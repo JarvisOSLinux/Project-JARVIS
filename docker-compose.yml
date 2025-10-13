@@ -5,7 +5,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: jarvis-ai:latest
+      args:
+        # PyTorch variant: cpu, cuda, or rocm
+        # Set via: TORCH_VARIANT=cuda docker-compose build
+        TORCH_VARIANT: ${TORCH_VARIANT:-cpu}
+        TORCH_VERSION: ${TORCH_VERSION:-2.8.0}
+    image: jarvis-ai:${TORCH_VARIANT:-cpu}
     container_name: jarvis
     
     # Environment variables

@@ -3,8 +3,28 @@
 
 set -e  # Exit on error
 
+# Parse arguments
+TORCH_VARIANT="${1:-cpu}"  # Default to cpu if not specified
+TORCH_VERSION="${2:-2.8.0}"
+
+# Validate variant
+if [[ ! "$TORCH_VARIANT" =~ ^(cpu|cuda|rocm)$ ]]; then
+    echo "Error: Invalid TORCH_VARIANT '$TORCH_VARIANT'"
+    echo "Valid options: cpu, cuda, rocm"
+    echo ""
+    echo "Usage: $0 [cpu|cuda|rocm] [torch_version]"
+    echo "Examples:"
+    echo "  $0              # CPU-only (default)"
+    echo "  $0 cuda         # NVIDIA CUDA support"
+    echo "  $0 rocm         # AMD ROCm support"
+    exit 1
+fi
+
 echo "Building JARVIS Docker Image..."
 echo "=================================="
+echo "PyTorch Variant: $TORCH_VARIANT"
+echo "PyTorch Version: $TORCH_VERSION"
+echo ""
 
 # Check if Docker is installed
 if ! command -v docker &> /dev/null; then
@@ -47,17 +67,22 @@ fi
 
 # Build the image
 echo "🔨 Building Docker image..."
-docker build -t jarvis-ai:latest .
+docker build \
+    --build-arg TORCH_VARIANT=$TORCH_VARIANT \
+    --build-arg TORCH_VERSION=$TORCH_VERSION \
+    -t jarvis-ai:$TORCH_VARIANT \
+    -t jarvis-ai:latest \
+    .
 
 # Check build status
 if [ $? -eq 0 ]; then
     echo ""
-    echo "Build successful!"
+    echo "✅ Build successful!"
     echo ""
-    echo "Image size:"
-    docker images jarvis-ai:latest --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}"
+    echo "📦 Image info:"
+    docker images jarvis-ai --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}"
     echo ""
-    echo "Quick start commands:"
+    echo "🚀 Quick start commands:"
     echo ""
     echo "  Text mode (recommended for first test):"
     echo "    docker run -it --rm --network host jarvis-ai python -m jarvis.main --text"

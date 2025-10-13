@@ -15,20 +15,100 @@ Complete guide for running Project JARVIS in Docker for cross-platform testing a
 
 **Linux/Mac:**
 ```bash
-./docker-build.sh           # Build image (includes models)
+./docker-build.sh           # Build image with CPU support (default, smallest)
+./docker-build.sh cuda      # Build with NVIDIA GPU support
+./docker-build.sh rocm      # Build with AMD GPU support
 ./docker-run.sh text        # Run in text mode (recommended first test)
 ./docker-run.sh             # Run in voice mode
 ```
 
 **Windows:**
 ```bash
-docker-build.bat            # Build image
+docker-build.bat            # Build image with CPU support (default)
+docker-build.bat cuda       # Build with NVIDIA GPU support
 docker-run.bat text         # Run in text mode
 ```
 
 **Using docker-compose (all platforms):**
 ```bash
+# CPU-only (default)
 docker-compose up --build
+
+# NVIDIA CUDA
+TORCH_VARIANT=cuda docker-compose up --build
+
+# AMD ROCm
+TORCH_VARIANT=rocm docker-compose up --build
+```
+
+---
+
+## 🔥 PyTorch Variants (CPU/CUDA/ROCm)
+
+The Dockerfile supports building with different PyTorch backends to match your hardware.
+
+### **Available Variants**
+
+| Variant | Image Size | Hardware | Use Case |
+|---------|-----------|----------|----------|
+| **cpu** (default) | ~2-3 GB | Any system | No GPU, testing, smallest size |
+| **cuda** | ~5-7 GB | NVIDIA GPUs | RTX/GTX/Tesla cards, best performance |
+| **rocm** | ~5-7 GB | AMD GPUs | Radeon RX/Pro/Instinct (Linux only) |
+
+### **How to Build Different Variants**
+
+```bash
+# CPU-only (default, smallest)
+./docker-build.sh
+# or explicitly:
+./docker-build.sh cpu
+
+# NVIDIA CUDA
+./docker-build.sh cuda
+
+# AMD ROCm
+./docker-build.sh rocm
+
+# Specify custom PyTorch version
+./docker-build.sh cuda 2.8.0
+```
+
+**Manual Docker build:**
+```bash
+# CPU
+docker build --build-arg TORCH_VARIANT=cpu -t jarvis-ai:cpu .
+
+# CUDA
+docker build --build-arg TORCH_VARIANT=cuda -t jarvis-ai:cuda .
+
+# ROCm
+docker build --build-arg TORCH_VARIANT=rocm -t jarvis-ai:rocm .
+```
+
+### **What This Does**
+
+The Dockerfile installs PyTorch from different index URLs based on variant:
+
+- **CPU**: `pip install torch --index-url https://download.pytorch.org/whl/cpu`
+- **CUDA**: `pip install torch --index-url https://download.pytorch.org/whl/cu124`
+- **ROCm**: `pip install torch --index-url https://download.pytorch.org/whl/rocm6.2`
+
+This ensures you get the right PyTorch wheel for your hardware without unnecessary CUDA/ROCm libraries.
+
+### **Running GPU Variants**
+
+**NVIDIA CUDA:**
+```bash
+# Requires: nvidia-docker2 installed
+docker run -it --rm --network host --gpus all jarvis-ai:cuda python -m jarvis.main --text
+```
+
+**AMD ROCm:**
+```bash
+# Requires: ROCm drivers installed
+docker run -it --rm --network host \
+  --device /dev/kfd --device /dev/dri --group-add video \
+  jarvis-ai:rocm python -m jarvis.main --text
 ```
 
 ---
