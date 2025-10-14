@@ -65,8 +65,15 @@ if [ ! -f "jarvis/.env" ]; then
     echo "Created jarvis/.env - Please edit it with your settings"
 fi
 
+# Detect PyTorch variant
+TORCH_VARIANT="${TORCH_VARIANT:-cpu}"
+TORCH_VERSION="${TORCH_VERSION:-2.8.0}"
+
 # Build the image
 echo "🔨 Building Docker image..."
+echo "   Variant: ${TORCH_VARIANT}"
+echo "   PyTorch: ${TORCH_VERSION}"
+echo ""
 docker build \
     --build-arg TORCH_VARIANT=$TORCH_VARIANT \
     --build-arg TORCH_VERSION=$TORCH_VERSION \
@@ -82,18 +89,26 @@ if [ $? -eq 0 ]; then
     echo "📦 Image info:"
     docker images jarvis-ai --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}"
     echo ""
+    echo "🎯 Built variant: ${TORCH_VARIANT}"
+    if [ "$TORCH_VARIANT" = "cuda" ]; then
+        echo "   ⚡ GPU: NVIDIA CUDA support"
+        echo "   📋 Requires: nvidia-docker2"
+    elif [ "$TORCH_VARIANT" = "rocm" ]; then
+        echo "   ⚡ GPU: AMD ROCm support"
+        echo "   📋 Requires: ROCm Docker runtime"
+    else
+        echo "   🖥️  Hardware: CPU only"
+    fi
+    echo ""
     echo "🚀 Quick start commands:"
     echo ""
-    echo "  Text mode (recommended for first test):"
-    echo "    docker run -it --rm --network host jarvis-ai python -m jarvis.main --text"
-    echo ""
-    echo "  Voice mode (Linux with audio):"
-    echo "    docker run -it --rm --network host --device /dev/snd jarvis-ai"
+    echo "  Using helper script (auto-detects hardware):"
+    echo "    TORCH_VARIANT=${TORCH_VARIANT} ./docker-run.sh text"
     echo ""
     echo "  Using docker-compose:"
-    echo "    docker-compose up"
+    echo "    TORCH_VARIANT=${TORCH_VARIANT} docker-compose up"
     echo ""
-    echo "See DOCKER_USAGE.md for more information"
+    echo "📖 See DOCKER.md for more information"
 else
     echo "Build failed!"
     exit 1
