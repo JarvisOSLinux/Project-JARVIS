@@ -1,6 +1,9 @@
 from typing import Dict, Any
 from ..config import Config
 from ..voice_output import TextToSpeech
+from .logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class OutputManager:
@@ -16,13 +19,14 @@ class OutputManager:
             self._output_text(response["output"])
         else:
             # Default to text if unknown mode
-            print(f"Warning: Unknown output mode '{Config.OUTPUT_MODE}', using text")
+            logger.warning(f"Unknown output mode '{Config.OUTPUT_MODE}', using text")
             self._output_text(response["output"])
     
     def _output_voice(self, text: str) -> None:
         self.tts.say(text)
     
     def _output_text(self, text: str) -> None:
+        # Output text is intentionally printed to stdout for user visibility
         print(text)
     
     def get_current_mode(self) -> str:

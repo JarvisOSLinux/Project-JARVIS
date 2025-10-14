@@ -1,5 +1,8 @@
 from typing import Dict, Any, List
-from .supermcp_client import SuperMCPWrapper
+from ..supermcp_client import SuperMCPWrapper
+from .logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class SuperMCPCommandParser:
@@ -12,7 +15,7 @@ class SuperMCPCommandParser:
             results = []
             
             for command in commands:
-                print(f"Executing SuperMCP command: {command}")
+                logger.info(f"Executing SuperMCP command: {command}")
                 result = self._parse_and_execute_command(command)
                 results.append(result)
             

@@ -27,6 +27,17 @@ __email__ = "your.email@example.com"
 __license__ = "GPL-3.0"
 __description__ = "AI-Native Voice Assistant with Dynamic Capability Discovery"
 
+# Initialize logging when package is imported
+from .config import Config
+from .core.logger import JarvisLogger
+
+# Setup logging with configuration
+JarvisLogger.setup(
+    log_level=Config.LOG_LEVEL,
+    log_file=Config.LOG_FILE if Config.LOG_FILE else None,
+    enable_colors=Config.LOG_COLORS
+)
+
 from .main import Jarvis
 
 __all__ = ["Jarvis"]

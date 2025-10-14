@@ -2,6 +2,9 @@ import threading
 import time
 from typing import Callable, Optional, List
 from queue import Queue, Empty
+from .core.logger import get_logger
+
+logger = get_logger(__name__)
 
 class VoiceActivation:
     """
@@ -80,20 +83,20 @@ class VoiceActivation:
         """
         try:
             # Initialize Vosk model
-            print(f"Loading Vosk model from: {self.model_path}")
+            logger.info(f"Loading Vosk model from: {self.model_path}")
             self._model = self.vosk.Model(self.model_path)
             self._recognizer = self.vosk.KaldiRecognizer(self._model, self.sample_rate)
             
-            print(f"Voice Activation initialized:")
-            print(f"   Wake words: {', '.join(self.wake_words)}")
-            print(f"   Sample rate: {self.sample_rate} Hz")
-            print(f"   Chunk size: {self.chunk_size} samples")
-            print(f"   Sensitivity: {self.sensitivity}")
+            logger.info(f"Voice Activation initialized:")
+            logger.info(f"   Wake words: {', '.join(self.wake_words)}")
+            logger.info(f"   Sample rate: {self.sample_rate} Hz")
+            logger.info(f"   Chunk size: {self.chunk_size} samples")
+            logger.info(f"   Sensitivity: {self.sensitivity}")
             
             return True
             
         except Exception as e:
-            print(f"Failed to initialize voice activation: {e}")
+            logger.error(f"Failed to initialize voice activation: {e}")
             return False
     
     def start_listening(self) -> bool:
@@ -131,11 +134,11 @@ class VoiceActivation:
             )
             self._listening_thread.start()
             
-            print("Voice activation listening started")
+            logger.info("Voice activation listening started")
             return True
             
         except Exception as e:
-            print(f"Failed to start listening: {e}")
+            logger.error(f"Failed to start listening: {e}")
             self.stop_listening()
             return False
     
@@ -160,12 +163,12 @@ class VoiceActivation:
                 pass
             self._stream = None
         
-        print("Voice activation stopped")
+        logger.info("Voice activation stopped")
     
     def _audio_callback(self, indata, frames, time, status):
         """Callback for sounddevice audio input."""
         if status:
-            print(f"Audio callback status: {status}")
+            logger.warning(f"Audio callback status: {status}")
         # Convert numpy array to bytes and put in buffer
         audio_bytes = indata.tobytes()
         self._audio_buffer.put(audio_bytes)
@@ -196,7 +199,7 @@ class VoiceActivation:
                         self._check_for_wake_word(partial_text)
                         
         except Exception as e:
-            print(f"Error in listening loop: {e}")
+            logger.error(f"Error in listening loop: {e}")
         finally:
             self._running.clear()
     
@@ -219,11 +222,11 @@ class VoiceActivation:
         self._detection_count += 1
         self._last_detection_time = current_time
         
-        print(f"   WAKE WORD DETECTED!")
-        print(f"   Word: '{wake_word}'")
-        print(f"   Full text: '{full_text}'")
-        print(f"   Detection #{self._detection_count}")
-        print(f"   Time: {time.strftime('%H:%M:%S')}")
+        logger.info(f"   🎯 WAKE WORD DETECTED!")
+        logger.info(f"   Word: '{wake_word}'")
+        logger.info(f"   Full text: '{full_text}'")
+        logger.info(f"   Detection #{self._detection_count}")
+        logger.info(f"   Time: {time.strftime('%H:%M:%S')}")
         
         # Queue the activation
         self._activation_queue.put({
@@ -238,7 +241,7 @@ class VoiceActivation:
             try:
                 self.on_wake_word()
             except Exception as e:
-                print(f"Error in wake word callback: {e}")
+                logger.error(f"Error in wake word callback: {e}")
     
     def get_activation(self, timeout: Optional[float] = None) -> Optional[dict]:
         """
@@ -296,7 +299,7 @@ class VoiceActivation:
 # Example usage and testing
 if __name__ == "__main__":
     def on_wake_word():
-        print("Wake word callback triggered!")
+        logger.info("Wake word callback triggered!")
     
     # Create voice activation instance
     va = VoiceActivation(
@@ -307,24 +310,24 @@ if __name__ == "__main__":
     try:
         # Start listening
         if va.start_listening():
-            print("Listening for wake words... Press Ctrl+C to exit")
+            logger.info("Listening for wake words... Press Ctrl+C to exit")
             
             # Main loop - check for activations
             while True:
                 activation = va.get_activation(timeout=1.0)
                 if activation:
-                    print(f"Received activation: {activation}")
+                    logger.info(f"Received activation: {activation}")
                     
-                # Print stats every 10 seconds
+                # Log stats every 10 seconds
                 if int(time.time()) % 10 == 0:
                     stats = va.get_stats()
-                    print(f"Stats: {stats['detection_count']} detections")
+                    logger.info(f"Stats: {stats['detection_count']} detections")
                     
     except KeyboardInterrupt:
-        print("\nShutting down...")
+        logger.info("\nShutting down...")
     finally:
         va.cleanup()
-        print("Cleanup completed")
+        logger.info("Cleanup completed")
 
 
 

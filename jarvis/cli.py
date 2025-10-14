@@ -13,7 +13,9 @@ import sys
 import os
 from pathlib import Path
 from .config import Config
+from .core.logger import get_logger
 
+logger = get_logger(__name__)
 
 ENV_FILE = Path(__file__).parent / ".env"
 
@@ -60,7 +62,7 @@ def _update_env_setting(key: str, value: str) -> None:
         # If .env doesn't exist, try template
         template_file = Path(__file__).parent / "config.env.template"
         if template_file.exists():
-            print(f"Creating .env from template...")
+            logger.info(f"Creating .env from template...")
             lines = template_file.read_text().splitlines()
         else:
             lines = []

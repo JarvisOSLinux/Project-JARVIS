@@ -156,6 +156,11 @@ VOICE_ACTIVATION_SENSITIVITY=0.8
 
 # Vosk model path
 VOSK_MODEL_PATH=models/vosk-model-small-en-us-0.15
+
+# Logging configuration (optional)
+LOG_LEVEL=INFO                # DEBUG, INFO, WARNING, ERROR, CRITICAL
+LOG_FILE=logs/jarvis.log      # Optional: enable file logging
+LOG_COLORS=true               # Colored console output
 ```
 
 ### **Voice Activation Features**
@@ -240,6 +245,7 @@ Wake Word → Voice Activation → STT → LLM → SuperMCP → MCP Servers → 
 - ✅ **Extensible Architecture**: Plugin-based MCP servers
 - ✅ **Smart Audio Management**: Automatic mode switching
 - ✅ **Customizable Wake Words**: User-defined activation phrases
+- ✅ **Professional Logging**: Configurable logging system with colored output and file logging support
 
 ### **Revolutionary Features in Development**
 - 🔄 **AI-Driven MCP Generation**: AI creates new tools on demand

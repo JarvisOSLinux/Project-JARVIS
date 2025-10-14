@@ -1,4 +1,4 @@
-""from typing import Optional
+from typing import Optional
 from ..config import Config
 from ..voice_output import TextToSpeech
 from ..llm import LLM
@@ -7,15 +7,18 @@ from .system_info import SystemInfo
 from .command_parser import SuperMCPCommandParser
 from .output_manager import OutputManager
 from .voice_manager import VoiceManager
+from .logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class ComponentFactory:
     @staticmethod
     def create_llm() -> LLM:
-        print("Getting system information...")
+        logger.info("Getting system information...")
         system_info = SystemInfo.get_system_info()
         
-        print("Initiating LLM...")
+        logger.info("Initiating LLM...")
         return LLM(
             system=system_info['system'],
             release=system_info['release'],
@@ -26,7 +29,7 @@ class ComponentFactory:
     
     @staticmethod
     def create_tts() -> TextToSpeech:
-        print("Initiating TTS...")
+        logger.info("Initiating TTS...")
         return TextToSpeech(
             model_path=f"models/piper/{Config.TTS_MODEL_ONNX}",
             config_path=f"models/piper/{Config.TTS_MODEL_JSON}",
@@ -34,7 +37,7 @@ class ComponentFactory:
     
     @staticmethod
     def create_supermcp() -> SuperMCPWrapper:
-        print("Initiating SuperMCP...")
+        logger.info("Initiating SuperMCP...")
         return SuperMCPWrapper()
     
     @staticmethod
@@ -47,7 +50,7 @@ class ComponentFactory:
     
     @staticmethod
     def create_voice_manager(on_command) -> Optional[VoiceManager]:
-        print("Initiating Voice Activation...")
+        logger.info("Initiating Voice Activation...")
         return VoiceManager(on_command)
     
     @staticmethod
@@ -83,5 +86,5 @@ class ComponentFactory:
                 on_voice_command
             )
         
-        print("Initiations Complete!")
+        logger.info("Initiations Complete!")
         return components
