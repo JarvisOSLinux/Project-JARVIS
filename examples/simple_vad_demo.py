@@ -13,11 +13,12 @@ Usage:
     python simple_vad_demo.py
 """
 
-import pyaudio
+import sounddevice as sd
 import numpy as np
 import time
 import threading
 from collections import deque
+from queue import Queue, Empty
 
 class SimpleVADDetector:
     """Simple voice activity detector for wake word detection."""
@@ -58,18 +59,28 @@ class SimpleVADDetector:
         # Callbacks
         self.on_speech_start = None
         self.on_speech_end = None
+        self.audio_buffer = None
+    
+    def _audio_callback(self, indata, frames, time, status):
+        """Callback for sounddevice audio input."""
+        if status:
+            print(f"Audio callback status: {status}")
+        # Convert numpy array to bytes and put in buffer
+        audio_bytes = indata.tobytes()
+        self.audio_buffer.put(audio_bytes)
         
     def initialize(self):
         """Initialize audio system."""
         try:
-            self.audio = pyaudio.PyAudio()
-            self.stream = self.audio.open(
-                format=pyaudio.paInt16,
+            self.audio_buffer = Queue()
+            self.stream = sd.InputStream(
+                samplerate=self.sample_rate,
                 channels=1,
-                rate=self.sample_rate,
-                input=True,
-                frames_per_buffer=self.chunk_size
+                dtype='int16',
+                blocksize=self.chunk_size,
+                callback=self._audio_callback
             )
+            self.stream.start()
             
             print("✅ Simple VAD detector initialized successfully!")
             return True
@@ -97,8 +108,11 @@ class SimpleVADDetector:
         
         try:
             while self.running:
-                # Read audio chunk
-                audio_data = self.stream.read(self.chunk_size, exception_on_overflow=False)
+                # Read audio chunk from buffer
+                try:
+                    audio_data = self.audio_buffer.get(timeout=0.1)
+                except Empty:
+                    continue
                 
                 # Calculate energy
                 energy = self.calculate_energy(audio_data)
@@ -157,10 +171,8 @@ class SimpleVADDetector:
         self.running = False
         
         if self.stream:
-            self.stream.stop_stream()
+            self.stream.stop()
             self.stream.close()
-        if self.audio:
-            self.audio.terminate()
         
         print("🔇 Listening stopped")
     

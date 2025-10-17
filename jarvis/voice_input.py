@@ -1,7 +1,8 @@
 import threading
 import json
-import pyaudio
+import sounddevice as sd
 import vosk
+import numpy as np
 from queue import Queue, Empty
 from datetime import datetime, timedelta
 from typing import Callable, Generator, Optional, Tuple
@@ -54,9 +55,8 @@ class SpeechToText:
         self._model: Optional[vosk.Model] = None
         self._recognizer: Optional[vosk.KaldiRecognizer] = None
         
-        # PyAudio components
-        self._audio: Optional[pyaudio.PyAudio] = None
-        self._stream: Optional[pyaudio.Stream] = None
+        # sounddevice components
+        self._stream: Optional[sd.InputStream] = None
 
         # Processing thread state
         self._worker_thread: Optional[threading.Thread] = None
@@ -69,21 +69,30 @@ class SpeechToText:
 
         # Optional callback for push updates
         self._on_update: Optional[Callable[[str, bool], None]] = None
+        
+        # Audio buffer for sounddevice callback
+        self._audio_buffer = Queue()
 
     @staticmethod
     def list_audio_devices() -> None:
         """List available audio input devices."""
-        audio = pyaudio.PyAudio()
         print("Available audio input devices:")
-        for i in range(audio.get_device_count()):
-            info = audio.get_device_info_by_index(i)
-            if info['maxInputChannels'] > 0:
-                print(f"[{i}] {info['name']} (channels: {info['maxInputChannels']})")
-        audio.terminate()
+        devices = sd.query_devices()
+        for i, device in enumerate(devices):
+            if device['max_input_channels'] > 0:
+                print(f"[{i}] {device['name']} (channels: {device['max_input_channels']})")
 
     def on_update(self, cb: Callable[[str, bool], None]) -> None:
         """Register a callback called as `cb(text, is_final)`."""
         self._on_update = cb
+    
+    def _audio_callback(self, indata, frames, time, status):
+        """Callback for sounddevice audio input."""
+        if status:
+            print(f"Audio callback status: {status}")
+        # Convert numpy array to bytes and put in buffer
+        audio_bytes = indata.tobytes()
+        self._audio_buffer.put(audio_bytes)
 
     def start(self) -> None:
         """Load model, open mic, start background processing."""
@@ -97,23 +106,21 @@ class SpeechToText:
             self._recognizer = vosk.KaldiRecognizer(self._model, self.sample_rate)
             print("✅ Vosk model loaded successfully")
 
-            # Initialize PyAudio
-            self._audio = pyaudio.PyAudio()
-            
-            # Build stream parameters
+            # Initialize sounddevice stream
             stream_params = {
-                'format': pyaudio.paInt16,
+                'samplerate': self.sample_rate,
                 'channels': 1,
-                'rate': self.sample_rate,
-                'input': True,
-                'frames_per_buffer': self.chunk_size
+                'dtype': 'int16',
+                'blocksize': self.chunk_size,
+                'callback': self._audio_callback
             }
             
             # Add device_index only if specified
             if self.device_index is not None:
-                stream_params['input_device_index'] = self.device_index
+                stream_params['device'] = self.device_index
             
-            self._stream = self._audio.open(**stream_params)
+            self._stream = sd.InputStream(**stream_params)
+            self._stream.start()
             print("✅ Audio stream initialized")
 
             # Start processing thread
@@ -142,18 +149,11 @@ class SpeechToText:
         # Close audio stream
         if self._stream:
             try:
-                self._stream.stop_stream()
+                self._stream.stop()
                 self._stream.close()
             except Exception:
                 pass
             self._stream = None
-
-        if self._audio:
-            try:
-                self._audio.terminate()
-            except Exception:
-                pass
-            self._audio = None
 
         # Release Vosk model
         self._recognizer = None
@@ -161,6 +161,7 @@ class SpeechToText:
 
         # Drain queues
         self._drain_queue(self._result_q)
+        self._drain_queue(self._audio_buffer)
 
         # Reset state
         self._last_speech_time = None
@@ -181,8 +182,11 @@ class SpeechToText:
         """Main processing loop: read audio, transcribe with Vosk, emit results."""
         while self._running.is_set():
             try:
-                # Read audio chunk
-                data = self._stream.read(self.chunk_size, exception_on_overflow=False)
+                # Read audio chunk from buffer
+                try:
+                    data = self._audio_buffer.get(timeout=0.1)
+                except Empty:
+                    continue
                 
                 if self._recognizer.AcceptWaveform(data):
                     # Final result
