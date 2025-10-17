@@ -1,0 +1,53 @@
+[Unit]
+Description=JARVIS AI Voice Assistant
+Documentation=https://github.com/YakupAtahanov/Project-JARVIS
+After=network.target sound.target
+Wants=network.target
+Requires=systemd-user-sessions.service
+
+[Service]
+Type=simple
+User=jarvis
+Group=jarvis
+WorkingDirectory=/usr/lib/jarvis
+ExecStart=/usr/bin/jarvis-daemon
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=10
+TimeoutStartSec=60
+TimeoutStopSec=30
+
+# Security settings
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/jarvis /var/log/jarvis /tmp
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# Environment
+Environment=JARVIS_CONFIG_DIR=/etc/jarvis
+Environment=JARVIS_DATA_DIR=/var/lib/jarvis
+Environment=JARVIS_LOG_DIR=/var/log/jarvis
+Environment=JARVIS_MODELS_DIR=/var/lib/jarvis/models
+Environment=PYTHONPATH=/usr/lib/jarvis
+Environment=OLLAMA_HOST=127.0.0.1:11434
+
+# Standard output/error
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=jarvis
+
+[Install]
+WantedBy=multi-user.target
