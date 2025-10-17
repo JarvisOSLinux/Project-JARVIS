@@ -1,14 +1,42 @@
 from dotenv import load_dotenv
 # import multiprocessing
 import os
+import sys
 
 # Load .env file from the jarvis directory
-load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
+env_path = os.path.join(os.path.dirname(__file__), '.env')
+load_dotenv(env_path)
 
 class Config:
     # Vosk STT Configuration
     VOSK_MODEL_PATH = os.getenv("VOSK_MODEL_PATH", "models/vosk-model-small-en-us-0.15")
     LLM_MODEL = os.getenv("LLM_MODEL")
+    
+    # Validate required configuration
+    @classmethod
+    def validate(cls):
+        """Validate that required configuration values are set"""
+        env_path = os.path.join(os.path.dirname(__file__), '.env')
+        template_path = os.path.join(os.path.dirname(__file__), 'config.env.template')
+        
+        if not cls.LLM_MODEL:
+            error_msg = f"\n{'='*70}\n"
+            error_msg += "ERROR: LLM_MODEL is not configured!\n\n"
+            
+            if not os.path.exists(env_path):
+                error_msg += f"The configuration file is missing: {env_path}\n\n"
+                error_msg += f"Please copy the template file to create your configuration:\n"
+                error_msg += f"  cp {template_path} {env_path}\n\n"
+                error_msg += "Then edit the .env file and set your LLM_MODEL.\n"
+            else:
+                error_msg += f"The .env file exists but LLM_MODEL is not set.\n"
+                error_msg += f"Please edit {env_path} and set LLM_MODEL.\n\n"
+            
+            error_msg += "Example: LLM_MODEL=llama3.2:3b\n"
+            error_msg += "\nSee config.env.template for more examples.\n"
+            error_msg += f"{'='*70}\n"
+            print(error_msg, file=sys.stderr)
+            sys.exit(1)
 
     TTS_MODEL_ONNX = os.getenv("TTS_MODEL_ONNX")
     TTS_MODEL_JSON = os.getenv("TTS_MODEL_JSON")

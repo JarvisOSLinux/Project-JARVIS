@@ -1,21 +1,11 @@
-# JARVIS Docker Image with Configurable PyTorch Backend
+# JARVIS Docker Image
 # 
-# Build arguments:
-#   TORCH_VARIANT: cpu (default), cuda, or rocm
-#   TORCH_VERSION: PyTorch version (default: 2.8.0)
-#
 # Usage examples:
-#   docker build -t jarvis-ai:cpu .
-#   docker build --build-arg TORCH_VARIANT=cuda -t jarvis-ai:cuda .
-#   docker build --build-arg TORCH_VARIANT=rocm -t jarvis-ai:rocm .
+#   docker build -t jarvis-ai .
 #
 # See DOCKER.md for detailed setup guide
 
 FROM python:3.13-slim
-
-# Build arguments for PyTorch variant (cuda, rocm, cpu)
-ARG TORCH_VARIANT=cpu
-ARG TORCH_VERSION=2.8.0
 
 WORKDIR /app
 
@@ -39,17 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY requirements.txt pyproject.toml ./
 
-RUN if [ "$TORCH_VARIANT" = "cuda" ]; then \
-        pip install --no-cache-dir torch==${TORCH_VERSION} --index-url https://download.pytorch.org/whl/cu124; \
-    elif [ "$TORCH_VARIANT" = "rocm" ]; then \
-        pip install --no-cache-dir torch==${TORCH_VERSION} --index-url https://download.pytorch.org/whl/rocm6.2; \
-    else \
-        pip install --no-cache-dir torch==${TORCH_VERSION} --index-url https://download.pytorch.org/whl/cpu; \
-    fi
-
-RUN grep -v "^torch==" requirements.txt > requirements_no_torch.txt && \
-    pip install --no-cache-dir -r requirements_no_torch.txt && \
-    rm requirements_no_torch.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY jarvis/ ./jarvis/
 COPY examples/ ./examples/
