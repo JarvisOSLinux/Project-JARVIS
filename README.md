@@ -69,6 +69,50 @@ Project JARVIS is an innovative AI-powered voice assistant that combines natural
 
 ---
 
+## 🐳 Docker Support
+
+Run JARVIS in Docker for easy cross-platform deployment and testing!
+
+### **Quick Docker Setup**
+
+```bash
+# 1. Make sure Ollama is running on your host
+ollama serve
+
+# 2. Build the Docker image (includes models)
+./docker-build.sh        # Linux/Mac
+docker-build.bat         # Windows
+
+# 3. Run JARVIS
+./docker-run.sh          # Linux/Mac - auto-detects voice/text
+docker-run.bat           # Windows
+# OR use docker-compose
+docker-compose up
+```
+
+### **Docker Benefits**
+- ✅ **Cross-platform**: Same environment on Linux, Mac, Windows
+- ✅ **Isolated**: No OS-level dependencies to manage
+- ✅ **Portable**: Models baked into image (~2-3GB)
+- ✅ **Easy testing**: Quick setup for development
+
+### **Docker Commands**
+
+```bash
+# Text mode (recommended for first test)
+docker run -it --rm --network host jarvis-ai python -m jarvis.main --text
+
+# Voice mode (Linux with audio)
+docker run -it --rm --network host --device /dev/snd jarvis-ai
+
+# Using docker-compose
+docker-compose up
+```
+
+📖 **See [DOCKER.md](DOCKER.md) for detailed instructions and troubleshooting**
+
+---
+
 ## 💻 CLI Interface
 
 JARVIS now supports a command-line interface for text-based interaction without voice input!

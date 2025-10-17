@@ -1,0 +1,82 @@
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Environment and config files
+.env
+.env.*
+*.env
+config.env
+!config.env.template
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# Logs
+*.log
+logs/
+jarvis/SuperMCP/ShellMCP/logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Docker files (don't copy Docker files into the image)
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Poetry lock file (optional, uncomment if you want to exclude)
+# poetry.lock
+
+# UV lock file
+uv.lock
+

@@ -42,20 +42,21 @@ class VoiceActivation:
         # Import Vosk components
         try:
             import vosk
-            import pyaudio
+            import sounddevice as sd
             import json
+            import numpy as np
             self.vosk = vosk
-            self.pyaudio = pyaudio
+            self.sounddevice = sd
             self.json = json
+            self.numpy = np
         except ImportError as e:
-            raise ImportError(f"Required dependencies not found: {e}. Please install: pip install vosk pyaudio")
+            raise ImportError(f"Required dependencies not found: {e}. Please install: pip install vosk sounddevice")
         
         # Vosk components
         self._model = None
         self._recognizer = None
         
-        # PyAudio components
-        self._audio = None
+        # sounddevice components
         self._stream = None
         
         # Threading
@@ -66,6 +67,9 @@ class VoiceActivation:
         # Statistics
         self._detection_count = 0
         self._last_detection_time = 0.0
+        
+        # Audio buffer for sounddevice callback
+        self._audio_buffer = Queue()
         
     def initialize(self) -> bool:
         """
@@ -107,19 +111,17 @@ class VoiceActivation:
                 return False
         
         try:
-            # Initialize PyAudio
-            self._audio = self.pyaudio.PyAudio()
-            
-            # Build stream parameters
+            # Initialize sounddevice stream
             stream_params = {
-                'format': self.pyaudio.paInt16,
+                'samplerate': self.sample_rate,
                 'channels': 1,
-                'rate': self.sample_rate,
-                'input': True,
-                'frames_per_buffer': self.chunk_size
+                'dtype': 'int16',
+                'blocksize': self.chunk_size,
+                'callback': self._audio_callback
             }
             
-            self._stream = self._audio.open(**stream_params)
+            self._stream = self.sounddevice.InputStream(**stream_params)
+            self._stream.start()
             
             # Start listening thread
             self._running.set()
@@ -152,27 +154,31 @@ class VoiceActivation:
         # Cleanup audio
         if self._stream:
             try:
-                self._stream.stop_stream()
+                self._stream.stop()
                 self._stream.close()
             except Exception:
                 pass
             self._stream = None
-            
-        if self._audio:
-            try:
-                self._audio.terminate()
-            except Exception:
-                pass
-            self._audio = None
         
         print("Voice activation stopped")
+    
+    def _audio_callback(self, indata, frames, time, status):
+        """Callback for sounddevice audio input."""
+        if status:
+            print(f"Audio callback status: {status}")
+        # Convert numpy array to bytes and put in buffer
+        audio_bytes = indata.tobytes()
+        self._audio_buffer.put(audio_bytes)
     
     def _listen_loop(self) -> None:
         """Main listening loop running in separate thread."""
         try:
             while self._running.is_set():
-                # Read audio frame
-                data = self._stream.read(self.chunk_size, exception_on_overflow=False)
+                # Read audio frame from buffer
+                try:
+                    data = self._audio_buffer.get(timeout=0.1)
+                except Empty:
+                    continue
                 
                 if self._recognizer.AcceptWaveform(data):
                     # Final result
