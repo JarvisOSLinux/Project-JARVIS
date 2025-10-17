@@ -1,6 +1,9 @@
 import ollama
 from .config import Config
+from .core.logger import get_logger
 import json
+
+logger = get_logger(__name__)
 
 class LLM:
     def __init__(self, system, release, version, machine, shell):
@@ -13,13 +16,13 @@ class LLM:
                 ]
         self.chat_history = list.copy(self.default_chat)
 
-        print("LLM: Initiating Preload...")
+        logger.info("LLM: Initiating Preload...")
         # Start preload
         ollama.chat(
             model=Config.LLM_MODEL,
             messages=self.chat_history
         )
-        print("LLM: Initiation Complete!")
+        logger.info("LLM: Initiation Complete!")
     
     def ask(self, prompt):
         self.chat_history.append({
@@ -32,7 +35,7 @@ class LLM:
             messages=self.chat_history
         )["message"]["content"]
 
-        print(f"LLM Responded:'\n{response}\n----------")
+        logger.debug(f"LLM Responded:'\n{response}\n----------")
 
         try:
             return json.loads(response)

@@ -27,6 +27,11 @@ class Config:
     SUPERMCP_SERVER_PATH = os.getenv("SUPERMCP_SERVER_PATH", "SuperMCP/SuperMCP.py")
     SUPERMCP_TIMEOUT = int(os.getenv("SUPERMCP_TIMEOUT", "60"))  # seconds
     
+    # Logging Configuration
+    LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+    LOG_FILE = os.getenv("LOG_FILE", "")  # Optional: path to log file (empty = no file logging)
+    LOG_COLORS = os.getenv("LOG_COLORS", "true").lower() == "true"  # Enable colored console output
+    
     # os.environ["OLLAMA_NO_GPU"] = "1"
     # os.environ["OLLAMA_NUM_THREADS"] = str(multiprocessing.cpu_count())
 

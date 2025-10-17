@@ -5,6 +5,9 @@ from typing import Dict, Any, Optional, List
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from .config import Config
+from .core.logger import get_logger
+
+logger = get_logger(__name__)
 
 class SuperMCPClient:
     def __init__(self):
@@ -39,9 +42,9 @@ class SuperMCPClient:
             read, write = await self._client.__aenter__()
             self.session = ClientSession(read, write)
             await self.session.initialize()
-            print("SuperMCP: Connected successfully!")
+            logger.info("SuperMCP: Connected successfully!")
         except Exception as e:
-            print(f"SuperMCP: Connection failed: {e}")
+            logger.error(f"SuperMCP: Connection failed: {e}")
             raise
             
     async def disconnect(self):
@@ -51,9 +54,9 @@ class SuperMCPClient:
                 await self.session.close()
             if self._client:
                 await self._client.__aexit__(None, None, None)
-            print("SuperMCP: Disconnected successfully!")
+            logger.info("SuperMCP: Disconnected successfully!")
         except Exception as e:
-            print(f"SuperMCP: Disconnect error: {e}")
+            logger.error(f"SuperMCP: Disconnect error: {e}")
             
     async def reload_servers(self) -> Dict[str, Any]:
         """Reload available MCP servers"""

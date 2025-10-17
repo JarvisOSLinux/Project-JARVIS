@@ -1,6 +1,9 @@
 from .config import Config
 from .core import ComponentFactory
+from .core.logger import get_logger
 from json import dumps
+
+logger = get_logger(__name__)
 
 class Jarvis:
     def __init__(self, text_mode=False):
@@ -35,7 +38,7 @@ class Jarvis:
             text: Transcribed voice command
         """
         response = self.ask(prompt=text)
-        print(f"Response: {response['output']}")
+        logger.info(f"Response: {response['output']}")
 
     def ask(self, prompt):
         """
@@ -52,7 +55,7 @@ class Jarvis:
             if response['user_request'] == "SuperMCP":
                 # Handle SuperMCP commands
                 supermcp_output = self.command_parser.execute_command_sequence(response['output'])
-                print(f"Output from SuperMCP:\n{supermcp_output}\n----------")
+                logger.debug(f"Output from SuperMCP:\n{supermcp_output}\n----------")
                 response = self.llm.ask(dumps(supermcp_output))
 
         # Reset history only if configured to do so
@@ -67,7 +70,7 @@ class Jarvis:
     def listen_with_activation(self):
         """Listen with voice activation (wake word detection)."""
         if not self.voice_manager:
-            print("Error: Voice manager not available in text mode")
+            logger.error("Voice manager not available in text mode")
             return
         
         self.voice_manager.start_voice_activation_mode()
@@ -75,7 +78,7 @@ class Jarvis:
     def listen(self):
         """Legacy continuous listening mode (without wake word detection)."""
         if not self.voice_manager:
-            print("Error: Voice manager not available in text mode")
+            logger.error("Voice manager not available in text mode")
             return
             
         self.voice_manager.start_continuous_listening_mode()
