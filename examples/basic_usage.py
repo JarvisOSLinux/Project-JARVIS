@@ -27,17 +27,17 @@ def main():
         # Example 1: Simple conversation
         print("\n📝 Example 1: Simple Conversation")
         response = jarvis.ask("Hello JARVIS, what can you do?")
-        print(f"Response: {response}")
+        print(f"Response: {response['output']}")
         
         # Example 2: Command execution
         print("\n⚡ Example 2: Command Execution")
         response = jarvis.ask("List the files in the current directory")
-        print(f"Response: {response}")
+        print(f"Response: {response['output']}")
         
         # Example 3: SuperMCP discovery
         print("\n🔍 Example 3: SuperMCP Discovery")
         response = jarvis.ask("What MCP servers are available?")
-        print(f"Response: {response}")
+        print(f"Response: {response['output']}")
         
     except Exception as e:
         print(f"❌ Error: {e}")

@@ -2,6 +2,9 @@ import threading
 import time
 from typing import Callable, Optional, List
 from queue import Queue, Empty
+from .core.logger import get_logger
+
+logger = get_logger(__name__)
 
 class VoiceActivation:
     """
@@ -114,10 +117,11 @@ class VoiceActivation:
             # Initialize sounddevice stream
             stream_params = {
                 'samplerate': self.sample_rate,
-                'dtype': 'int16',
                 'channels': 1,
+                'dtype': 'int16',
                 'blocksize': self.chunk_size,
-                'callback': self._audio_callback
+                'callback': self.
+              
             }
             
             self._stream = self.sounddevice.InputStream(**stream_params)
@@ -161,6 +165,14 @@ class VoiceActivation:
             self._stream = None
         
         logger.info("Voice activation stopped")
+    
+    def _audio_callback(self, indata, frames, time, status):
+        """Callback for sounddevice audio input."""
+        if status:
+            logger.warning(f"Audio callback status: {status}")
+        # Convert numpy array to bytes and put in buffer
+        audio_bytes = indata.tobytes()
+        self._audio_buffer.put(audio_bytes)
     
     def _listen_loop(self) -> None:
         """Main listening loop running in separate thread."""

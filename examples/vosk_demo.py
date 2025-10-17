@@ -14,7 +14,8 @@ Usage:
 """
 
 import json
-import pyaudio
+import sounddevice as sd
+import numpy as np
 import vosk
 import sys
 import time
@@ -36,10 +37,18 @@ class VoskWakeWordDetector:
         self.model_path = model_path
         self.model = None
         self.recognizer = None
-        self.audio = None
         self.stream = None
+        self.audio_buffer = None
         self.running = False
         self.detection_queue = Queue()
+    
+    def _audio_callback(self, indata, frames, time, status):
+        """Callback for sounddevice audio input."""
+        if status:
+            print(f"Audio callback status: {status}")
+        # Convert numpy array to bytes and put in buffer
+        audio_bytes = indata.tobytes()
+        self.audio_buffer.put(audio_bytes)
         
     def initialize(self):
         """Initialize Vosk model and audio."""
@@ -56,15 +65,16 @@ class VoskWakeWordDetector:
             
             self.recognizer = vosk.KaldiRecognizer(self.model, 16000)
             
-            # Initialize PyAudio
-            self.audio = pyaudio.PyAudio()
-            self.stream = self.audio.open(
-                format=pyaudio.paInt16,
+            # Initialize sounddevice stream
+            self.audio_buffer = Queue()
+            self.stream = sd.InputStream(
+                samplerate=16000,
                 channels=1,
-                rate=16000,
-                input=True,
-                frames_per_buffer=8000
+                dtype='int16',
+                blocksize=8000,
+                callback=self._audio_callback
             )
+            self.stream.start()
             
             print("\tVosk wake word detector initialized successfully!")
             return True
@@ -85,7 +95,10 @@ class VoskWakeWordDetector:
         
         try:
             while self.running:
-                data = self.stream.read(4000, exception_on_overflow=False)
+                try:
+                    data = self.audio_buffer.get(timeout=0.1)
+                except Empty:
+                    continue
                 
                 if self.recognizer.AcceptWaveform(data):
                     result = json.loads(self.recognizer.Result())
@@ -128,10 +141,8 @@ class VoskWakeWordDetector:
         self.running = False
         
         if self.stream:
-            self.stream.stop_stream()
+            self.stream.stop()
             self.stream.close()
-        if self.audio:
-            self.audio.terminate()
         
         print("Listening stopped")
     

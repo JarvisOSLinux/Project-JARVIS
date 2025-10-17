@@ -10,12 +10,14 @@ Project JARVIS is an innovative AI-powered voice assistant that combines natural
 
 - **🎤 Voice-First Interface**: Real-time speech recognition and synthesis
 - **👂 Wake Word Detection**: Always-listening voice activation with customizable wake words ("Jarvis", "Hey Jarvis", etc.)
+- **💻 CLI Support**: Text-based interface with `jarvis ask` command for scripting and accessibility
 - **🧠 AI-Driven Tool Discovery**: Automatically discovers and uses available MCP servers
 - **🔧 Dynamic Capability Extension**: Add new tools without code changes
 - **🛡️ Secure Local Processing**: All operations run locally for privacy
 - **🌐 Cross-Platform Support**: Windows, Linux, macOS compatibility
 - **⚡ Self-Extending AI**: Can create new MCP servers on demand
-- **🎯 Smart Audio Management**: Automatically switches between wake word detection and command processing  
+- **🎯 Smart Audio Management**: Automatically switches between wake word detection and command processing
+- **🔄 Flexible Output**: Choose between text or voice output for responses  
 
 ---
 
@@ -67,6 +69,120 @@ Project JARVIS is an innovative AI-powered voice assistant that combines natural
 
 ---
 
+## 🐳 Docker Support
+
+Run JARVIS in Docker for easy cross-platform deployment and testing!
+
+### **Quick Docker Setup**
+
+```bash
+# 1. Make sure Ollama is running on your host
+ollama serve
+
+# 2. Build the Docker image (includes models)
+./docker-build.sh        # Linux/Mac
+docker-build.bat         # Windows
+
+# 3. Run JARVIS
+./docker-run.sh          # Linux/Mac - auto-detects voice/text
+docker-run.bat           # Windows
+# OR use docker-compose
+docker-compose up
+```
+
+### **Docker Benefits**
+- ✅ **Cross-platform**: Same environment on Linux, Mac, Windows
+- ✅ **Isolated**: No OS-level dependencies to manage
+- ✅ **Portable**: Models baked into image (~2-3GB)
+- ✅ **Easy testing**: Quick setup for development
+
+### **Docker Commands**
+
+```bash
+# Text mode (recommended for first test)
+docker run -it --rm --network host jarvis-ai python -m jarvis.main --text
+
+# Voice mode (Linux with audio)
+docker run -it --rm --network host --device /dev/snd jarvis-ai
+
+# Using docker-compose
+docker-compose up
+```
+
+📖 **See [DOCKER.md](DOCKER.md) for detailed instructions and troubleshooting**
+
+---
+
+## 💻 CLI Interface
+
+JARVIS now supports a command-line interface for text-based interaction without voice input!
+
+### **Quick Start**
+
+```bash
+# Ask a question (uses current output mode)
+jarvis ask "what is the weather?"
+
+# Switch to text output
+jarvis text
+
+# Ask questions with text output
+jarvis ask "list files in current directory"
+
+# Switch to voice output
+jarvis voice
+
+# Check current mode
+jarvis output-type
+
+# Start voice activation mode (default)
+jarvis
+```
+
+### **CLI Commands**
+
+| Command | Description |
+|---------|-------------|
+| `jarvis` | Start voice activation mode (wake word detection) |
+| `jarvis ask "<message>"` | Ask a question via text input |
+| `jarvis text` | Set output mode to text |
+| `jarvis voice` | Set output mode to voice (TTS) |
+| `jarvis output-type` | Show current output mode |
+| `jarvis history-reset on` | Enable history reset after each response |
+| `jarvis history-reset off` | Disable history reset (maintain context) |
+| `jarvis history-reset` | Show current history reset setting |
+| `jarvis --help` | Show help message |
+
+### **Usage Examples**
+
+```bash
+# Quick text query
+$ jarvis text
+$ jarvis ask "what is 2+2?"
+Four.
+
+# Use in scripts or pipelines
+$ jarvis ask "analyze system logs" | grep ERROR
+
+# Voice output for accessibility
+$ jarvis voice
+$ jarvis ask "read me the news"
+[TTS speaks the response]
+
+# Maintain conversation context
+$ jarvis history-reset off
+$ jarvis ask "My name is John"
+$ jarvis ask "What's my name?"
+# JARVIS remembers: "Your name is John"
+
+# Reset context after each response (default)
+$ jarvis history-reset on
+$ jarvis ask "What's my name?"
+# JARVIS doesn't remember previous context
+```
+
+---
+
 ## 🎤 Voice Activation Configuration
 
 JARVIS features advanced voice activation capabilities with customizable wake words and sensitivity settings.
@@ -84,6 +200,11 @@ VOICE_ACTIVATION_SENSITIVITY=0.8
 
 # Vosk model path
 VOSK_MODEL_PATH=models/vosk-model-small-en-us-0.15
+
+# Logging configuration (optional)
+LOG_LEVEL=INFO                # DEBUG, INFO, WARNING, ERROR, CRITICAL
+LOG_FILE=logs/jarvis.log      # Optional: enable file logging
+LOG_COLORS=true               # Colored console output
 ```
 
 ### **Voice Activation Features**
@@ -160,12 +281,15 @@ Wake Word → Voice Activation → STT → LLM → SuperMCP → MCP Servers → 
 ### **Current Capabilities**
 - ✅ **Voice-First AI Assistant**: Real-time speech processing
 - ✅ **Wake Word Detection**: Always-listening voice activation system
+- ✅ **CLI Interface**: Text-based command interface for scripting
+- ✅ **Flexible Output**: Text or voice response modes
 - ✅ **Dynamic Tool Discovery**: SuperMCP orchestration
 - ✅ **Local Privacy**: All processing on-device
 - ✅ **Cross-Platform**: Windows, Linux, macOS support
 - ✅ **Extensible Architecture**: Plugin-based MCP servers
 - ✅ **Smart Audio Management**: Automatic mode switching
 - ✅ **Customizable Wake Words**: User-defined activation phrases
+- ✅ **Professional Logging**: Configurable logging system with colored output and file logging support
 
 ### **Revolutionary Features in Development**
 - 🔄 **AI-Driven MCP Generation**: AI creates new tools on demand

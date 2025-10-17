@@ -1,0 +1,72 @@
+version: '3.9'
+
+# Profiles allow selective service activation based on hardware
+# Usage:
+#   CPU:  docker-compose up                              (default)
+#   CUDA: TORCH_VARIANT=cuda docker-compose --profile cuda up
+#   ROCm: TORCH_VARIANT=rocm docker-compose --profile rocm up
+
+services:
+  jarvis:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # PyTorch variant: cpu, cuda, or rocm
+        # Set via: TORCH_VARIANT=cuda docker-compose build
+        TORCH_VARIANT: ${TORCH_VARIANT:-cpu}
+        TORCH_VERSION: ${TORCH_VERSION:-2.8.0}
+    image: jarvis-ai:${TORCH_VARIANT:-cpu}
+    container_name: jarvis
+    
+    # Environment variables
+    environment:
+      # Linux: Use host.docker.internal or 172.17.0.1
+      # Mac/Windows: Use host.docker.internal
+      - OLLAMA_HOST=http://host.docker.internal:11434
+      
+      # Optional: Override any config values
+      # - LLM_MODEL=codegemma:7b-instruct-q5_K_M
+      # - OUTPUT_MODE=voice
+      # - WAKE_WORDS=jarvis,hey jarvis
+    
+    # For voice mode: Give access to audio devices
+    devices:
+      - /dev/snd:/dev/snd  # Audio devices (Linux only)
+    
+    # Network mode options:
+    # Option 1 (Linux): Share host network for easy Ollama access
+    # network_mode: host
+    
+    # Option 2 (Mac/Windows): Use default bridge + host.docker.internal
+    # (default - no need to specify)
+    
+    # Optional: Mount custom .env file
+    volumes:
+      - ./jarvis/.env:/app/jarvis/.env:ro  # Mount your custom config
+      # - ./jarvis:/app/jarvis  # Development mode: live code changes
+    
+    # Make container interactive for CLI usage
+    stdin_open: true
+    tty: true
+    
+    # Optional: Restart policy
+    # restart: unless-stopped
+    
+    # Command options:
+    # Default: Voice activation mode
+    # command: python -m jarvis.main
+    
+    # Text mode only:
+    # command: python -m jarvis.main --text
+    
+    # CLI mode (ask command):
+    # command: python -m jarvis.main ask "what time is it?"
+
+# For Linux users who want to use PulseAudio:
+# Uncomment the volume below and use --security-opt seccomp=unconfined
+#   volumes:
+#     - /run/user/1000/pulse:/run/user/1000/pulse
+#   environment:
+#     - PULSE_SERVER=unix:/run/user/1000/pulse/native
+

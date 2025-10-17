@@ -16,10 +16,21 @@ class Config:
     # Voice Activation Configuration
     WAKE_WORDS = os.getenv("WAKE_WORDS", "jarvis,hey jarvis,okay jarvis").split(",")
     VOICE_ACTIVATION_SENSITIVITY = float(os.getenv("VOICE_ACTIVATION_SENSITIVITY", "0.8"))
+    
+    # CLI Output Mode Configuration
+    OUTPUT_MODE = os.getenv("OUTPUT_MODE", "voice")  # voice or text
+    
+    # Conversation History Configuration
+    RESET_HISTORY_AFTER_RESPONSE = os.getenv("RESET_HISTORY_AFTER_RESPONSE", "true").lower() == "true"
 
     # SuperMCP Configuration
     SUPERMCP_SERVER_PATH = os.getenv("SUPERMCP_SERVER_PATH", "SuperMCP/SuperMCP.py")
     SUPERMCP_TIMEOUT = int(os.getenv("SUPERMCP_TIMEOUT", "60"))  # seconds
+    
+    # Logging Configuration
+    LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+    LOG_FILE = os.getenv("LOG_FILE", "")  # Optional: path to log file (empty = no file logging)
+    LOG_COLORS = os.getenv("LOG_COLORS", "true").lower() == "true"  # Enable colored console output
     
     # os.environ["OLLAMA_NO_GPU"] = "1"
     # os.environ["OLLAMA_NUM_THREADS"] = str(multiprocessing.cpu_count())
