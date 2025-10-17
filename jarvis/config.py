@@ -10,6 +10,8 @@ load_dotenv(env_path)
 class Config:
     # Vosk STT Configuration
     VOSK_MODEL_PATH = os.getenv("VOSK_MODEL_PATH", "models/vosk-model-small-en-us-0.15")
+    
+    # LLM Configuration
     LLM_MODEL = os.getenv("LLM_MODEL")
     
     # Validate required configuration
@@ -110,40 +112,55 @@ If the user needs tool execution (commands, file operations, code analysis, etc.
     "output": "<SuperMCP command sequence>"
 }}
 
-Step 2 - SuperMCP Command Format:
-When user_request == "SuperMCP", the output should be a sequence of SuperMCP commands separated by semicolons (;).
-
-Available SuperMCP commands:
-- reload_servers() - Refresh available MCP servers
+Step 2 - SuperMCP Quick Reference:
+Available commands (separated by semicolons):
+- reload_servers() - Refresh available MCP servers  
 - list_servers() - List all available servers
-- inspect_server(<server_name>) - Get server capabilities
-- call_server_tool(<server_name>, <tool_name>, <arguments>) - Execute a tool
+- call_server_tool(<server>, <tool>, {{<params>}}) - Execute a tool
 
-Example SuperMCP sequences:
-- "reload_servers(); list_servers()"
-- "call_server_tool(CodeAnalysisMCP, initialize_repository, {{path: '/path/to/repo'}})"
-- "call_server_tool(ShellMCP, run_command, {{command: 'ls -la'}})"
+Step 3 - Common Tool Examples:
+For file operations, use FileSystemMCP:
+- List files: "call_server_tool(FileSystemMCP, list_directory, {{directory_path: '.'}})"
+- Read file: "call_server_tool(FileSystemMCP, read_text_file_tool, {{file_path: 'path/to/file.txt'}})"
+- Write file: "call_server_tool(FileSystemMCP, write_text_file_tool, {{file_path: 'file.txt', content: 'text'}})"
 
-Step 3 - Processing SuperMCP results:
-After SuperMCP execution, you will receive the results. If the results indicate success and the user's request is fulfilled, return:
+For shell commands, use ShellMCP:
+- Execute command: "call_server_tool(ShellMCP, execute_command, {{command: 'dir', security_level: 'read_only'}})"
+- Get platform: "call_server_tool(ShellMCP, get_platform_info, {{}})"
+
+For code generation, use CodeGenMCP:
+- Create MCP server: "call_server_tool(CodeGenMCP, create_mcp_server, {{server_name: 'WeatherMCP', description: 'Weather tools', tools_description: 'get_weather(city, country) returns temp and conditions'}})"
+- Generate function: "call_server_tool(CodeGenMCP, generate_python_function, {{function_name: 'parse_data', function_description: 'Parse JSON data', parameters: 'data: str'}})"
+- List templates: "call_server_tool(CodeGenMCP, list_available_templates, {{}})"
+
+For code analysis, use CodeAnalysisMCP:
+- Initialize repo: "call_server_tool(CodeAnalysisMCP, initialize_repository, {{path: '/path'}})"
+
+Step 4 - Processing Results:
+You will receive CLEAR TEXT feedback like:
+"[OK] Reloaded 4 MCP servers"
+"[OK] Available servers: FileSystemMCP, ShellMCP, ..."
+"[SUCCESS] Listed directory: Files: file1.txt, file2.py..."
+
+When you see "[SUCCESS]" or "TASK COMPLETE", immediately return a Conversation response with the results.
+Do NOT repeat the same command - the task is done!
+
+Step 5 - Error Handling:
+If you see "Error: Field required: <parameter_name>", retry with the correct parameter name.
+If you see "Tool not found", try a different tool or ask for clarification.
+
+Step 6 - Response after success:
 {{
     "user_request": "Conversation",
-    "output": "<short confirmation + essential results>"
+    "output": "<summarize the successful results to the user>"
 }}
 
-If more steps are needed, continue with another SuperMCP command sequence.
-
-Step 4 - Error handling:
-If SuperMCP commands fail, analyze the error and either:
-- Try alternative commands or servers
-- Ask for clarification via "Conversation"
-- Explain the limitation to the user
-
 Additional rules:
-- ALWAYS return valid JSON only (no extra text, no markdown).
-- NEVER run destructive commands without explicit confirmation.
-- Use absolute paths when possible.
-- Prefer SuperMCP tools over direct shell commands when available.
-- Always reload_servers() first to ensure you have the latest available tools.
+- ALWAYS return valid JSON only (no extra text, no markdown)
+- Use the exact parameter names from the examples above
+- NEVER run destructive commands (delete, move, write) without explicit confirmation
+- For file paths: use '.' for current directory, or provide full paths
+- When you get successful results with "[SUCCESS]" or "TASK COMPLETE", immediately return Conversation
+- Don't repeat successful operations - if something worked, you're done!
 """
 
