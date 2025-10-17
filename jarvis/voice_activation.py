@@ -120,7 +120,8 @@ class VoiceActivation:
                 'channels': 1,
                 'dtype': 'int16',
                 'blocksize': self.chunk_size,
-                'callback': self._audio_callback
+                'callback': self.
+              
             }
             
             self._stream = self.sounddevice.InputStream(**stream_params)

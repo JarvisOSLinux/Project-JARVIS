@@ -107,7 +107,7 @@ class SpeechToText:
             logger.info(f"Loading Vosk model from: {self.model_path}")
             self._model = vosk.Model(self.model_path)
             self._recognizer = vosk.KaldiRecognizer(self._model, self.sample_rate)
-            logger.info("✅ Vosk model loaded successfully")
+            logger.info("Vosk model loaded successfully")
 
             # Initialize sounddevice stream
             stream_params = {
@@ -124,16 +124,16 @@ class SpeechToText:
             
             self._stream = sd.InputStream(**stream_params)
             self._stream.start()
-            logger.info("✅ Audio stream initialized")
+            logger.info("Audio stream initialized")
 
             # Start processing thread
             self._running.set()
             self._worker_thread = threading.Thread(target=self._process_loop, daemon=True)
             self._worker_thread.start()
-            logger.info("✅ Speech-to-text processing started")
+            logger.info("Speech-to-text processing started")
 
         except Exception as e:
-            logger.error(f"❌ Failed to start speech-to-text: {e}")
+            logger.error(f"Failed to start speech-to-text: {e}")
             self.stop()
             raise
 
@@ -171,7 +171,7 @@ class SpeechToText:
         self._last_emitted_text = ""
         self._current_phrase = ""
 
-        logger.info("🔇 Speech-to-text stopped")
+        logger.info("Speech-to-text stopped")
 
     def _drain_queue(self, q: Queue) -> None:
         """Drain a queue of all items."""
@@ -201,7 +201,7 @@ class SpeechToText:
                         self._last_speech_time = datetime.utcnow()
                         self._emit(text, is_final=True)
                         self._last_emitted_text = text
-                        logger.debug(f"📝 FINAL: {text}")
+                        logger.debug(f"FINAL: {text}")
                 else:
                     # Partial result
                     partial = json.loads(self._recognizer.PartialResult())
@@ -211,7 +211,7 @@ class SpeechToText:
                         self._last_speech_time = datetime.utcnow()
                         self._emit(partial_text, is_final=False)
                         self._last_emitted_text = partial_text
-                        logger.debug(f"🔄 PARTIAL: {partial_text}")
+                        logger.debug(f"PARTIAL: {partial_text}")
                 
                 # Check for silence timeout
                 if self._last_speech_time:
@@ -221,13 +221,13 @@ class SpeechToText:
                             # Emit the current phrase as final
                             self._emit(self._current_phrase, is_final=True)
                             self._last_emitted_text = self._current_phrase
-                            logger.debug(f"📝 FINAL (silence): {self._current_phrase}")
+                            logger.debug(f"FINAL (silence): {self._current_phrase}")
                         self._current_phrase = ""
                         self._last_speech_time = None
                         
             except Exception as e:
                 if self._running.is_set():  # Only log error if we're still supposed to be running
-                    logger.error(f"❌ Error in processing loop: {e}")
+                    logger.error(f"Error in processing loop: {e}")
                 break
 
     def _emit(self, text: str, is_final: bool) -> None:
