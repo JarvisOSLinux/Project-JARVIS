@@ -1,29 +1,8 @@
 @echo off
 REM Docker build script for Project JARVIS (Windows)
 
-REM Parse arguments
-set TORCH_VARIANT=%1
-set TORCH_VERSION=%2
-if "%TORCH_VARIANT%"=="" set TORCH_VARIANT=cpu
-if "%TORCH_VERSION%"=="" set TORCH_VERSION=2.8.0
-
-REM Validate variant
-if /i not "%TORCH_VARIANT%"=="cpu" if /i not "%TORCH_VARIANT%"=="cuda" if /i not "%TORCH_VARIANT%"=="rocm" (
-    echo Error: Invalid TORCH_VARIANT '%TORCH_VARIANT%'
-    echo Valid options: cpu, cuda, rocm
-    echo.
-    echo Usage: %~nx0 [cpu^|cuda^|rocm] [torch_version]
-    echo Examples:
-    echo   %~nx0              # CPU-only (default^)
-    echo   %~nx0 cuda         # NVIDIA CUDA support
-    echo   %~nx0 rocm         # AMD ROCm support
-    exit /b 1
-)
-
 echo Building JARVIS Docker Image...
 echo ==================================
-echo PyTorch Variant: %TORCH_VARIANT%
-echo PyTorch Version: %TORCH_VERSION%
 echo.
 
 REM Check if Docker is installed
@@ -65,7 +44,7 @@ if not exist "jarvis\.env" (
 
 REM Build the image
 echo Building Docker image...
-docker build --build-arg TORCH_VARIANT=%TORCH_VARIANT% --build-arg TORCH_VERSION=%TORCH_VERSION% -t jarvis-ai:%TORCH_VARIANT% -t jarvis-ai:latest .
+docker build -t jarvis-ai:latest .
 
 if errorlevel 0 (
     echo.

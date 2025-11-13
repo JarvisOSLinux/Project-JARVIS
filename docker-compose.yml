@@ -1,22 +1,11 @@
 version: '3.9'
 
-# Profiles allow selective service activation based on hardware
-# Usage:
-#   CPU:  docker-compose up                              (default)
-#   CUDA: TORCH_VARIANT=cuda docker-compose --profile cuda up
-#   ROCm: TORCH_VARIANT=rocm docker-compose --profile rocm up
-
 services:
   jarvis:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        # PyTorch variant: cpu, cuda, or rocm
-        # Set via: TORCH_VARIANT=cuda docker-compose build
-        TORCH_VARIANT: ${TORCH_VARIANT:-cpu}
-        TORCH_VERSION: ${TORCH_VERSION:-2.8.0}
-    image: jarvis-ai:${TORCH_VARIANT:-cpu}
+    image: jarvis-ai:latest
     container_name: jarvis
     
     # Environment variables
