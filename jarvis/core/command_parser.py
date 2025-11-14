@@ -11,6 +11,11 @@ class SuperMCPCommandParser:
     def __init__(self, supermcp_client: SuperMCPWrapper):
         self.supermcp = supermcp_client
     
+    def execute_approved_command(self, server: str, tool: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute a command that has been approved by the user"""
+        logger.info(f"CommandParser: Executing approved command {server}.{tool} with args: {arguments}")
+        return self.supermcp.call_server_tool(server, tool, arguments)
+    
     def execute_command_sequence(self, command_sequence: str) -> Dict[str, Any]:
         try:
             logger.info(f"CommandParser: Executing {command_sequence.count(';') + 1} command(s)")
@@ -90,6 +95,29 @@ class SuperMCPCommandParser:
                 logger.info(f"CommandParser: Calling {server_name}.{tool_name} with args: {arguments}")
                 result = self.supermcp.call_server_tool(server_name, tool_name, arguments)
                 logger.debug(f"CommandParser: call_server_tool returned: {result}")
+                
+                # Check if ShellMCP returned a "requires approval" response
+                # ShellMCP returns a message like "This command requires approval. It has been queued with ID: ..."
+                if server_name == "ShellMCP" and tool_name == "execute_command":
+                    # Handle both dict and string results
+                    if isinstance(result, dict):
+                        result_str = str(result.get('result', ''))
+                    else:
+                        # Result is already a string (common for simple command outputs)
+                        result_str = str(result)
+                    
+                    if 'requires approval' in result_str.lower() or 'queued with id' in result_str.lower():
+                        command_to_execute = arguments.get("command", "")
+                        logger.info(f"CommandParser: ShellMCP command requires approval: {command_to_execute}")
+                        return {
+                            "approval_required": True,
+                            "server": server_name,
+                            "tool": tool_name,
+                            "arguments": arguments,
+                            "command": command_to_execute,
+                            "shellmcp_response": result_str
+                        }
+                
                 return result
             else:
                 error_msg = f"Invalid call_server_tool format: {command}"

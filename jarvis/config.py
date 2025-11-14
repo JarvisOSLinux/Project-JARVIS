@@ -125,8 +125,14 @@ For file operations, use FileSystemMCP:
 - Write file: "call_server_tool(FileSystemMCP, write_text_file_tool, {{file_path: 'file.txt', content: 'text'}})"
 
 For shell commands, use ShellMCP:
-- Execute command: "call_server_tool(ShellMCP, execute_command, {{command: 'dir', security_level: 'read_only'}})"
+- Execute command: "call_server_tool(ShellMCP, execute_command, {{command: 'dir'}})"
 - Get platform: "call_server_tool(ShellMCP, get_platform_info, {{}})"
+- If a command fails with "not whitelisted":
+  1. Ask the user if they want to add it: "The command 'X' is not whitelisted. Would you like me to add it?"
+  2. If user approves, add it: "call_server_tool(ShellMCP, add_to_whitelist, {{command: 'X', securityLevel: 'safe', description: '...'}})"
+  3. Then RETRY the original command immediately
+- Security levels: 'safe' (runs immediately), 'requires_approval' (asks user), 'forbidden' (blocks)
+- For read-only commands like 'python --version', use 'safe' level
 
 For code generation, use CodeGenMCP:
 - Create MCP server: "call_server_tool(CodeGenMCP, create_mcp_server, {{server_name: 'WeatherMCP', description: 'Weather tools', tools_description: 'get_weather(city, country) returns temp and conditions'}})"
