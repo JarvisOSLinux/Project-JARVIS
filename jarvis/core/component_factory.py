@@ -15,10 +15,6 @@ logger = get_logger(__name__)
 class ComponentFactory:
     @staticmethod
     def create_llm() -> LLM:
-        # Validate configuration first
-        logger.info("Validating configuration...")
-        Config.validate()
-        
         logger.info("Getting system information...")
         system_info = SystemInfo.get_system_info()
         

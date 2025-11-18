@@ -62,11 +62,33 @@ echo "Detected OS: $OS"
 # Parse mode argument
 MODE="${1:-voice}"  # Default to voice mode
 
-# Use latest image
-IMAGE_NAME="jarvis-ai:latest"
+# Detect PyTorch variant from image tag (if exists)
+TORCH_VARIANT="${TORCH_VARIANT:-cpu}"
+IMAGE_NAME="jarvis-ai:${TORCH_VARIANT}"
+
+# Check if specific variant image exists, fallback to latest
+if ! docker image inspect "${IMAGE_NAME}" &> /dev/null; then
+    IMAGE_NAME="jarvis-ai:latest"
+fi
 
 # Build Docker command based on OS and mode
 DOCKER_CMD="docker run -it --rm"
+
+# Add GPU support based on TORCH_VARIANT
+if [ "$TORCH_VARIANT" = "cuda" ]; then
+    # NVIDIA GPU support
+    if command -v nvidia-smi &> /dev/null; then
+        DOCKER_CMD="$DOCKER_CMD --gpus all"
+        echo -e "${GREEN}✓ NVIDIA GPU support enabled${NC}"
+    else
+        echo -e "${YELLOW}⚠️  CUDA variant selected but nvidia-smi not found${NC}"
+        echo "Install nvidia-docker2 for GPU support, or use CPU variant"
+    fi
+elif [ "$TORCH_VARIANT" = "rocm" ]; then
+    # AMD GPU support (ROCm)
+    DOCKER_CMD="$DOCKER_CMD --device=/dev/kfd --device=/dev/dri"
+    echo -e "${GREEN}✓ AMD ROCm GPU support enabled${NC}"
+fi
 
 case "$OS" in
     linux)
