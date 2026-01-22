@@ -23,6 +23,26 @@ Project JARVIS is an innovative AI-powered voice assistant that combines natural
 
 ## ⚡ Installation
 
+### Quick Start (Minimal Install - CLI/Text Only)
+
+For text-only mode without voice features:
+
+```bash
+# Install core package
+pip install jarvis-ai
+
+# Install Ollama and pull an LLM model
+# Install Ollama from https://ollama.com/
+ollama pull codegemma:7b-instruct-q5_K_M
+
+# Configure and run
+cp jarvis/config.env.template jarvis/.env
+cd jarvis
+python main.py
+```
+
+### Full Installation with Voice Features
+
 1. **Clone the repository with SuperMCP submodule**:
    ```bash
    git clone --recursive https://github.com/YakupAtahanov/Project-JARVIS.git
@@ -34,7 +54,7 @@ Project JARVIS is an innovative AI-powered voice assistant that combines natural
    mkdir -p models/piper
    ```
 
-3. **Download a Piper TTS model**:
+3. **Download a Piper TTS model** (for voice output):
    - Get both `.onnx` and `.onnx.json` files from [Piper samples](https://rhasspy.github.io/piper-samples/).  
    - Place them in `models/piper`.  
    - Example: [en_US-libritts_r-medium](https://rhasspy.github.io/piper-samples/#en_US-libritts_r-medium).  
@@ -47,8 +67,28 @@ Project JARVIS is an innovative AI-powered voice assistant that combines natural
    ```
 
 5. **Install dependencies**:
+   
+   **Option A: Install with voice support (recommended)**:
    ```bash
-   pip install -r requirements.txt
+   pip install jarvis-ai[voice]
+   ```
+   
+   **Option B: Install from source with voice support**:
+   ```bash
+   pip install -e ".[voice]"
+   ```
+   
+   **Option C: Install minimal (CLI/Text only)**:
+   ```bash
+   pip install jarvis-ai
+   # or from source:
+   pip install -e .
+   ```
+   
+   **Option D: Install specific voice features**:
+   ```bash
+   pip install jarvis-ai[voice-input]   # Speech-to-text only
+   pip install jarvis-ai[voice-output] # Text-to-speech only
    ```
 
 6. **Install Ollama and pull an LLM model**:
@@ -66,6 +106,20 @@ Project JARVIS is an innovative AI-powered voice assistant that combines natural
    cd jarvis
    python main.py
    ```
+
+### Optional Dependency Groups
+
+JARVIS supports optional dependencies for flexible installation:
+
+- **`jarvis-ai`** - Core package (CLI/Text mode only)
+- **`jarvis-ai[voice-input]`** - Add speech-to-text support
+- **`jarvis-ai[voice-output]`** - Add text-to-speech support  
+- **`jarvis-ai[voice]`** - Full voice support (input + output)
+- **`jarvis-ai[dev]`** - Development tools (pytest, black, etc.)
+- **`jarvis-ai[docs]`** - Documentation tools (sphinx, etc.)
+- **`jarvis-ai[all]`** - Everything (voice + dev + docs)
+
+**Note**: Voice features require audio devices. The system will gracefully degrade to text mode if audio is unavailable.
 
 ---
 
@@ -232,14 +286,19 @@ LOG_COLORS=true               # Colored console output
 
 ## 🖥️ System Requirements
 
+### Core Requirements (CLI/Text Mode)
 - **Python**: 3.10 or later
+- **Memory**: 4GB RAM minimum (8GB recommended)
+- **CPU**: x86_64 (Apple Silicon and ARM64 builds may work but are untested)
+- **OS**: Windows 10/11, Linux (Ubuntu 20.04+ recommended), macOS
+
+### Voice Features Requirements (Optional)
+- **Audio Hardware**: Microphone (for voice input) and speakers/headphones (for voice output)
 - **Memory**: 8GB RAM (16GB recommended for larger models)
-- **CPU**: x86_64 with AVX2 support (Apple Silicon and ARM64 builds may work but are untested)
 - **GPU**: Optional, for acceleration of Ollama or Piper TTS models
-- **OS**:
-  - Windows 10/11
-  - Linux (Ubuntu 20.04+ recommended)
-  - MacOS (testing needed)
+- **Additional Packages**: Install with `pip install jarvis-ai[voice]`
+
+**Note**: JARVIS works perfectly fine without audio hardware - it will automatically use text mode.
 
 ---
 

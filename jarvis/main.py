@@ -207,21 +207,21 @@ class Jarvis:
         else:
             # Voice mode: use voice input
             if not self.voice_manager:
-                logger.error("Voice manager not available for approval request")
-                return False
-            
-            # Start STT and listen for response
-            self.voice_manager.stt.start()
-            try:
-                logger.info("Listening for your approval response...")
-                user_response = ""
-                for text, is_final in self.voice_manager.stt.iter_results():
-                    if is_final and text.strip():
-                        user_response = text.strip()
-                        logger.info(f"Approval response received: {user_response}")
-                        break
-            finally:
-                self.voice_manager.stt.stop()
+                logger.warning("Voice manager not available for approval request, falling back to text input")
+                user_response = input().strip()
+            else:
+                # Start STT and listen for response
+                try:
+                    self.voice_manager.stt.start()
+                    logger.info("Listening for your approval response...")
+                    user_response = ""
+                    for text, is_final in self.voice_manager.stt.iter_results():
+                        if is_final and text.strip():
+                            user_response = text.strip()
+                            logger.info(f"Approval response received: {user_response}")
+                            break
+                finally:
+                    self.voice_manager.stt.stop()
         
         if not user_response:
             logger.warning("JARVIS: No response received, denying command")

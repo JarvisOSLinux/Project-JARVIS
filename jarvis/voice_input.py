@@ -1,12 +1,10 @@
 import threading
 import json
-import sounddevice as sd
-import vosk
-import numpy as np
 from queue import Queue, Empty
 from datetime import datetime, timedelta
-from typing import Callable, Generator, Optional, Tuple
+from typing import Callable, Generator, Optional, Tuple, Any
 from .core.logger import get_logger
+from .core.audio_detection import check_audio_input_available, AudioUnavailableError
 
 logger = get_logger(__name__)
 
@@ -43,7 +41,33 @@ class SpeechToText:
             phrase_timeout: Timeout for phrase completion
             silence_timeout: Timeout for silence detection
             device_index: Audio device index (None for default)
+            
+        Raises:
+            AudioUnavailableError: If audio packages or devices unavailable
         """
+        # Lazy import audio packages
+        try:
+            import sounddevice as sd
+            self.sd = sd
+        except ImportError:
+            raise AudioUnavailableError(
+                "sounddevice package not installed. Install with: pip install sounddevice"
+            )
+        
+        try:
+            import vosk
+            self.vosk = vosk
+        except ImportError:
+            raise AudioUnavailableError(
+                "vosk package not installed. Install with: pip install vosk"
+            )
+        
+        # Check audio input availability
+        if not check_audio_input_available():
+            raise AudioUnavailableError(
+                "No audio input devices available. Cannot initialize STT."
+            )
+        
         self.model_path = model_path
         self.sample_rate = sample_rate
         self.chunk_size = chunk_size
@@ -54,12 +78,12 @@ class SpeechToText:
         # I/O queues
         self._result_q: Queue[Tuple[str, bool]] = Queue()  # (text, is_final)
 
-        # Vosk components
-        self._model: Optional[vosk.Model] = None
-        self._recognizer: Optional[vosk.KaldiRecognizer] = None
+        # Vosk components (will be initialized in start())
+        self._model: Optional[Any] = None
+        self._recognizer: Optional[Any] = None
         
         # sounddevice components
-        self._stream: Optional[sd.InputStream] = None
+        self._stream: Optional[Any] = None
 
         # Processing thread state
         self._worker_thread: Optional[threading.Thread] = None
@@ -79,6 +103,12 @@ class SpeechToText:
     @staticmethod
     def list_audio_devices() -> None:
         """List available audio input devices."""
+        try:
+            import sounddevice as sd
+        except ImportError:
+            logger.error("sounddevice package not available")
+            return
+        
         logger.info("Available audio input devices:")
         devices = sd.query_devices()
         for i, device in enumerate(devices):
@@ -105,8 +135,8 @@ class SpeechToText:
         try:
             # Load Vosk model
             logger.info(f"Loading Vosk model from: {self.model_path}")
-            self._model = vosk.Model(self.model_path)
-            self._recognizer = vosk.KaldiRecognizer(self._model, self.sample_rate)
+            self._model = self.vosk.Model(self.model_path)
+            self._recognizer = self.vosk.KaldiRecognizer(self._model, self.sample_rate)
             logger.info("Vosk model loaded successfully")
 
             # Initialize sounddevice stream
@@ -122,7 +152,7 @@ class SpeechToText:
             if self.device_index is not None:
                 stream_params['device'] = self.device_index
             
-            self._stream = sd.InputStream(**stream_params)
+            self._stream = self.sd.InputStream(**stream_params)
             self._stream.start()
             logger.info("Audio stream initialized")
 

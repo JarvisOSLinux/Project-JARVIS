@@ -113,6 +113,28 @@ def show_usage() -> None:
     print("  jarvis output-type        # Check current mode")
 
 
+def _check_capabilities() -> dict:
+    """
+    Check system capabilities for voice features
+    
+    Returns:
+        Dictionary with capability flags
+    """
+    capabilities = {
+        'voice_input': False,
+        'voice_output': False,
+    }
+    
+    try:
+        from .core.audio_detection import check_audio_input_available, check_audio_output_available
+        capabilities['voice_input'] = check_audio_input_available()
+        capabilities['voice_output'] = check_audio_output_available()
+    except Exception as e:
+        logger.debug(f"Error checking capabilities: {e}")
+    
+    return capabilities
+
+
 def main() -> None:
     """Main CLI entry point"""
     # Import here to avoid circular imports and to delay heavy imports
@@ -121,8 +143,26 @@ def main() -> None:
     # No arguments - start voice activation
     if len(sys.argv) == 1:
         print("Starting JARVIS in voice activation mode...")
-        jarvis = Jarvis()
-        jarvis.listen_with_activation()
+        
+        # Check capabilities and warn if unavailable
+        capabilities = _check_capabilities()
+        if not capabilities['voice_input']:
+            print("⚠️  Warning: No audio input devices detected.")
+            print("   Voice activation will not work. Use 'jarvis ask' for text mode.")
+            print()
+        
+        try:
+            jarvis = Jarvis()
+            if not jarvis.voice_manager:
+                print("⚠️  Voice manager unavailable. Falling back to text-only mode.")
+                print("   Use 'jarvis ask \"<message>\"' to interact via text.")
+                sys.exit(1)
+            jarvis.listen_with_activation()
+        except Exception as e:
+            logger.error(f"Failed to start JARVIS: {e}")
+            print(f"\n❌ Error: {e}")
+            print("\nTip: Use 'jarvis ask \"<message>\"' for text-only mode.")
+            sys.exit(1)
         return
     
     # Parse command
@@ -132,6 +172,15 @@ def main() -> None:
         set_output_mode("text")
         
     elif command == "voice":
+        # Check if voice output is available
+        capabilities = _check_capabilities()
+        if not capabilities['voice_output']:
+            print("⚠️  Warning: No audio output devices detected.")
+            print("   Voice output will fallback to text mode.")
+            response = input("Continue anyway? (y/n): ").strip().lower()
+            if response not in ['y', 'yes']:
+                print("Cancelled.")
+                sys.exit(0)
         set_output_mode("voice")
         
     elif command == "output-type":

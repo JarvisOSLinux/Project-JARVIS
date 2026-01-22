@@ -6,10 +6,9 @@ and voice command processing.
 """
 
 import time
-from typing import Callable, Optional
-from ..voice_input import SpeechToText
-from ..voice_activation import VoiceActivation
+from typing import Callable, Optional, Any
 from ..config import Config
+from .audio_detection import check_audio_input_available, AudioUnavailableError
 from .logger import get_logger
 
 logger = get_logger(__name__)
@@ -24,28 +23,54 @@ class VoiceManager:
         
         Args:
             on_command: Callback function called when a voice command is received
+            
+        Raises:
+            AudioUnavailableError: If audio packages or devices unavailable
         """
         self.on_command = on_command
         self._wake_word_detected = False
         
-        # Initialize voice components
-        self.stt = SpeechToText(
-            model_path=Config.VOSK_MODEL_PATH,
-            sample_rate=16000,
-            chunk_size=4000,
-            phrase_timeout=3.0,
-            silence_timeout=1.0,
-            device_index=None
-        )
+        # Check audio input availability
+        if not check_audio_input_available():
+            raise AudioUnavailableError(
+                "No audio input devices available. Cannot initialize voice manager."
+            )
         
-        self.voice_activation = VoiceActivation(
-            wake_words=Config.WAKE_WORDS,
-            model_path=Config.VOSK_MODEL_PATH,
-            sample_rate=16000,
-            chunk_size=4000,
-            sensitivity=Config.VOICE_ACTIVATION_SENSITIVITY,
-            on_wake_word=self._on_wake_word_detected
-        )
+        # Lazy import voice components to avoid import errors when not needed
+        try:
+            from ..voice_input import SpeechToText
+            from ..voice_activation import VoiceActivation
+        except ImportError as e:
+            raise AudioUnavailableError(
+                f"Voice components dependencies not available: {e}. "
+                "Install with: pip install vosk sounddevice"
+            ) from e
+        
+        # Initialize voice components
+        try:
+            self.stt = SpeechToText(
+                model_path=Config.VOSK_MODEL_PATH,
+                sample_rate=16000,
+                chunk_size=4000,
+                phrase_timeout=3.0,
+                silence_timeout=1.0,
+                device_index=None
+            )
+            
+            self.voice_activation = VoiceActivation(
+                wake_words=Config.WAKE_WORDS,
+                model_path=Config.VOSK_MODEL_PATH,
+                sample_rate=16000,
+                chunk_size=4000,
+                sensitivity=Config.VOICE_ACTIVATION_SENSITIVITY,
+                on_wake_word=self._on_wake_word_detected
+            )
+        except AudioUnavailableError:
+            raise
+        except Exception as e:
+            raise AudioUnavailableError(
+                f"Failed to initialize voice components: {e}"
+            ) from e
     
     def start_voice_activation_mode(self) -> bool:
         """
