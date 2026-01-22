@@ -1,44 +1,26 @@
 from dotenv import load_dotenv
 # import multiprocessing
 import os
-import sys
 
 # Load .env file from the jarvis directory
-env_path = os.path.join(os.path.dirname(__file__), '.env')
-load_dotenv(env_path)
+load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 
 class Config:
     # Vosk STT Configuration
     VOSK_MODEL_PATH = os.getenv("VOSK_MODEL_PATH", "models/vosk-model-small-en-us-0.15")
     
     # LLM Configuration
+    LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama")  # "ollama" or "api"
     LLM_MODEL = os.getenv("LLM_MODEL")
     
-    # Validate required configuration
-    @classmethod
-    def validate(cls):
-        """Validate that required configuration values are set"""
-        env_path = os.path.join(os.path.dirname(__file__), '.env')
-        template_path = os.path.join(os.path.dirname(__file__), 'config.env.template')
-        
-        if not cls.LLM_MODEL:
-            error_msg = f"\n{'='*70}\n"
-            error_msg += "ERROR: LLM_MODEL is not configured!\n\n"
-            
-            if not os.path.exists(env_path):
-                error_msg += f"The configuration file is missing: {env_path}\n\n"
-                error_msg += f"Please copy the template file to create your configuration:\n"
-                error_msg += f"  cp {template_path} {env_path}\n\n"
-                error_msg += "Then edit the .env file and set your LLM_MODEL.\n"
-            else:
-                error_msg += f"The .env file exists but LLM_MODEL is not set.\n"
-                error_msg += f"Please edit {env_path} and set LLM_MODEL.\n\n"
-            
-            error_msg += "Example: LLM_MODEL=llama3.2:3b\n"
-            error_msg += "\nSee config.env.template for more examples.\n"
-            error_msg += f"{'='*70}\n"
-            print(error_msg, file=sys.stderr)
-            sys.exit(1)
+    # Ollama-specific configuration
+    LLM_OLLAMA_URL = os.getenv("LLM_OLLAMA_URL", "http://localhost:11434")  # Optional custom Ollama URL
+    LLM_AUTO_PULL = os.getenv("LLM_AUTO_PULL", "false").lower() == "true"  # Auto-pull missing models
+    
+    # API-based LLM configuration (for OpenAI, Claude, OpenRouter, custom servers)
+    LLM_API_URL = os.getenv("LLM_API_URL")  # Base URL for API endpoint (e.g., https://api.openai.com)
+    LLM_API_KEY = os.getenv("LLM_API_KEY")  # API key for authentication
+    LLM_API_HEADERS = os.getenv("LLM_API_HEADERS")  # Optional custom headers (JSON string)
 
     TTS_MODEL_ONNX = os.getenv("TTS_MODEL_ONNX")
     TTS_MODEL_JSON = os.getenv("TTS_MODEL_JSON")
@@ -112,17 +94,19 @@ If the user needs tool execution (commands, file operations, code analysis, etc.
     "output": "<SuperMCP command sequence>"
 }}
 
-Step 2 - SuperMCP Quick Reference:
-Available commands (separated by semicolons):
-- reload_servers() - Refresh available MCP servers  
-- list_servers() - List all available servers
-- call_server_tool(<server>, <tool>, {{<params>}}) - Execute a tool
+Step 2 - SuperMCP Command Format:
+When user_request == "SuperMCP", the output should be a sequence of SuperMCP commands separated by semicolons (;).
 
-Step 3 - Common Tool Examples:
-For file operations, use FileSystemMCP:
-- List files: "call_server_tool(FileSystemMCP, list_directory, {{directory_path: '.'}})"
-- Read file: "call_server_tool(FileSystemMCP, read_text_file_tool, {{file_path: 'path/to/file.txt'}})"
-- Write file: "call_server_tool(FileSystemMCP, write_text_file_tool, {{file_path: 'file.txt', content: 'text'}})"
+Available SuperMCP commands:
+- reload_servers() - Refresh available MCP servers
+- list_servers() - List all available servers
+- inspect_server(<server_name>) - Get server capabilities
+- call_server_tool(<server_name>, <tool_name>, <arguments>) - Execute a tool
+
+Example SuperMCP sequences:
+- "reload_servers(); list_servers()"
+- "call_server_tool(CodeAnalysisMCP, initialize_repository, {{path: '/path/to/repo'}})"
+- "call_server_tool(ShellMCP, run_command, {{command: 'ls -la'}})"
 
 For shell commands, use ShellMCP:
 - Execute command: "call_server_tool(ShellMCP, execute_command, {{command: 'dir'}})"
@@ -142,8 +126,8 @@ For code generation, use CodeGenMCP:
 For code analysis, use CodeAnalysisMCP:
 - Initialize repo: "call_server_tool(CodeAnalysisMCP, initialize_repository, {{path: '/path'}})"
 
-Step 4 - Processing Results:
-You will receive CLEAR TEXT feedback like:
+Step 3 - Processing SuperMCP results:
+After SuperMCP execution, you will receive CLEAR TEXT feedback like:
 "[OK] Reloaded 4 MCP servers"
 "[OK] Available servers: FileSystemMCP, ShellMCP, ..."
 "[SUCCESS] Listed directory: Files: file1.txt, file2.py..."
@@ -151,22 +135,27 @@ You will receive CLEAR TEXT feedback like:
 When you see "[SUCCESS]" or "TASK COMPLETE", immediately return a Conversation response with the results.
 Do NOT repeat the same command - the task is done!
 
-Step 5 - Error Handling:
-If you see "Error: Field required: <parameter_name>", retry with the correct parameter name.
-If you see "Tool not found", try a different tool or ask for clarification.
-
-Step 6 - Response after success:
+If the results indicate success and the user's request is fulfilled, return:
 {{
     "user_request": "Conversation",
-    "output": "<summarize the successful results to the user>"
+    "output": "<short confirmation + essential results>"
 }}
+
+If more steps are needed, continue with another SuperMCP command sequence.
+
+Step 4 - Error Handling:
+If you see "Error: Field required: <parameter_name>", retry with the correct parameter name.
+If you see "Tool not found", try a different tool or ask for clarification.
+If SuperMCP commands fail, analyze the error and either:
+- Try alternative commands or servers
+- Ask for clarification via "Conversation"
+- Explain the limitation to the user
 
 Additional rules:
 - ALWAYS return valid JSON only (no extra text, no markdown)
-- Use the exact parameter names from the examples above
-- NEVER run destructive commands (delete, move, write) without explicit confirmation
-- For file paths: use '.' for current directory, or provide full paths
-- When you get successful results with "[SUCCESS]" or "TASK COMPLETE", immediately return Conversation
-- Don't repeat successful operations - if something worked, you're done!
+- NEVER run destructive commands without explicit confirmation
+- Use absolute paths when possible
+- Prefer SuperMCP tools over direct shell commands when available
+- Always reload_servers() first to ensure you have the latest available tools
 """
 

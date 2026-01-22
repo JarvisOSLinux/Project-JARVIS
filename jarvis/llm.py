@@ -1,56 +1,81 @@
-import ollama
 from .config import Config
 from .core.logger import get_logger
+from .llm_providers import LLMProviderFactory
 import json
 
 logger = get_logger(__name__)
 
 class LLM:
+    """Main LLM interface that works with any configured provider."""
+    
     def __init__(self, system, release, version, machine, shell):
-        self.llm_model = Config.LLM_MODEL
+        """
+        Initialize LLM with configured provider.
+        
+        Args:
+            system: Operating system name
+            release: OS release version
+            version: OS version
+            machine: Machine architecture
+            shell: Shell name
+        """
+        # Create provider based on configuration
+        self.provider = LLMProviderFactory.create_provider()
+        logger.info(f"Using LLM provider: {Config.LLM_PROVIDER} with model: {self.provider.model}")
+        
+        # Initialize chat history with system prompt
         self.default_chat = [
-                    {
-                        'role': 'system',
-                        'content': Config.LLM_RULE.format(system=system, release=release, version=version, machine=machine, shell=shell),
-                    }
-                ]
+            {
+                'role': 'system',
+                'content': Config.LLM_RULE.format(
+                    system=system,
+                    release=release,
+                    version=version,
+                    machine=machine,
+                    shell=shell
+                ),
+            }
+        ]
         self.chat_history = list.copy(self.default_chat)
 
         logger.info("LLM: Initiating Preload...")
-        # Start preload
-        ollama.chat(
-            model=Config.LLM_MODEL,
-            messages=self.chat_history
-        )
-        logger.info("LLM: Initiation Complete!")
+        # Start preload to warm up the provider
+        try:
+            self.provider.chat(self.chat_history)
+            logger.info("LLM: Initiation Complete!")
+        except Exception as e:
+            logger.warning(f"LLM preload failed (this may be expected): {e}")
+            logger.info("LLM: Continuing despite preload failure...")
     
     def ask(self, prompt):
-        logger.info(f"LLM: Received prompt (length: {len(prompt)} chars)")
-        logger.debug(f"LLM: Prompt content:\n{prompt}\n----------")
+        """
+        Ask the LLM a question and get JSON response.
         
+        Args:
+            prompt: User's question/prompt
+            
+        Returns:
+            Parsed JSON response as dictionary
+        """
+        # Add user message to history
         self.chat_history.append({
             'role': 'user',
             'content': prompt
         })
 
-        logger.info(f"LLM: Calling ollama.chat with model '{self.llm_model}'...")
-        response = ollama.chat(
-            model=self.llm_model,
-            messages=self.chat_history
-        )["message"]["content"]
+        # Get response from provider
+        response_text = self.provider.chat(self.chat_history)
 
-        logger.info(f"LLM: Received response (length: {len(response)} chars)")
-        logger.debug(f"LLM: Response content:\n{response}\n----------")
+        logger.debug(f"LLM Responded:'\n{response_text}\n----------")
 
+        # Try to parse as JSON
         try:
-            parsed = json.loads(response)
-            logger.info(f"LLM: Parsed - user_request={parsed.get('user_request')}, output={parsed.get('output')[:60]}...")
-            return parsed
+            return json.loads(response_text)
         
-        except json.decoder.JSONDecodeError as e:
-            logger.warning(f"LLM: Failed to parse JSON response: {e}")
-            logger.info("LLM: Re-prompting with error correction message...")
+        except json.decoder.JSONDecodeError:
+            logger.warning("LLM response was not valid JSON, retrying with error message...")
             return self.ask(Config.LLM_WRONG_JSON_FORMAT_MESSAGE)
         
     def reset_history(self):
+        """Reset chat history to default system prompt."""
         self.chat_history = list.copy(self.default_chat)

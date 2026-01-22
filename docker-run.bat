@@ -37,11 +37,37 @@ REM Parse mode argument
 set MODE=%1
 if "%MODE%"=="" set MODE=voice
 
-REM Use latest image
-set IMAGE_NAME=jarvis-ai:latest
+REM Detect PyTorch variant from environment (default: cpu)
+if "%TORCH_VARIANT%"=="" set TORCH_VARIANT=cpu
+set IMAGE_NAME=jarvis-ai:%TORCH_VARIANT%
+
+REM Check if specific variant image exists
+docker image inspect %IMAGE_NAME% >nul 2>&1
+if errorlevel 1 set IMAGE_NAME=jarvis-ai:latest
 
 REM Build Docker command
-set DOCKER_CMD=docker run -it --rm -e OLLAMA_HOST=http://host.docker.internal:11434 %IMAGE_NAME%
+set DOCKER_CMD=docker run -it --rm -e OLLAMA_HOST=http://host.docker.internal:11434
+
+REM Add GPU support based on TORCH_VARIANT
+if "%TORCH_VARIANT%"=="cuda" (
+    REM Check for nvidia-smi
+    where nvidia-smi >nul 2>&1
+    if not errorlevel 1 (
+        set DOCKER_CMD=%DOCKER_CMD% --gpus all
+        echo ✓ NVIDIA GPU support enabled
+    ) else (
+        echo Warning: CUDA variant selected but nvidia-smi not found
+        echo Install nvidia-docker2 for GPU support, or use CPU variant
+    )
+)
+
+if "%TORCH_VARIANT%"=="rocm" (
+    REM AMD GPU support (limited on Windows)
+    set DOCKER_CMD=%DOCKER_CMD% --device=/dev/kfd --device=/dev/dri
+    echo ✓ AMD ROCm GPU support enabled
+)
+
+set DOCKER_CMD=%DOCKER_CMD% %IMAGE_NAME%
 
 if "%MODE%"=="text" (
     set DOCKER_CMD=%DOCKER_CMD% python -m jarvis.main --text
