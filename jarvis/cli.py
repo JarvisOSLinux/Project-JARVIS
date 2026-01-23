@@ -176,12 +176,49 @@ def show_usage() -> None:
     print("  jarvis model -n '<model>'  # Set LLM model (e.g., 'qwen2.5:7b')")
     print("  jarvis model set '<model>' # Set LLM model (alternative syntax)")
     print()
+    print("LLM Configuration:")
+    print("  jarvis provider <ollama|api>  # Set LLM provider")
+    print("  jarvis model <model_name>     # Set LLM model")
+    print("  jarvis api-url <url>          # Set API base URL (for API provider)")
+    print("  jarvis api-key <key>          # Set API key (for API provider)")
+    print("  jarvis ollama-url <url>       # Set Ollama URL (for Ollama provider)")
+    print("  jarvis auto-pull on/off       # Enable/disable auto-pull missing models")
+    print("  jarvis auto-pull              # Show current auto-pull setting")
+    print("  jarvis llm-config             # Show current LLM configuration")
+    print()
     print("Examples:")
     print("  jarvis                    # Start voice assistant")
     print("  jarvis text               # Switch to text output")
     print("  jarvis ask \"what is 2+2?\" # Ask a question")
     print("  jarvis history-reset off  # Maintain conversation context")
     print("  jarvis output-type        # Check current mode")
+    print("  jarvis provider api       # Switch to API provider")
+    print("  jarvis model gpt-4        # Set model to GPT-4")
+    print("  jarvis api-url https://api.openai.com  # Set OpenAI API URL")
+    print("  jarvis api-key sk-...     # Set API key")
+    print("  jarvis llm-config         # Show LLM settings")
+
+
+def _check_capabilities() -> dict:
+    """
+    Check system capabilities for voice features
+    
+    Returns:
+        Dictionary with capability flags
+    """
+    capabilities = {
+        'voice_input': False,
+        'voice_output': False,
+    }
+    
+    try:
+        from .core.audio_detection import check_audio_input_available, check_audio_output_available
+        capabilities['voice_input'] = check_audio_input_available()
+        capabilities['voice_output'] = check_audio_output_available()
+    except Exception as e:
+        logger.debug(f"Error checking capabilities: {e}")
+    
+    return capabilities
 
 
 def main() -> None:
@@ -192,8 +229,26 @@ def main() -> None:
     # No arguments - start voice activation
     if len(sys.argv) == 1:
         print("Starting JARVIS in voice activation mode...")
-        jarvis = Jarvis()
-        jarvis.listen_with_activation()
+        
+        # Check capabilities and warn if unavailable
+        capabilities = _check_capabilities()
+        if not capabilities['voice_input']:
+            print("⚠️  Warning: No audio input devices detected.")
+            print("   Voice activation will not work. Use 'jarvis ask' for text mode.")
+            print()
+        
+        try:
+            jarvis = Jarvis()
+            if not jarvis.voice_manager:
+                print("⚠️  Voice manager unavailable. Falling back to text-only mode.")
+                print("   Use 'jarvis ask \"<message>\"' to interact via text.")
+                sys.exit(1)
+            jarvis.listen_with_activation()
+        except Exception as e:
+            logger.error(f"Failed to start JARVIS: {e}")
+            print(f"\n❌ Error: {e}")
+            print("\nTip: Use 'jarvis ask \"<message>\"' for text-only mode.")
+            sys.exit(1)
         return
     
     # Parse command
@@ -203,6 +258,15 @@ def main() -> None:
         set_output_mode("text")
         
     elif command == "voice":
+        # Check if voice output is available
+        capabilities = _check_capabilities()
+        if not capabilities['voice_output']:
+            print("⚠️  Warning: No audio output devices detected.")
+            print("   Voice output will fallback to text mode.")
+            response = input("Continue anyway? (y/n): ").strip().lower()
+            if response not in ['y', 'yes']:
+                print("Cancelled.")
+                sys.exit(0)
         set_output_mode("voice")
         
     elif command == "output-type":
@@ -294,6 +358,65 @@ def main() -> None:
         jarvis = Jarvis(text_mode=True)
         # ask() now handles output based on Config.OUTPUT_MODE
         jarvis.ask(message)
+    
+    elif command == "provider":
+        if len(sys.argv) < 3:
+            print("Error: Provider type required")
+            print("Usage: jarvis provider <ollama|api>")
+            sys.exit(1)
+        set_llm_provider(sys.argv[2])
+    
+    elif command == "model":
+        if len(sys.argv) < 3:
+            print("Error: Model name required")
+            print("Usage: jarvis model <model_name>")
+            sys.exit(1)
+        set_llm_model(sys.argv[2])
+    
+    elif command == "api-url":
+        if len(sys.argv) < 3:
+            print("Error: API URL required")
+            print("Usage: jarvis api-url <url>")
+            sys.exit(1)
+        set_api_url(sys.argv[2])
+    
+    elif command == "api-key":
+        if len(sys.argv) < 3:
+            print("Error: API key required")
+            print("Usage: jarvis api-key <key>")
+            sys.exit(1)
+        set_api_key(sys.argv[2])
+    
+    elif command == "ollama-url":
+        if len(sys.argv) < 3:
+            print("Error: Ollama URL required")
+            print("Usage: jarvis ollama-url <url>")
+            sys.exit(1)
+        set_ollama_url(sys.argv[2])
+    
+    elif command == "llm-config":
+        show_llm_config()
+    
+    elif command == "auto-pull":
+        if len(sys.argv) == 2:
+            # Show current setting
+            auto_pull = getattr(Config, 'LLM_AUTO_PULL', False)
+            print(f"Auto-pull missing models: {'enabled' if auto_pull else 'disabled'}")
+        elif len(sys.argv) == 3:
+            # Set new value
+            value = sys.argv[2].lower()
+            if value in ["on", "true", "1", "yes", "enable"]:
+                _update_env_setting("LLM_AUTO_PULL", "true")
+                print("✓ Auto-pull enabled")
+            elif value in ["off", "false", "0", "no", "disable"]:
+                _update_env_setting("LLM_AUTO_PULL", "false")
+                print("✓ Auto-pull disabled")
+            else:
+                print(f"Error: Invalid value '{value}'. Use 'on' or 'off'")
+                sys.exit(1)
+        else:
+            print("Usage: jarvis auto-pull [on|off]")
+            sys.exit(1)
         
     elif command in ["-h", "--help", "help"]:
         show_usage()

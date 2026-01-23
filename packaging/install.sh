@@ -137,8 +137,16 @@ install_python_dependencies() {
     # Upgrade pip
     pip install --upgrade pip
     
-    # Install dependencies from requirements.txt
-    pip install -r requirements.txt
+    # Check if installing from source or package
+    if [ -f "pyproject.toml" ]; then
+        # Installing from source - use pyproject.toml
+        log_info "Installing from source with voice support..."
+        pip install -e ".[voice]"
+    else
+        # Installing from package - use pip with extras
+        log_info "Installing package with voice support..."
+        pip install jarvis-ai[voice]
+    fi
     
     # Deactivate virtual environment
     deactivate
@@ -147,6 +155,8 @@ install_python_dependencies() {
     chown -R "$JARVIS_USER:$JARVIS_GROUP" "$DATA_DIR/venv"
     
     log_info "Python dependencies installed"
+    log_info "Note: For minimal install (CLI only), use: pip install jarvis-ai"
+    log_info "      For voice features: pip install jarvis-ai[voice]"
 }
 
 setup_ollama() {
