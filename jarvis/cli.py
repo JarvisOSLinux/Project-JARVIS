@@ -47,6 +47,49 @@ def set_history_reset(enabled: bool) -> None:
     print(f"✓ History reset {'enabled' if enabled else 'disabled'}")
 
 
+def set_sudo_access(enabled: bool) -> None:
+    """
+    Enable or disable sudo access for jarvis user
+    
+    Args:
+        enabled: True to enable sudo, False to disable
+    """
+    from .core.sudo_manager import enable_sudo, disable_sudo
+    
+    # Update config preference
+    value = "true" if enabled else "false"
+    _update_env_setting("JARVIS_SUDO_ENABLED", value)
+    
+    # Actually configure system sudo access
+    if enabled:
+        if enable_sudo():
+            print("✓ Sudo access enabled for jarvis user")
+        else:
+            print("✗ Failed to enable sudo access. Please run with sudo: sudo jarvis sudo enable")
+            sys.exit(1)
+    else:
+        if disable_sudo():
+            print("✓ Sudo access disabled for jarvis user")
+        else:
+            print("✗ Failed to disable sudo access. Please run with sudo: sudo jarvis sudo disable")
+            sys.exit(1)
+
+
+def get_sudo_status() -> None:
+    """Show current sudo access status"""
+    from .core.sudo_manager import is_sudo_enabled, get_sudo_status as get_system_status
+    
+    enabled = is_sudo_enabled()
+    config_preference = Config.JARVIS_SUDO_ENABLED
+    
+    print(f"Sudo access: {'enabled' if enabled else 'disabled'}")
+    print(f"Config preference: {'enabled' if config_preference else 'disabled'}")
+    
+    if enabled != config_preference:
+        print("⚠ Warning: System state differs from config preference")
+        print("  Run 'jarvis sudo enable' or 'jarvis sudo disable' to sync")
+
+
 def _update_env_setting(key: str, value: str) -> None:
     """
     Update a setting in .env file
@@ -91,104 +134,26 @@ def get_output_mode() -> str:
     return Config.OUTPUT_MODE
 
 
-def set_llm_provider(provider: str) -> None:
-    """
-    Update LLM_PROVIDER in .env file
-    
-    Args:
-        provider: 'ollama' or 'api'
-    """
-    if provider not in ["ollama", "api"]:
-        print(f"Error: Invalid provider '{provider}'. Must be 'ollama' or 'api'")
-        sys.exit(1)
-    
-    _update_env_setting("LLM_PROVIDER", provider)
-    print(f"✓ LLM provider set to: {provider}")
-
-
-def set_llm_model(model: str) -> None:
+def set_llm_model(model_name: str) -> None:
     """
     Update LLM_MODEL in .env file
     
     Args:
-        model: Model name/identifier
+        model_name: Ollama model name (e.g., 'qwen2.5:7b', 'llama3.2:3b')
     """
-    if not model:
+    if not model_name or not model_name.strip():
         print("Error: Model name cannot be empty")
         sys.exit(1)
     
-    _update_env_setting("LLM_MODEL", model)
-    print(f"✓ LLM model set to: {model}")
+    model_name = model_name.strip()
+    _update_env_setting("LLM_MODEL", model_name)
+    print(f"✓ LLM model set to: {model_name}")
+    print(f"  Note: Make sure the model is available: ollama pull {model_name}")
 
 
-def set_api_url(url: str) -> None:
-    """
-    Update LLM_API_URL in .env file
-    
-    Args:
-        url: API base URL
-    """
-    if not url:
-        print("Error: API URL cannot be empty")
-        sys.exit(1)
-    
-    _update_env_setting("LLM_API_URL", url)
-    print(f"✓ API URL set to: {url}")
-
-
-def set_api_key(key: str) -> None:
-    """
-    Update LLM_API_KEY in .env file
-    
-    Args:
-        key: API key
-    """
-    if not key:
-        print("Error: API key cannot be empty")
-        sys.exit(1)
-    
-    _update_env_setting("LLM_API_KEY", key)
-    print(f"✓ API key set")
-
-
-def set_ollama_url(url: str) -> None:
-    """
-    Update LLM_OLLAMA_URL in .env file
-    
-    Args:
-        url: Ollama base URL
-    """
-    if not url:
-        print("Error: Ollama URL cannot be empty")
-        sys.exit(1)
-    
-    _update_env_setting("LLM_OLLAMA_URL", url)
-    print(f"✓ Ollama URL set to: {url}")
-
-
-def show_llm_config() -> None:
-    """Display current LLM configuration"""
-    print("Current LLM Configuration:")
-    print("=" * 40)
-    print(f"Provider: {getattr(Config, 'LLM_PROVIDER', 'ollama')}")
-    print(f"Model: {getattr(Config, 'LLM_MODEL', 'Not set')}")
-    
-    provider = getattr(Config, 'LLM_PROVIDER', 'ollama')
-    if provider == 'ollama':
-        ollama_url = getattr(Config, 'LLM_OLLAMA_URL', 'http://localhost:11434')
-        auto_pull = getattr(Config, 'LLM_AUTO_PULL', False)
-        print(f"Ollama URL: {ollama_url}")
-        print(f"Auto-pull: {'enabled' if auto_pull else 'disabled'}")
-    elif provider == 'api':
-        api_url = getattr(Config, 'LLM_API_URL', 'Not set')
-        api_key = getattr(Config, 'LLM_API_KEY', None)
-        print(f"API URL: {api_url}")
-        if api_key:
-            # Mask the key for security
-            masked_key = api_key[:8] + "..." + api_key[-4:] if len(api_key) > 12 else "***"
-            print(f"API Key: {masked_key}")
-        else:
-            print("API Key: Not set")
+def get_llm_model() -> str:
+    """Get current LLM model from config"""
+    return Config.LLM_MODEL or "(not set)"
 
 
 def show_usage() -> None:
@@ -204,6 +169,12 @@ def show_usage() -> None:
     print("  jarvis history-reset on   # Enable history reset after each response")
     print("  jarvis history-reset off  # Disable history reset (maintain context)")
     print("  jarvis history-reset      # Show current history reset setting")
+    print("  jarvis sudo enable         # Enable sudo access for jarvis user (requires root)")
+    print("  jarvis sudo disable       # Disable sudo access for jarvis user (requires root)")
+    print("  jarvis sudo               # Show current sudo access status")
+    print("  jarvis model               # Show current LLM model")
+    print("  jarvis model -n '<model>'  # Set LLM model (e.g., 'qwen2.5:7b')")
+    print("  jarvis model set '<model>' # Set LLM model (alternative syntax)")
     print()
     print("LLM Configuration:")
     print("  jarvis provider <ollama|api>  # Set LLM provider")
@@ -319,6 +290,59 @@ def main() -> None:
                 sys.exit(1)
         else:
             print("Usage: jarvis history-reset [on|off]")
+            sys.exit(1)
+    
+    elif command == "sudo":
+        if len(sys.argv) == 2:
+            # Show current status
+            get_sudo_status()
+        elif len(sys.argv) == 3:
+            # Set new value
+            value = sys.argv[2].lower()
+            if value in ["on", "true", "1", "yes", "enable"]:
+                set_sudo_access(True)
+            elif value in ["off", "false", "0", "no", "disable"]:
+                set_sudo_access(False)
+            else:
+                print(f"Error: Invalid value '{value}'. Use 'enable' or 'disable'")
+                print("Usage: jarvis sudo [enable|disable]")
+                sys.exit(1)
+        else:
+            print("Usage: jarvis sudo [enable|disable]")
+            sys.exit(1)
+    
+    elif command == "model":
+        if len(sys.argv) == 2:
+            # Show current model
+            model = get_llm_model()
+            print(f"Current LLM model: {model}")
+            if model != "(not set)":
+                print(f"  To change: jarvis model -n '<new_model>'")
+                print(f"  To verify model exists: ollama list")
+        elif len(sys.argv) == 3:
+            # Handle: jarvis model set or jarvis model -n (missing value)
+            if sys.argv[2] == "set" or sys.argv[2] == "-n" or sys.argv[2] == "--name":
+                print("Error: Model name required")
+                print("Usage: jarvis model -n '<model_name>'")
+                print("   or: jarvis model set '<model_name>'")
+                sys.exit(1)
+            else:
+                # Treat as model name (backward compatibility: jarvis model <model>)
+                set_llm_model(sys.argv[2])
+        elif len(sys.argv) == 4:
+            # Handle: jarvis model -n '<model>' or jarvis model set '<model>'
+            if sys.argv[2] == "-n" or sys.argv[2] == "--name":
+                set_llm_model(sys.argv[3])
+            elif sys.argv[2] == "set":
+                set_llm_model(sys.argv[3])
+            else:
+                print(f"Error: Unknown option '{sys.argv[2]}'")
+                print("Usage: jarvis model -n '<model_name>'")
+                print("   or: jarvis model set '<model_name>'")
+                sys.exit(1)
+        else:
+            print("Usage: jarvis model [-n '<model_name>'|set '<model_name>']")
+            print("   or: jarvis model  (to show current model)")
             sys.exit(1)
         
     elif command == "ask":

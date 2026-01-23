@@ -34,6 +34,11 @@ class Config:
     
     # Conversation History Configuration
     RESET_HISTORY_AFTER_RESPONSE = os.getenv("RESET_HISTORY_AFTER_RESPONSE", "true").lower() == "true"
+    
+    # Sudo Access Configuration
+    # Note: This is a preference setting. Actual sudo access is managed by sudo_manager
+    # This setting tracks whether sudo should be enabled (for installation/configuration purposes)
+    JARVIS_SUDO_ENABLED = os.getenv("JARVIS_SUDO_ENABLED", "false").lower() == "true"
 
     # SuperMCP Configuration
     SUPERMCP_SERVER_PATH = os.getenv("SUPERMCP_SERVER_PATH", "SuperMCP/SuperMCP.py")
