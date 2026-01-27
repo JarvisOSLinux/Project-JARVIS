@@ -84,26 +84,44 @@ class OllamaProvider(BaseLLMProvider):
         try:
             models_response = ollama.list()
             models = models_response.get("models", [])
-            model_names = [m.get("name", "") for m in models]
+            model_names = [m.get("name", "") for m in models if m.get("name")]
+            
+            logger.debug(f"Looking for model '{self.model}' in available models: {model_names}")
             
             # Check for exact match first
             if self.model in model_names:
+                logger.debug(f"Found exact match for model '{self.model}'")
                 return True
             
             # Check if model name matches as prefix (e.g., "llama3" matches "llama3:8b")
             # or if we have a tag, check if base name matches
+            model_base = self.model.split(":")[0]
             for name in model_names:
+                if not name:
+                    continue
+                    
                 # Handle both "model" and "model:tag" formats
                 name_base = name.split(":")[0]
-                model_base = self.model.split(":")[0]
                 
-                # Exact base match or model starts with our model name
-                if name_base == model_base or name.startswith(self.model):
+                # Exact base match
+                if name_base == model_base:
+                    logger.debug(f"Found base match: '{name}' matches '{self.model}'")
+                    return True
+                
+                # Check if name starts with our model (handles cases like "qwen3-embedding:4b" matching "qwen3-embedding")
+                if name.startswith(self.model):
+                    logger.debug(f"Found prefix match: '{name}' starts with '{self.model}'")
+                    return True
+                
+                # Also check reverse: if our model starts with the name (handles "qwen3-embedding:4b" matching "qwen3-embedding")
+                if self.model.startswith(name_base):
+                    logger.debug(f"Found reverse prefix match: '{self.model}' starts with '{name_base}'")
                     return True
             
+            logger.debug(f"Model '{self.model}' not found in available models")
             return False
         except Exception as e:
-            logger.debug(f"Error checking for model: {e}")
+            logger.debug(f"Error checking for model: {e}", exc_info=True)
             return False
     
     def _pull_model(self) -> bool:
@@ -122,7 +140,9 @@ class OllamaProvider(BaseLLMProvider):
                 if "status" in chunk:
                     # Show progress without spamming logs
                     if "downloading" in chunk["status"].lower() or "pulling" in chunk["status"].lower():
-                        progress = chunk.get("completed", 0) / chunk.get("total", 1) * 100 if chunk.get("total", 0) > 0 else 0
+                        completed = chunk.get("completed") or 0
+                        total = chunk.get("total") or 0
+                        progress = (completed / total * 100) if total and total > 0 else 0
                         print(f"\rPulling {self.model}: {chunk['status']} ({progress:.1f}%)", end="", flush=True)
             
             print()  # New line after progress
