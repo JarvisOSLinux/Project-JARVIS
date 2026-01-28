@@ -27,7 +27,7 @@ class ComponentFactory:
         )
     
     @staticmethod
-    def create_tts_optional() -> Optional[Any]:
+    def create_tts_optional() -> Optional[any]:
         """
         Create TTS instance if voice output is enabled and audio is available
         
@@ -79,7 +79,7 @@ class ComponentFactory:
         return SuperMCPCommandParser(supermcp)
     
     @staticmethod
-    def create_output_manager(tts: Optional[Any] = None) -> OutputManager:
+    def create_output_manager(tts: Optional[any] = None) -> OutputManager:
         """
         Create OutputManager with optional TTS
         
@@ -89,7 +89,7 @@ class ComponentFactory:
         return OutputManager(tts)
     
     @staticmethod
-    def create_voice_manager_optional(on_command) -> Optional[Any]:
+    def create_voice_manager_optional(on_command) -> Optional[any]:
         """
         Create VoiceManager if voice input is enabled and audio is available
         
@@ -108,7 +108,7 @@ class ComponentFactory:
         
         # Lazy import to avoid import errors when not needed
         try:
-            from ..voice_manager import VoiceManager
+            from .voice_manager import VoiceManager
         except ImportError as e:
             logger.warning(f"Voice manager dependencies not available: {e}")
             return None
@@ -123,7 +123,7 @@ class ComponentFactory:
             return None
     
     @staticmethod
-    def create_voice_manager(on_command) -> Optional[Any]:
+    def create_voice_manager(on_command) -> Optional[any]:
         """
         Legacy method for backward compatibility
         """
