@@ -108,7 +108,7 @@ class ComponentFactory:
         
         # Lazy import to avoid import errors when not needed
         try:
-            from ..voice_manager import VoiceManager
+            from .voice_manager import VoiceManager
         except ImportError as e:
             logger.warning(f"Voice manager dependencies not available: {e}")
             return None

@@ -83,8 +83,13 @@ class OllamaProvider(BaseLLMProvider):
         """
         try:
             models_response = ollama.list()
-            models = models_response.get("models", [])
-            model_names = [m.get("name", "") for m in models if m.get("name")]
+            # Support both old dict format and new ListResponse object
+            if hasattr(models_response, 'models'):
+                models = models_response.models
+                model_names = [m.model for m in models if hasattr(m, 'model')]
+            else:
+                models = models_response.get("models", [])
+                model_names = [m.get("name", "") for m in models if m.get("name")]
             
             logger.debug(f"Looking for model '{self.model}' in available models: {model_names}")
             
@@ -194,7 +199,8 @@ class OllamaProvider(BaseLLMProvider):
         try:
             response = ollama.chat(
                 model=self.model,
-                messages=messages
+                messages=messages,
+                format="json"
             )
             return response["message"]["content"]
         except Exception as e:
@@ -206,7 +212,8 @@ class OllamaProvider(BaseLLMProvider):
                     try:
                         response = ollama.chat(
                             model=self.model,
-                            messages=messages
+                            messages=messages,
+                            format="json"
                         )
                         return response["message"]["content"]
                     except Exception as retry_error:
