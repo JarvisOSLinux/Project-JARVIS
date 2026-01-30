@@ -16,6 +16,12 @@
 # This file contains all dependencies for a full installation including voice features.
 # For minimal install, use: pip install jarvis-ai
 # For voice features only: pip install jarvis-ai[voice]
+#
+# IMPORTANT: Python Version Compatibility
+# - Voice output features (piper-tts, onnxruntime) require Python 3.10-3.12
+# - Python 3.13+ may work but is not officially supported by onnxruntime stable releases
+# - Python 3.14 is NOT supported - use Python 3.12 or 3.13 instead
+# - If you need Python 3.14, you can use nightly builds: pip install --pre onnxruntime
 
 # Core dependencies (always installed)
 ollama>=0.5.3
