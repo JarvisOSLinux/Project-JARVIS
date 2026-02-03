@@ -1,0 +1,90 @@
+# Maintainer: Your Name <your.email@example.com>
+pkgname=jarvis-ai
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="AI Assistant with voice activation, LLM integration, and MCP tool orchestration"
+arch=('any')
+url="https://github.com/your-repo/Project-JARVIS"
+license=('MIT')
+depends=(
+    'python>=3.10'
+    'python-pip'
+    'ollama'
+)
+optdepends=(
+    'python-vosk: Voice input (speech-to-text)'
+    'python-sounddevice: Audio I/O'
+    'piper-tts: Voice output (text-to-speech)'
+)
+makedepends=(
+    'python-build'
+    'python-installer'
+    'python-wheel'
+    'python-setuptools'
+)
+source=("$pkgname-$pkgver.tar.gz::https://github.com/your-repo/Project-JARVIS/archive/v$pkgver.tar.gz")
+sha256sums=('SKIP')  # Update with actual checksum
+
+# For local development, use:
+# source=("git+file:///path/to/Project-JARVIS")
+
+build() {
+    cd "$srcdir/Project-JARVIS-$pkgver"
+    python -m build --wheel --no-isolation
+}
+
+package() {
+    cd "$srcdir/Project-JARVIS-$pkgver"
+
+    # Install Python package
+    python -m installer --destdir="$pkgdir" dist/*.whl
+
+    # Install systemd user services
+    install -Dm644 packaging/systemd/jarvis-daemon.service \
+        "$pkgdir/usr/lib/systemd/user/jarvis-daemon.service"
+    install -Dm644 packaging/systemd/jarvis-voice.service \
+        "$pkgdir/usr/lib/systemd/user/jarvis-voice.service"
+
+    # Install documentation
+    install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+    install -Dm644 packaging/systemd/README.md \
+        "$pkgdir/usr/share/doc/$pkgname/systemd-README.md"
+
+    # Install license
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
+
+post_install() {
+    echo ""
+    echo "==> JARVIS AI Assistant installed!"
+    echo ""
+    echo "Quick start:"
+    echo "  1. Start Ollama:  systemctl --user start ollama"
+    echo "  2. Start JARVIS:  systemctl --user start jarvis-daemon"
+    echo "  3. Enable auto-start: systemctl --user enable jarvis-daemon"
+    echo "  4. Use it:        jarvis \"hello!\""
+    echo ""
+    echo "Optional voice service:"
+    echo "  systemctl --user start jarvis-voice"
+    echo ""
+    echo "For voice features, install optional dependencies:"
+    echo "  yay -S python-vosk python-sounddevice piper-tts"
+    echo ""
+}
+
+post_upgrade() {
+    post_install
+    echo "==> Restarting services..."
+    systemctl --user daemon-reload
+    systemctl --user restart jarvis-daemon 2>/dev/null || true
+    systemctl --user restart jarvis-voice 2>/dev/null || true
+}
+
+post_remove() {
+    echo "==> Stopping JARVIS services..."
+    systemctl --user stop jarvis-daemon 2>/dev/null || true
+    systemctl --user stop jarvis-voice 2>/dev/null || true
+    systemctl --user disable jarvis-daemon 2>/dev/null || true
+    systemctl --user disable jarvis-voice 2>/dev/null || true
+    systemctl --user daemon-reload
+}

@@ -1,0 +1,29 @@
+[Unit]
+Description=JARVIS Voice Service (Wake Word Detection)
+Documentation=https://github.com/your-repo/Project-JARVIS
+After=jarvis-daemon.service sound.target
+Requires=jarvis-daemon.service
+ConditionPathExists=/dev/snd
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python -m jarvis.services.voice_service --host 127.0.0.1 --port 18789
+Restart=on-failure
+RestartSec=5
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ReadWritePaths=%h/.jarvis %h/.config/jarvis
+
+# Audio access
+SupplementaryGroups=audio
+
+# Environment
+Environment=PYTHONUNBUFFERED=1
+WorkingDirectory=%h
+
+[Install]
+WantedBy=default.target

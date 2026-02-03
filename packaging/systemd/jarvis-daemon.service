@@ -1,0 +1,25 @@
+[Unit]
+Description=JARVIS AI Assistant Daemon
+Documentation=https://github.com/your-repo/Project-JARVIS
+After=network.target ollama.service
+Wants=ollama.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python -m jarvis.daemon.gateway --host 127.0.0.1 --port 18789
+Restart=on-failure
+RestartSec=5
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ReadWritePaths=%h/.jarvis %h/.config/jarvis
+
+# Environment
+Environment=PYTHONUNBUFFERED=1
+WorkingDirectory=%h
+
+[Install]
+WantedBy=default.target
