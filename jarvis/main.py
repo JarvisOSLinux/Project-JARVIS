@@ -176,15 +176,21 @@ class Jarvis:
         
         logger.info(f"JARVIS: Completed in {iteration} iteration(s)")
 
-        # Reset history only if configured to do so
-        if Config.RESET_HISTORY_AFTER_RESPONSE:
-            logger.debug("JARVIS: Resetting LLM history")
-            self.llm.reset_history()
-        
         # Handle output using output manager
         logger.info(f"JARVIS: Final response: {response['output']}")
         self.output_manager.handle_response(response)
-        
+
+        # Reset history only if configured AND response doesn't end with a question
+        # (questions indicate follow-up expected, so keep context)
+        output_text = response.get('output', '')
+        is_follow_up_expected = output_text.rstrip().endswith('?')
+
+        if Config.RESET_HISTORY_AFTER_RESPONSE and not is_follow_up_expected:
+            logger.debug("JARVIS: Resetting LLM history")
+            self.llm.reset_history()
+        elif is_follow_up_expected:
+            logger.debug("JARVIS: Keeping history for follow-up question")
+
         return response
     
     def request_approval(self, command: str, security_level: str = "read_only") -> bool:
@@ -314,7 +320,8 @@ class Jarvis:
                 # Handle string results (common for simple command outputs)
                 feedback_lines.append(f"[SUCCESS] Command executed successfully")
                 feedback_lines.append(f"  Output: {str(result)}")
-                feedback_lines.append(f"TASK COMPLETE! Return a Conversation response with this output.")
+                feedback_lines.append(f"\n>>> STOP! Task is complete. Return this JSON:")
+                feedback_lines.append(f'{{"user_request": "Conversation", "output": "summarize the output above"}}')
                 continue
             
             # Handle errors FIRST
@@ -344,7 +351,8 @@ class Jarvis:
                     feedback_lines.append(f"  Directories ({len(dirs)}): {dir_names}")
                     if len(dirs) > 10:
                         feedback_lines.append(f"    ... and {len(dirs) - 10} more")
-                    feedback_lines.append(f"\nTASK COMPLETE! Return a Conversation response summarizing these results to the user.")
+                    feedback_lines.append(f"\n>>> STOP! Task is complete. Return this JSON:")
+                    feedback_lines.append(f'{{"user_request": "Conversation", "output": "summarize the directory listing above"}}')
                     continue
                     
                 # Handle list_servers success (list of dicts with 'name')
@@ -356,7 +364,8 @@ class Jarvis:
                 # Generic successful result
                 feedback_lines.append(f"[OK] Command executed successfully")
                 feedback_lines.append(f"  Output: {str(inner_result)[:300]}")
-                feedback_lines.append(f"TASK COMPLETE! Return a Conversation response with this output.")
+                feedback_lines.append(f"\n>>> STOP! Task is complete. Return this JSON:")
+                feedback_lines.append(f'{{"user_request": "Conversation", "output": "summarize the output above"}}')
                 continue
             
             # Handle inspect_server success  

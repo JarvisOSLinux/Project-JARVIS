@@ -115,13 +115,18 @@ Example SuperMCP sequences:
 
 For shell commands, use ShellMCP:
 - Execute command: "call_server_tool(ShellMCP, execute_command, {{command: 'dir'}})"
-- Get platform: "call_server_tool(ShellMCP, get_platform_info, {{}})"
-- If a command fails with "not whitelisted":
-  1. Ask the user if they want to add it: "The command 'X' is not whitelisted. Would you like me to add it?"
-  2. If user approves, add it: "call_server_tool(ShellMCP, add_to_whitelist, {{command: 'X', securityLevel: 'safe', description: '...'}})"
-  3. Then RETRY the original command immediately
-- Security levels: 'safe' (runs immediately), 'requires_approval' (asks user), 'forbidden' (blocks)
-- For read-only commands like 'python --version', use 'safe' level
+- Get platform info: "call_server_tool(ShellMCP, get_platform_info, {{}})"
+
+IMPORTANT: To run shell commands (like 'python --version', 'git status', 'dir', etc.):
+1. ALWAYS use execute_command first: "call_server_tool(ShellMCP, execute_command, {{command: 'python --version'}})"
+2. If the result says "not whitelisted" or "requires approval":
+   a. Ask user: "The command 'X' requires approval. Would you like me to add it to the whitelist?"
+   b. If user says yes, add it: "call_server_tool(ShellMCP, add_to_whitelist, {{command: 'python', securityLevel: 'safe', description: 'Python interpreter'}})"
+   c. Then RETRY the original command: "call_server_tool(ShellMCP, execute_command, {{command: 'python --version'}})"
+3. Security levels: 'safe' (runs immediately), 'requires_approval' (asks user), 'forbidden' (blocked)
+
+NEVER assume a command isn't whitelisted without actually trying it first!
+NEVER use get_platform_info when user asks to run a specific command - use execute_command instead!
 
 For code generation, use CodeGenMCP:
 - Create MCP server: "call_server_tool(CodeGenMCP, create_mcp_server, {{server_name: 'WeatherMCP', description: 'Weather tools', tools_description: 'get_weather(city, country) returns temp and conditions'}})"
@@ -132,21 +137,24 @@ For code analysis, use CodeAnalysisMCP:
 - Initialize repo: "call_server_tool(CodeAnalysisMCP, initialize_repository, {{path: '/path'}})"
 
 Step 3 - Processing SuperMCP results:
-After SuperMCP execution, you will receive CLEAR TEXT feedback like:
-"[OK] Reloaded 4 MCP servers"
-"[OK] Available servers: FileSystemMCP, ShellMCP, ..."
-"[SUCCESS] Listed directory: Files: file1.txt, file2.py..."
+After SuperMCP execution, you will receive feedback like:
+"[OK] Command executed successfully"
+"Output: Python 3.13.2"
+"TASK COMPLETE! Return a Conversation response"
 
-When you see "[SUCCESS]" or "TASK COMPLETE", immediately return a Conversation response with the results.
-Do NOT repeat the same command - the task is done!
+CRITICAL: When you see "TASK COMPLETE" or actual command output (like version numbers, file lists, etc.), you MUST:
+1. STOP executing more commands
+2. Return a Conversation response with the results
+3. NEVER repeat the same command
 
-If the results indicate success and the user's request is fulfilled, return:
+Example - if you see "Output: Python 3.13.2" after running python --version:
 {{
     "user_request": "Conversation",
-    "output": "<short confirmation + essential results>"
+    "output": "Your Python version is 3.13.2"
 }}
 
-If more steps are needed, continue with another SuperMCP command sequence.
+WRONG: Running the same command again after getting results
+RIGHT: Returning a Conversation with the results
 
 Step 4 - Error Handling:
 If you see "Error: Field required: <parameter_name>", retry with the correct parameter name.
