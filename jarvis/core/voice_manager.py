@@ -129,10 +129,10 @@ class VoiceManager:
     def _process_voice_command(self) -> None:
         """Process voice command after wake word detection"""
         logger.debug("Starting voice processing...")
-        
+
         # Stop voice activation to free up audio resources
         self.voice_activation.stop_listening()
-        
+
         # Start STT processing
         self.stt.start()
         try:
@@ -140,14 +140,34 @@ class VoiceManager:
             for text, is_final in self.stt.iter_results():
                 if is_final and text.strip():
                     logger.info(f"Final Input: {text}")
-                    self.on_command(text)
+                    response = self.on_command(text)
+
+                    # Check if LLM response ends with a question — if so, keep listening for follow-up
+                    if response and isinstance(response, dict):
+                        output = response.get('output', '')
+                        if output.rstrip().endswith('?'):
+                            logger.info("LLM asked a follow-up question, listening for response (10s timeout)...")
+                            follow_up_start = time.time()
+                            got_follow_up = False
+                            for follow_text, follow_final in self.stt.iter_results():
+                                if time.time() - follow_up_start > 10:
+                                    logger.info("Follow-up listen timed out after 10 seconds")
+                                    break
+                                if follow_final and follow_text.strip():
+                                    logger.info(f"Follow-up Input: {follow_text}")
+                                    self.on_command(follow_text)
+                                    got_follow_up = True
+                                    break
+                            if not got_follow_up:
+                                logger.info("No follow-up received, returning to wake word mode")
+
                     break  # Exit after processing one command
         except Exception as e:
             logger.error(f"Error processing voice command: {e}")
         finally:
             self.stt.stop()
             logger.debug("Voice processing completed. Restarting wake word detection...")
-            
+
             # Restart voice activation
             if not self.voice_activation.start_listening():
                 logger.error("Failed to restart voice activation")

@@ -32,15 +32,19 @@ class Jarvis:
         # Voice manager only exists in voice mode
         self.voice_manager = self.components.get('voice_manager')
 
-    def _handle_voice_command(self, text: str) -> None:
+    def _handle_voice_command(self, text: str) -> dict:
         """
         Handle voice command from voice manager
-        
+
         Args:
             text: Transcribed voice command
+
+        Returns:
+            LLM response dictionary
         """
         response = self.ask(prompt=text)
         logger.info(f"Response: {response['output']}")
+        return response
 
     def ask(self, prompt):
         """
