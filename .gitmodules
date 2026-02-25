@@ -1,4 +1,0 @@
-[submodule "jarvis/SuperMCP"]
-	path = jarvis/SuperMCP
-	url = git@github.com:YakupAtahanov/SuperMCP.git
-	branch = default-mcp-servers
