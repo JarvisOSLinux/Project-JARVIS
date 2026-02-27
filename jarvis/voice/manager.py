@@ -1,13 +1,15 @@
 """
-Voice manager for JARVIS AI Assistant
+Voice manager for JARVIS AI Assistant.
 
 Orchestrates voice activation (wake word detection) and
-voice command processing (speech-to-text).
+voice command processing (speech-to-text) through abstract
+provider interfaces.
 """
 
 import time
 from typing import Callable, Optional
 from ..core.logger import get_logger
+from .base import STTProvider, ActivationProvider
 
 logger = get_logger(__name__)
 
@@ -15,93 +17,41 @@ logger = get_logger(__name__)
 class VoiceManager:
     """Manages voice activation and command processing.
 
-    This class coordinates wake word detection and speech-to-text,
-    ensuring exclusive audio access (only one holds the mic at a time).
+    This class coordinates an :class:`STTProvider` and an
+    :class:`ActivationProvider`, ensuring exclusive audio access
+    (only one holds the mic at a time).
+
+    It does **not** know which concrete engine (Vosk, Whisper, etc.)
+    is behind the providers — that is decided by the caller.
     """
 
     def __init__(
         self,
         on_command: Callable[[str], None],
-        model_path: str = "vosk-model-small-en-us-0.15",
-        wake_words: Optional[list] = None,
-        sensitivity: float = 0.8,
-        sample_rate: int = 16000,
-        chunk_size: int = 4000,
-        phrase_timeout: float = 3.0,
-        silence_timeout: float = 1.0,
+        stt: STTProvider,
+        activation: ActivationProvider,
     ):
         """
-        Initialize voice manager.
-
         Args:
-            on_command: Callback called with transcribed text when a voice command is received.
-            model_path: Path to Vosk model directory.
-            wake_words: List of wake words to detect.
-            sensitivity: Wake word detection sensitivity (0.0 to 1.0).
-            sample_rate: Audio sample rate in Hz.
-            chunk_size: Audio chunk size for processing.
-            phrase_timeout: Timeout for phrase completion in seconds.
-            silence_timeout: Timeout for silence detection in seconds.
-
-        Raises:
-            AudioUnavailableError: If audio packages or devices are unavailable.
+            on_command: Callback invoked with the transcribed text.
+            stt: A ready-to-use speech-to-text provider.
+            activation: A ready-to-use activation (wake-word) provider.
         """
-        from .audio import check_audio_input_available, AudioUnavailableError
-
         self.on_command = on_command
+        self.stt = stt
+        self.activation = activation
         self._wake_word_detected = False
 
-        if not check_audio_input_available():
-            raise AudioUnavailableError(
-                "No audio input devices available. Cannot initialize voice manager."
-            )
-
-        try:
-            from .stt import SpeechToText
-            from .activation import VoiceActivation
-        except ImportError as e:
-            raise AudioUnavailableError(
-                f"Voice components dependencies not available: {e}. "
-                "Install with: pip install vosk sounddevice"
-            ) from e
-
-        try:
-            self.stt = SpeechToText(
-                model_path=model_path,
-                sample_rate=sample_rate,
-                chunk_size=chunk_size,
-                phrase_timeout=phrase_timeout,
-                silence_timeout=silence_timeout,
-                device_index=None,
-            )
-
-            self.voice_activation = VoiceActivation(
-                wake_words=wake_words or ["jarvis", "hey jarvis"],
-                model_path=model_path,
-                sample_rate=sample_rate,
-                chunk_size=chunk_size,
-                sensitivity=sensitivity,
-                on_wake_word=self._on_wake_word_detected,
-            )
-        except AudioUnavailableError:
-            raise
-        except Exception as e:
-            raise AudioUnavailableError(
-                f"Failed to initialize voice components: {e}"
-            ) from e
+    # -- public API -----------------------------------------------------------
 
     def listen_once(self, timeout: Optional[float] = None) -> Optional[str]:
-        """
-        Start STT, wait for a single final utterance, stop STT, and return the text.
-
-        This is the proper way for external code to get voice input without
-        reaching into internal STT state.
+        """Start STT, wait for a single final utterance, stop, and return it.
 
         Args:
-            timeout: Maximum seconds to wait. None means wait indefinitely.
+            timeout: Maximum seconds to wait (None = indefinite).
 
         Returns:
-            The transcribed text, or None if timed out or nothing was captured.
+            The transcribed text, or None on timeout.
         """
         self.stt.start()
         try:
@@ -116,18 +66,20 @@ class VoiceManager:
         return None
 
     def start_voice_activation_mode(self) -> bool:
-        """
-        Start voice activation mode (wake word detection).
+        """Run the wake-word → command → repeat loop.
 
-        Returns:
-            True if exited normally, False on failure.
+        Returns True on clean exit, False on activation failure.
         """
         try:
             logger.info("Starting JARVIS with voice activation...")
             logger.info("Say 'Jarvis' to activate me!")
             logger.info("Press Ctrl+C to stop.\n")
 
-            if not self.voice_activation.start_listening():
+            # Wire up the wake-word callback
+            if hasattr(self.activation, 'on_wake_word'):
+                self.activation.on_wake_word = self._on_wake_word_detected
+
+            if not self.activation.start_listening():
                 logger.error("Failed to start voice activation")
                 return False
 
@@ -141,10 +93,10 @@ class VoiceManager:
             logger.info("\nShutting down...")
             return True
         finally:
-            self.voice_activation.cleanup()
+            self.activation.cleanup()
 
     def start_continuous_listening_mode(self) -> None:
-        """Start continuous listening mode (no wake word, always transcribing)."""
+        """Continuously transcribe and dispatch (no wake word)."""
         try:
             self.stt.start()
             logger.info("I am listening.")
@@ -160,19 +112,23 @@ class VoiceManager:
         finally:
             self.stt.stop()
 
+    def cleanup(self) -> None:
+        """Release all voice resources."""
+        if hasattr(self, 'activation'):
+            self.activation.cleanup()
+        if hasattr(self, 'stt'):
+            self.stt.stop()
+
+    # -- internals ------------------------------------------------------------
+
     def _on_wake_word_detected(self) -> None:
-        """Callback when wake word is detected."""
         logger.debug("Wake word detected! Setting flag...")
         self._wake_word_detected = True
 
     def _process_voice_command(self) -> None:
-        """Process voice command after wake word detection."""
         logger.debug("Starting voice processing...")
 
-        # Stop voice activation to free up audio resources
-        self.voice_activation.stop_listening()
-
-        # Start STT processing
+        self.activation.stop_listening()
         self.stt.start()
         try:
             logger.info("Listening for your command...")
@@ -181,7 +137,6 @@ class VoiceManager:
                     logger.info(f"Final Input: {text}")
                     response = self.on_command(text)
 
-                    # Check if LLM response ends with a question — keep listening
                     if response and isinstance(response, dict):
                         output = response.get('output', '')
                         if output.rstrip().endswith('?'):
@@ -200,19 +155,12 @@ class VoiceManager:
                             if not got_follow_up:
                                 logger.info("No follow-up received, returning to wake word mode")
 
-                    break  # Exit after processing one command
+                    break
         except Exception as e:
             logger.error(f"Error processing voice command: {e}")
         finally:
             self.stt.stop()
             logger.debug("Voice processing completed. Restarting wake word detection...")
 
-            if not self.voice_activation.start_listening():
+            if not self.activation.start_listening():
                 logger.error("Failed to restart voice activation")
-
-    def cleanup(self) -> None:
-        """Clean up voice resources."""
-        if hasattr(self, 'voice_activation'):
-            self.voice_activation.cleanup()
-        if hasattr(self, 'stt'):
-            self.stt.stop()

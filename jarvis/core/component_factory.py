@@ -29,31 +29,31 @@ class ComponentFactory:
     @staticmethod
     def create_tts_optional() -> Optional[any]:
         """
-        Create TTS instance if voice output is enabled and audio is available
-        
+        Create TTS provider if voice output is enabled and audio is available.
+
+        The concrete provider is selected by ``Config.TTS_PROVIDER``.
+
         Returns:
-            TextToSpeech instance or None if unavailable
+            A TTSProvider instance or None if unavailable.
         """
-        # Only create TTS if voice output is requested
         if Config.OUTPUT_MODE != "voice":
             logger.debug("TTS not needed (OUTPUT_MODE != 'voice')")
             return None
-        
-        # Check audio output availability
+
         if not check_audio_output_available():
             logger.warning("Audio output devices not available, TTS disabled")
             return None
-        
-        # Lazy import to avoid import errors when not needed
+
         try:
-            from ..voice.tts import TextToSpeech
+            from ..voice.tts import create_tts
         except ImportError as e:
             logger.warning(f"TTS dependencies not available: {e}")
             return None
-        
+
         try:
-            logger.info("Initiating TTS...")
-            tts = TextToSpeech(
+            logger.info(f"Initiating TTS (provider: {Config.TTS_PROVIDER})...")
+            tts = create_tts(
+                provider=Config.TTS_PROVIDER,
                 model_path=f"models/piper/{Config.TTS_MODEL_ONNX}",
                 config_path=f"models/piper/{Config.TTS_MODEL_JSON}",
             )
@@ -93,29 +93,53 @@ class ComponentFactory:
         """
         Create VoiceManager if voice input is enabled and audio is available.
 
+        Providers are selected by ``Config.STT_PROVIDER`` and
+        ``Config.ACTIVATION_PROVIDER``.
+
         Args:
-            on_command: Callback for voice commands
+            on_command: Callback for voice commands.
 
         Returns:
-            VoiceManager instance or None if unavailable
+            VoiceManager instance or None if unavailable.
         """
         if not check_audio_input_available():
             logger.warning("Audio input devices not available, voice manager disabled")
             return None
 
         try:
+            from ..voice.stt import create_stt
+            from ..voice.activation import create_activation
             from ..voice.manager import VoiceManager
         except ImportError as e:
             logger.warning(f"Voice manager dependencies not available: {e}")
             return None
 
         try:
-            logger.info("Initiating Voice Activation...")
+            logger.info(
+                f"Initiating Voice (STT: {Config.STT_PROVIDER}, "
+                f"Activation: {Config.ACTIVATION_PROVIDER})..."
+            )
+
+            stt = create_stt(
+                provider=Config.STT_PROVIDER,
+                model_path=Config.VOSK_MODEL_PATH,
+                sample_rate=16000,
+                chunk_size=4000,
+                phrase_timeout=3.0,
+                silence_timeout=1.0,
+            )
+
+            activation = create_activation(
+                provider=Config.ACTIVATION_PROVIDER,
+                wake_words=Config.WAKE_WORDS,
+                model_path=Config.VOSK_MODEL_PATH,
+                sensitivity=Config.VOICE_ACTIVATION_SENSITIVITY,
+            )
+
             vm = VoiceManager(
                 on_command=on_command,
-                model_path=Config.VOSK_MODEL_PATH,
-                wake_words=Config.WAKE_WORDS,
-                sensitivity=Config.VOICE_ACTIVATION_SENSITIVITY,
+                stt=stt,
+                activation=activation,
             )
             logger.info("Voice manager initialized successfully")
             return vm

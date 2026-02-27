@@ -84,30 +84,26 @@ class TestModuleImports:
 
     def test_optional_modules_graceful(self):
         """Test that optional modules handle missing dependencies gracefully."""
-        # Test voice_input (should handle missing sounddevice/vosk)
+        # Test STT (should handle missing sounddevice/vosk)
         try:
-            from voice.stt import SpeechToText
-            # If import succeeds, create instance should handle missing audio
-            stt = SpeechToText()
-            # Should either work or raise AudioUnavailableError
+            from voice.stt.vosk_stt import VoskSTT
+            stt = VoskSTT()
         except AudioUnavailableError:
             pass  # Expected for missing audio
         except ImportError:
             pass  # Expected if dependencies missing
 
-        # Test voice_output (should handle missing piper/sounddevice)
+        # Test TTS (should handle missing piper/sounddevice)
         try:
-            from voice.tts import TextToSpeech
-            # If import succeeds, should handle missing models gracefully
+            from voice.tts.piper_tts import PiperTTS
         except AudioUnavailableError:
             pass  # Expected for missing audio
         except ImportError:
             pass  # Expected if dependencies missing
 
-        # Test voice_activation (should handle missing vosk/sounddevice)
+        # Test Activation (should handle missing vosk/sounddevice)
         try:
-            from voice.activation import VoiceActivation
-            # Should handle missing models/audio gracefully
+            from voice.activation.vosk_activation import VoskActivation
         except AudioUnavailableError:
             pass  # Expected for missing audio
         except ImportError:

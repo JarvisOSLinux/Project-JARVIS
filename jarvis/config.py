@@ -6,9 +6,14 @@ import os
 load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 
 class Config:
+    # Voice Provider Configuration
+    STT_PROVIDER = os.getenv("STT_PROVIDER", "vosk")               # "vosk" (add more later)
+    TTS_PROVIDER = os.getenv("TTS_PROVIDER", "piper")              # "piper" (add more later)
+    ACTIVATION_PROVIDER = os.getenv("ACTIVATION_PROVIDER", "vosk") # "vosk" (add more later)
+
     # Vosk STT Configuration
     VOSK_MODEL_PATH = os.getenv("VOSK_MODEL_PATH", "models/vosk-model-small-en-us-0.15")
-    
+
     # LLM Configuration
     LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama")  # "ollama" or "api"
     LLM_MODEL = os.getenv("LLM_MODEL")
