@@ -41,7 +41,7 @@ sys.modules['mcp.client.sse'] = Mock(sse_client=sse_client_mock)
 # Now import JARVIS modules
 from config import Config
 from core.component_factory import ComponentFactory
-from core.audio_detection import (
+from voice.audio import (
     check_audio_input_available,
     check_audio_output_available,
     list_audio_devices,
@@ -64,7 +64,7 @@ class TestModuleImports:
         modules_to_test = [
             'config',
             'core.component_factory',
-            'core.audio_detection',
+            'voice.audio',
             'core.logger',
             'core.system_info',
             'core.command_parser',
@@ -86,7 +86,7 @@ class TestModuleImports:
         """Test that optional modules handle missing dependencies gracefully."""
         # Test voice_input (should handle missing sounddevice/vosk)
         try:
-            from voice_input import SpeechToText
+            from voice.stt import SpeechToText
             # If import succeeds, create instance should handle missing audio
             stt = SpeechToText()
             # Should either work or raise AudioUnavailableError
@@ -97,7 +97,7 @@ class TestModuleImports:
 
         # Test voice_output (should handle missing piper/sounddevice)
         try:
-            from voice_output import TextToSpeech
+            from voice.tts import TextToSpeech
             # If import succeeds, should handle missing models gracefully
         except AudioUnavailableError:
             pass  # Expected for missing audio
@@ -106,7 +106,7 @@ class TestModuleImports:
 
         # Test voice_activation (should handle missing vosk/sounddevice)
         try:
-            from voice_activation import VoiceActivation
+            from voice.activation import VoiceActivation
             # Should handle missing models/audio gracefully
         except AudioUnavailableError:
             pass  # Expected for missing audio

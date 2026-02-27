@@ -2,7 +2,7 @@ import threading
 import time
 from typing import Callable, Optional, List
 from queue import Queue, Empty
-from .core.logger import get_logger
+from ..core.logger import get_logger
 
 logger = get_logger(__name__)
 

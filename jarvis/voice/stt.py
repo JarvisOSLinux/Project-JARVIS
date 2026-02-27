@@ -3,8 +3,8 @@ import json
 from queue import Queue, Empty
 from datetime import datetime, timedelta
 from typing import Callable, Generator, Optional, Tuple, Any
-from .core.logger import get_logger
-from .core.audio_detection import check_audio_input_available, AudioUnavailableError
+from ..core.logger import get_logger
+from .audio import check_audio_input_available, AudioUnavailableError
 
 logger = get_logger(__name__)
 

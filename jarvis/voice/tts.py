@@ -1,7 +1,7 @@
 import time
 from typing import Optional
-from .core.audio_detection import check_audio_output_available, get_default_output_device, AudioUnavailableError
-from .core.logger import get_logger
+from .audio import check_audio_output_available, get_default_output_device, AudioUnavailableError
+from ..core.logger import get_logger
 
 logger = get_logger(__name__)
 

@@ -5,7 +5,7 @@ from ..supermcp_client import SuperMCPWrapper
 from .system_info import SystemInfo
 from .command_parser import SuperMCPCommandParser
 from .output_manager import OutputManager
-from .audio_detection import check_audio_output_available, AudioUnavailableError
+from ..voice.audio import check_audio_output_available, check_audio_input_available, AudioUnavailableError
 from .logger import get_logger
 
 logger = get_logger(__name__)
@@ -46,7 +46,7 @@ class ComponentFactory:
         
         # Lazy import to avoid import errors when not needed
         try:
-            from ..voice_output import TextToSpeech
+            from ..voice.tts import TextToSpeech
         except ImportError as e:
             logger.warning(f"TTS dependencies not available: {e}")
             return None
@@ -91,43 +91,37 @@ class ComponentFactory:
     @staticmethod
     def create_voice_manager_optional(on_command) -> Optional[any]:
         """
-        Create VoiceManager if voice input is enabled and audio is available
-        
+        Create VoiceManager if voice input is enabled and audio is available.
+
         Args:
             on_command: Callback for voice commands
-            
+
         Returns:
             VoiceManager instance or None if unavailable
         """
-        # Check audio input availability
-        from .audio_detection import check_audio_input_available
-        
         if not check_audio_input_available():
             logger.warning("Audio input devices not available, voice manager disabled")
             return None
-        
-        # Lazy import to avoid import errors when not needed
+
         try:
-            from .voice_manager import VoiceManager
+            from ..voice.manager import VoiceManager
         except ImportError as e:
             logger.warning(f"Voice manager dependencies not available: {e}")
             return None
-        
+
         try:
             logger.info("Initiating Voice Activation...")
-            vm = VoiceManager(on_command)
+            vm = VoiceManager(
+                on_command=on_command,
+                model_path=Config.VOSK_MODEL_PATH,
+                wake_words=Config.WAKE_WORDS,
+                sensitivity=Config.VOICE_ACTIVATION_SENSITIVITY,
+            )
             logger.info("Voice manager initialized successfully")
             return vm
         except Exception as e:
             logger.error(f"Failed to initialize voice manager: {e}", exc_info=True)
             return None
-    
-    @staticmethod
-    def create_voice_manager(on_command) -> Optional[any]:
-        """
-        Legacy method for backward compatibility
-        """
-        return ComponentFactory.create_voice_manager_optional(on_command)
     
     @staticmethod
     def create_all_components(text_mode: bool = False, on_voice_command=None):

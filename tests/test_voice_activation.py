@@ -33,15 +33,15 @@ class TestVoiceActivationHealth:
     def test_voice_activation_import(self):
         """Test voice activation can be imported."""
         try:
-            from voice_activation import VoiceActivation
+            from voice.activation import VoiceActivation
         except ImportError as e:
             pytest.skip(f"Voice activation dependencies not available: {e}")
 
     def test_voice_activation_creation_fails_gracefully(self):
         """Test voice activation creation fails gracefully when audio unavailable."""
         try:
-            from voice_activation import VoiceActivation
-            from core.audio_detection import AudioUnavailableError
+            from voice.activation import VoiceActivation
+            from voice.audio import AudioUnavailableError
 
             # Should raise AudioUnavailableError when audio not available
             with pytest.raises(AudioUnavailableError):
@@ -64,7 +64,7 @@ class TestVoiceActivationHealth:
         mock_recognizer.return_value = Mock()
 
         try:
-            from voice_activation import VoiceActivation
+            from voice.activation import VoiceActivation
 
             def dummy_callback():
                 pass
@@ -86,8 +86,8 @@ class TestVoiceActivationHealth:
     def test_voice_activation_stats(self):
         """Test voice activation stats functionality."""
         try:
-            from voice_activation import VoiceActivation
-            from core.audio_detection import AudioUnavailableError
+            from voice.activation import VoiceActivation
+            from voice.audio import AudioUnavailableError
 
             # Create instance (should fail gracefully)
             with pytest.raises(AudioUnavailableError):
@@ -109,7 +109,7 @@ class TestVoiceActivationManual:
     def test_voice_activation_manual(self):
         """Manual test of voice activation system."""
         try:
-            from voice_activation import VoiceActivation
+            from voice.activation import VoiceActivation
 
             detections = []
 
