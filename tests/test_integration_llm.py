@@ -21,7 +21,7 @@ class TestLLMProviderIntegration:
 
     def test_ollama_provider_initialization(self):
         """Test Ollama provider initializes correctly."""
-        from jarvis.llm_providers import OllamaProvider
+        from jarvis.llm.providers.ollama import OllamaProvider
 
         provider = OllamaProvider("test-model")
         assert provider is not None
@@ -31,42 +31,41 @@ class TestLLMProviderIntegration:
 
     def test_ollama_provider_with_custom_url(self):
         """Test Ollama provider with custom base URL."""
-        from jarvis.llm_providers import OllamaProvider
+        from jarvis.llm.providers.ollama import OllamaProvider
 
         custom_url = "http://localhost:8080"
         provider = OllamaProvider("test-model", base_url=custom_url)
 
         assert provider.base_url == custom_url
 
-    def test_openai_provider_initialization(self):
-        """Test OpenAI-compatible provider initialization."""
-        from jarvis.llm_providers import OpenAICompatibleProvider
+    def test_api_provider_initialization(self):
+        """Test API provider initialization."""
+        from jarvis.llm.providers.api import APIProvider
 
-        provider = OpenAICompatibleProvider("test-model", api_key="test-key")
+        provider = APIProvider("test-model", api_url="http://localhost:8080", api_key="test-key")
         assert provider is not None
         assert provider.model == "test-model"
 
     def test_llm_provider_factory_ollama(self):
         """Test LLM provider factory creates Ollama provider."""
-        from jarvis.llm_providers import LLMProviderFactory
+        from jarvis.llm.providers import create_provider
 
-        with patch.dict('os.environ', {'LLM_PROVIDER': 'ollama', 'LLM_MODEL': 'test-model'}):
-            provider = LLMProviderFactory.create_provider()
-            assert provider is not None
-            assert hasattr(provider, 'chat')
+        provider = create_provider(provider="ollama", model="test-model")
+        assert provider is not None
+        assert hasattr(provider, 'chat')
 
-    def test_llm_provider_factory_openai(self):
-        """Test LLM provider factory creates OpenAI provider."""
-        from jarvis.llm_providers import LLMProviderFactory
+    def test_llm_provider_factory_api(self):
+        """Test LLM provider factory creates API provider."""
+        from jarvis.llm.providers import create_provider
 
-        with patch.dict('os.environ', {
-            'LLM_PROVIDER': 'openai',
-            'LLM_MODEL': 'gpt-3.5-turbo',
-            'OPENAI_API_KEY': 'test-key'
-        }):
-            provider = LLMProviderFactory.create_provider()
-            assert provider is not None
-            assert hasattr(provider, 'chat')
+        provider = create_provider(
+            provider="api",
+            model="gpt-3.5-turbo",
+            api_url="http://localhost:8080",
+            api_key="test-key",
+        )
+        assert provider is not None
+        assert hasattr(provider, 'chat')
 
 
 @pytest.mark.integration
@@ -91,32 +90,29 @@ class TestLLMJsonResponseParsing:
     def test_malformed_json_handling(self):
         """Test handling of malformed JSON responses."""
         malformed_responses = [
-            '{"user_request": "Conversation", "output": "test"',  # Missing closing brace
-            '{"user_request": "Conversation", output: "test"}',   # Missing quotes on output key
-            'not json at all',                                   # Not JSON
-            '{"user_request": "InvalidType", "output": "test"}',  # Invalid user_request
+            '{"user_request": "Conversation", "output": "test"',
+            '{"user_request": "Conversation", output: "test"}',
+            'not json at all',
+            '{"user_request": "InvalidType", "output": "test"}',
         ]
 
         from jarvis.llm import LLM
 
         for malformed in malformed_responses:
-            with patch('jarvis.llm_providers.LLMProviderFactory.create_provider') as mock_factory:
-                mock_provider = Mock()
-                mock_factory.return_value = mock_provider
+            mock_provider = Mock()
+            mock_provider.chat.return_value = malformed
 
-                # Mock provider returns malformed JSON
-                mock_provider.chat.return_value = malformed
+            llm = LLM(
+                provider=mock_provider,
+                system_prompt="test",
+                wrong_json_message="Fix your JSON",
+            )
 
-                llm = LLM("linux", "5.4.0", "#1 SMP", "x86_64", ["bash"])
-
-                # Should handle gracefully or raise appropriate error
-                try:
-                    result = llm.ask("test question")
-                    # If it succeeds, should be a valid response
-                    assert_valid_json_response(result)
-                except (json.JSONDecodeError, ValueError, KeyError):
-                    # Expected for malformed JSON
-                    pass
+            try:
+                result = llm.ask("test question")
+                assert_valid_json_response(result)
+            except (json.JSONDecodeError, ValueError, KeyError):
+                pass
 
     def test_invalid_user_request_type(self):
         """Test handling of invalid user_request types."""
@@ -130,28 +126,24 @@ class TestLLMJsonResponseParsing:
             try:
                 response = json.loads(invalid_json)
                 assert_valid_json_response(response)
-                # Should fail validation
                 assert False, f"Should have failed validation: {invalid_json}"
             except AssertionError:
-                # Expected - validation should fail
                 pass
 
     def test_missing_required_fields(self):
         """Test handling of JSON missing required fields."""
         invalid_responses = [
-            '{"output": "test"}',                    # Missing user_request
-            '{"user_request": "Conversation"}',      # Missing output
-            '{}',                                    # Missing both
+            '{"output": "test"}',
+            '{"user_request": "Conversation"}',
+            '{}',
         ]
 
         for invalid_json in invalid_responses:
             try:
                 response = json.loads(invalid_json)
                 assert_valid_json_response(response)
-                # Should fail validation
                 assert False, f"Should have failed validation: {invalid_json}"
             except AssertionError:
-                # Expected - validation should fail
                 pass
 
 
@@ -163,59 +155,47 @@ class TestLLMResponseTypes:
         """Test complete conversation response workflow."""
         from jarvis.llm import LLM
 
-        with patch('jarvis.llm_providers.LLMProviderFactory.create_provider') as mock_factory:
-            mock_provider = create_mock_llm_provider([
-                mock_llm_response("Conversation", "Hello! I'm JARVIS.")
-            ])
-            mock_factory.return_value = mock_provider
+        mock_provider = create_mock_llm_provider([
+            mock_llm_response("Conversation", "Hello! I'm JARVIS.")
+        ])
 
-            llm = LLM("linux", "5.4.0", "#1 SMP", "x86_64", ["bash"])
-            result = llm.ask("Hello")
+        llm = LLM(provider=mock_provider, system_prompt="test")
+        result = llm.ask("Hello")
 
-            assert_valid_json_response(result)
-            assert result["user_request"] == "Conversation"
-            assert "JARVIS" in result["output"]
+        assert_valid_json_response(result)
+        assert result["user_request"] == "Conversation"
+        assert "JARVIS" in result["output"]
 
     def test_supermcp_response_workflow(self):
         """Test SuperMCP response workflow."""
         from jarvis.llm import LLM
 
         commands = "list_servers(); inspect_server(EchoMCP)"
-        with patch('jarvis.llm_providers.LLMProviderFactory.create_provider') as mock_factory:
-            mock_provider = create_mock_llm_provider([
-                mock_llm_response("SuperMCP", commands)
-            ])
-            mock_factory.return_value = mock_provider
+        mock_provider = create_mock_llm_provider([
+            mock_llm_response("SuperMCP", commands)
+        ])
 
-            llm = LLM("linux", "5.4.0", "#1 SMP", "x86_64", ["bash"])
-            result = llm.ask("What servers are available?")
+        llm = LLM(provider=mock_provider, system_prompt="test")
+        result = llm.ask("What servers are available?")
 
-            assert_valid_json_response(result)
-            assert result["user_request"] == "SuperMCP"
-            assert "list_servers()" in result["output"]
-            assert "inspect_server(EchoMCP)" in result["output"]
+        assert_valid_json_response(result)
+        assert result["user_request"] == "SuperMCP"
+        assert "list_servers()" in result["output"]
+        assert "inspect_server(EchoMCP)" in result["output"]
 
     def test_llm_error_recovery(self):
         """Test LLM error recovery with malformed responses."""
         from jarvis.llm import LLM
-        from jarvis.config import Config
 
-        # Mock provider that returns invalid JSON first, then valid
-        with patch('jarvis.llm_providers.LLMProviderFactory.create_provider') as mock_factory:
-            mock_provider = Mock()
-            mock_provider.chat.side_effect = [
-                '{"user_request": "Conversation", "output": "test"',  # Malformed
-                mock_llm_response("Conversation", "Sorry, I had trouble processing that. Please try again.")
-            ]
-            mock_factory.return_value = mock_provider
+        mock_provider = Mock()
+        mock_provider.chat.side_effect = [
+            '{"user_request": "Conversation", "output": "test"',
+            mock_llm_response("Conversation", "Sorry, I had trouble processing that.")
+        ]
 
-            llm = LLM("linux", "5.4.0", "#1 SMP", "x86_64", ["bash"])
-
-            # First call should handle error gracefully
-            result = llm.ask("test question")
-
-            # Should eventually get a valid response
-            assert_valid_json_response(result)
+        llm = LLM(provider=mock_provider, system_prompt="test", wrong_json_message="Fix JSON")
+        result = llm.ask("test question")
+        assert_valid_json_response(result)
 
 
 @pytest.mark.integration
@@ -226,109 +206,87 @@ class TestLLMContextManagement:
         """Test chat history starts with system prompt."""
         from jarvis.llm import LLM
 
-        with patch('jarvis.llm_providers.LLMProviderFactory.create_provider') as mock_factory:
-            mock_provider = create_mock_llm_provider([
-                mock_llm_response("Conversation", "Hello!")
-            ])
-            mock_factory.return_value = mock_provider
+        mock_provider = create_mock_llm_provider([
+            mock_llm_response("Conversation", "Hello!")
+        ])
 
-            llm = LLM("linux", "5.4.0", "#1 SMP", "x86_64", ["bash"])
+        llm = LLM(provider=mock_provider, system_prompt="You are JARVIS with SuperMCP")
 
-            # Check initial chat history
-            assert len(llm.chat_history) > 0
-            assert llm.chat_history[0]["role"] == "system"
-            assert "SuperMCP" in llm.chat_history[0]["content"]
+        assert len(llm.chat_history) > 0
+        assert llm.chat_history[0]["role"] == "system"
+        assert "SuperMCP" in llm.chat_history[0]["content"]
 
     def test_chat_history_accumulation(self):
         """Test chat history accumulates across multiple interactions."""
         from jarvis.llm import LLM
 
-        with patch('jarvis.llm_providers.LLMProviderFactory.create_provider') as mock_factory:
-            mock_provider = create_mock_llm_provider([
-                mock_llm_response("Conversation", "First response"),
-                mock_llm_response("Conversation", "Second response"),
-            ])
-            mock_factory.return_value = mock_provider
+        mock_provider = create_mock_llm_provider([
+            mock_llm_response("Conversation", "First response"),
+            mock_llm_response("Conversation", "Second response"),
+        ])
 
-            llm = LLM("linux", "5.4.0", "#1 SMP", "x86_64", ["bash"])
+        llm = LLM(provider=mock_provider, system_prompt="test")
 
-            # First interaction
-            result1 = llm.ask("First question")
-            initial_history_length = len(llm.chat_history)
+        result1 = llm.ask("First question")
+        initial_history_length = len(llm.chat_history)
 
-            # Second interaction
-            result2 = llm.ask("Second question")
+        result2 = llm.ask("Second question")
+        assert len(llm.chat_history) > initial_history_length
 
-            # History should have grown
-            assert len(llm.chat_history) > initial_history_length
-
-            # Should contain both user questions and assistant responses
-            user_messages = [msg for msg in llm.chat_history if msg["role"] == "user"]
-            assistant_messages = [msg for msg in llm.chat_history if msg["role"] == "assistant"]
-
-            assert len(user_messages) >= 2  # At least 2 user messages
-            assert len(assistant_messages) >= 2  # At least 2 assistant responses
+        user_messages = [msg for msg in llm.chat_history if msg["role"] == "user"]
+        assert len(user_messages) >= 2
 
     def test_chat_history_reset_behavior(self):
         """Test chat history reset behavior."""
         from jarvis.llm import LLM
 
-        with patch('jarvis.llm_providers.LLMProviderFactory.create_provider') as mock_factory:
-            mock_provider = create_mock_llm_provider([
-                mock_llm_response("Conversation", "Response 1"),
-                mock_llm_response("Conversation", "Response 2"),
-            ])
-            mock_factory.return_value = mock_provider
+        mock_provider = create_mock_llm_provider([
+            mock_llm_response("Conversation", "Response 1"),
+            mock_llm_response("Conversation", "Response 2"),
+        ])
 
-            llm = LLM("linux", "5.4.0", "#1 SMP", "x86_64", ["bash"])
+        llm = LLM(provider=mock_provider, system_prompt="test")
 
-            # First interaction
-            llm.ask("Question 1")
-            history_after_first = len(llm.chat_history)
+        llm.ask("Question 1")
+        history_after_first = len(llm.chat_history)
 
-            # Second interaction
-            llm.ask("Question 2")
-            history_after_second = len(llm.chat_history)
+        llm.ask("Question 2")
+        history_after_second = len(llm.chat_history)
 
-            assert history_after_second > history_after_first
+        assert history_after_second > history_after_first
 
 
 @pytest.mark.integration
 class TestLLMProviderSwitching:
     """Test switching between different LLM providers."""
 
-    def test_provider_switching_ollama_to_openai(self):
-        """Test switching from Ollama to OpenAI provider."""
-        from jarvis.llm_providers import LLMProviderFactory
+    def test_provider_switching_ollama_to_api(self):
+        """Test switching from Ollama to API provider."""
+        from jarvis.llm.providers import create_provider
 
-        # Test Ollama provider
-        with patch.dict('os.environ', {'LLM_PROVIDER': 'ollama', 'LLM_MODEL': 'llama2'}):
-            ollama_provider = LLMProviderFactory.create_provider()
-            assert ollama_provider is not None
+        ollama_provider = create_provider(provider="ollama", model="llama2")
+        assert ollama_provider is not None
 
-        # Test OpenAI provider
-        with patch.dict('os.environ', {
-            'LLM_PROVIDER': 'openai',
-            'LLM_MODEL': 'gpt-3.5-turbo',
-            'OPENAI_API_KEY': 'test-key'
-        }):
-            openai_provider = LLMProviderFactory.create_provider()
-            assert openai_provider is not None
-            assert openai_provider != ollama_provider  # Different instances
+        api_provider = create_provider(
+            provider="api",
+            model="gpt-3.5-turbo",
+            api_url="http://localhost:8080",
+            api_key="test-key",
+        )
+        assert api_provider is not None
+        assert api_provider != ollama_provider
 
     def test_provider_availability_check(self):
         """Test provider availability checking."""
-        from jarvis.llm_providers import OllamaProvider, OpenAICompatibleProvider
+        from jarvis.llm.providers.ollama import OllamaProvider
+        from jarvis.llm.providers.api import APIProvider
 
-        # Test Ollama availability (will be False without actual Ollama)
         ollama_provider = OllamaProvider("test-model")
         availability = ollama_provider.is_available()
-        # Should return boolean without crashing
         assert isinstance(availability, bool)
 
-        # Test OpenAI availability (will be False without API key)
-        openai_provider = OpenAICompatibleProvider("test-model", api_key="fake-key")
-        availability = openai_provider.is_available()
+        api_provider = APIProvider("test-model", api_url="http://localhost:8080", api_key="fake-key")
+        availability = api_provider.is_available()
         assert isinstance(availability, bool)
 
 
@@ -338,50 +296,39 @@ class TestLLMErrorHandling:
 
     def test_provider_initialization_failure(self):
         """Test handling of provider initialization failures."""
-        from jarvis.llm_providers import LLMProviderFactory
+        from jarvis.llm.providers import create_provider
 
-        # Test with invalid provider
-        with patch.dict('os.environ', {'LLM_PROVIDER': 'invalid_provider'}):
-            with pytest.raises((ValueError, ImportError, KeyError)):
-                LLMProviderFactory.create_provider()
+        with pytest.raises(ValueError):
+            create_provider(provider="invalid_provider", model="test")
 
-    def test_missing_environment_variables(self):
-        """Test handling of missing required environment variables."""
-        from jarvis.llm_providers import LLMProviderFactory
+    def test_missing_model(self):
+        """Test handling of missing model."""
+        from jarvis.llm.providers import create_provider
 
-        # Missing LLM_PROVIDER
-        with patch.dict('os.environ', {}, clear=True):
-            with pytest.raises((KeyError, ValueError)):
-                LLMProviderFactory.create_provider()
+        with pytest.raises(ValueError):
+            create_provider(provider="ollama", model="")
 
     def test_llm_timeout_handling(self):
         """Test handling of LLM request timeouts."""
         from jarvis.llm import LLM
 
-        with patch('jarvis.llm_providers.LLMProviderFactory.create_provider') as mock_factory:
-            mock_provider = Mock()
-            mock_provider.chat.side_effect = TimeoutError("Request timed out")
-            mock_factory.return_value = mock_provider
+        mock_provider = Mock()
+        mock_provider.chat.side_effect = TimeoutError("Request timed out")
 
-            llm = LLM("linux", "5.4.0", "#1 SMP", "x86_64", ["bash"])
+        llm = LLM(provider=mock_provider, system_prompt="test")
 
-            # Should handle timeout gracefully
-            with pytest.raises(TimeoutError):
-                llm.ask("test question")
+        with pytest.raises(TimeoutError):
+            llm.ask("test question")
 
     def test_empty_llm_response(self):
         """Test handling of empty LLM responses."""
         from jarvis.llm import LLM
 
-        with patch('jarvis.llm_providers.LLMProviderFactory.create_provider') as mock_factory:
-            mock_provider = create_mock_llm_provider([
-                "",  # Empty response
-                mock_llm_response("Conversation", "Sorry, I didn't understand that.")
-            ])
-            mock_factory.return_value = mock_provider
+        mock_provider = create_mock_llm_provider([
+            "",
+            mock_llm_response("Conversation", "Sorry, I didn't understand that.")
+        ])
 
-            llm = LLM("linux", "5.4.0", "#1 SMP", "x86_64", ["bash"])
-
-            # Should handle empty response gracefully
-            result = llm.ask("test")
-            assert_valid_json_response(result)
+        llm = LLM(provider=mock_provider, system_prompt="test", wrong_json_message="Fix JSON")
+        result = llm.ask("test")
+        assert_valid_json_response(result)

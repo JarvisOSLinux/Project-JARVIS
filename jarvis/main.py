@@ -250,17 +250,8 @@ class Jarvis:
         
         try:
             # Create a temporary LLM instance for parsing (don't pollute main history)
-            from .llm import LLM
-            from .core.system_info import SystemInfo
-            
-            system_info = SystemInfo.get_system_info()
-            temp_llm = LLM(
-                system=system_info['system'],
-                release=system_info['release'],
-                version=system_info['version'],
-                machine=system_info['machine'],
-                shell=system_info['shell']
-            )
+            from .core.component_factory import ComponentFactory
+            temp_llm = ComponentFactory.create_llm()
             
             # Reset history to avoid context pollution
             temp_llm.reset_history()

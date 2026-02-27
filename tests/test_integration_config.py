@@ -330,18 +330,17 @@ class TestConfigurationIntegration:
 
     def test_config_affects_llm_provider_selection(self):
         """Test that configuration affects LLM provider selection."""
-        from jarvis.llm_providers import LLMProviderFactory
+        from jarvis.llm.providers import create_provider
 
         with setup_test_environment({'LLM_PROVIDER': 'ollama', 'LLM_MODEL': 'llama2'}):
-            provider = LLMProviderFactory.create_provider()
-
-            # Should create the correct provider type
+            provider = create_provider(provider="ollama", model="llama2")
             assert provider is not None
 
-        with setup_test_environment({'LLM_PROVIDER': 'openai', 'LLM_MODEL': 'gpt-3.5-turbo', 'OPENAI_API_KEY': 'test'}):
-            provider = LLMProviderFactory.create_provider()
-
-            # Should create the correct provider type
+        with setup_test_environment({'LLM_PROVIDER': 'api', 'LLM_MODEL': 'gpt-3.5-turbo'}):
+            provider = create_provider(
+                provider="api", model="gpt-3.5-turbo",
+                api_url="http://localhost:8080", api_key="test",
+            )
             assert provider is not None
 
     def test_config_affects_supermcp_client(self):

@@ -48,7 +48,7 @@ from voice.audio import (
     AudioUnavailableError
 )
 from supermcp_client import SuperMCPWrapper
-from llm_providers import LLMProviderFactory
+from llm.providers import create_provider as create_llm_provider
 from llm import LLM
 from core.system_info import SystemInfo
 from core.command_parser import SuperMCPCommandParser
@@ -70,8 +70,8 @@ class TestModuleImports:
             'core.command_parser',
             'core.output_manager',
             'supermcp_client',
-            'llm_providers',
             'llm',
+            'llm.providers',
             'main',
             'cli',
         ]
@@ -242,7 +242,7 @@ class TestLLM:
     def test_llm_provider_factory(self):
         """Test LLM provider factory works."""
         try:
-            provider = LLMProviderFactory.create_provider()
+            provider = create_llm_provider(provider="ollama", model="test-model")
             assert provider is not None
         except Exception as e:
             pytest.skip(f"LLM provider factory failed: {e}")
