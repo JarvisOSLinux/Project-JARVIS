@@ -1,6 +1,7 @@
 from typing import Optional
 from ..config import Config
 from ..llm import LLM
+from ..llm.providers import create_provider as create_llm_provider
 from ..supermcp_client import SuperMCPWrapper
 from .system_info import SystemInfo
 from .command_parser import SuperMCPCommandParser
@@ -14,16 +15,65 @@ logger = get_logger(__name__)
 class ComponentFactory:
     @staticmethod
     def create_llm() -> LLM:
+        """Create LLM with provider selected by ``Config.LLM_PROVIDER``."""
+        import json as _json
+
         logger.info("Getting system information...")
         system_info = SystemInfo.get_system_info()
-        
-        logger.info("Initiating LLM...")
-        return LLM(
+
+        logger.info(f"Initiating LLM (provider: {Config.LLM_PROVIDER})...")
+
+        # Build provider-specific kwargs
+        provider_kwargs = {}
+        provider_type = Config.LLM_PROVIDER.lower()
+
+        if provider_type == "ollama":
+            provider_kwargs["base_url"] = Config.LLM_OLLAMA_URL
+            provider_kwargs["auto_pull"] = getattr(Config, "LLM_AUTO_PULL", False)
+        elif provider_type == "api":
+            if not Config.LLM_API_URL:
+                raise ValueError("LLM_API_URL must be set when using API provider")
+            if not Config.LLM_API_KEY:
+                raise ValueError("LLM_API_KEY must be set when using API provider")
+            provider_kwargs["api_url"] = Config.LLM_API_URL
+            provider_kwargs["api_key"] = Config.LLM_API_KEY
+            if Config.LLM_API_HEADERS:
+                try:
+                    provider_kwargs["headers"] = _json.loads(Config.LLM_API_HEADERS)
+                except _json.JSONDecodeError:
+                    logger.warning(f"Invalid LLM_API_HEADERS JSON, ignoring")
+
+        llm_provider = create_llm_provider(
+            provider=provider_type,
+            model=Config.LLM_MODEL,
+            **provider_kwargs,
+        )
+
+        # For Ollama, ensure model is available
+        if provider_type == "ollama":
+            if not llm_provider.is_available():
+                logger.warning("Ollama provider configured but not available.")
+            else:
+                logger.info(f"Checking if model '{Config.LLM_MODEL}' is available...")
+                if not llm_provider.ensure_model():
+                    raise RuntimeError(
+                        f"Model '{Config.LLM_MODEL}' is not available. "
+                        "Please install it or enable auto-pull."
+                    )
+
+        # Build system prompt from template + system info
+        system_prompt = Config.LLM_RULE.format(
             system=system_info['system'],
             release=system_info['release'],
             version=system_info['version'],
             machine=system_info['machine'],
-            shell=system_info['shell']
+            shell=system_info['shell'],
+        )
+
+        return LLM(
+            provider=llm_provider,
+            system_prompt=system_prompt,
+            wrong_json_message=Config.LLM_WRONG_JSON_FORMAT_MESSAGE,
         )
     
     @staticmethod
