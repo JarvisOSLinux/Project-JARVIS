@@ -343,7 +343,7 @@ def create_test_jarvis_config(**overrides) -> Dict[str, Any]:
         'LOG_LEVEL': 'INFO',
         'TTS_MODEL_ONNX': 'test.onnx',
         'TTS_MODEL_JSON': 'test.json',
-        'VOSK_MODEL_PATH': 'models/vosk-model-small-en-us-0.15'
+        'VOSK_MODEL_PATH': 'models/vosk/vosk-model-small-en-us-0.15'
     }
     config.update(overrides)
     return config
