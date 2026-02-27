@@ -169,10 +169,12 @@ temp/
 logs/
 cache/
 
-# Models (keep structure but ignore large files)
+# Models — organised by engine, ignore large binaries
+models/vosk/*/
 models/piper/*.onnx
 models/piper/*.json
-!models/piper/.gitkeep
+models/whisper/
+!models/**/.gitkeep
 
 # OS specific
 .DS_Store

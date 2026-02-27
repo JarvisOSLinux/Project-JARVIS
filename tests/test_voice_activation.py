@@ -100,7 +100,7 @@ class TestVoiceActivationManual:
 
             va = VoskActivation(
                 wake_words=["jarvis"],
-                model_path="models/vosk-model-small-en-us-0.15",
+                model_path="models/vosk/vosk-model-small-en-us-0.15",
                 on_wake_word=on_wake_word
             )
 
