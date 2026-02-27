@@ -1,3 +1,4 @@
+import os
 from typing import Optional
 from ..config import Config
 from ..llm import LLM
@@ -104,8 +105,8 @@ class ComponentFactory:
             logger.info(f"Initiating TTS (provider: {Config.TTS_PROVIDER})...")
             tts = create_tts(
                 provider=Config.TTS_PROVIDER,
-                model_path=f"models/piper/{Config.TTS_MODEL_ONNX}",
-                config_path=f"models/piper/{Config.TTS_MODEL_JSON}",
+                model_path=os.path.join(Config.MODELS_DIR, "piper", Config.TTS_MODEL_ONNX),
+                config_path=os.path.join(Config.MODELS_DIR, "piper", Config.TTS_MODEL_JSON),
             )
             logger.info("TTS initialized successfully")
             return tts
