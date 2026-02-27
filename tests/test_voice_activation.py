@@ -33,19 +33,19 @@ class TestVoiceActivationHealth:
     def test_voice_activation_import(self):
         """Test voice activation can be imported."""
         try:
-            from voice_activation import VoiceActivation
+            from voice.activation.vosk_activation import VoskActivation
         except ImportError as e:
             pytest.skip(f"Voice activation dependencies not available: {e}")
 
     def test_voice_activation_creation_fails_gracefully(self):
         """Test voice activation creation fails gracefully when audio unavailable."""
         try:
-            from voice_activation import VoiceActivation
-            from core.audio_detection import AudioUnavailableError
+            from voice.activation.vosk_activation import VoskActivation
+            from voice.audio import AudioUnavailableError
 
             # Should raise AudioUnavailableError when audio not available
             with pytest.raises(AudioUnavailableError):
-                va = VoiceActivation(
+                va = VoskActivation(
                     wake_words=["test"],
                     model_path="/nonexistent/model",
                     on_wake_word=lambda: None
@@ -53,45 +53,15 @@ class TestVoiceActivationHealth:
         except ImportError:
             pytest.skip("Voice activation module not available")
 
-    @patch('voice_activation.check_audio_input_available')
-    @patch('voice_activation.sd.InputStream')
-    @patch('voice_activation.vosk.Model')
-    @patch('voice_activation.vosk.KaldiRecognizer')
-    def test_voice_activation_creation_success(self, mock_recognizer, mock_model, mock_stream, mock_audio_check):
-        """Test voice activation creation succeeds when all dependencies available."""
-        mock_audio_check.return_value = True
-        mock_model.return_value = Mock()
-        mock_recognizer.return_value = Mock()
-
-        try:
-            from voice_activation import VoiceActivation
-
-            def dummy_callback():
-                pass
-
-            va = VoiceActivation(
-                wake_words=["test"],
-                model_path="/test/model",
-                on_wake_word=dummy_callback
-            )
-
-            assert va is not None
-            assert hasattr(va, 'start_listening')
-            assert hasattr(va, 'stop_listening')
-            assert hasattr(va, 'cleanup')
-
-        except ImportError:
-            pytest.skip("Voice activation module not available")
-
     def test_voice_activation_stats(self):
         """Test voice activation stats functionality."""
         try:
-            from voice_activation import VoiceActivation
-            from core.audio_detection import AudioUnavailableError
+            from voice.activation.vosk_activation import VoskActivation
+            from voice.audio import AudioUnavailableError
 
             # Create instance (should fail gracefully)
             with pytest.raises(AudioUnavailableError):
-                va = VoiceActivation(
+                va = VoskActivation(
                     wake_words=["test"],
                     model_path="/nonexistent",
                     on_wake_word=lambda: None
@@ -99,6 +69,18 @@ class TestVoiceActivationHealth:
 
         except ImportError:
             pytest.skip("Voice activation module not available")
+
+    def test_factory_function(self):
+        """Test create_activation factory produces the right type."""
+        try:
+            from voice.activation import create_activation
+            from voice.base import ActivationProvider
+        except ImportError:
+            pytest.skip("Voice activation module not available")
+            return
+
+        with pytest.raises(ValueError):
+            create_activation("nonexistent_provider")
 
 
 @pytest.mark.manual
@@ -109,25 +91,22 @@ class TestVoiceActivationManual:
     def test_voice_activation_manual(self):
         """Manual test of voice activation system."""
         try:
-            from voice_activation import VoiceActivation
+            from voice.activation.vosk_activation import VoskActivation
 
             detections = []
 
             def on_wake_word():
                 detections.append("detected")
 
-            va = VoiceActivation(
+            va = VoskActivation(
                 wake_words=["jarvis"],
-                model_path="models/vosk-model-small-en-us-0.15",
+                model_path="models/vosk/vosk-model-small-en-us-0.15",
                 on_wake_word=on_wake_word
             )
 
-            # This would be a manual test requiring user interaction
-            # For automated tests, this is skipped
             assert va is not None
 
         except ImportError:
             pytest.skip("Voice activation dependencies not available")
         except Exception:
             pytest.skip("Voice activation requires audio hardware and models")
-

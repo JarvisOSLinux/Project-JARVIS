@@ -8,14 +8,12 @@ and testability.
 
 from .system_info import SystemInfo
 from .command_parser import SuperMCPCommandParser
-from .voice_manager import VoiceManager
 from .output_manager import OutputManager
 from .component_factory import ComponentFactory
 
 __all__ = [
     'SystemInfo',
-    'SuperMCPCommandParser', 
-    'VoiceManager',
+    'SuperMCPCommandParser',
     'OutputManager',
-    'ComponentFactory'
+    'ComponentFactory',
 ]

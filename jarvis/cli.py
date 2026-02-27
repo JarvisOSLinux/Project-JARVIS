@@ -212,7 +212,7 @@ def _check_capabilities() -> dict:
     }
     
     try:
-        from .core.audio_detection import check_audio_input_available, check_audio_output_available
+        from .voice.audio import check_audio_input_available, check_audio_output_available
         capabilities['voice_input'] = check_audio_input_available()
         capabilities['voice_output'] = check_audio_output_available()
     except Exception as e:

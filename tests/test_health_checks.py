@@ -41,7 +41,7 @@ sys.modules['mcp.client.sse'] = Mock(sse_client=sse_client_mock)
 # Now import JARVIS modules
 from config import Config
 from core.component_factory import ComponentFactory
-from core.audio_detection import (
+from voice.audio import (
     check_audio_input_available,
     check_audio_output_available,
     list_audio_devices,
@@ -64,7 +64,7 @@ class TestModuleImports:
         modules_to_test = [
             'config',
             'core.component_factory',
-            'core.audio_detection',
+            'voice.audio',
             'core.logger',
             'core.system_info',
             'core.command_parser',
@@ -84,30 +84,26 @@ class TestModuleImports:
 
     def test_optional_modules_graceful(self):
         """Test that optional modules handle missing dependencies gracefully."""
-        # Test voice_input (should handle missing sounddevice/vosk)
+        # Test STT (should handle missing sounddevice/vosk)
         try:
-            from voice_input import SpeechToText
-            # If import succeeds, create instance should handle missing audio
-            stt = SpeechToText()
-            # Should either work or raise AudioUnavailableError
+            from voice.stt.vosk_stt import VoskSTT
+            stt = VoskSTT()
         except AudioUnavailableError:
             pass  # Expected for missing audio
         except ImportError:
             pass  # Expected if dependencies missing
 
-        # Test voice_output (should handle missing piper/sounddevice)
+        # Test TTS (should handle missing piper/sounddevice)
         try:
-            from voice_output import TextToSpeech
-            # If import succeeds, should handle missing models gracefully
+            from voice.tts.piper_tts import PiperTTS
         except AudioUnavailableError:
             pass  # Expected for missing audio
         except ImportError:
             pass  # Expected if dependencies missing
 
-        # Test voice_activation (should handle missing vosk/sounddevice)
+        # Test Activation (should handle missing vosk/sounddevice)
         try:
-            from voice_activation import VoiceActivation
-            # Should handle missing models/audio gracefully
+            from voice.activation.vosk_activation import VoskActivation
         except AudioUnavailableError:
             pass  # Expected for missing audio
         except ImportError:
