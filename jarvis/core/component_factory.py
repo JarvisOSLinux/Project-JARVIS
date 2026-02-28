@@ -3,9 +3,9 @@ from typing import Optional
 from ..config import Config
 from ..llm import LLM
 from ..llm.providers import create_provider as create_llm_provider
-from ..supermcp_client import SuperMCPWrapper
+from ..dispatch import DispatchAdapter, GoalManager, EventMerger
 from .system_info import SystemInfo
-from .command_parser import SuperMCPCommandParser
+from .command_parser import TaskParser
 from .output_manager import OutputManager
 from ..voice.audio import check_audio_output_available, check_audio_input_available, AudioUnavailableError
 from .logger import get_logger
@@ -76,7 +76,30 @@ class ComponentFactory:
             system_prompt=system_prompt,
             wrong_json_message=Config.LLM_WRONG_JSON_FORMAT_MESSAGE,
         )
-    
+
+    @staticmethod
+    def create_dispatch_adapter() -> DispatchAdapter:
+        """Create DispatchAdapter for connecting to the dispatch binary."""
+        logger.info("Initiating Dispatch adapter...")
+        return DispatchAdapter()
+
+    @staticmethod
+    def create_goal_manager() -> GoalManager:
+        """Create GoalManager for tracking user goals."""
+        logger.info("Initiating Goal manager...")
+        return GoalManager()
+
+    @staticmethod
+    def create_event_merger() -> EventMerger:
+        """Create EventMerger for dual-input event loop."""
+        logger.info("Initiating Event merger...")
+        return EventMerger()
+
+    @staticmethod
+    def create_task_parser() -> TaskParser:
+        """Create TaskParser for validating LLM dispatch responses."""
+        return TaskParser()
+
     @staticmethod
     def create_tts_optional() -> Optional[any]:
         """
@@ -119,26 +142,17 @@ class ComponentFactory:
         except Exception as e:
             logger.error(f"Failed to initialize TTS: {e}", exc_info=True)
             return None
-    
-    @staticmethod
-    def create_supermcp() -> SuperMCPWrapper:
-        logger.info("Initiating SuperMCP...")
-        return SuperMCPWrapper()
-    
-    @staticmethod
-    def create_command_parser(supermcp: SuperMCPWrapper) -> SuperMCPCommandParser:
-        return SuperMCPCommandParser(supermcp)
-    
+
     @staticmethod
     def create_output_manager(tts: Optional[any] = None) -> OutputManager:
         """
         Create OutputManager with optional TTS
-        
+
         Args:
             tts: Optional TTS instance
         """
         return OutputManager(tts)
-    
+
     @staticmethod
     def create_voice_manager_optional(on_command) -> Optional[any]:
         """
@@ -197,7 +211,7 @@ class ComponentFactory:
         except Exception as e:
             logger.error(f"Failed to initialize voice manager: {e}", exc_info=True)
             return None
-    
+
     @staticmethod
     def create_all_components(text_mode: bool = False, on_voice_command=None):
         """
@@ -211,22 +225,22 @@ class ComponentFactory:
             Dictionary of all initialized components
         """
         components = {}
-        
+
         # Core components (always needed)
         components['llm'] = ComponentFactory.create_llm()
-        components['supermcp'] = ComponentFactory.create_supermcp()
-        
+        components['dispatch_adapter'] = ComponentFactory.create_dispatch_adapter()
+        components['goal_manager'] = ComponentFactory.create_goal_manager()
+        components['event_merger'] = ComponentFactory.create_event_merger()
+        components['task_parser'] = ComponentFactory.create_task_parser()
+
         # TTS (optional - only if voice output enabled and available)
         components['tts'] = ComponentFactory.create_tts_optional()
-        
+
         # Dependent components
-        components['command_parser'] = ComponentFactory.create_command_parser(
-            components['supermcp']
-        )
         components['output_manager'] = ComponentFactory.create_output_manager(
             components['tts']
         )
-        
+
         # Voice input components (only if not in text mode and available)
         if not text_mode and on_voice_command:
             components['voice_manager'] = ComponentFactory.create_voice_manager_optional(
@@ -234,6 +248,6 @@ class ComponentFactory:
             )
         else:
             components['voice_manager'] = None
-        
+
         logger.info("Initiations Complete!")
         return components

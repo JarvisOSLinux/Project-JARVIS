@@ -1,9 +1,9 @@
 """
-Project JARVIS - AI-Native Voice Assistant with Dynamic Capability Discovery
+Project JARVIS - AI-Native Voice Assistant with Concurrent Task Dispatch
 
-JARVIS is an innovative AI-powered voice assistant that combines natural language 
-processing with dynamic tool discovery through SuperMCP (Super Model Context Protocol) 
-orchestration.
+JARVIS is an AI-powered voice assistant that combines natural language
+processing with concurrent tool execution through the dispatch system
+and MCP (Model Context Protocol) servers.
 
 Copyright (C) 2025 YakupAtahanov
 
@@ -25,7 +25,7 @@ __version__ = "1.0.0"
 __author__ = "YakupAtahanov"
 __email__ = "your.email@example.com"
 __license__ = "GPL-3.0"
-__description__ = "AI-Native Voice Assistant with Dynamic Capability Discovery"
+__description__ = "AI-Native Voice Assistant with Concurrent Task Dispatch"
 
 # Initialize logging when package is imported
 from .config import Config

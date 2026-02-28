@@ -7,13 +7,13 @@ and testability.
 """
 
 from .system_info import SystemInfo
-from .command_parser import SuperMCPCommandParser
+from .command_parser import TaskParser
 from .output_manager import OutputManager
 from .component_factory import ComponentFactory
 
 __all__ = [
     'SystemInfo',
-    'SuperMCPCommandParser',
+    'TaskParser',
     'OutputManager',
     'ComponentFactory',
 ]

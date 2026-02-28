@@ -20,11 +20,11 @@ class Config:
     # LLM Configuration
     LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama")  # "ollama" or "api"
     LLM_MODEL = os.getenv("LLM_MODEL")
-    
+
     # Ollama-specific configuration
     LLM_OLLAMA_URL = os.getenv("LLM_OLLAMA_URL", "http://localhost:11434")  # Optional custom Ollama URL
     LLM_AUTO_PULL = os.getenv("LLM_AUTO_PULL", "false").lower() == "true"  # Auto-pull missing models
-    
+
     # API-based LLM configuration (for OpenAI, Claude, OpenRouter, custom servers)
     LLM_API_URL = os.getenv("LLM_API_URL")  # Base URL for API endpoint (e.g., https://api.openai.com)
     LLM_API_KEY = os.getenv("LLM_API_KEY")  # API key for authentication
@@ -32,47 +32,69 @@ class Config:
 
     TTS_MODEL_ONNX = os.getenv("TTS_MODEL_ONNX")
     TTS_MODEL_JSON = os.getenv("TTS_MODEL_JSON")
-    
+
     # Voice Activation Configuration
     WAKE_WORDS = os.getenv("WAKE_WORDS", "jarvis,hey jarvis,okay jarvis").split(",")
     VOICE_ACTIVATION_SENSITIVITY = float(os.getenv("VOICE_ACTIVATION_SENSITIVITY", "0.8"))
-    
+
     # CLI Output Mode Configuration
     OUTPUT_MODE = os.getenv("OUTPUT_MODE", "voice")  # voice or text
-    
+
     # Conversation History Configuration
     RESET_HISTORY_AFTER_RESPONSE = os.getenv("RESET_HISTORY_AFTER_RESPONSE", "true").lower() == "true"
-    
+
     # Sudo Access Configuration
     # Note: This is a preference setting. Actual sudo access is managed by sudo_manager
     # This setting tracks whether sudo should be enabled (for installation/configuration purposes)
     JARVIS_SUDO_ENABLED = os.getenv("JARVIS_SUDO_ENABLED", "false").lower() == "true"
 
-    # SuperMCP Configuration
-    SUPERMCP_SERVER_PATH = os.getenv("SUPERMCP_SERVER_PATH", "SuperMCP/SuperMCP.py")
-    SUPERMCP_TIMEOUT = int(os.getenv("SUPERMCP_TIMEOUT", "60"))  # seconds
-    
+    # Dispatch Configuration
+    DISPATCH_BINARY = os.getenv("DISPATCH_BINARY", "dispatch")  # Path to dispatch binary
+    DISPATCH_TIMEOUT = int(os.getenv("DISPATCH_TIMEOUT", "60"))  # seconds
+
     # Logging Configuration
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()  # DEBUG, INFO, WARNING, ERROR, CRITICAL
     LOG_FILE = os.getenv("LOG_FILE", "")  # Optional: path to log file (empty = no file logging)
     LOG_COLORS = os.getenv("LOG_COLORS", "true").lower() == "true"  # Enable colored console output
-    
+
     # os.environ["OLLAMA_NO_GPU"] = "1"
     # os.environ["OLLAMA_NUM_THREADS"] = str(multiprocessing.cpu_count())
 
     LLM_WRONG_JSON_FORMAT_MESSAGE = """\
-The JSON text you provided was not valid or properly formatted. 
+The JSON text you provided was not valid or properly formatted.
 Please fix it and output ONLY valid JSON, with no explanations or extra text.
 
 The required format is exactly:
 
-{
-  "user_request": "<Conversation|SuperMCP>",
-  "output": "<string>"
-}
+{{
+  "action": "<dispatch|respond|wait|kill>",
+  ...
+}}
 
-Here is your previous response:
-<insert the bad JSON here>
+Valid formats:
+
+1. To execute tasks concurrently:
+{{
+  "action": "dispatch",
+  "tasks": [{{"server": "...", "tool": "...", "params": {{...}}}}]
+}}
+
+2. To respond to the user:
+{{
+  "action": "respond",
+  "output": "your message"
+}}
+
+3. To wait for running tasks:
+{{
+  "action": "wait"
+}}
+
+4. To kill running tasks:
+{{
+  "action": "kill",
+  "pids": [1, 2]
+}}
 
 Now, return the corrected JSON."""
 
@@ -83,92 +105,78 @@ Below are the specs for the OS:
 * Version: {version}
 * Machine: {machine}
 
-You have access to a SuperMCP system that provides dynamic tool discovery and usage through specialized MCP servers.
+You are JARVIS, an AI assistant with access to a dispatch system for concurrent tool execution.
+You communicate with the user and execute tasks through MCP servers managed by the dispatch system.
 
-Instructions:
-You are expected to provide ALL of your responses in JSON text format:
+ALL of your responses MUST be valid JSON in one of these formats:
+
+--- Action: dispatch ---
+Send tasks to run concurrently. Each task targets an MCP server and tool.
 {{
-    "user_request": "",
-    "output": ""
+    "action": "dispatch",
+    "tasks": [
+        {{
+            "server": "<mcp_server_name>",
+            "tool": "<tool_name>",
+            "params": {{}},
+            "remind_after": 60
+        }}
+    ],
+    "goal_updates": [
+        {{"id": "<goal_id>", "status": "active"}}
+    ]
 }}
 
-Step 1 - Identify request type:
-Given prompt from the user, first identify whether the user is trying to have a conversation or needs tool execution.
-
-If the user is trying to have a conversation, respond EXACTLY in this format:
+--- Action: respond ---
+Speak to the user. Use this for conversation, reporting results, or asking questions.
 {{
-    "user_request": "Conversation",
-    "output": "<your response to the user's prompt>"
+    "action": "respond",
+    "output": "<your message to the user>",
+    "goal_updates": [
+        {{"id": "<goal_id>", "status": "completed", "result": "summary"}}
+    ]
 }}
 
-If the user needs tool execution (commands, file operations, code analysis, etc.), respond EXACTLY in this format:
+--- Action: wait ---
+Acknowledge a signal but continue waiting for other tasks to finish.
 {{
-    "user_request": "SuperMCP",
-    "output": "<SuperMCP command sequence>"
+    "action": "wait"
 }}
 
-Step 2 - SuperMCP Command Format:
-When user_request == "SuperMCP", the output should be a sequence of SuperMCP commands separated by semicolons (;).
-
-Available SuperMCP commands:
-- reload_servers() - Refresh available MCP servers
-- list_servers() - List all available servers
-- inspect_server(<server_name>) - Get server capabilities
-- call_server_tool(<server_name>, <tool_name>, <arguments>) - Execute a tool
-
-Example SuperMCP sequences:
-- "reload_servers(); list_servers()"
-- "call_server_tool(CodeAnalysisMCP, initialize_repository, {{path: '/path/to/repo'}})"
-- "call_server_tool(ShellMCP, run_command, {{command: 'ls -la'}})"
-
-For shell commands, use ShellMCP:
-- Execute command: "call_server_tool(ShellMCP, execute_command, {{command: 'dir'}})"
-- Get platform: "call_server_tool(ShellMCP, get_platform_info, {{}})"
-- If a command fails with "not whitelisted":
-  1. Ask the user if they want to add it: "The command 'X' is not whitelisted. Would you like me to add it?"
-  2. If user approves, add it: "call_server_tool(ShellMCP, add_to_whitelist, {{command: 'X', securityLevel: 'safe', description: '...'}})"
-  3. Then RETRY the original command immediately
-- Security levels: 'safe' (runs immediately), 'requires_approval' (asks user), 'forbidden' (blocks)
-- For read-only commands like 'python --version', use 'safe' level
-
-For code generation, use CodeGenMCP:
-- Create MCP server: "call_server_tool(CodeGenMCP, create_mcp_server, {{server_name: 'WeatherMCP', description: 'Weather tools', tools_description: 'get_weather(city, country) returns temp and conditions'}})"
-- Generate function: "call_server_tool(CodeGenMCP, generate_python_function, {{function_name: 'parse_data', function_description: 'Parse JSON data', parameters: 'data: str'}})"
-- List templates: "call_server_tool(CodeGenMCP, list_available_templates, {{}})"
-
-For code analysis, use CodeAnalysisMCP:
-- Initialize repo: "call_server_tool(CodeAnalysisMCP, initialize_repository, {{path: '/path'}})"
-
-Step 3 - Processing SuperMCP results:
-After SuperMCP execution, you will receive CLEAR TEXT feedback like:
-"[OK] Reloaded 4 MCP servers"
-"[OK] Available servers: FileSystemMCP, ShellMCP, ..."
-"[SUCCESS] Listed directory: Files: file1.txt, file2.py..."
-
-When you see "[SUCCESS]" or "TASK COMPLETE", immediately return a Conversation response with the results.
-Do NOT repeat the same command - the task is done!
-
-If the results indicate success and the user's request is fulfilled, return:
+--- Action: kill ---
+Terminate tasks that are taking too long or no longer needed.
 {{
-    "user_request": "Conversation",
-    "output": "<short confirmation + essential results>"
+    "action": "kill",
+    "pids": [1, 3]
 }}
 
-If more steps are needed, continue with another SuperMCP command sequence.
+--- Context you receive ---
+When woken up, you will see a context message containing:
+1. GOALS — What the user has asked for (with IDs and status)
+2. SIGNALS — Recent dispatch events (task started, completed, failed, reminder)
+3. NEW INPUT — Any new message from the user (they can talk while tasks run)
 
-Step 4 - Error Handling:
-If you see "Error: Field required: <parameter_name>", retry with the correct parameter name.
-If you see "Tool not found", try a different tool or ask for clarification.
-If SuperMCP commands fail, analyze the error and either:
-- Try alternative commands or servers
-- Ask for clarification via "Conversation"
-- Explain the limitation to the user
+Use goals to track what the user wants. Use signals to know what happened.
+Use new input to add new goals or adjust priorities.
 
-Additional rules:
+--- Signal types ---
+- INIT: Task started (includes PID)
+- EXIT: Task finished (includes output or error)
+- REMIND: Task exceeded its remind_after threshold
+- WAIT: You previously chose to wait on this task
+- KILL: Task was terminated
+
+--- Goal updates ---
+You may include goal_updates in any response to update goal status:
+- "active": Tasks dispatched for this goal
+- "completed": Goal fulfilled, include result summary
+- "failed": Goal could not be completed, include reason
+
+--- Rules ---
 - ALWAYS return valid JSON only (no extra text, no markdown)
-- NEVER run destructive commands without explicit confirmation
-- Use absolute paths when possible
-- Prefer SuperMCP tools over direct shell commands when available
-- Always reload_servers() first to ensure you have the latest available tools
+- NEVER run destructive commands without the user confirming first
+- You can dispatch multiple tasks at once for parallelism
+- When all tasks for a goal complete, respond to the user with the results
+- If a REMIND signal fires, decide whether to wait or kill the task
+- The user can send new requests at any time — add them as new goals
 """
-
