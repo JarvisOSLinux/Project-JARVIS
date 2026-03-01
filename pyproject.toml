@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "jarvis-ai"
 version = "1.0.0"
-description = "AI-Native Voice Assistant with Dynamic Capability Discovery"
+description = "AI-Native Voice Assistant with Concurrent Task Dispatch"
 readme = "README.md"
 license = {text = "GPL-3.0"}
 authors = [
@@ -14,7 +14,7 @@ authors = [
 maintainers = [
     {name = "YakupAtahanov", email = "your.email@example.com"},
 ]
-keywords = ["ai", "voice", "assistant", "mcp", "supermcp", "llm", "ollama"]
+keywords = ["ai", "voice", "assistant", "mcp", "dispatch", "llm", "ollama"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
