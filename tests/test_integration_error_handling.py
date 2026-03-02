@@ -1,423 +1,234 @@
 """
 Error handling and recovery integration tests for JARVIS AI Assistant.
 
-Tests error scenarios, recovery mechanisms, loop detection, retry logic,
-and graceful handling of various failure modes.
+Tests error scenarios, graceful handling of LLM failures, and
+robustness of the synchronous ask() interface.
 """
 
 import pytest
-from unittest.mock import Mock, patch, AsyncMock
-from tests.integration_utils import (
-    mock_llm_response,
-    mock_llm_supermcp_command,
-    create_mock_supermcp_client
-)
+from unittest.mock import Mock, patch
+from jarvis.core.command_parser import TaskParser
+from jarvis.dispatch.goal_manager import GoalManager
+from tests.integration_utils import make_respond_action
+
+
+def _make_jarvis(llm_responses=None, llm_side_effect=None):
+    """Helper to create a Jarvis instance with predefined LLM behaviour."""
+    from jarvis.main import Jarvis
+
+    mock_llm = Mock()
+    if llm_side_effect:
+        mock_llm.ask = Mock(side_effect=llm_side_effect)
+    elif llm_responses:
+        if isinstance(llm_responses, list):
+            mock_llm.ask = Mock(side_effect=llm_responses)
+        else:
+            mock_llm.ask = Mock(return_value=llm_responses)
+    else:
+        mock_llm.ask = Mock(return_value=make_respond_action("Default"))
+    mock_llm.reset_history = Mock()
+
+    components = {
+        'llm': mock_llm,
+        'dispatch_adapter': Mock(is_connected=False),
+        'goal_manager': GoalManager(),
+        'event_merger': Mock(),
+        'task_parser': TaskParser(),
+        'output_manager': Mock(),
+        'tts': None,
+        'voice_manager': None,
+    }
+
+    with patch('jarvis.core.component_factory.ComponentFactory.create_all_components') as m:
+        m.return_value = components
+        jarvis = Jarvis(text_mode=True)
+
+    return jarvis
 
 
 @pytest.mark.integration
 class TestLLMErrorHandling:
     """Test LLM error handling and recovery."""
 
-    def test_llm_service_unavailable(self, jarvis_instance):
+    def test_llm_service_unavailable(self):
         """Test handling when LLM service is completely unavailable."""
-        # Mock LLM to raise connection error
-        jarvis_instance.llm.ask.side_effect = ConnectionError("LLM service unavailable")
+        jarvis = _make_jarvis(llm_side_effect=ConnectionError("LLM service unavailable"))
 
-        # Should handle gracefully
-        result = jarvis_instance.ask("Test question")
+        # Jarvis.ask() does not catch provider exceptions; they propagate
+        with pytest.raises(ConnectionError):
+            jarvis.ask("Test question")
 
-        # Should return a valid response indicating the error
-        assert isinstance(result, dict)
-        assert "user_request" in result
-        # May return error message or fallback response
-
-    def test_llm_timeout_handling(self, jarvis_instance):
+    def test_llm_timeout_handling(self):
         """Test handling of LLM request timeouts."""
         import asyncio
+        jarvis = _make_jarvis(llm_side_effect=asyncio.TimeoutError("Request timed out"))
 
-        # Mock LLM to timeout
-        async def timeout_llm():
-            await asyncio.sleep(10)  # Long delay
-            return mock_llm_response("Conversation", "Too late!")
+        with pytest.raises(asyncio.TimeoutError):
+            jarvis.ask("Test question")
 
-        jarvis_instance.llm.ask = Mock(side_effect=asyncio.TimeoutError("Request timed out"))
+    def test_llm_returns_unknown_action(self):
+        """Test handling when LLM returns an unknown action type."""
+        jarvis = _make_jarvis(llm_responses={"action": "fly_to_moon"})
 
-        # Should handle timeout gracefully
-        result = jarvis_instance.ask("Test question")
-
-        assert isinstance(result, dict)
-        assert "user_request" in result
-
-    def test_llm_returns_invalid_json(self, jarvis_instance):
-        """Test handling when LLM returns invalid JSON."""
-        # Mock LLM to return invalid JSON
-        invalid_responses = [
-            '{"user_request": "Conversation", "output": "incomplete json',
-            '{"user_request": "InvalidType", "output": "test"}',
-            'not json at all',
-            '{"user_request": "Conversation"}',  # Missing output
-            '{"output": "test"}',  # Missing user_request
-        ]
-
-        for invalid_json in invalid_responses:
-            jarvis_instance.llm.ask.return_value = invalid_json
-
-            result = jarvis_instance.ask("Test question")
-
-            # Should handle gracefully and return valid response
-            assert isinstance(result, dict)
-            assert "user_request" in result
-            assert "output" in result
-
-    def test_llm_returns_empty_response(self, jarvis_instance):
-        """Test handling of empty LLM responses."""
-        jarvis_instance.llm.ask.return_value = ""
-
-        result = jarvis_instance.ask("Test question")
-
-        # Should handle empty response
-        assert isinstance(result, dict)
-        assert "user_request" in result
-
-    def test_llm_provider_switching_on_failure(self, jarvis_instance):
-        """Test automatic LLM provider switching on failure."""
-        # This would require multiple LLM providers configured
-        # For now, test that single provider failure is handled
-        jarvis_instance.llm.ask.side_effect = Exception("Provider failed")
-
-        result = jarvis_instance.ask("Test question")
+        result = jarvis.ask("Test question")
 
         assert isinstance(result, dict)
-        # Should either recover or provide error message
+        assert "trouble" in result["output"].lower() or "try again" in result["output"].lower()
+
+    def test_llm_returns_empty_dict(self):
+        """Test handling of empty LLM response dict."""
+        jarvis = _make_jarvis(llm_responses={})
+
+        result = jarvis.ask("Test question")
+        assert isinstance(result, dict)
+        assert "output" in result
+
+    def test_llm_provider_exception(self):
+        """Test handling of generic LLM provider exceptions."""
+        jarvis = _make_jarvis(llm_side_effect=Exception("Provider crashed"))
+
+        with pytest.raises(Exception, match="Provider crashed"):
+            jarvis.ask("Test question")
 
 
 @pytest.mark.integration
-class TestSuperMCPErrorHandling:
-    """Test SuperMCP error handling and recovery."""
+class TestTaskParserErrorHandling:
+    """Test TaskParser error handling for various malformed inputs."""
 
-    def test_supermcp_connection_failure(self, jarvis_instance):
-        """Test handling of SuperMCP connection failures."""
-        # Mock SuperMCP command execution to fail
-        jarvis_instance.command_parser.execute_command_sequence.side_effect = ConnectionError("SuperMCP unreachable")
+    def test_dispatch_without_tasks_key(self):
+        parser = TaskParser()
+        result = parser.parse({"action": "dispatch"})
+        assert "error" in result
 
-        # Setup LLM to request SuperMCP command
-        jarvis_instance.llm.ask.return_value = mock_llm_supermcp_command("list_servers()")
+    def test_kill_without_pids(self):
+        parser = TaskParser()
+        result = parser.parse({"action": "kill"})
+        assert "error" in result
 
-        result = jarvis_instance.ask("List servers")
+    def test_defer_without_goal_id(self):
+        parser = TaskParser()
+        result = parser.parse({"action": "defer", "duration": 60})
+        assert "error" in result
 
-        # Should handle connection failure gracefully
-        assert isinstance(result, dict)
-        assert "user_request" in result
+    def test_defer_with_zero_duration(self):
+        parser = TaskParser()
+        result = parser.parse({"action": "defer", "goal_id": "g1", "duration": 0})
+        assert "error" in result
 
-    def test_supermcp_server_not_found(self, jarvis_instance):
-        """Test handling when requested MCP server doesn't exist."""
-        # Setup command for non-existent server
-        jarvis_instance.llm.ask.return_value = mock_llm_supermcp_command("inspect_server(NonExistentServer)")
+    def test_dispatch_with_non_list_tasks(self):
+        parser = TaskParser()
+        result = parser.parse({"action": "dispatch", "tasks": "not a list"})
+        assert "error" in result
 
-        # Mock SuperMCP to return server not found error
-        jarvis_instance.command_parser.execute_command_sequence.return_value = {
-            "success": False,
-            "error": "Server 'NonExistentServer' not found"
-        }
-
-        result = jarvis_instance.ask("Inspect unknown server")
-
-        assert result["user_request"] == "Conversation"
-        # Should contain error information or recovery message
-
-    def test_supermcp_tool_not_found(self, jarvis_instance):
-        """Test handling when requested tool doesn't exist on server."""
-        # Setup command for non-existent tool
-        jarvis_instance.llm.ask.return_value = mock_llm_supermcp_command("call_server_tool(EchoMCP, nonexistent_tool, {})")
-
-        # Mock tool execution to fail
-        jarvis_instance.command_parser.execute_command_sequence.return_value = {
-            "success": False,
-            "results": [{"error": "Tool 'nonexistent_tool' not found on server 'EchoMCP'"}]
-        }
-
-        result = jarvis_instance.ask("Use unknown tool")
-
-        assert isinstance(result, dict)
-        assert result["user_request"] == "Conversation"
-
-    def test_supermcp_partial_command_failure(self, jarvis_instance):
-        """Test handling when some commands in sequence fail."""
-        # Setup multi-command sequence
-        commands = "list_servers(); call_server_tool(BadServer, bad_tool, {}); call_server_tool(ShellMCP, get_platform_info, {})"
-        jarvis_instance.llm.ask.return_value = mock_llm_supermcp_command(commands)
-
-        # Mock mixed results: success, failure, success
-        jarvis_instance.command_parser.execute_command_sequence.return_value = {
-            "success": True,
-            "results": [
-                {"servers": ["ShellMCP", "EchoMCP"]},  # Success
-                {"error": "BadServer not found"},     # Failure
-                {"result": {"os": "Linux"}}           # Success
-            ]
-        }
-
-        # Setup LLM to handle partial failure
-        jarvis_instance.llm.ask.return_value = mock_llm_response(
-            "Conversation",
-            "Found servers ShellMCP and EchoMCP. BadServer was not available. System is running Linux."
-        )
-
-        result = jarvis_instance.ask("Check system and servers")
-
-        assert result["user_request"] == "Conversation"
-        assert "BadServer was not available" in result["output"]
-        assert "Linux" in result["output"]
+    def test_kill_with_non_list_pids(self):
+        parser = TaskParser()
+        result = parser.parse({"action": "kill", "pids": "not a list"})
+        assert "error" in result
 
 
 @pytest.mark.integration
-class TestLoopDetectionAndRecovery:
-    """Test loop detection and infinite loop prevention."""
+class TestMultipleRequestIsolation:
+    """Test that error state does not leak between requests."""
 
-    def test_llm_command_repetition_detection(self, jarvis_instance):
-        """Test detection when LLM repeats the same command."""
-        # Setup LLM to always return the same failing command
-        failing_command = mock_llm_supermcp_command("call_server_tool(BrokenServer, broken_tool, {})")
-        jarvis_instance.llm.ask.side_effect = [
-            failing_command,  # First attempt
-            failing_command,  # Second attempt (repeat)
-            failing_command,  # Third attempt (repeat detected)
-        ]
+    def test_error_then_success(self):
+        """Test that a failed request doesn't pollute the next one."""
+        jarvis = _make_jarvis(llm_responses=[
+            {"action": "nonexistent"},
+            make_respond_action("Second request worked!"),
+        ])
 
-        # Mock command execution to always fail
-        jarvis_instance.command_parser.execute_command_sequence.return_value = {
-            "success": False,
-            "error": "BrokenServer not found"
+        r1 = jarvis.ask("First failing request")
+        r2 = jarvis.ask("Second normal request")
+
+        assert isinstance(r1, dict)
+        assert isinstance(r2, dict)
+        assert r2["output"] == "Second request worked!"
+
+    def test_exception_then_success(self):
+        """Test that an exception doesn't prevent the next request."""
+        mock_llm = Mock()
+        mock_llm.ask = Mock(side_effect=[
+            RuntimeError("Boom"),
+            make_respond_action("Recovery!"),
+        ])
+        mock_llm.reset_history = Mock()
+
+        from jarvis.main import Jarvis
+        components = {
+            'llm': mock_llm,
+            'dispatch_adapter': Mock(is_connected=False),
+            'goal_manager': GoalManager(),
+            'event_merger': Mock(),
+            'task_parser': TaskParser(),
+            'output_manager': Mock(),
+            'tts': None,
+            'voice_manager': None,
         }
 
-        result = jarvis_instance.ask("Use broken server")
+        with patch('jarvis.core.component_factory.ComponentFactory.create_all_components') as m:
+            m.return_value = components
+            jarvis = Jarvis(text_mode=True)
 
-        # Should detect loop and break with error message
-        assert result["user_request"] == "Conversation"
-        assert "difficulty" in result["output"] or "try again" in result["output"]
+        # First request raises
+        with pytest.raises(RuntimeError):
+            jarvis.ask("Boom")
 
-    def test_max_iterations_limit(self, jarvis_instance):
-        """Test that system respects maximum iteration limits."""
-        # Setup scenario that would loop indefinitely
-        jarvis_instance.llm.ask.return_value = mock_llm_supermcp_command("list_servers()")
-
-        # Mock command that always requires more processing
-        jarvis_instance.command_parser.execute_command_sequence.return_value = {
-            "success": True,
-            "results": [{"servers": ["Server1"]}]
-        }
-
-        # This should eventually hit the iteration limit
-        result = jarvis_instance.ask("List servers repeatedly")
-
-        # Should eventually stop and return a response
-        assert isinstance(result, dict)
-        assert "user_request" in result
-
-    def test_loop_detection_reset_between_requests(self, jarvis_instance):
-        """Test that loop detection state resets between different requests."""
-        # First request with repetition
-        jarvis_instance.llm.ask.return_value = mock_llm_supermcp_command("call_server_tool(Broken, tool, {})")
-        jarvis_instance.command_parser.execute_command_sequence.return_value = {
-            "success": False,
-            "error": "Broken server"
-        }
-
-        # First request should work normally
-        result1 = jarvis_instance.ask("First broken request")
-
-        # Second different request should not be affected by first request's loop detection
-        jarvis_instance.llm.ask.return_value = mock_llm_supermcp_command("list_servers()")
-        jarvis_instance.command_parser.execute_command_sequence.return_value = {
-            "success": True,
-            "results": [{"servers": ["EchoMCP"]}]
-        }
-
-        result2 = jarvis_instance.ask("Second normal request")
-
-        # Both should return valid responses
-        assert isinstance(result1, dict)
-        assert isinstance(result2, dict)
+        # Second request should work
+        r2 = jarvis.ask("Recover")
+        assert r2["output"] == "Recovery!"
 
 
 @pytest.mark.integration
-class TestRetryLogicAndRecovery:
-    """Test retry logic and error recovery mechanisms."""
+class TestDispatchNotConnectedHandling:
+    """Test behaviour when dispatch is not connected."""
 
-    def test_automatic_command_retry_on_failure(self, jarvis_instance):
-        """Test automatic retry of failed commands."""
-        # Setup LLM to provide alternative command after failure
-        jarvis_instance.llm.ask.side_effect = [
-            mock_llm_supermcp_command("call_server_tool(BadServer, tool, {})"),  # First attempt fails
-            mock_llm_supermcp_command("call_server_tool(GoodServer, tool, {})"), # Retry with different server
-        ]
+    def test_dispatch_action_without_connection(self):
+        """Test dispatch action when dispatch adapter is not connected."""
+        jarvis = _make_jarvis(llm_responses={
+            "action": "dispatch",
+            "tasks": [{"server": "X", "tool": "y", "params": {}}],
+        })
 
-        # Mock first command fails, second succeeds
-        jarvis_instance.command_parser.execute_command_sequence.side_effect = [
-            {"success": False, "error": "BadServer not found"},  # First failure
-            {"success": True, "results": [{"result": "Success!"}]},  # Second success
-        ]
+        result = jarvis.ask("Run something")
 
-        result = jarvis_instance.ask("Execute command with retry")
-
-        # Should eventually succeed
-        assert result["user_request"] == "Conversation"
-        assert "Success" in result["output"]
-
-    def test_graceful_degradation_on_all_failures(self, jarvis_instance):
-        """Test graceful degradation when all retry attempts fail."""
-        # Setup LLM that keeps trying failing commands
-        jarvis_instance.llm.ask.return_value = mock_llm_supermcp_command("call_server_tool(AlwaysFails, tool, {})")
-
-        # Mock all attempts fail
-        jarvis_instance.command_parser.execute_command_sequence.return_value = {
-            "success": False,
-            "error": "Server always fails"
-        }
-
-        result = jarvis_instance.ask("Impossible task")
-
-        # Should eventually give up gracefully
+        # The ask() method catches dispatch actions and returns action label
         assert isinstance(result, dict)
-        assert result["user_request"] == "Conversation"
+        assert "output" in result
 
-    def test_partial_recovery_scenarios(self, jarvis_instance):
-        """Test recovery from partial failures."""
-        # Setup multi-step process where some steps fail but others succeed
-        commands = "reload_servers(); inspect_server(BadServer); list_servers()"
-        jarvis_instance.llm.ask.return_value = mock_llm_supermcp_command(commands)
+    def test_kill_action_without_connection(self):
+        """Test kill action when dispatch adapter is not connected."""
+        jarvis = _make_jarvis(llm_responses={"action": "kill", "pids": [1]})
 
-        # Mock: reload succeeds, inspect fails, list succeeds
-        jarvis_instance.command_parser.execute_command_sequence.return_value = {
-            "success": True,
-            "results": [
-                {"message": "Reloaded 3 servers"},
-                {"error": "BadServer not found"},
-                {"servers": ["EchoMCP", "ShellMCP"]}
-            ]
-        }
-
-        result = jarvis_instance.ask("Complex multi-step task")
-
-        # Should handle partial success
+        result = jarvis.ask("Kill task 1")
         assert isinstance(result, dict)
-        assert result["user_request"] == "Conversation"
+        assert "output" in result
 
 
 @pytest.mark.integration
-class TestResourceAndTimeoutHandling:
-    """Test resource management and timeout handling."""
+class TestGoalManagerErrorResilience:
+    """Test GoalManager handles edge cases properly."""
 
-    def test_long_running_command_timeout(self, jarvis_instance):
-        """Test handling of long-running commands that timeout."""
-        import asyncio
+    def test_complete_nonexistent_goal(self):
+        gm = GoalManager()
+        gm.complete_goal("nonexistent")  # Should not crash
 
-        # Setup long-running command
-        jarvis_instance.llm.ask.return_value = mock_llm_supermcp_command("call_server_tool(ShellMCP, execute_command, {command: 'sleep 30'})")
+    def test_fail_nonexistent_goal(self):
+        gm = GoalManager()
+        gm.fail_goal("nonexistent")  # Should not crash
 
-        # Mock command execution that takes too long
-        async def slow_execution(*args, **kwargs):
-            await asyncio.sleep(35)  # Longer than timeout
-            return {"result": "Too late!"}
+    def test_defer_nonexistent_goal(self):
+        gm = GoalManager()
+        gm.defer_goal("nonexistent", 99)  # Should not crash
 
-        jarvis_instance.command_parser.execute_command_sequence = AsyncMock(side_effect=slow_execution)
+    def test_link_tasks_nonexistent_goal(self):
+        gm = GoalManager()
+        gm.link_tasks("nonexistent", [1, 2])  # Should not crash
 
-        result = jarvis_instance.ask("Run slow command")
+    def test_reactivate_nonexistent_goal(self):
+        gm = GoalManager()
+        gm.reactivate_goal("nonexistent")  # Should not crash
 
-        # Should handle timeout gracefully
-        assert isinstance(result, dict)
-
-    def test_memory_error_handling(self, jarvis_instance):
-        """Test handling of memory errors during processing."""
-        # Setup command that causes memory issues
-        jarvis_instance.llm.ask.return_value = mock_llm_supermcp_command("call_server_tool(ShellMCP, execute_command, {command: 'huge_command'})")
-
-        # Mock memory error
-        jarvis_instance.command_parser.execute_command_sequence.side_effect = MemoryError("Out of memory")
-
-        result = jarvis_instance.ask("Run memory-intensive command")
-
-        # Should handle memory error gracefully
-        assert isinstance(result, dict)
-        assert "user_request" in result
-
-    def test_network_error_recovery(self, jarvis_instance):
-        """Test recovery from network-related errors."""
-        # Setup network-dependent command
-        jarvis_instance.llm.ask.return_value = mock_llm_supermcp_command("reload_servers()")
-
-        # Mock network error
-        jarvis_instance.command_parser.execute_command_sequence.side_effect = OSError("Network is unreachable")
-
-        result = jarvis_instance.ask("Refresh servers")
-
-        # Should handle network error gracefully
-        assert isinstance(result, dict)
-        assert "user_request" in result
-
-
-@pytest.mark.integration
-class TestComplexErrorScenarios:
-    """Test complex error scenarios with multiple failure modes."""
-
-    def test_cascading_error_recovery(self, jarvis_instance):
-        """Test recovery from cascading errors."""
-        # Setup scenario where one error leads to another
-        jarvis_instance.llm.ask.side_effect = [
-            mock_llm_supermcp_command("call_server_tool(Server1, tool1, {})"),
-            mock_llm_supermcp_command("call_server_tool(Server2, tool2, {})"),  # Fallback
-            mock_llm_response("Conversation", "Unable to complete the requested operation.")
-        ]
-
-        # Mock cascading failures
-        jarvis_instance.command_parser.execute_command_sequence.side_effect = [
-            OSError("Server1 network error"),     # First server down
-            Exception("Server2 authentication failed"),  # Second server auth issue
-        ]
-
-        result = jarvis_instance.ask("Complex operation")
-
-        # Should eventually fail gracefully
-        assert result["user_request"] == "Conversation"
-        assert "Unable to complete" in result["output"]
-
-    def test_error_message_propagation(self, jarvis_instance):
-        """Test that error messages are properly propagated to user."""
-        # Setup command that fails with specific error
-        jarvis_instance.llm.ask.return_value = mock_llm_supermcp_command("call_server_tool(ShellMCP, execute_command, {command: 'nonexistent_cmd'})")
-
-        # Mock specific error
-        specific_error = "Command 'nonexistent_cmd' not found in PATH"
-        jarvis_instance.command_parser.execute_command_sequence.return_value = {
-            "success": False,
-            "error": specific_error
-        }
-
-        result = jarvis_instance.ask("Run unknown command")
-
-        # Error should be communicated to user
-        assert isinstance(result, dict)
-        assert result["user_request"] == "Conversation"
-
-    def test_error_state_cleanup(self, jarvis_instance):
-        """Test that error states are properly cleaned up between requests."""
-        # First request with error
-        jarvis_instance.llm.ask.return_value = mock_llm_supermcp_command("call_server_tool(Broken, tool, {})")
-        jarvis_instance.command_parser.execute_command_sequence.return_value = {
-            "success": False,
-            "error": "Broken server"
-        }
-
-        result1 = jarvis_instance.ask("First failing request")
-
-        # Second request should work normally (not affected by first error)
-        jarvis_instance.llm.ask.return_value = mock_llm_response("Conversation", "Second request successful")
-        jarvis_instance.command_parser.execute_command_sequence = Mock()  # Reset
-
-        result2 = jarvis_instance.ask("Second normal request")
-
-        # Both should return valid responses
-        assert isinstance(result1, dict)
-        assert isinstance(result2, dict)
-        assert result2["user_request"] == "Conversation"
-        assert "successful" in result2["output"]
+    def test_dismiss_completed_empty(self):
+        gm = GoalManager()
+        result = gm.dismiss_completed()
+        assert result == []

@@ -2,33 +2,138 @@
 Integration test utilities for JARVIS AI Assistant.
 
 Provides helper functions and utilities for integration testing across all subsystems.
+Updated for the event-driven dispatch architecture.
 """
 
 import json
 import tempfile
 import os
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Callable
-from unittest.mock import Mock, AsyncMock, MagicMock
-import pytest
+from typing import Dict, Any, List, Optional
+from unittest.mock import Mock, AsyncMock
 
-# JARVIS imports for testing
-from jarvis.config import Config
-from jarvis.core.logger import get_logger
 
-logger = get_logger(__name__)
+# ---------------------------------------------------------------------------
+# Dispatch-format response builders
+# ---------------------------------------------------------------------------
+
+def make_respond_action(output: str, goal_updates: Optional[List] = None) -> Dict[str, Any]:
+    """Create a respond action (LLM tells the user something)."""
+    resp = {"action": "respond", "output": output}
+    if goal_updates:
+        resp["goal_updates"] = goal_updates
+    return resp
+
+
+def make_dispatch_action(tasks: List[Dict[str, Any]], goal_updates: Optional[List] = None) -> Dict[str, Any]:
+    """Create a dispatch action (LLM sends tasks to dispatch)."""
+    resp = {"action": "dispatch", "tasks": tasks}
+    if goal_updates:
+        resp["goal_updates"] = goal_updates
+    return resp
+
+
+def make_wait_action() -> Dict[str, Any]:
+    """Create a wait action."""
+    return {"action": "wait"}
+
+
+def make_kill_action(pids: List[int]) -> Dict[str, Any]:
+    """Create a kill action."""
+    return {"action": "kill", "pids": pids}
+
+
+def make_defer_action(goal_id: str, duration: int, reason: str = "") -> Dict[str, Any]:
+    """Create a defer action."""
+    return {"action": "defer", "goal_id": goal_id, "duration": duration, "reason": reason}
+
+
+def make_task(server: str, tool: str, params: Optional[Dict] = None,
+              remind_after: Optional[int] = None) -> Dict[str, Any]:
+    """Create a single task dict for dispatch actions."""
+    task = {"server": server, "tool": tool, "params": params or {}}
+    if remind_after is not None:
+        task["remind_after"] = remind_after
+    return task
+
+
+# ---------------------------------------------------------------------------
+# Signal builders (dispatch signals coming back from dispatch binary)
+# ---------------------------------------------------------------------------
+
+def make_signal(pid: int, signal_type: str, data: Optional[Dict] = None,
+                metadata: Optional[Dict] = None) -> Dict[str, Any]:
+    """Create a dispatch signal dict."""
+    sig = {"pid": pid, "type": signal_type}
+    if data is not None:
+        sig["data"] = data
+    if metadata is not None:
+        sig["metadata"] = metadata
+    return sig
+
+
+def make_exit_signal(pid: int, output: str = "", error: str = "") -> Dict[str, Any]:
+    """Create an EXIT signal."""
+    data = {}
+    if output:
+        data["output"] = output
+    if error:
+        data["error"] = error
+    return make_signal(pid, "EXIT", data=data)
+
+
+def make_remind_signal(pid: int, goal_id: Optional[str] = None) -> Dict[str, Any]:
+    """Create a REMIND signal, optionally linked to a goal."""
+    metadata = {"goal_id": goal_id} if goal_id else None
+    return make_signal(pid, "REMIND", metadata=metadata)
+
+
+# ---------------------------------------------------------------------------
+# Mock factories
+# ---------------------------------------------------------------------------
+
+def create_mock_llm(responses: Optional[List[Dict[str, Any]]] = None) -> Mock:
+    """Create a mock LLM that returns predefined dispatch-format responses."""
+    llm = Mock()
+    if responses:
+        llm.ask = Mock(side_effect=responses)
+    else:
+        llm.ask = Mock(return_value=make_respond_action("Hello!"))
+    llm.reset_history = Mock()
+    llm.provider = Mock()
+    llm.provider.model = "test-model"
+    return llm
+
+
+def create_mock_dispatch_adapter(connected: bool = False) -> Mock:
+    """Create a mock DispatchAdapter."""
+    adapter = Mock()
+    adapter.is_connected = connected
+    adapter.connect = AsyncMock()
+    adapter.disconnect = AsyncMock()
+    adapter.send_tasks = AsyncMock(return_value={"pids": [1]})
+    adapter.kill_tasks = AsyncMock(return_value={"killed": [1]})
+    adapter.set_timer = AsyncMock(return_value={"pid": 99})
+    adapter.get_signal_window = AsyncMock(return_value=[])
+    return adapter
+
+
+# ---------------------------------------------------------------------------
+# File system helpers
+# ---------------------------------------------------------------------------
+
+def create_temp_directory_with_files(files: Dict[str, str]) -> str:
+    """Create a temporary directory with test files."""
+    temp_dir = tempfile.mkdtemp()
+    for file_path, content in files.items():
+        full_path = Path(temp_dir) / file_path
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        full_path.write_text(content)
+    return temp_dir
 
 
 def create_test_mcp_config(servers: Optional[Dict[str, Any]] = None) -> str:
-    """
-    Create a temporary mcp.json config file for testing.
-
-    Args:
-        servers: Dictionary of MCP servers to include. If None, creates minimal test config.
-
-    Returns:
-        Path to the temporary config file
-    """
+    """Create a temporary mcp.json config file for testing."""
     if servers is None:
         servers = {
             "EchoMCP": {
@@ -36,280 +141,45 @@ def create_test_mcp_config(servers: Optional[Dict[str, Any]] = None) -> str:
                 "args": ["tests/mock_servers/echo_server.py"],
                 "type": "stdio",
                 "description": "Test echo server",
-                "enabled": True
+                "enabled": True,
             }
         }
-
     config = {"mcpServers": servers}
-
     with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
         json.dump(config, f, indent=2)
         return f.name
 
 
-def mock_llm_response(user_request: str, output: str, **kwargs) -> Dict[str, Any]:
-    """
-    Create a mock LLM response dictionary.
+# ---------------------------------------------------------------------------
+# Environment helpers
+# ---------------------------------------------------------------------------
 
-    Args:
-        user_request: Either "Conversation" or "SuperMCP"
-        output: The response content
-        **kwargs: Additional fields to include
+def setup_test_environment(config_overrides: Optional[Dict[str, str]] = None):
+    """Set up test environment with configuration overrides."""
+    original_env = os.environ.copy()
 
-    Returns:
-        Properly formatted LLM response dictionary
-    """
-    response = {
-        "user_request": user_request,
-        "output": output
-    }
-    response.update(kwargs)
-    return response
+    if config_overrides:
+        os.environ.update(config_overrides)
 
+    class TestEnvironment:
+        def __enter__(self):
+            return self
 
-def mock_llm_conversation(question: str, answer: str) -> Dict[str, Any]:
-    """
-    Create a mock LLM conversation response.
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            os.environ.clear()
+            os.environ.update(original_env)
 
-    Args:
-        question: User question (ignored, for documentation)
-        answer: LLM's conversational response
-
-    Returns:
-        Conversation-type LLM response
-    """
-    return mock_llm_response("Conversation", answer)
+    return TestEnvironment()
 
 
-def mock_llm_supermcp_command(commands: str) -> Dict[str, Any]:
-    """
-    Create a mock LLM SuperMCP command response.
-
-    Args:
-        commands: SuperMCP command sequence (e.g., "list_servers(); reload_servers()")
-
-    Returns:
-        SuperMCP-type LLM response
-    """
-    return mock_llm_response("SuperMCP", commands)
-
-
-def mock_supermcp_tool_call(server: str, tool: str, args: Optional[Dict[str, Any]] = None,
-                           result: Any = None, error: Optional[str] = None) -> Dict[str, Any]:
-    """
-    Create a mock SuperMCP tool call response.
-
-    Args:
-        server: MCP server name
-        tool: Tool name
-        args: Tool arguments
-        result: Tool execution result
-        error: Error message if tool failed
-
-    Returns:
-        Mock tool execution result
-    """
-    if error:
-        return {"error": error}
-    return {
-        "server": server,
-        "tool": tool,
-        "arguments": args or {},
-        "result": result,
-        "success": True
-    }
-
-
-def mock_shellmcp_approval_required(command: str, command_id: str = "test-123") -> Dict[str, Any]:
-    """
-    Create a mock ShellMCP response requiring approval.
-
-    Args:
-        command: The command that requires approval
-        command_id: Command ID for approval/denial
-
-    Returns:
-        Mock approval-required response
-    """
-    return {
-        "approval_required": True,
-        "server": "ShellMCP",
-        "tool": "execute_command",
-        "arguments": {"command": command},
-        "shellmcp_response": f"This command requires approval. It has been queued with ID: {command_id}"
-    }
-
-
-def mock_shellmcp_approved_execution(command: str, output: str) -> Dict[str, Any]:
-    """
-    Create a mock ShellMCP successful execution response.
-
-    Args:
-        command: The executed command
-        output: Command output
-
-    Returns:
-        Mock successful execution response
-    """
-    return {
-        "server": "ShellMCP",
-        "tool": "execute_command",
-        "arguments": {"command": command},
-        "result": {
-            "success": True,
-            "stdout": output,
-            "stderr": "",
-            "returncode": 0
-        },
-        "success": True
-    }
-
-
-def create_mock_llm_provider(responses: List[Dict[str, Any]]) -> Mock:
-    """
-    Create a mock LLM provider that returns predefined responses.
-
-    Args:
-        responses: List of responses to return in sequence
-
-    Returns:
-        Mock LLM provider
-    """
-    provider = Mock()
-    provider.chat = Mock(side_effect=responses)
-    provider.is_available.return_value = True
-    return provider
-
-
-def create_mock_supermcp_client() -> Mock:
-    """
-    Create a mock SuperMCP client for testing.
-
-    Returns:
-        Mock SuperMCP client
-    """
-    client = Mock()
-
-    # Mock server operations
-    client.reload_servers = AsyncMock(return_value={"servers": ["EchoMCP", "ShellMCP"]})
-    client.list_servers = AsyncMock(return_value=["EchoMCP", "ShellMCP"])
-    client.inspect_server = AsyncMock(return_value={
-        "tools": [{"name": "echo", "description": "Echo back input"}]
-    })
-
-    # Mock tool calls
-    def mock_call_server_tool(server, tool, args=None):
-        if server == "EchoMCP" and tool == "echo":
-            return {"result": args.get("message", "")}
-        elif server == "ShellMCP" and tool == "get_platform_info":
-            return {"result": {"os": "Linux", "arch": "x86_64"}}
-        elif server == "ShellMCP" and tool == "execute_command":
-            command = args.get("command", "")
-            if "ls" in command:
-                return {"result": {"stdout": "file1.txt\nfile2.py", "stderr": "", "returncode": 0}}
-            else:
-                return mock_shellmcp_approval_required(command)
-        return {"error": f"Unknown tool {server}.{tool}"}
-
-    client.call_server_tool = AsyncMock(side_effect=mock_call_server_tool)
-
-    return client
-
-
-def create_mock_mcp_server_response(success: bool = True, result: Any = None,
-                                   error: Optional[str] = None) -> Dict[str, Any]:
-    """
-    Create a mock MCP server response.
-
-    Args:
-        success: Whether the operation succeeded
-        result: The operation result
-        error: Error message if operation failed
-
-    Returns:
-        Mock MCP server response
-    """
-    if not success:
-        return {"success": False, "error": error}
-    return {"success": True, "result": result}
-
-
-def assert_valid_json_response(response: Dict[str, Any]) -> None:
-    """
-    Assert that a response is a valid JARVIS JSON response.
-
-    Args:
-        response: Response to validate
-
-    Raises:
-        AssertionError: If response is not valid
-    """
-    assert isinstance(response, dict), "Response must be a dictionary"
-    assert "user_request" in response, "Response must have 'user_request' field"
-    assert "output" in response, "Response must have 'output' field"
-
-    user_request = response["user_request"]
-    assert user_request in ["Conversation", "SuperMCP"], \
-        f"user_request must be 'Conversation' or 'SuperMCP', got: {user_request}"
-
-
-def assert_supermcp_command_format(command: str) -> None:
-    """
-    Assert that a SuperMCP command string is properly formatted.
-
-    Args:
-        command: Command string to validate
-
-    Raises:
-        AssertionError: If command format is invalid
-    """
-    assert isinstance(command, str), "SuperMCP command must be a string"
-    assert command.strip() != "", "SuperMCP command cannot be empty"
-
-    # Basic format check - should contain valid command patterns
-    valid_patterns = [
-        "reload_servers()",
-        "list_servers()",
-        "inspect_server(",
-        "call_server_tool("
-    ]
-
-    has_valid_command = any(pattern in command for pattern in valid_patterns)
-    assert has_valid_command, f"Command must contain valid SuperMCP pattern: {command}"
-
-
-def create_temp_directory_with_files(files: Dict[str, str]) -> str:
-    """
-    Create a temporary directory with test files.
-
-    Args:
-        files: Dictionary mapping file paths to content
-
-    Returns:
-        Path to the temporary directory
-    """
-    temp_dir = tempfile.mkdtemp()
-
-    for file_path, content in files.items():
-        full_path = Path(temp_dir) / file_path
-        full_path.parent.mkdir(parents=True, exist_ok=True)
-        full_path.write_text(content)
-
-    return temp_dir
-
+# ---------------------------------------------------------------------------
+# Async test helpers
+# ---------------------------------------------------------------------------
 
 def wait_for_async(coro, timeout: float = 5.0):
-    """
-    Helper to run async coroutines in tests.
-
-    Args:
-        coro: Coroutine to run
-        timeout: Timeout in seconds
-
-    Returns:
-        Coroutine result
-    """
+    """Helper to run async coroutines in tests."""
     import asyncio
+    import pytest
 
     async def run_with_timeout():
         try:
@@ -325,95 +195,67 @@ def wait_for_async(coro, timeout: float = 5.0):
         loop.close()
 
 
-def create_test_jarvis_config(**overrides) -> Dict[str, Any]:
+# ---------------------------------------------------------------------------
+# Legacy LLM response helpers (for LLM-level tests that care about raw JSON)
+# ---------------------------------------------------------------------------
+
+def mock_llm_response(user_request: str = "Conversation", output: str = "Hello!") -> Dict[str, Any]:
+    """Create a mock LLM response in the old JSON format (user_request/output).
+
+    The LLM actually returns free-form JSON; the *new* dispatch format uses
+    ``action`` as the key. These helpers are kept for tests that exercise
+    the raw LLM response parsing layer.
     """
-    Create a test configuration for JARVIS components.
+    return {"user_request": user_request, "output": output}
 
-    Args:
-        **overrides: Configuration overrides
 
-    Returns:
-        Test configuration dictionary
+def mock_llm_supermcp_command(command: str) -> Dict[str, Any]:
+    """Create a mock SuperMCP command response from the LLM."""
+    return {"user_request": "SuperMCP", "output": command}
+
+
+def assert_valid_json_response(response: Dict[str, Any]) -> None:
+    """Assert that a response dict is valid per the old JSON format."""
+    assert isinstance(response, dict), f"Expected dict, got {type(response)}"
+    assert "user_request" in response, f"Missing 'user_request' key: {response}"
+    assert "output" in response, f"Missing 'output' key: {response}"
+    valid_types = {"Conversation", "SuperMCP"}
+    assert response["user_request"] in valid_types, (
+        f"Invalid user_request type '{response['user_request']}'"
+    )
+
+
+def create_mock_llm_provider(responses: Optional[List] = None) -> Mock:
+    """Create a mock LLM provider that returns pre-serialized JSON strings.
+
+    NOTE: The LLM constructor calls ``provider.chat()`` once during preload.
+    This helper automatically prepends a preload response so the test
+    responses are consumed during actual ``llm.ask()`` calls.
     """
-    config = {
-        'LLM_MODEL': 'test-model',
-        'SUPERMCP_SERVER_PATH': 'SuperMCP/SuperMCP.py',
-        'SUPERMCP_TIMEOUT': 30,
-        'OUTPUT_MODE': 'text',
-        'LOG_LEVEL': 'INFO',
-        'TTS_MODEL_ONNX': 'test.onnx',
-        'TTS_MODEL_JSON': 'test.json',
-        'VOSK_MODEL_PATH': 'models/vosk/vosk-model-small-en-us-0.15'
-    }
-    config.update(overrides)
-    return config
+    provider = Mock()
+    provider.model = "mock-model"
+
+    # Preload response (consumed by LLM.__init__)
+    preload_response = json.dumps({"status": "ready"})
+
+    if responses:
+        json_responses = [preload_response]
+        for r in responses:
+            if isinstance(r, dict):
+                json_responses.append(json.dumps(r))
+            else:
+                json_responses.append(r)  # already a string
+        provider.chat = Mock(side_effect=json_responses)
+    else:
+        provider.chat = Mock(return_value=json.dumps(mock_llm_response()))
+
+    return provider
 
 
-class MockApprovalHandler:
-    """
-    Mock approval handler for testing approval workflows.
-    """
-
-    def __init__(self, approve_commands: bool = True):
-        """
-        Initialize mock approval handler.
-
-        Args:
-            approve_commands: Whether to approve or deny commands by default
-        """
-        self.approve_commands = approve_commands
-        self.requests = []
-
-    def request_approval(self, command: str, security_level: str) -> bool:
-        """
-        Mock approval request.
-
-        Args:
-            command: Command requiring approval
-            security_level: Security level of the command
-
-        Returns:
-            True if approved, False if denied
-        """
-        self.requests.append({
-            'command': command,
-            'security_level': security_level,
-            'approved': self.approve_commands
-        })
-
-        return self.approve_commands
-
-    def get_requests(self) -> List[Dict[str, Any]]:
-        """Get all approval requests made."""
-        return self.requests.copy()
-
-    def clear_requests(self) -> None:
-        """Clear the request history."""
-        self.requests.clear()
-
-
-def setup_test_environment(config_overrides: Optional[Dict[str, str]] = None):
-    """
-    Set up test environment with configuration overrides.
-
-    Args:
-        config_overrides: Environment variable overrides
-
-    Returns:
-        Context manager that cleans up environment on exit
-    """
-    original_env = os.environ.copy()
-
-    if config_overrides:
-        os.environ.update(config_overrides)
-
-    class TestEnvironment:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc_val, exc_tb):
-            # Restore original environment
-            os.environ.clear()
-            os.environ.update(original_env)
-
-    return TestEnvironment()
+# Keep old names available for backward compat in conftest fixtures
+mock_shellmcp_approval_required = None  # removed
+mock_shellmcp_approved_execution = None  # removed
+MockApprovalHandler = None  # removed
+create_mock_supermcp_client = None  # removed
+mock_supermcp_tool_call = None  # removed
+assert_supermcp_command_format = None  # removed

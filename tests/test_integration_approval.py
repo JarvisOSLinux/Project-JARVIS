@@ -1,435 +1,221 @@
 """
-Approval workflow integration tests for JARVIS AI Assistant.
+Goal management integration tests for JARVIS AI Assistant.
 
-Tests ShellMCP approval/denial workflow, command ID extraction,
-approval request handling, and complete approval cycles.
+Tests the GoalManager lifecycle: adding goals, linking tasks, completing,
+failing, deferring, reactivating, and signal-driven updates.
 """
 
 import pytest
-from unittest.mock import Mock, patch, AsyncMock
-from tests.integration_utils import (
-    mock_shellmcp_approval_required,
-    mock_shellmcp_approved_execution,
-    MockApprovalHandler
-)
+from jarvis.dispatch.goal_manager import GoalManager, Goal, GoalStatus
+from tests.integration_utils import make_exit_signal, make_remind_signal
 
 
 @pytest.mark.integration
-class TestApprovalRequestDetection:
-    """Test detection of approval-required commands."""
+class TestGoalCreation:
+    """Test goal creation and initial state."""
 
-    def test_detect_approval_required_response(self):
-        """Test detection of approval-required response from ShellMCP."""
-        from jarvis.main import Jarvis
+    def test_add_single_goal(self):
+        gm = GoalManager()
+        goal = gm.add_goal("Install numpy")
+        assert goal.description == "Install numpy"
+        assert goal.status == GoalStatus.PENDING
+        assert len(goal.id) > 0
 
-        # Create Jarvis instance
-        with patch('jarvis.core.component_factory.ComponentFactory.create_llm') as mock_llm, \
-             patch('jarvis.core.component_factory.ComponentFactory.create_supermcp') as mock_supermcp, \
-             patch('jarvis.core.component_factory.ComponentFactory.create_tts_optional') as mock_tts, \
-             patch('jarvis.core.component_factory.ComponentFactory.create_voice_manager_optional') as mock_vm:
+    def test_add_multiple_goals(self):
+        gm = GoalManager()
+        goals = gm.add_goals(["Task A", "Task B", "Task C"])
+        assert len(goals) == 3
+        assert goals[0].description == "Task A"
+        assert goals[2].description == "Task C"
 
-            mock_llm.return_value = Mock()
-            mock_supermcp.return_value = Mock()
-            mock_tts.return_value = None
-            mock_vm.return_value = None
-
-            jarvis = Jarvis(text_mode=True)
-
-            # Test approval detection
-            approval_response = mock_shellmcp_approval_required("rm -rf /tmp/*", "cmd-123")
-            is_required = jarvis._is_approval_required([approval_response])
-
-            assert is_required == True
-
-    def test_detect_no_approval_required(self):
-        """Test detection when approval is not required."""
-        from jarvis.main import Jarvis
-
-        with patch('jarvis.core.component_factory.ComponentFactory.create_llm') as mock_llm, \
-             patch('jarvis.core.component_factory.ComponentFactory.create_supermcp') as mock_supermcp, \
-             patch('jarvis.core.component_factory.ComponentFactory.create_tts_optional') as mock_tts, \
-             patch('jarvis.core.component_factory.ComponentFactory.create_voice_manager_optional') as mock_vm:
-
-            mock_llm.return_value = Mock()
-            mock_supermcp.return_value = Mock()
-            mock_tts.return_value = None
-            mock_vm.return_value = None
-
-            jarvis = Jarvis(text_mode=True)
-
-            # Test non-approval response
-            normal_response = mock_shellmcp_approved_execution("ls -la", "file1.txt\nfile2.py")
-            is_required = jarvis._is_approval_required([normal_response])
-
-            assert is_required == False
-
-    def test_extract_command_id_from_approval_response(self):
-        """Test extracting command ID from approval response."""
-        from jarvis.main import Jarvis
-
-        with patch('jarvis.core.component_factory.ComponentFactory.create_llm') as mock_llm, \
-             patch('jarvis.core.component_factory.ComponentFactory.create_supermcp') as mock_supermcp, \
-             patch('jarvis.core.component_factory.ComponentFactory.create_tts_optional') as mock_tts, \
-             patch('jarvis.core.component_factory.ComponentFactory.create_voice_manager_optional') as mock_vm:
-
-            mock_llm.return_value = Mock()
-            mock_supermcp.return_value = Mock()
-            mock_tts.return_value = None
-            mock_vm.return_value = None
-
-            jarvis = Jarvis(text_mode=True)
-
-            # Test command ID extraction
-            response_text = "This command requires approval. It has been queued with ID: test-uuid-123"
-            command_id = jarvis._extract_command_id(response_text)
-
-            assert command_id == "test-uuid-123"
-
-    def test_extract_command_id_various_formats(self):
-        """Test extracting command ID from various response formats."""
-        from jarvis.main import Jarvis
-
-        with patch('jarvis.core.component_factory.ComponentFactory.create_llm') as mock_llm, \
-             patch('jarvis.core.component_factory.ComponentFactory.create_supermcp') as mock_supermcp, \
-             patch('jarvis.core.component_factory.ComponentFactory.create_tts_optional') as mock_tts, \
-             patch('jarvis.core.component_factory.ComponentFactory.create_voice_manager_optional') as mock_vm:
-
-            mock_llm.return_value = Mock()
-            mock_supermcp.return_value = Mock()
-            mock_tts.return_value = None
-            mock_vm.return_value = None
-
-            jarvis = Jarvis(text_mode=True)
-
-            test_cases = [
-                ("Command queued with ID: simple-123", "simple-123"),
-                ("ID: complex-uuid-here", "complex-uuid-here"),
-                ("queued with ID: 123456", "123456"),
-                ("no id in this message", None),
-                ("", None),
-            ]
-
-            for response_text, expected_id in test_cases:
-                command_id = jarvis._extract_command_id(response_text)
-                assert command_id == expected_id
+    def test_goal_ids_are_unique(self):
+        gm = GoalManager()
+        g1 = gm.add_goal("A")
+        g2 = gm.add_goal("B")
+        assert g1.id != g2.id
 
 
 @pytest.mark.integration
-class TestApprovalWorkflowApproved:
-    """Test complete approval workflow when user approves."""
+class TestGoalLifecycle:
+    """Test goal lifecycle transitions."""
 
-    def test_complete_approval_workflow_approved(self, jarvis_instance, mock_llm_supermcp_command,
-                                                mock_approval_handler, mock_supermcp_client):
-        """Test complete workflow: command requires approval, user approves, command executes."""
-        # Setup LLM to request dangerous command
-        dangerous_command = "call_server_tool(ShellMCP, execute_command, {command: 'rm -rf /tmp/*'})"
-        jarvis_instance.llm.ask.return_value = mock_llm_supermcp_command(dangerous_command)
+    def test_link_tasks_activates_goal(self):
+        gm = GoalManager()
+        goal = gm.add_goal("Run tests")
+        gm.link_tasks(goal.id, [10, 20])
 
-        # Setup SuperMCP to require approval
-        approval_result = mock_shellmcp_approval_required("rm -rf /tmp/*", "cmd-approve-test")
-        jarvis_instance.command_parser.execute_command_sequence.return_value = {
-            "success": True,
-            "results": [approval_result]
-        }
+        assert goal.status == GoalStatus.ACTIVE
+        assert goal.task_pids == [10, 20]
 
-        # Setup approval handler to approve
-        jarvis_instance.request_approval = mock_approval_handler.request_approval
+    def test_complete_goal(self):
+        gm = GoalManager()
+        goal = gm.add_goal("Build project")
+        gm.complete_goal(goal.id, "Build succeeded")
 
-        # Setup command execution after approval
-        execution_result = mock_shellmcp_approved_execution("rm -rf /tmp/*", "Removed 5 temporary files")
-        jarvis_instance.command_parser.supermcp.call_server_tool.return_value = execution_result
+        assert goal.status == GoalStatus.COMPLETED
+        assert goal.result == "Build succeeded"
+        assert goal.completed_at is not None
 
-        # Setup final LLM response
-        final_response = {
-            "user_request": "Conversation",
-            "output": "Successfully cleaned up 5 temporary files from /tmp/"
-        }
-        jarvis_instance.llm.ask.return_value = final_response
+    def test_fail_goal(self):
+        gm = GoalManager()
+        goal = gm.add_goal("Deploy")
+        gm.fail_goal(goal.id, "Network error")
 
-        # Execute request
-        result = jarvis_instance.ask("Clean up temp files")
+        assert goal.status == GoalStatus.FAILED
+        assert goal.result == "Network error"
+        assert goal.completed_at is not None
 
-        # Verify workflow completed successfully
-        assert result["user_request"] == "Conversation"
-        assert "cleaned up" in result["output"]
-        assert "5 temporary files" in result["output"]
+    def test_defer_goal(self):
+        gm = GoalManager()
+        goal = gm.add_goal("Check later")
+        gm.defer_goal(goal.id, timer_pid=42)
 
-        # Verify approval was requested
-        requests = mock_approval_handler.get_requests()
-        assert len(requests) == 1
-        assert "rm -rf /tmp/*" in requests[0]["command"]
-        assert requests[0]["approved"] == True
+        assert goal.status == GoalStatus.DEFERRED
+        assert goal.timer_pid == 42
+        assert goal.defer_count == 1
+        assert goal.deferred_at is not None
 
-    def test_approval_with_command_id_extraction(self, jarvis_instance, mock_supermcp_client):
-        """Test approval workflow with proper command ID extraction and tool calls."""
-        # Setup dangerous command request
-        jarvis_instance.llm.ask.return_value = {
-            "user_request": "SuperMCP",
-            "output": "call_server_tool(ShellMCP, execute_command, {command: 'sudo rm -rf /var'})"
-        }
+    def test_defer_goal_increments_count(self):
+        gm = GoalManager()
+        goal = gm.add_goal("Recurring check")
+        gm.defer_goal(goal.id, 1)
+        gm.reactivate_goal(goal.id)
+        gm.defer_goal(goal.id, 2)
 
-        # Setup approval-required response with command ID
-        approval_result = mock_shellmcp_approval_required("sudo rm -rf /var", "approval-uuid-456")
-        jarvis_instance.command_parser.execute_command_sequence.return_value = {
-            "success": True,
-            "results": [approval_result]
-        }
+        assert goal.defer_count == 2
 
-        # Mock approval approval
-        jarvis_instance.request_approval = Mock(return_value=True)
+    def test_reactivate_deferred_goal(self):
+        gm = GoalManager()
+        goal = gm.add_goal("Deferred task")
+        gm.defer_goal(goal.id, 50)
+        gm.reactivate_goal(goal.id)
 
-        # Mock approve_command tool call
-        jarvis_instance.command_parser.supermcp.call_server_tool = AsyncMock(return_value={
-            "success": True,
-            "result": "Command approved and executed successfully"
-        })
+        assert goal.status == GoalStatus.PENDING
+        assert goal.timer_pid is None
 
-        # Setup final response
-        jarvis_instance.llm.ask.return_value = {
-            "user_request": "Conversation",
-            "output": "System cleanup completed successfully."
-        }
+    def test_reactivate_non_deferred_is_noop(self):
+        gm = GoalManager()
+        goal = gm.add_goal("Active task")
+        gm.link_tasks(goal.id, [1])
+        gm.reactivate_goal(goal.id)
 
-        # Execute
-        result = jarvis_instance.ask("Clean system")
-
-        # Verify approval_command was called with correct ID
-        jarvis_instance.command_parser.supermcp.call_server_tool.assert_called_with(
-            "ShellMCP",
-            "approve_command",
-            {"commandId": "approval-uuid-456"}
-        )
-
-        assert result["user_request"] == "Conversation"
-        assert "completed successfully" in result["output"]
+        # Should stay ACTIVE, not revert to PENDING
+        assert goal.status == GoalStatus.ACTIVE
 
 
 @pytest.mark.integration
-class TestApprovalWorkflowDenied:
-    """Test complete approval workflow when user denies."""
+class TestGoalQuerying:
+    """Test goal querying and context generation."""
 
-    def test_complete_approval_workflow_denied(self, jarvis_instance, mock_llm_supermcp_command,
-                                              mock_approval_handler_deny, mock_supermcp_client):
-        """Test complete workflow: command requires approval, user denies, command not executed."""
-        # Setup dangerous command request
-        dangerous_command = "call_server_tool(ShellMCP, execute_command, {command: 'rm -rf /home'})"
-        jarvis_instance.llm.ask.return_value = mock_llm_supermcp_command(dangerous_command)
+    def test_get_active_goals(self):
+        gm = GoalManager()
+        g1 = gm.add_goal("Pending")
+        g2 = gm.add_goal("Active")
+        gm.link_tasks(g2.id, [1])
+        g3 = gm.add_goal("Completed")
+        gm.complete_goal(g3.id)
+        g4 = gm.add_goal("Deferred")
+        gm.defer_goal(g4.id, 99)
 
-        # Setup approval-required response
-        approval_result = mock_shellmcp_approval_required("rm -rf /home", "cmd-deny-test")
-        jarvis_instance.command_parser.execute_command_sequence.return_value = {
-            "success": True,
-            "results": [approval_result]
-        }
+        active = gm.get_active_goals()
+        active_ids = {g.id for g in active}
 
-        # Setup denial handler
-        jarvis_instance.request_approval = mock_approval_handler_deny.request_approval
+        assert g1.id in active_ids  # PENDING
+        assert g2.id in active_ids  # ACTIVE
+        assert g3.id not in active_ids  # COMPLETED
+        assert g4.id in active_ids  # DEFERRED counts as active
 
-        # Mock deny_command tool call
-        jarvis_instance.command_parser.supermcp.call_server_tool = AsyncMock(return_value={
-            "success": True,
-            "result": "Command denied by user"
-        })
+    def test_dismiss_completed(self):
+        gm = GoalManager()
+        g1 = gm.add_goal("Done")
+        gm.complete_goal(g1.id)
+        g2 = gm.add_goal("Not done")
 
-        # Setup final LLM response acknowledging denial
-        final_response = {
-            "user_request": "Conversation",
-            "output": "Command was denied for security reasons. No files were deleted."
-        }
-        jarvis_instance.llm.ask.return_value = final_response
+        dismissed = gm.dismiss_completed()
+        assert len(dismissed) == 1
+        assert dismissed[0].id == g1.id
+        assert len(gm.get_all_goals()) == 1
 
-        # Execute request
-        result = jarvis_instance.ask("Delete all user files")
+    def test_get_context_excludes_completed(self):
+        gm = GoalManager()
+        g1 = gm.add_goal("Task A")
+        g2 = gm.add_goal("Task B")
+        gm.complete_goal(g2.id)
 
-        # Verify workflow completed with denial
-        assert result["user_request"] == "Conversation"
-        assert "denied" in result["output"] or "security reasons" in result["output"]
+        ctx = gm.get_context()
+        assert len(ctx) == 1
+        assert ctx[0]["id"] == g1.id
 
-        # Verify denial was recorded
-        requests = mock_approval_handler_deny.get_requests()
-        assert len(requests) == 1
-        assert "rm -rf /home" in requests[0]["command"]
-        assert requests[0]["approved"] == False
+    def test_goal_to_context_includes_deferred_info(self):
+        gm = GoalManager()
+        goal = gm.add_goal("Check later")
+        gm.defer_goal(goal.id, timer_pid=42)
 
-        # Verify deny_command was called
-        jarvis_instance.command_parser.supermcp.call_server_tool.assert_called_with(
-            "ShellMCP",
-            "deny_command",
-            {"commandId": "cmd-deny-test", "reason": "User denied the command"}
-        )
+        ctx = goal.to_context()
+        assert ctx["status"] == "deferred"
+        assert ctx["defer_count"] == 1
+        assert ctx["timer_pid"] == 42
 
-    def test_denial_without_command_id(self, jarvis_instance, mock_approval_handler_deny):
-        """Test denial workflow when no command ID is available."""
-        # Setup approval-required response without command ID
-        approval_result = {
-            "approval_required": True,
-            "server": "ShellMCP",
-            "tool": "execute_command",
-            "arguments": {"command": "dangerous_cmd"},
-            "shellmcp_response": "This command requires approval but no ID was provided."
-        }
-
-        jarvis_instance.command_parser.execute_command_sequence.return_value = {
-            "success": True,
-            "results": [approval_result]
-        }
-
-        # Setup denial
-        jarvis_instance.request_approval = mock_approval_handler_deny.request_approval
-
-        # Setup final response (no deny_command call should be made)
-        final_response = {
-            "user_request": "Conversation",
-            "output": "Command was denied. No execution was performed."
-        }
-        jarvis_instance.llm.ask.return_value = final_response
-
-        # Execute (mock the initial dangerous command request)
-        jarvis_instance.llm.ask.return_value = {
-            "user_request": "SuperMCP",
-            "output": "call_server_tool(ShellMCP, execute_command, {command: 'dangerous_cmd'})"
-        }
-
-        result = jarvis_instance.ask("Run dangerous command")
-
-        # Verify denial worked without command ID
-        assert result["user_request"] == "Conversation"
-        assert "denied" in result["output"]
-
-        # Verify no deny_command call was made (since no command ID)
-        jarvis_instance.command_parser.supermcp.call_server_tool.assert_not_called()
+    def test_clear_goals(self):
+        gm = GoalManager()
+        gm.add_goal("A")
+        gm.add_goal("B")
+        gm.clear()
+        assert gm.get_all_goals() == []
 
 
 @pytest.mark.integration
-class TestApprovalEdgeCases:
-    """Test approval workflow edge cases."""
+class TestSignalDrivenUpdates:
+    """Test GoalManager updates driven by dispatch signals."""
 
-    def test_multiple_approval_requests(self, jarvis_instance, mock_approval_handler):
-        """Test handling multiple commands requiring approval in sequence."""
-        # Setup command sequence with multiple dangerous commands
-        commands = "call_server_tool(ShellMCP, execute_command, {command: 'rm -rf /tmp'}); call_server_tool(ShellMCP, execute_command, {command: 'rm -rf /var'})"
-        jarvis_instance.llm.ask.return_value = {
-            "user_request": "SuperMCP",
-            "output": commands
-        }
+    def test_exit_signal_for_linked_task(self):
+        gm = GoalManager()
+        goal = gm.add_goal("Run command")
+        gm.link_tasks(goal.id, [10])
 
-        # Setup both commands requiring approval
-        approval1 = mock_shellmcp_approval_required("rm -rf /tmp", "cmd-1")
-        approval2 = mock_shellmcp_approval_required("rm -rf /var", "cmd-2")
+        signal = make_exit_signal(10, output="done")
+        gm.update_from_signal(signal)
 
-        jarvis_instance.command_parser.execute_command_sequence.return_value = {
-            "success": True,
-            "results": [approval1, approval2]
-        }
+        # Goal should still be ACTIVE (LLM decides when to mark complete)
+        assert goal.status == GoalStatus.ACTIVE
 
-        # Setup approval handler
-        jarvis_instance.request_approval = mock_approval_handler.request_approval
+    def test_remind_signal_reactivates_deferred_goal(self):
+        gm = GoalManager()
+        goal = gm.add_goal("Check later")
+        gm.defer_goal(goal.id, timer_pid=50)
 
-        # Execute
-        result = jarvis_instance.ask("Clean multiple directories")
+        signal = make_remind_signal(50, goal_id=goal.id)
+        gm.update_from_signal(signal)
 
-        # Verify both approvals were requested
-        requests = mock_approval_handler.get_requests()
-        assert len(requests) == 2
-        assert "rm -rf /tmp" in requests[0]["command"]
-        assert "rm -rf /var" in requests[1]["command"]
+        assert goal.status == GoalStatus.PENDING
 
-    def test_approval_request_timeout(self, jarvis_instance):
-        """Test handling of approval request timeouts."""
-        # Setup approval-required command
-        jarvis_instance.llm.ask.return_value = {
-            "user_request": "SuperMCP",
-            "output": "call_server_tool(ShellMCP, execute_command, {command: 'timeout_cmd'})"
-        }
+    def test_remind_signal_by_timer_pid(self):
+        gm = GoalManager()
+        goal = gm.add_goal("Timer task")
+        gm.defer_goal(goal.id, timer_pid=77)
 
-        approval_result = mock_shellmcp_approval_required("timeout_cmd", "cmd-timeout")
-        jarvis_instance.command_parser.execute_command_sequence.return_value = {
-            "success": True,
-            "results": [approval_result]
-        }
+        signal = make_remind_signal(77)
+        gm.update_from_signal(signal)
 
-        # Setup approval handler that raises timeout
-        def timeout_approval(command, level):
-            import time
-            time.sleep(35)  # Longer than any reasonable timeout
-            return True
+        assert goal.status == GoalStatus.PENDING
 
-        jarvis_instance.request_approval = timeout_approval
+    def test_signal_for_unknown_pid(self):
+        gm = GoalManager()
+        gm.add_goal("Something")
 
-        # This would need to be tested with actual timeout handling in Jarvis
-        # For now, just verify the approval request is made
-        result = jarvis_instance.ask("Run timeout command")
+        signal = make_exit_signal(999, output="unknown")
+        gm.update_from_signal(signal)  # Should not crash
 
-        # Should still attempt to process the approval
-        assert isinstance(result, dict)
+    def test_find_goal_by_timer_pid(self):
+        gm = GoalManager()
+        goal = gm.add_goal("Timed")
+        gm.defer_goal(goal.id, timer_pid=88)
 
-    def test_approval_with_malformed_response(self, jarvis_instance):
-        """Test approval handling with malformed ShellMCP response."""
-        # Setup command that gets malformed approval response
-        jarvis_instance.llm.ask.return_value = {
-            "user_request": "SuperMCP",
-            "output": "call_server_tool(ShellMCP, execute_command, {command: 'test'})"
-        }
+        found = gm.find_goal_by_timer_pid(88)
+        assert found is not None
+        assert found.id == goal.id
 
-        # Malformed approval response (missing required fields)
-        malformed_approval = {
-            "approval_required": True,
-            # Missing server, tool, arguments, shellmcp_response
-        }
-
-        jarvis_instance.command_parser.execute_command_sequence.return_value = {
-            "success": True,
-            "results": [malformed_approval]
-        }
-
-        # Should handle gracefully
-        result = jarvis_instance.ask("Run test command")
-
-        # Should still return a valid response
-        assert isinstance(result, dict)
-        assert "user_request" in result
-
-    def test_approval_state_persistence(self, jarvis_instance, mock_approval_handler):
-        """Test that approval state is properly managed across requests."""
-        # First request with approval
-        jarvis_instance.llm.ask.return_value = {
-            "user_request": "SuperMCP",
-            "output": "call_server_tool(ShellMCP, execute_command, {command: 'first_cmd'})"
-        }
-
-        approval_result = mock_shellmcp_approval_required("first_cmd", "cmd-1")
-        jarvis_instance.command_parser.execute_command_sequence.return_value = {
-            "success": True,
-            "results": [approval_result]
-        }
-
-        jarvis_instance.request_approval = mock_approval_handler.request_approval
-
-        # First execution
-        jarvis_instance.ask("First command")
-
-        # Verify first approval was recorded
-        requests = mock_approval_handler.get_requests()
-        assert len(requests) == 1
-
-        # Reset for second command
-        mock_approval_handler.clear_requests()
-
-        # Second request
-        jarvis_instance.llm.ask.return_value = {
-            "user_request": "SuperMCP",
-            "output": "call_server_tool(ShellMCP, execute_command, {command: 'second_cmd'})"
-        }
-
-        approval_result2 = mock_shellmcp_approval_required("second_cmd", "cmd-2")
-        jarvis_instance.command_parser.execute_command_sequence.return_value = {
-            "success": True,
-            "results": [approval_result2]
-        }
-
-        jarvis_instance.ask("Second command")
-
-        # Verify second approval was recorded separately
-        requests = mock_approval_handler.get_requests()
-        assert len(requests) == 1  # Only the second request
-        assert "second_cmd" in requests[0]["command"]
+    def test_find_goal_by_timer_pid_not_found(self):
+        gm = GoalManager()
+        found = gm.find_goal_by_timer_pid(9999)
+        assert found is None
