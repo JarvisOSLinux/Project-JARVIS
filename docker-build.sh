@@ -61,7 +61,7 @@ fi
 # Check if .env exists, if not create from template
 if [ ! -f "jarvis/.env" ]; then
     echo "Creating .env from template..."
-    cp jarvis/config.env.template jarvis/.env
+    cp jarvis/.env.example jarvis/.env
     echo "Created jarvis/.env - Please edit it with your settings"
 fi
 

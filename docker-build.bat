@@ -59,7 +59,7 @@ if not exist "models\" (
 REM Check if .env exists, if not create from template
 if not exist "jarvis\.env" (
     echo Creating .env from template...
-    copy jarvis\config.env.template jarvis\.env
+    copy jarvis\.env.example jarvis\.env
     echo Created jarvis\.env - Please edit it with your settings
 )
 

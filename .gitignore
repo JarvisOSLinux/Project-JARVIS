@@ -170,11 +170,7 @@ logs/
 cache/
 
 # Models — organised by engine, ignore large binaries
-models/vosk/*/
-models/piper/*.onnx
-models/piper/*.json
-models/whisper/
-!models/**/.gitkeep
+models/
 
 # OS specific
 .DS_Store

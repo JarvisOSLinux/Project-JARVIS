@@ -183,7 +183,7 @@ def _update_env_setting(key: str, value: str) -> None:
     if ENV_FILE.exists():
         lines = ENV_FILE.read_text().splitlines()
     else:
-        template_file = Path(__file__).parent / "config.env.template"
+        template_file = Path(__file__).parent / ".env.example"
         if template_file.exists():
             logger.info("Creating .env from template...")
             lines = template_file.read_text().splitlines()

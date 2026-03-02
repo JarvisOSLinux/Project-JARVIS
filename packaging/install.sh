@@ -88,7 +88,7 @@ install_files() {
     cp packaging/jarvis.service "$SYSTEMD_DIR/"
     
     # Install configuration template
-    cp jarvis/config.env.template "$CONFIG_DIR/jarvis.conf.template"
+    cp jarvis/.env.example "$CONFIG_DIR/jarvis.conf.template"
     
     # Set ownership
     chown -R "$JARVIS_USER:$JARVIS_GROUP" "$INSTALL_DIR"

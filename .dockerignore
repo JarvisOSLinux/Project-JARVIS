@@ -48,7 +48,7 @@ docs/
 .env.*
 *.env
 config.env
-!config.env.template
+!.env.example
 
 # CI/CD
 .github/

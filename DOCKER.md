@@ -229,7 +229,7 @@ docker run -it --rm \
 ### **4. Custom Configuration**
 ```bash
 # Create and edit your .env
-cp jarvis/config.env.template jarvis/.env
+cp jarvis/.env.example jarvis/.env
 nano jarvis/.env
 
 # Run with custom config

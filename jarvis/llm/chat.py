@@ -15,6 +15,8 @@ logger = get_logger(__name__)
 class LLM:
     """Main LLM interface that works with any provider."""
 
+    MAX_JSON_RETRIES = 3
+
     def __init__(
         self,
         provider: BaseLLMProvider,
@@ -45,8 +47,11 @@ class LLM:
             logger.warning(f"LLM preload failed (this may be expected): {e}")
             logger.info("LLM: Continuing despite preload failure...")
 
-    def ask(self, prompt):
+    def ask(self, prompt, _retries_left=None):
         """Ask the LLM a question and return the parsed JSON response."""
+        if _retries_left is None:
+            _retries_left = self.MAX_JSON_RETRIES
+
         self.chat_history.append({
             'role': 'user',
             'content': prompt,
@@ -57,9 +62,15 @@ class LLM:
 
         try:
             return json.loads(response_text)
-        except json.decoder.JSONDecodeError:
-            logger.warning("LLM response was not valid JSON, retrying with error message...")
-            return self.ask(self._wrong_json_message)
+        except json.JSONDecodeError:
+            if _retries_left > 0:
+                logger.warning(
+                    f"LLM response was not valid JSON, retrying "
+                    f"({_retries_left} attempts left)..."
+                )
+                return self.ask(self._wrong_json_message, _retries_left - 1)
+            logger.error("LLM failed to return valid JSON after all retries")
+            return {"action": "respond", "output": "I had trouble formatting my response. Could you try again?"}
 
     def reset_history(self):
         """Reset chat history to the default system prompt."""

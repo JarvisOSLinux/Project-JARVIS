@@ -33,10 +33,10 @@ pip install jarvis-ai
 
 # Install Ollama and pull an LLM model
 # Install Ollama from https://ollama.com/
-ollama pull codegemma:7b-instruct-q5_K_M
+ollama pull qwen3:4b
 
 # Configure and run
-cp jarvis/config.env.template jarvis/.env
+cp jarvis/.env.example jarvis/.env
 cd jarvis
 python main.py
 ```
@@ -94,11 +94,11 @@ python main.py
 6. **Install Ollama and pull an LLM model**:
    ```bash
    # Install Ollama from https://ollama.com/
-   ollama pull codegemma:7b-instruct-q5_K_M
+   ollama pull qwen3:4b
    ```
 
 7. **Configure environment variables**:  
-   - Copy `jarvis/config.env.template` to `jarvis/.env`
+   - Copy `jarvis/.env.example` to `jarvis/.env`
    - Adjust settings as needed for your system
 
 8. **Run JARVIS**:  

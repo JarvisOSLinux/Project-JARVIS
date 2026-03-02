@@ -85,7 +85,7 @@ package-deb: $(DEB_BUILD_DIR)
 	echo '\tcp -r jarvis/* debian/$(PACKAGE_NAME)/usr/lib/jarvis/' >> $(DEB_BUILD_DIR)/$(PACKAGE_NAME)-$(VERSION)/debian/rules
 	echo '\tinstall -m 755 packaging/jarvis-daemon debian/$(PACKAGE_NAME)/usr/bin/' >> $(DEB_BUILD_DIR)/$(PACKAGE_NAME)-$(VERSION)/debian/rules
 	echo '\tinstall -m 644 packaging/jarvis.service debian/$(PACKAGE_NAME)/usr/lib/systemd/system/' >> $(DEB_BUILD_DIR)/$(PACKAGE_NAME)-$(VERSION)/debian/rules
-	echo '\tcp jarvis/config.env.template debian/$(PACKAGE_NAME)/etc/jarvis/jarvis.conf.template' >> $(DEB_BUILD_DIR)/$(PACKAGE_NAME)-$(VERSION)/debian/rules
+	echo '\tcp jarvis/.env.example debian/$(PACKAGE_NAME)/etc/jarvis/jarvis.conf.template' >> $(DEB_BUILD_DIR)/$(PACKAGE_NAME)-$(VERSION)/debian/rules
 	chmod +x $(DEB_BUILD_DIR)/$(PACKAGE_NAME)-$(VERSION)/debian/rules
 	
 	# Create debian/changelog

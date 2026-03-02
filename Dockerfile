@@ -59,7 +59,7 @@ COPY models/ ./models/
 
 COPY pytest.ini run_tests.py README.md LICENSE ./
 
-RUN cp jarvis/config.env.template jarvis/.env || true
+RUN cp jarvis/.env.example jarvis/.env || true
 
 RUN useradd -m -u 1000 jarvisuser && \
     chown -R jarvisuser:jarvisuser /app
