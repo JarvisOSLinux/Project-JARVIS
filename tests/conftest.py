@@ -5,7 +5,7 @@ Test configuration and fixtures for JARVIS
 import pytest
 import os
 import tempfile
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, AsyncMock
 from pathlib import Path
 
 
@@ -13,12 +13,10 @@ from pathlib import Path
 def temp_env_file():
     """Create a temporary .env file for testing"""
     with tempfile.NamedTemporaryFile(mode='w', suffix='.env', delete=False) as f:
-        f.write("""STT_MODEL=base
-LLM_MODEL=test-model
-TTS_MODEL_ONNX=test.onnx
-TTS_MODEL_JSON=test.json
-SUPERMCP_SERVER_PATH=SuperMCP/SuperMCP.py
-SUPERMCP_TIMEOUT=30
+        f.write("""LLM_MODEL=test-model
+LLM_PROVIDER=ollama
+DISPATCH_TIMEOUT=30
+OUTPUT_MODE=text
 """)
         f.flush()
         yield f.name
@@ -29,12 +27,11 @@ SUPERMCP_TIMEOUT=30
 def mock_config():
     """Mock configuration for testing"""
     return {
-        'STT_MODEL': 'base',
         'LLM_MODEL': 'test-model',
-        'TTS_MODEL_ONNX': 'test.onnx',
-        'TTS_MODEL_JSON': 'test.json',
-        'SUPERMCP_SERVER_PATH': 'SuperMCP/SuperMCP.py',
-        'SUPERMCP_TIMEOUT': 30
+        'LLM_PROVIDER': 'ollama',
+        'DISPATCH_TIMEOUT': 60,
+        'OUTPUT_MODE': 'text',
+        'LOG_LEVEL': 'INFO',
     }
 
 
@@ -51,67 +48,65 @@ def mock_system_info():
 
 
 @pytest.fixture
-def mock_llm_response():
-    """Mock LLM response factory"""
-    from tests.integration_utils import mock_llm_response
-    return mock_llm_response
+def mock_llm():
+    """Create a mock LLM that returns dispatch-format responses."""
+    llm = Mock()
+    llm.ask = Mock(return_value={
+        "action": "respond",
+        "output": "Hello! How can I help you?"
+    })
+    llm.reset_history = Mock()
+    llm.provider = Mock()
+    llm.provider.model = "test-model"
+    return llm
 
 
 @pytest.fixture
-def mock_llm_conversation():
-    """Mock LLM conversation response factory"""
-    from tests.integration_utils import mock_llm_conversation
-    return mock_llm_conversation
+def mock_dispatch_adapter():
+    """Create a mock DispatchAdapter."""
+    adapter = Mock()
+    adapter.is_connected = False
+    adapter.connect = AsyncMock()
+    adapter.disconnect = AsyncMock()
+    adapter.send_tasks = AsyncMock(return_value={"pids": [1, 2]})
+    adapter.kill_tasks = AsyncMock(return_value={"killed": [1, 2]})
+    adapter.set_timer = AsyncMock(return_value={"pid": 99})
+    adapter.get_signal_window = AsyncMock(return_value=[])
+    return adapter
 
 
 @pytest.fixture
-def mock_llm_supermcp_command():
-    """Mock LLM SuperMCP command response factory"""
-    from tests.integration_utils import mock_llm_supermcp_command
-    return mock_llm_supermcp_command
+def mock_goal_manager():
+    """Create a real GoalManager (it has no external dependencies)."""
+    from jarvis.dispatch.goal_manager import GoalManager
+    return GoalManager()
 
 
 @pytest.fixture
-def mock_supermcp_client():
-    """Mock SuperMCP client for testing"""
-    from tests.integration_utils import create_mock_supermcp_client
-    return create_mock_supermcp_client()
+def mock_event_merger():
+    """Create a mock EventMerger."""
+    merger = Mock()
+    merger.start = Mock()
+    merger.stop = AsyncMock()
+    return merger
 
 
 @pytest.fixture
-def temp_mcp_config():
-    """Create a temporary MCP configuration file"""
-    from tests.integration_utils import create_test_mcp_config
-    config_file = create_test_mcp_config()
-
-    yield config_file
-
-    # Cleanup
-    try:
-        os.unlink(config_file)
-    except:
-        pass
+def mock_output_manager():
+    """Create a mock OutputManager."""
+    om = Mock()
+    om.handle_response = Mock()
+    om.get_current_mode = Mock(return_value="text")
+    om.is_voice_mode = Mock(return_value=False)
+    om.has_tts = Mock(return_value=False)
+    return om
 
 
 @pytest.fixture
-def mock_approval_handler():
-    """Mock approval handler for testing approval workflows"""
-    from tests.integration_utils import MockApprovalHandler
-    return MockApprovalHandler(approve_commands=True)
-
-
-@pytest.fixture
-def mock_approval_handler_deny():
-    """Mock approval handler that denies commands"""
-    from tests.integration_utils import MockApprovalHandler
-    return MockApprovalHandler(approve_commands=False)
-
-
-@pytest.fixture
-def mock_llm_provider():
-    """Mock LLM provider for testing"""
-    from tests.integration_utils import create_mock_llm_provider
-    return create_mock_llm_provider
+def mock_task_parser():
+    """Create a real TaskParser (it's stateless, no external dependencies)."""
+    from jarvis.core.command_parser import TaskParser
+    return TaskParser()
 
 
 @pytest.fixture
@@ -126,55 +121,32 @@ def temp_test_directory():
     }
 
     temp_dir = create_temp_directory_with_files(test_files)
-
     yield temp_dir
 
-    # Cleanup
     import shutil
     try:
         shutil.rmtree(temp_dir)
-    except:
+    except Exception:
         pass
 
 
 @pytest.fixture
-def test_jarvis_config():
-    """Test configuration for JARVIS"""
-    from tests.integration_utils import create_test_jarvis_config
-    return create_test_jarvis_config()
-
-
-@pytest.fixture
-def jarvis_instance(mock_llm_provider, mock_supermcp_client, mock_approval_handler):
-    """Create a Jarvis instance with mocked dependencies"""
-    from unittest.mock import patch
+def jarvis_instance(mock_llm, mock_dispatch_adapter, mock_goal_manager,
+                    mock_event_merger, mock_task_parser, mock_output_manager):
+    """Create a Jarvis instance with mocked dependencies for the dispatch architecture."""
     from jarvis.main import Jarvis
 
-    # Create mock LLM responses
-    llm_responses = [
-        {"user_request": "Conversation", "output": "Hello! How can I help you?"}
-    ]
+    with patch('jarvis.core.component_factory.ComponentFactory.create_all_components') as mock_create_all:
+        mock_create_all.return_value = {
+            'llm': mock_llm,
+            'dispatch_adapter': mock_dispatch_adapter,
+            'goal_manager': mock_goal_manager,
+            'event_merger': mock_event_merger,
+            'task_parser': mock_task_parser,
+            'output_manager': mock_output_manager,
+            'tts': None,
+            'voice_manager': None,
+        }
 
-    mock_provider = mock_llm_provider(llm_responses)
-
-    with patch('jarvis.core.component_factory.ComponentFactory.create_llm') as mock_create_llm, \
-         patch('jarvis.core.component_factory.ComponentFactory.create_supermcp') as mock_create_supermcp, \
-         patch('jarvis.core.component_factory.ComponentFactory.create_tts_optional') as mock_create_tts, \
-         patch('jarvis.core.component_factory.ComponentFactory.create_voice_manager_optional') as mock_create_vm:
-
-        # Mock LLM
-        mock_llm = Mock()
-        mock_llm.ask = Mock(return_value=llm_responses[0])
-        mock_create_llm.return_value = mock_llm
-
-        # Mock SuperMCP
-        mock_create_supermcp.return_value = Mock()
-
-        # Mock optional components
-        mock_create_tts.return_value = None
-        mock_create_vm.return_value = None
-
-        # Create Jarvis instance
         jarvis = Jarvis(text_mode=True)
-
         yield jarvis
