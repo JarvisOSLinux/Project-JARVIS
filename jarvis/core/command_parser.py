@@ -15,7 +15,7 @@ from .logger import get_logger
 logger = get_logger(__name__)
 
 # Valid LLM action types
-VALID_ACTIONS = {"dispatch", "respond", "wait", "kill"}
+VALID_ACTIONS = {"dispatch", "respond", "wait", "kill", "defer"}
 
 
 class TaskParser:
@@ -53,6 +53,8 @@ class TaskParser:
             return TaskParser._parse_wait(response)
         elif action == "kill":
             return TaskParser._parse_kill(response)
+        elif action == "defer":
+            return TaskParser._parse_defer(response)
 
     @staticmethod
     def _parse_dispatch(response: Dict[str, Any]) -> Dict[str, Any]:
@@ -117,5 +119,24 @@ class TaskParser:
         return {
             "action": "kill",
             "pids": [int(p) for p in pids],
+            "goal_updates": response.get("goal_updates", []),
+        }
+
+    @staticmethod
+    def _parse_defer(response: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate a defer action."""
+        goal_id = response.get("goal_id")
+        duration = response.get("duration")
+
+        if not goal_id:
+            return {"error": "Defer action requires 'goal_id'", "raw": response}
+        if not duration or not isinstance(duration, (int, float)) or duration <= 0:
+            return {"error": "Defer action requires a positive 'duration' (seconds)", "raw": response}
+
+        return {
+            "action": "defer",
+            "goal_id": str(goal_id),
+            "duration": int(duration),
+            "reason": response.get("reason", ""),
             "goal_updates": response.get("goal_updates", []),
         }

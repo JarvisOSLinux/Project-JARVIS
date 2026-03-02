@@ -150,6 +150,9 @@ class Jarvis:
         elif action == "kill":
             await self._do_kill(parsed["pids"])
 
+        elif action == "defer":
+            await self._do_defer(parsed["goal_id"], parsed["duration"], parsed.get("reason", ""))
+
     async def _do_dispatch(self, tasks):
         """Send tasks to dispatch and link PIDs to goals."""
         if not self.dispatch.is_connected:
@@ -175,6 +178,30 @@ class Jarvis:
             logger.error(f"JARVIS: Kill error: {result['error']}")
         else:
             logger.info(f"JARVIS: Killed PID(s): {pids}")
+
+    async def _do_defer(self, goal_id: str, duration: int, reason: str = ""):
+        """Defer a goal by setting a timer in dispatch."""
+        if not self.dispatch.is_connected:
+            logger.warning("JARVIS: Dispatch not connected, cannot defer goal")
+            self.output_manager.handle_response({
+                "output": "I can't defer goals right now — dispatch is not connected."
+            })
+            return
+
+        label = f"goal_reminder:{goal_id}"
+        metadata = {"goal_id": goal_id, "type": "goal_defer"}
+        if reason:
+            metadata["reason"] = reason
+
+        result = await self.dispatch.set_timer(label, duration, metadata)
+
+        if "error" in result:
+            logger.error(f"JARVIS: Timer error: {result['error']}")
+        else:
+            # Extract timer PID from result
+            timer_pid = result.get("pid", 0)
+            self.goals.defer_goal(goal_id, timer_pid)
+            logger.info(f"JARVIS: Deferred goal [{goal_id}] for {duration}s (timer PID {timer_pid})")
 
     # ------------------------------------------------------------------
     # Context building
@@ -221,6 +248,10 @@ class Jarvis:
                 self.goals.fail_goal(goal_id, update.get("result"))
             elif status == "active":
                 self.goals.link_tasks(goal_id, update.get("pids", []))
+            elif status == "deferred":
+                # Deferral is handled by the defer action; this is just
+                # a status acknowledgement from the LLM.
+                pass
 
     # ------------------------------------------------------------------
     # Input sources (fed to EventMerger)

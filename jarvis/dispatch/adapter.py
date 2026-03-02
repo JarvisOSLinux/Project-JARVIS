@@ -115,6 +115,38 @@ class DispatchAdapter:
         except Exception as e:
             return {"error": f"Failed to kill tasks: {e}"}
 
+    async def set_timer(
+        self, label: str, duration: int, metadata: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Set a one-shot timer in dispatch.
+
+        Args:
+            label: Human-readable label for the signal window.
+            duration: Seconds until REMIND fires.
+            metadata: Opaque key-value data passed through in signals.
+
+        Returns:
+            Dict with assigned PID and status, or error.
+        """
+        if not self._connected:
+            return {"error": "Not connected to dispatch"}
+
+        params: Dict[str, Any] = {"label": label, "duration": duration}
+        if metadata is not None:
+            params["metadata"] = metadata
+
+        try:
+            result = await asyncio.wait_for(
+                self.session.call_tool("timer", params),
+                timeout=self.timeout,
+            )
+            return self._extract_content(result)
+        except asyncio.TimeoutError:
+            return {"error": f"Timer call timed out after {self.timeout}s"}
+        except Exception as e:
+            return {"error": f"Failed to set timer: {e}"}
+
     async def get_signal_window(self) -> List[Dict[str, Any]]:
         """
         Get the current signal window from dispatch.
