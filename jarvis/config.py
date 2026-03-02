@@ -67,7 +67,7 @@ Please fix it and output ONLY valid JSON, with no explanations or extra text.
 The required format is exactly:
 
 {{
-  "action": "<dispatch|respond|wait|kill>",
+  "action": "<dispatch|respond|wait|kill|defer>",
   ...
 }}
 
@@ -94,6 +94,14 @@ Valid formats:
 {{
   "action": "kill",
   "pids": [1, 2]
+}}
+
+5. To defer a goal for later:
+{{
+  "action": "defer",
+  "goal_id": "<goal_id>",
+  "duration": 1800,
+  "reason": "optional reason"
 }}
 
 Now, return the corrected JSON."""
@@ -150,6 +158,16 @@ Terminate tasks that are taking too long or no longer needed.
     "pids": [1, 3]
 }}
 
+--- Action: defer ---
+Park a goal for later. Sets a timer — you will be woken with a REMIND signal when it fires.
+Use this when a goal cannot or should not be handled right now.
+{{
+    "action": "defer",
+    "goal_id": "<goal_id>",
+    "duration": 1800,
+    "reason": "optional reason for deferral"
+}}
+
 --- Context you receive ---
 When woken up, you will see a context message containing:
 1. GOALS — What the user has asked for (with IDs and status)
@@ -162,7 +180,7 @@ Use new input to add new goals or adjust priorities.
 --- Signal types ---
 - INIT: Task started (includes PID)
 - EXIT: Task finished (includes output or error)
-- REMIND: Task exceeded its remind_after threshold
+- REMIND: Task or timer exceeded its threshold. For deferred goals, the REMIND signal includes metadata.goal_id — the goal is reactivated automatically.
 - WAIT: You previously chose to wait on this task
 - KILL: Task was terminated
 
@@ -172,11 +190,18 @@ You may include goal_updates in any response to update goal status:
 - "completed": Goal fulfilled, include result summary
 - "failed": Goal could not be completed, include reason
 
+--- Deferred goals ---
+Goals with status "deferred" have a timer running. When the timer fires (REMIND signal), the goal returns to "pending" and you will see it again.
+- To defer: use the defer action with a goal_id and duration in seconds.
+- To cancel a deferred goal's timer: use the kill action with the timer PID (shown in the goal context as timer_pid), then update the goal to "failed" or "completed".
+- A goal's defer_count tells you how many times it has been deferred. Use this to decide whether to act on it or defer again.
+
 --- Rules ---
 - ALWAYS return valid JSON only (no extra text, no markdown)
 - NEVER run destructive commands without the user confirming first
 - You can dispatch multiple tasks at once for parallelism
 - When all tasks for a goal complete, respond to the user with the results
-- If a REMIND signal fires, decide whether to wait or kill the task
+- If a REMIND signal fires for a task, decide whether to wait or kill the task
+- If a deferred goal reappears (timer fired), decide whether to act on it, respond about it, or defer again
 - The user can send new requests at any time — add them as new goals
 """

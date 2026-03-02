@@ -22,6 +22,7 @@ logger = get_logger(__name__)
 class GoalStatus(Enum):
     PENDING = "pending"       # Parsed but not yet dispatched
     ACTIVE = "active"         # Tasks dispatched, waiting for results
+    DEFERRED = "deferred"     # Parked with a timer — will reactivate on REMIND
     COMPLETED = "completed"   # All tasks done, goal fulfilled
     FAILED = "failed"         # Tasks failed or user cancelled
 
@@ -37,6 +38,10 @@ class Goal:
     result: Optional[str] = None
     created_at: float = field(default_factory=time.time)
     completed_at: Optional[float] = None
+    # Deferral tracking
+    timer_pid: Optional[int] = None
+    defer_count: int = 0
+    deferred_at: Optional[float] = None
 
     def to_context(self) -> Dict[str, Any]:
         """Serialize for LLM context."""
@@ -49,6 +54,10 @@ class Goal:
             ctx["task_pids"] = self.task_pids
         if self.result:
             ctx["result"] = self.result
+        if self.status == GoalStatus.DEFERRED:
+            ctx["defer_count"] = self.defer_count
+            if self.timer_pid is not None:
+                ctx["timer_pid"] = self.timer_pid
         return ctx
 
 
@@ -95,6 +104,35 @@ class GoalManager:
             goal.completed_at = time.time()
             logger.info(f"GoalManager: Goal [{goal_id}] failed: {reason}")
 
+    def defer_goal(self, goal_id: str, timer_pid: int):
+        """Mark a goal as deferred with an associated timer PID."""
+        goal = self._find_goal(goal_id)
+        if goal:
+            goal.status = GoalStatus.DEFERRED
+            goal.timer_pid = timer_pid
+            goal.defer_count += 1
+            goal.deferred_at = time.time()
+            logger.info(
+                f"GoalManager: Goal [{goal_id}] deferred "
+                f"(timer PID {timer_pid}, defer #{goal.defer_count})"
+            )
+
+    def reactivate_goal(self, goal_id: str):
+        """Move a deferred goal back to PENDING (timer fired)."""
+        goal = self._find_goal(goal_id)
+        if goal and goal.status == GoalStatus.DEFERRED:
+            goal.status = GoalStatus.PENDING
+            goal.timer_pid = None
+            goal.deferred_at = None
+            logger.info(f"GoalManager: Goal [{goal_id}] reactivated from deferral")
+
+    def find_goal_by_timer_pid(self, pid: int) -> Optional['Goal']:
+        """Find the goal whose timer has the given PID."""
+        for goal in self._goals:
+            if goal.timer_pid == pid:
+                return goal
+        return None
+
     def update_from_signal(self, signal: Dict[str, Any]):
         """
         Update goal status based on a dispatch signal.
@@ -104,6 +142,21 @@ class GoalManager:
         """
         pid = signal.get("pid")
         signal_type = signal.get("type", "").upper()
+
+        # Check if this is a timer REMIND signal for a deferred goal
+        if signal_type == "REMIND":
+            metadata = signal.get("metadata", {})
+            goal_id = metadata.get("goal_id") if isinstance(metadata, dict) else None
+            if goal_id:
+                goal = self._find_goal(goal_id)
+                if goal and goal.status == GoalStatus.DEFERRED:
+                    self.reactivate_goal(goal_id)
+                    return
+            # Also check by timer PID
+            timer_goal = self.find_goal_by_timer_pid(pid)
+            if timer_goal and timer_goal.status == GoalStatus.DEFERRED:
+                self.reactivate_goal(timer_goal.id)
+                return
 
         # Find the goal that owns this PID
         goal = self._find_goal_by_pid(pid)
@@ -117,8 +170,10 @@ class GoalManager:
             logger.info(f"GoalManager: PID {pid} exited for goal [{goal.id}]")
 
     def get_active_goals(self) -> List[Goal]:
-        """Get all non-completed, non-failed goals."""
-        return [g for g in self._goals if g.status in (GoalStatus.PENDING, GoalStatus.ACTIVE)]
+        """Get all non-completed, non-failed goals (includes deferred)."""
+        return [g for g in self._goals if g.status in (
+            GoalStatus.PENDING, GoalStatus.ACTIVE, GoalStatus.DEFERRED
+        )]
 
     def get_all_goals(self) -> List[Goal]:
         """Get all goals regardless of status."""
