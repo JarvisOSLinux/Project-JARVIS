@@ -29,14 +29,15 @@ class ComponentFactory:
         provider_type = Config.LLM_PROVIDER.lower()
 
         if provider_type == "ollama":
-            provider_kwargs["base_url"] = Config.LLM_OLLAMA_URL
+            provider_kwargs["base_url"] = Config.LLM_URL
+            provider_kwargs["api_key"] = Config.LLM_API_KEY
             provider_kwargs["auto_pull"] = getattr(Config, "LLM_AUTO_PULL", False)
         elif provider_type == "api":
-            if not Config.LLM_API_URL:
-                raise ValueError("LLM_API_URL must be set when using API provider")
+            if not Config.LLM_URL:
+                raise ValueError("LLM_URL must be set when using API provider")
             if not Config.LLM_API_KEY:
                 raise ValueError("LLM_API_KEY must be set when using API provider")
-            provider_kwargs["api_url"] = Config.LLM_API_URL
+            provider_kwargs["api_url"] = Config.LLM_URL
             provider_kwargs["api_key"] = Config.LLM_API_KEY
             if Config.LLM_API_HEADERS:
                 try:
