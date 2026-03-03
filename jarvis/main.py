@@ -13,6 +13,7 @@ multiplexing. Jarvis is the only one that knows the workflow.
 
 import asyncio
 import json
+import time
 from typing import Dict, Any, Optional
 from .config import Config
 from .core import ComponentFactory
@@ -96,25 +97,33 @@ class Jarvis:
         """Handle new user input — add as goal, ask LLM what to do."""
         logger.info(f"JARVIS: User input: '{text}'")
 
-        # Add as a goal
         self.goals.add_goal(text)
 
-        # Build context and ask LLM
         context = self._build_context(new_input=text)
+        logger.debug(f"JARVIS: LLM context:\n{context}")
+
+        t0 = time.perf_counter()
         response = self.llm.ask(context)
+        elapsed = time.perf_counter() - t0
+        logger.info(f"JARVIS: LLM responded in {elapsed:.2f}s")
+        logger.debug(f"JARVIS: LLM raw response: {response}")
 
         await self._act_on_response(response)
 
     async def _on_dispatch_signal(self, signal: Dict[str, Any]):
         """Handle a dispatch signal — update goals, ask LLM what to do."""
-        logger.info(f"JARVIS: Dispatch signal: {signal.get('type')} PID {signal.get('pid')}")
+        logger.info(f"JARVIS: Dispatch signal: type={signal.get('type')}, pid={signal.get('pid')}, data={signal.get('data', '')}")
 
-        # Update goal tracking
         self.goals.update_from_signal(signal)
 
-        # Build context and ask LLM
         context = self._build_context(signal=signal)
+        logger.debug(f"JARVIS: LLM context:\n{context}")
+
+        t0 = time.perf_counter()
         response = self.llm.ask(context)
+        elapsed = time.perf_counter() - t0
+        logger.info(f"JARVIS: LLM responded in {elapsed:.2f}s")
+        logger.debug(f"JARVIS: LLM raw response: {response}")
 
         await self._act_on_response(response)
 
@@ -124,15 +133,19 @@ class Jarvis:
 
         if "error" in parsed:
             logger.warning(f"JARVIS: LLM response parse error: {parsed['error']}")
+            logger.debug(f"JARVIS: Raw response that failed parsing: {parsed.get('raw', response)}")
             self.output_manager.handle_response({
                 "output": "I had trouble processing that. Could you try again?"
             })
             return
 
-        # Apply any goal updates the LLM included
-        self._apply_goal_updates(parsed.get("goal_updates", []))
-
         action = parsed["action"]
+        logger.info(f"JARVIS: Parsed action='{action}'")
+
+        goal_updates = parsed.get("goal_updates", [])
+        if goal_updates:
+            logger.info(f"JARVIS: Applying {len(goal_updates)} goal update(s): {goal_updates}")
+        self._apply_goal_updates(goal_updates)
 
         if action == "dispatch":
             await self._do_dispatch(parsed["tasks"])
@@ -166,7 +179,8 @@ class Jarvis:
         if "error" in result:
             logger.error(f"JARVIS: Dispatch error: {result['error']}")
         else:
-            logger.info(f"JARVIS: Dispatched {len(tasks)} task(s)")
+            pids = result.get("pids", result.get("pid", "N/A"))
+            logger.info(f"JARVIS: Dispatched {len(tasks)} task(s), assigned PIDs: {pids}")
 
     async def _do_kill(self, pids):
         """Kill tasks via dispatch."""
@@ -266,16 +280,15 @@ class Jarvis:
     async def _await_dispatch_signal(self) -> Optional[Dict[str, Any]]:
         """Async source for dispatch signals."""
         if not self.dispatch.is_connected:
-            # No dispatch connection — just sleep to avoid busy-loop
             await asyncio.sleep(1)
             return None
 
         signals = await self.dispatch.get_signal_window()
         if signals:
-            # Return the most recent signal
-            return signals[-1]
+            latest = signals[-1]
+            logger.debug(f"JARVIS: Received {len(signals)} signal(s), forwarding latest: type={latest.get('type')}, pid={latest.get('pid')}")
+            return latest
 
-        # No new signals — short sleep
         await asyncio.sleep(0.5)
         return None
 
@@ -294,10 +307,19 @@ class Jarvis:
 
         self.goals.add_goal(prompt)
         context = self._build_context(new_input=prompt)
+        logger.debug(f"JARVIS: LLM context:\n{context}")
+
+        t0 = time.perf_counter()
         response = self.llm.ask(context)
+        elapsed = time.perf_counter() - t0
+        logger.info(f"JARVIS: LLM responded in {elapsed:.2f}s")
+        logger.debug(f"JARVIS: LLM raw response: {response}")
+
         parsed = self.task_parser.parse(response)
+        logger.info(f"JARVIS: Parsed action='{parsed.get('action', 'error')}'")
 
         if "error" in parsed:
+            logger.warning(f"JARVIS: Parse error: {parsed['error']}")
             result = {"output": "I had trouble processing that. Could you try again?"}
         elif parsed["action"] == "respond":
             result = {"output": parsed["output"]}

@@ -110,6 +110,7 @@ class EventMerger:
             try:
                 text = await source()
                 if text and text.strip():
+                    logger.debug(f"EventMerger: Queued user input ({len(text.strip())} chars)")
                     await self._queue.put(Event.user_input(text.strip()))
             except asyncio.CancelledError:
                 break
@@ -122,6 +123,7 @@ class EventMerger:
             try:
                 signal = await source()
                 if signal is not None:
+                    logger.debug(f"EventMerger: Queued dispatch signal type={signal.get('type')}, pid={signal.get('pid')}")
                     await self._queue.put(Event.dispatch_signal(signal))
             except asyncio.CancelledError:
                 break

@@ -140,6 +140,7 @@ class GoalManager:
         Args:
             signal: Dict with pid, type (INIT/EXIT/REMIND/KILL), and optional data.
         """
+        logger.info(f"GoalManager: Processing signal type={signal.get('type')}, pid={signal.get('pid')}, data={signal.get('data', '')}")
         pid = signal.get("pid")
         signal_type = signal.get("type", "").upper()
 
@@ -183,6 +184,8 @@ class GoalManager:
         """Remove and return completed goals."""
         completed = [g for g in self._goals if g.status == GoalStatus.COMPLETED]
         self._goals = [g for g in self._goals if g.status != GoalStatus.COMPLETED]
+        if completed:
+            logger.info(f"GoalManager: Dismissing {len(completed)} completed goal(s): {[g.id for g in completed]}")
         return completed
 
     def get_context(self) -> List[Dict[str, Any]]:

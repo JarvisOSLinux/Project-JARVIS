@@ -11,6 +11,7 @@ tool invocations and surfaces results. All decision-making lives in Jarvis.
 """
 
 import asyncio
+import time
 from typing import Dict, Any, Optional, List
 from ..config import Config
 from ..core.logger import get_logger
@@ -33,6 +34,7 @@ class DispatchAdapter:
             from mcp import ClientSession, StdioServerParameters
             from mcp.client.stdio import stdio_client
 
+            logger.info(f"Dispatch: Spawning '{Config.DISPATCH_BINARY} serve'")
             params = StdioServerParameters(
                 command=Config.DISPATCH_BINARY,
                 args=["serve"],
@@ -44,7 +46,7 @@ class DispatchAdapter:
             self._connected = True
             logger.info("Dispatch: Connected successfully")
         except Exception as e:
-            logger.error(f"Dispatch: Connection failed: {e}")
+            logger.error(f"Dispatch: Connection failed (binary='{Config.DISPATCH_BINARY}'): {e}")
             raise
 
     async def disconnect(self):
@@ -78,17 +80,30 @@ class DispatchAdapter:
             Dict with assigned PIDs and status.
         """
         if not self._connected:
+            logger.warning("Dispatch: send_tasks called but not connected")
             return {"error": "Not connected to dispatch"}
 
+        logger.info(f"Dispatch: Sending {len(tasks)} task(s)")
+        for i, task in enumerate(tasks):
+            logger.info(f"Dispatch:   task[{i}]: server={task.get('server')}, tool={task.get('tool')}, params={task.get('params')}")
+
+        t0 = time.perf_counter()
         try:
             result = await asyncio.wait_for(
                 self.session.call_tool("dispatch", {"tasks": tasks}),
                 timeout=self.timeout,
             )
-            return self._extract_content(result)
+            elapsed = time.perf_counter() - t0
+            content = self._extract_content(result)
+            logger.info(f"Dispatch: send_tasks completed in {elapsed:.2f}s — result: {content}")
+            return content
         except asyncio.TimeoutError:
+            elapsed = time.perf_counter() - t0
+            logger.error(f"Dispatch: send_tasks timed out after {elapsed:.2f}s (limit={self.timeout}s)")
             return {"error": f"Dispatch timed out after {self.timeout}s"}
         except Exception as e:
+            elapsed = time.perf_counter() - t0
+            logger.error(f"Dispatch: send_tasks failed after {elapsed:.2f}s — {e}")
             return {"error": f"Failed to dispatch tasks: {e}"}
 
     async def kill_tasks(self, pids: List[int]) -> Dict[str, Any]:
@@ -102,17 +117,27 @@ class DispatchAdapter:
             Dict with kill confirmation.
         """
         if not self._connected:
+            logger.warning("Dispatch: kill_tasks called but not connected")
             return {"error": "Not connected to dispatch"}
 
+        logger.info(f"Dispatch: Killing PIDs {pids}")
+        t0 = time.perf_counter()
         try:
             result = await asyncio.wait_for(
                 self.session.call_tool("kill", {"pids": pids}),
                 timeout=self.timeout,
             )
-            return self._extract_content(result)
+            elapsed = time.perf_counter() - t0
+            content = self._extract_content(result)
+            logger.info(f"Dispatch: kill_tasks completed in {elapsed:.2f}s — result: {content}")
+            return content
         except asyncio.TimeoutError:
+            elapsed = time.perf_counter() - t0
+            logger.error(f"Dispatch: kill_tasks timed out after {elapsed:.2f}s (limit={self.timeout}s)")
             return {"error": f"Kill timed out after {self.timeout}s"}
         except Exception as e:
+            elapsed = time.perf_counter() - t0
+            logger.error(f"Dispatch: kill_tasks failed after {elapsed:.2f}s — {e}")
             return {"error": f"Failed to kill tasks: {e}"}
 
     async def set_timer(
@@ -130,21 +155,31 @@ class DispatchAdapter:
             Dict with assigned PID and status, or error.
         """
         if not self._connected:
+            logger.warning("Dispatch: set_timer called but not connected")
             return {"error": "Not connected to dispatch"}
 
+        logger.info(f"Dispatch: Setting timer label='{label}', duration={duration}s, metadata={metadata}")
         params: Dict[str, Any] = {"label": label, "duration": duration}
         if metadata is not None:
             params["metadata"] = metadata
 
+        t0 = time.perf_counter()
         try:
             result = await asyncio.wait_for(
                 self.session.call_tool("timer", params),
                 timeout=self.timeout,
             )
-            return self._extract_content(result)
+            elapsed = time.perf_counter() - t0
+            content = self._extract_content(result)
+            logger.info(f"Dispatch: set_timer completed in {elapsed:.2f}s — result: {content}")
+            return content
         except asyncio.TimeoutError:
+            elapsed = time.perf_counter() - t0
+            logger.error(f"Dispatch: set_timer timed out after {elapsed:.2f}s (limit={self.timeout}s)")
             return {"error": f"Timer call timed out after {self.timeout}s"}
         except Exception as e:
+            elapsed = time.perf_counter() - t0
+            logger.error(f"Dispatch: set_timer failed after {elapsed:.2f}s — {e}")
             return {"error": f"Failed to set timer: {e}"}
 
     async def get_signal_window(self) -> List[Dict[str, Any]]:
@@ -168,8 +203,17 @@ class DispatchAdapter:
             )
             content = self._extract_content(result)
             if isinstance(content, list):
-                return content
-            return content.get("signals", []) if isinstance(content, dict) else []
+                signals = content
+            elif isinstance(content, dict):
+                signals = content.get("signals", [])
+            else:
+                signals = []
+
+            if signals:
+                logger.debug(f"Dispatch: Signal window returned {len(signals)} signal(s)")
+                for sig in signals:
+                    logger.debug(f"Dispatch:   signal: type={sig.get('type')}, pid={sig.get('pid')}, data={sig.get('data', '')}")
+            return signals
         except Exception as e:
             logger.error(f"Dispatch: Failed to get signals: {e}")
             return []
@@ -185,11 +229,12 @@ class DispatchAdapter:
                 if hasattr(block, 'text') and block.text:
                     texts.append(block.text)
             combined = "\n".join(texts) if texts else str(result)
-            # Try to parse as JSON
             try:
                 return json.loads(combined)
             except (json.JSONDecodeError, ValueError):
+                logger.debug(f"Dispatch: MCP result was not JSON, using raw text ({len(combined)} chars)")
                 return combined
+        logger.debug(f"Dispatch: MCP result had no content, returning str representation")
         return str(result)
 
     async def __aenter__(self):

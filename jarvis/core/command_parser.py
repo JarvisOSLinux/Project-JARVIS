@@ -46,15 +46,40 @@ class TaskParser:
             return {"error": f"Unknown action: {action}", "raw": response}
 
         if action == "dispatch":
-            return TaskParser._parse_dispatch(response)
+            result = TaskParser._parse_dispatch(response)
         elif action == "respond":
-            return TaskParser._parse_respond(response)
+            result = TaskParser._parse_respond(response)
         elif action == "wait":
-            return TaskParser._parse_wait(response)
+            result = TaskParser._parse_wait(response)
         elif action == "kill":
-            return TaskParser._parse_kill(response)
+            result = TaskParser._parse_kill(response)
         elif action == "defer":
-            return TaskParser._parse_defer(response)
+            result = TaskParser._parse_defer(response)
+
+        if "error" in result:
+            logger.warning(f"TaskParser: Validation failed for action='{action}': {result['error']}")
+        else:
+            summary = TaskParser._summarize(result)
+            logger.info(f"TaskParser: Parsed action='{action}'{summary}")
+        return result
+
+    @staticmethod
+    def _summarize(result: Dict[str, Any]) -> str:
+        """One-line summary of a parsed result for log readability."""
+        action = result.get("action", "")
+        if action == "dispatch":
+            tasks = result.get("tasks", [])
+            parts = [f"{t.get('server')}/{t.get('tool')}" for t in tasks]
+            return f", tasks=[{', '.join(parts)}]"
+        if action == "respond":
+            output = result.get("output", "")
+            preview = (output[:80] + "...") if len(output) > 80 else output
+            return f", output='{preview}'"
+        if action == "kill":
+            return f", pids={result.get('pids', [])}"
+        if action == "defer":
+            return f", goal_id={result.get('goal_id')}, duration={result.get('duration')}s"
+        return ""
 
     @staticmethod
     def _parse_dispatch(response: Dict[str, Any]) -> Dict[str, Any]:
