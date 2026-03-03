@@ -4,6 +4,7 @@ from ..config import Config
 from ..llm import LLM
 from ..llm.providers import create_provider as create_llm_provider
 from ..dispatch import DispatchAdapter, GoalManager, EventMerger
+from ..kernel_client import KernelClient, provider_from_config
 from .system_info import SystemInfo
 from .command_parser import TaskParser
 from .output_manager import OutputManager
@@ -213,6 +214,23 @@ class ComponentFactory:
             return None
 
     @staticmethod
+    def create_kernel_client() -> KernelClient:
+        """
+        Create and start the /dev/jarvis kernel client.
+
+        Starts the background poll thread if the kernel module is loaded.
+        Always returns a KernelClient — it does nothing if /dev/jarvis is absent.
+        """
+        logger.info("Initiating kernel client (/dev/jarvis)...")
+        client = KernelClient()
+        available = client.start()
+        if available:
+            logger.info("Kernel integration active — /dev/jarvis connected")
+        else:
+            logger.info("Kernel integration unavailable — running userspace-only mode")
+        return client
+
+    @staticmethod
     def create_all_components(text_mode: bool = False, on_voice_command=None):
         """
         Create all JARVIS components
@@ -225,6 +243,9 @@ class ComponentFactory:
             Dictionary of all initialized components
         """
         components = {}
+
+        # Kernel integration client (started first — LLM providers may use keyring)
+        components['kernel_client'] = ComponentFactory.create_kernel_client()
 
         # Core components (always needed)
         components['llm'] = ComponentFactory.create_llm()
@@ -248,6 +269,12 @@ class ComponentFactory:
             )
         else:
             components['voice_manager'] = None
+
+        # Report active LLM provider to kernel sysfs
+        kernel_client = components['kernel_client']
+        if kernel_client.available:
+            k_provider = provider_from_config(Config.LLM_PROVIDER)
+            kernel_client.report_provider(k_provider, Config.LLM_MODEL)
 
         logger.info("Initiations Complete!")
         return components
