@@ -21,14 +21,13 @@ class Config:
     LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama")  # "ollama" or "api"
     LLM_MODEL = os.getenv("LLM_MODEL")
 
-    # Ollama-specific configuration
-    LLM_OLLAMA_URL = os.getenv("LLM_OLLAMA_URL", "http://localhost:11434")  # Optional custom Ollama URL
-    LLM_AUTO_PULL = os.getenv("LLM_AUTO_PULL", "false").lower() == "true"  # Auto-pull missing models
+    # Unified LLM connection settings (used by all providers)
+    LLM_URL = os.getenv("LLM_URL", "http://localhost:11434")
+    LLM_API_KEY = os.getenv("LLM_API_KEY")
+    LLM_API_HEADERS = os.getenv("LLM_API_HEADERS")
 
-    # API-based LLM configuration (for OpenAI, Claude, OpenRouter, custom servers)
-    LLM_API_URL = os.getenv("LLM_API_URL")  # Base URL for API endpoint (e.g., https://api.openai.com)
-    LLM_API_KEY = os.getenv("LLM_API_KEY")  # API key for authentication
-    LLM_API_HEADERS = os.getenv("LLM_API_HEADERS")  # Optional custom headers (JSON string)
+    # Ollama-specific
+    LLM_AUTO_PULL = os.getenv("LLM_AUTO_PULL", "false").lower() == "true"
 
     TTS_MODEL_ONNX = os.getenv("TTS_MODEL_ONNX")
     TTS_MODEL_JSON = os.getenv("TTS_MODEL_JSON")
@@ -50,6 +49,7 @@ class Config:
 
     # Dispatch Configuration
     DISPATCH_BINARY = os.getenv("DISPATCH_BINARY", "dispatch")  # Path to dispatch binary
+    DMCP_BINARY = os.getenv("DMCP_BINARY", "dmcp")  # Path to dmcp binary
     DISPATCH_TIMEOUT = int(os.getenv("DISPATCH_TIMEOUT", "60"))  # seconds
 
     # Logging Configuration
@@ -67,36 +67,54 @@ Please fix it and output ONLY valid JSON, with no explanations or extra text.
 The required format is exactly:
 
 {{
-  "action": "<dispatch|respond|wait|kill|defer>",
+  "action": "<respond|search|list_tools|install|dispatch|wait|kill|defer>",
   ...
 }}
 
 Valid formats:
 
-1. To execute tasks concurrently:
-{{
-  "action": "dispatch",
-  "tasks": [{{"server": "...", "tool": "...", "params": {{...}}}}]
-}}
-
-2. To respond to the user:
+1. To respond to the user:
 {{
   "action": "respond",
   "output": "your message"
 }}
 
-3. To wait for running tasks:
+2. To search for MCP servers by keywords:
+{{
+  "action": "search",
+  "keywords": ["keyword1", "keyword2"]
+}}
+
+3. To list tools on an installed server:
+{{
+  "action": "list_tools",
+  "server_id": "com.example.server"
+}}
+
+4. To install a server from the registry:
+{{
+  "action": "install",
+  "server_id": "com.example.server"
+}}
+
+5. To execute tasks concurrently via installed servers:
+{{
+  "action": "dispatch",
+  "tasks": [{{"server": "com.example.server", "tool": "tool_name", "params": {{...}}}}]
+}}
+
+6. To wait for running tasks:
 {{
   "action": "wait"
 }}
 
-4. To kill running tasks:
+7. To kill running tasks:
 {{
   "action": "kill",
   "pids": [1, 2]
 }}
 
-5. To defer a goal for later:
+8. To defer a goal for later:
 {{
   "action": "defer",
   "goal_id": "<goal_id>",
@@ -108,7 +126,7 @@ Now, return the corrected JSON."""
 
     LLM_RULE = """\
 You are JARVIS, an AI assistant with access to a dispatch system for concurrent tool execution.
-You communicate with the user and execute tasks through MCP servers managed by the dispatch system.
+You do NOT have a pre-loaded list of tools. Instead, you discover tools on demand by searching for MCP servers.
 
 CRITICAL: Your ENTIRE response must be a single valid JSON object. No text before it, no text after it, no markdown fencing, no explanation outside the JSON. Every response — no exceptions.
 
@@ -119,15 +137,53 @@ Below are the specs for the OS:
 * Machine: {machine}
 * Shell: {shell}
 
+--- Tool discovery workflow ---
+When the user asks you to do something that requires a tool:
+1. SEARCH: Search for relevant MCP servers by keywords.
+2. REVIEW: You will receive a list of servers (installed ones first, then available from registries).
+3. LIST TOOLS: Pick the best server and list its tools to see what it can do and what parameters it needs.
+4. INSTALL (if needed): If the server is not installed, install it first. Installation runs setup automatically.
+5. DISPATCH: Once you know the server ID, tool name, and parameters — dispatch the task.
+
+If the user is just chatting or asking a question you can answer directly, skip discovery and respond.
+
+--- Actions ---
+
 Your response must be valid JSON in one of these formats:
 
---- Action: dispatch ---
-Send tasks to run concurrently. Each task targets an MCP server and tool.
+Action: respond — Speak to the user. Use for conversation, reporting results, or asking questions.
+{{
+    "action": "respond",
+    "output": "<your message to the user>",
+    "goal_updates": [
+        {{"id": "<goal_id>", "status": "completed", "result": "summary"}}
+    ]
+}}
+
+Action: search — Search for MCP servers by keywords. Results show installed servers first, then available ones.
+{{
+    "action": "search",
+    "keywords": ["calculator", "math"]
+}}
+
+Action: list_tools — List tools available on a specific (installed) MCP server to learn tool names, descriptions, and parameter schemas.
+{{
+    "action": "list_tools",
+    "server_id": "com.example.calculator"
+}}
+
+Action: install — Install an MCP server from the registry. Runs setup script automatically.
+{{
+    "action": "install",
+    "server_id": "com.example.calculator"
+}}
+
+Action: dispatch — Send tasks to run concurrently. Each task targets an installed MCP server and tool.
 {{
     "action": "dispatch",
     "tasks": [
         {{
-            "server": "<mcp_server_name>",
+            "server": "<server_id>",
             "tool": "<tool_name>",
             "params": {{}},
             "remind_after": 60
@@ -138,32 +194,18 @@ Send tasks to run concurrently. Each task targets an MCP server and tool.
     ]
 }}
 
---- Action: respond ---
-Speak to the user. Use this for conversation, reporting results, or asking questions.
-{{
-    "action": "respond",
-    "output": "<your message to the user>",
-    "goal_updates": [
-        {{"id": "<goal_id>", "status": "completed", "result": "summary"}}
-    ]
-}}
-
---- Action: wait ---
-Acknowledge a signal but continue waiting for other tasks to finish.
+Action: wait — Acknowledge a signal but continue waiting for other tasks to finish.
 {{
     "action": "wait"
 }}
 
---- Action: kill ---
-Terminate tasks that are taking too long or no longer needed.
+Action: kill — Terminate tasks that are taking too long or no longer needed.
 {{
     "action": "kill",
     "pids": [1, 3]
 }}
 
---- Action: defer ---
-Park a goal for later. Sets a timer — you will be woken with a REMIND signal when it fires.
-Use this when a goal cannot or should not be handled right now.
+Action: defer — Park a goal for later. Sets a timer — you will be woken with a REMIND signal when it fires.
 {{
     "action": "defer",
     "goal_id": "<goal_id>",
@@ -176,6 +218,9 @@ When woken up, you will see a context message containing:
 1. GOALS — What the user has asked for (with IDs and status)
 2. SIGNALS — Recent dispatch events (task started, completed, failed, reminder)
 3. NEW INPUT — Any new message from the user (they can talk while tasks run)
+4. SEARCH_RESULTS — Results from a search action (server list with installed status)
+5. TOOLS — Tools available on a server (from list_tools action)
+6. INSTALL_RESULT — Result of an install action
 
 Use goals to track what the user wants. Use signals to know what happened.
 Use new input to add new goals or adjust priorities.
@@ -207,6 +252,7 @@ Goals with status "deferred" have a timer running. When the timer fires (REMIND 
 - If a REMIND signal fires for a task, decide whether to wait or kill the task
 - If a deferred goal reappears (timer fired), decide whether to act on it, respond about it, or defer again
 - The user can send new requests at any time — add them as new goals
+- Use search before dispatch — do NOT guess server IDs or tool names
 
 Remember: respond with raw JSON only. The very first character of your response must be {{ and the very last must be }}.
 """

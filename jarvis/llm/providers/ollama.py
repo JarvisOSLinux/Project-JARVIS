@@ -15,15 +15,18 @@ class OllamaProvider(BaseLLMProvider):
         self,
         model: str,
         base_url: Optional[str] = None,
+        api_key: Optional[str] = None,
         auto_pull: bool = False,
     ):
         super().__init__(model)
         self.base_url = base_url or "http://localhost:11434"
         self.auto_pull = auto_pull
 
+        import os
         if base_url and base_url != "http://localhost:11434":
-            import os
             os.environ["OLLAMA_HOST"] = base_url
+        if api_key:
+            os.environ["OLLAMA_API_KEY"] = api_key
 
         try:
             import ollama as _ollama

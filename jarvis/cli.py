@@ -101,7 +101,7 @@ def set_llm_provider(provider: str) -> None:
     print(f"LLM provider set to: {provider}")
 
     if provider == "api":
-        print("  Note: Set API URL and key with 'jarvis api-url' and 'jarvis api-key'")
+        print("  Note: Set URL and key with 'jarvis llm-url' and 'jarvis api-key'")
 
 
 def set_llm_model(model_name: str) -> None:
@@ -125,18 +125,18 @@ def get_llm_model() -> str:
     return Config.LLM_MODEL or "(not set)"
 
 
-def set_api_url(url: str) -> None:
-    """Set API base URL for API provider."""
+def set_llm_url(url: str) -> None:
+    """Set LLM base URL (used by all providers)."""
     if not url or not url.strip():
         print("Error: URL cannot be empty")
         sys.exit(1)
 
-    _update_env_setting("LLM_API_URL", url.strip())
-    print(f"API URL set to: {url.strip()}")
+    _update_env_setting("LLM_URL", url.strip())
+    print(f"LLM URL set to: {url.strip()}")
 
 
 def set_api_key(key: str) -> None:
-    """Set API key for API provider."""
+    """Set API key (used by all providers that require authentication)."""
     if not key or not key.strip():
         print("Error: API key cannot be empty")
         sys.exit(1)
@@ -145,28 +145,16 @@ def set_api_key(key: str) -> None:
     print(f"API key set (length: {len(key.strip())} chars)")
 
 
-def set_ollama_url(url: str) -> None:
-    """Set custom Ollama URL."""
-    if not url or not url.strip():
-        print("Error: URL cannot be empty")
-        sys.exit(1)
-
-    _update_env_setting("LLM_OLLAMA_URL", url.strip())
-    print(f"Ollama URL set to: {url.strip()}")
-
-
 def show_llm_config() -> None:
     """Show current LLM configuration."""
     print("LLM Configuration:")
     print(f"  Provider: {Config.LLM_PROVIDER}")
     print(f"  Model: {Config.LLM_MODEL or '(not set)'}")
+    print(f"  URL: {Config.LLM_URL}")
+    print(f"  API Key: {'set' if Config.LLM_API_KEY else '(not set)'}")
 
     if Config.LLM_PROVIDER == "ollama":
-        print(f"  Ollama URL: {Config.LLM_OLLAMA_URL}")
         print(f"  Auto-pull: {'enabled' if Config.LLM_AUTO_PULL else 'disabled'}")
-    elif Config.LLM_PROVIDER == "api":
-        print(f"  API URL: {Config.LLM_API_URL or '(not set)'}")
-        print(f"  API Key: {'set' if Config.LLM_API_KEY else '(not set)'}")
 
     print(f"  Dispatch binary: {Config.DISPATCH_BINARY}")
     print(f"  Dispatch timeout: {Config.DISPATCH_TIMEOUT}s")
@@ -250,9 +238,8 @@ def show_usage() -> None:
     print("  jarvis provider <ollama|api>  # Set LLM provider")
     print("  jarvis model                  # Show current LLM model")
     print("  jarvis model <model_name>     # Set LLM model")
-    print("  jarvis api-url <url>          # Set API base URL (for API provider)")
-    print("  jarvis api-key <key>          # Set API key (for API provider)")
-    print("  jarvis ollama-url <url>       # Set Ollama URL (for Ollama provider)")
+    print("  jarvis llm-url <url>          # Set LLM base URL")
+    print("  jarvis api-key <key>          # Set API key")
     print("  jarvis auto-pull on/off       # Enable/disable auto-pull missing models")
     print("  jarvis llm-config             # Show current LLM configuration")
 
@@ -385,23 +372,17 @@ def main() -> None:
             sys.exit(1)
         set_llm_provider(sys.argv[2])
 
-    elif command == "api-url":
+    elif command == "llm-url":
         if len(sys.argv) < 3:
-            print(f"Current API URL: {Config.LLM_API_URL or '(not set)'}")
+            print(f"Current LLM URL: {Config.LLM_URL}")
             sys.exit(1)
-        set_api_url(sys.argv[2])
+        set_llm_url(sys.argv[2])
 
     elif command == "api-key":
         if len(sys.argv) < 3:
             print(f"API key: {'set' if Config.LLM_API_KEY else '(not set)'}")
             sys.exit(1)
         set_api_key(sys.argv[2])
-
-    elif command == "ollama-url":
-        if len(sys.argv) < 3:
-            print(f"Current Ollama URL: {Config.LLM_OLLAMA_URL}")
-            sys.exit(1)
-        set_ollama_url(sys.argv[2])
 
     elif command == "llm-config":
         show_llm_config()

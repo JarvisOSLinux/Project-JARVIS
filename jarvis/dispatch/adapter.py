@@ -11,6 +11,7 @@ tool invocations and surfaces results. All decision-making lives in Jarvis.
 """
 
 import asyncio
+import json
 import time
 from typing import Dict, Any, Optional, List
 from ..config import Config
@@ -38,10 +39,12 @@ class DispatchAdapter:
             params = StdioServerParameters(
                 command=Config.DISPATCH_BINARY,
                 args=["serve"],
+                env={"RUST_LOG": "dispatch=warn"},
             )
             self._client = stdio_client(params)
             read, write = await self._client.__aenter__()
             self.session = ClientSession(read, write)
+            await self.session.__aenter__()
             await self.session.initialize()
             self._connected = True
             logger.info("Dispatch: Connected successfully")
@@ -53,7 +56,7 @@ class DispatchAdapter:
         """Disconnect from dispatch."""
         try:
             if self.session:
-                await self.session.close()
+                await self.session.__aexit__(None, None, None)
             if self._client:
                 await self._client.__aexit__(None, None, None)
             self._connected = False
@@ -198,7 +201,7 @@ class DispatchAdapter:
 
         try:
             result = await asyncio.wait_for(
-                self.session.call_tool("signals", {}),
+                self.session.call_tool("log", {}),
                 timeout=self.timeout,
             )
             content = self._extract_content(result)
@@ -236,6 +239,95 @@ class DispatchAdapter:
                 return combined
         logger.debug(f"Dispatch: MCP result had no content, returning str representation")
         return str(result)
+
+    # ------------------------------------------------------------------
+    # MCP server discovery via dmcp (on-demand, keyword-based)
+    # ------------------------------------------------------------------
+
+    async def _run_dmcp(self, *args: str) -> Optional[str]:
+        """Run a dmcp command and return stdout, or None on failure."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                Config.DMCP_BINARY, *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+        except FileNotFoundError:
+            logger.warning("Dispatch: dmcp binary not found")
+            return None
+        except asyncio.TimeoutError:
+            logger.warning(f"Dispatch: dmcp {args[0]} timed out")
+            return None
+
+        if proc.returncode != 0:
+            logger.warning(f"Dispatch: dmcp {' '.join(args)} failed: {stderr.decode().strip()}")
+            return None
+
+        return stdout.decode()
+
+    async def search_servers(self, keywords: List[str]) -> Dict[str, Any]:
+        """
+        Search for MCP servers by keywords via `dmcp browse`.
+
+        Returns installed matches first, then not-installed ones from registries.
+        """
+        logger.info(f"Dispatch: Searching MCP servers with keywords: {keywords}")
+
+        cmd_args = ["browse", "--json"]
+        for kw in keywords:
+            cmd_args.extend(["-k", kw])
+
+        raw = await self._run_dmcp(*cmd_args)
+        if raw is None:
+            return {"error": "dmcp browse failed", "servers": []}
+
+        try:
+            servers = json.loads(raw)
+        except json.JSONDecodeError:
+            return {"error": "dmcp returned invalid JSON", "servers": []}
+
+        if not isinstance(servers, list):
+            servers = servers.get("servers", []) if isinstance(servers, dict) else []
+
+        installed = [s for s in servers if s.get("installed")]
+        available = [s for s in servers if not s.get("installed")]
+        sorted_servers = installed + available
+
+        logger.info(
+            f"Dispatch: Found {len(installed)} installed, "
+            f"{len(available)} available server(s) for keywords {keywords}"
+        )
+
+        return {"servers": sorted_servers}
+
+    async def install_server(self, server_id: str) -> Dict[str, Any]:
+        """Install an MCP server from registry via `dmcp install`."""
+        logger.info(f"Dispatch: Installing MCP server '{server_id}'")
+        raw = await self._run_dmcp("install", server_id)
+        if raw is None:
+            return {"error": f"Failed to install server '{server_id}'"}
+        return {"installed": server_id, "output": raw.strip()}
+
+    async def list_server_tools(self, server_id: str) -> Dict[str, Any]:
+        """List tools available on an installed MCP server."""
+        logger.info(f"Dispatch: Listing tools for server '{server_id}'")
+        raw = await self._run_dmcp("tools", server_id, "--json")
+        if raw is None:
+            return {"error": f"Failed to list tools for '{server_id}'", "tools": []}
+
+        try:
+            tools = json.loads(raw)
+        except json.JSONDecodeError:
+            return {"error": "dmcp returned invalid JSON", "tools": []}
+
+        if isinstance(tools, dict) and "tools" in tools:
+            tools = tools["tools"]
+        if not isinstance(tools, list):
+            tools = []
+
+        logger.info(f"Dispatch: Server '{server_id}' has {len(tools)} tool(s)")
+        return {"server": server_id, "tools": tools}
 
     async def __aenter__(self):
         await self.connect()

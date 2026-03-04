@@ -152,7 +152,6 @@ class Jarvis:
 
         elif action == "respond":
             self.output_manager.handle_response({"output": parsed["output"]})
-            # Dismiss completed goals after responding
             dismissed = self.goals.dismiss_completed()
             if dismissed:
                 logger.info(f"JARVIS: Dismissed {len(dismissed)} completed goal(s)")
@@ -165,6 +164,15 @@ class Jarvis:
 
         elif action == "defer":
             await self._do_defer(parsed["goal_id"], parsed["duration"], parsed.get("reason", ""))
+
+        elif action == "search":
+            await self._do_search(parsed["keywords"])
+
+        elif action == "list_tools":
+            await self._do_list_tools(parsed["server_id"])
+
+        elif action == "install":
+            await self._do_install(parsed["server_id"])
 
     async def _do_dispatch(self, tasks):
         """Send tasks to dispatch and link PIDs to goals."""
@@ -216,6 +224,43 @@ class Jarvis:
             timer_pid = result.get("pid", 0)
             self.goals.defer_goal(goal_id, timer_pid)
             logger.info(f"JARVIS: Deferred goal [{goal_id}] for {duration}s (timer PID {timer_pid})")
+
+    # ------------------------------------------------------------------
+    # Tool discovery actions (search → list_tools → install → dispatch)
+    # ------------------------------------------------------------------
+
+    async def _do_search(self, keywords):
+        """Search for MCP servers and feed results back to the LLM."""
+        result = await self.dispatch.search_servers(keywords)
+        context = self._build_context()
+        context += f"\nSEARCH_RESULTS: {json.dumps(result)}"
+        await self._continue_llm(context)
+
+    async def _do_list_tools(self, server_id):
+        """List tools on a server and feed results back to the LLM."""
+        result = await self.dispatch.list_server_tools(server_id)
+        context = self._build_context()
+        context += f"\nTOOLS: {json.dumps(result)}"
+        await self._continue_llm(context)
+
+    async def _do_install(self, server_id):
+        """Install a server and feed results back to the LLM."""
+        result = await self.dispatch.install_server(server_id)
+        context = self._build_context()
+        context += f"\nINSTALL_RESULT: {json.dumps(result)}"
+        await self._continue_llm(context)
+
+    async def _continue_llm(self, context: str):
+        """Feed context back to the LLM for the next action in a multi-step chain."""
+        logger.debug(f"JARVIS: Continuing LLM with context:\n{context}")
+
+        t0 = time.perf_counter()
+        response = self.llm.ask(context)
+        elapsed = time.perf_counter() - t0
+        logger.info(f"JARVIS: LLM follow-up responded in {elapsed:.2f}s")
+        logger.debug(f"JARVIS: LLM raw follow-up response: {response}")
+
+        await self._act_on_response(response)
 
     # ------------------------------------------------------------------
     # Context building
