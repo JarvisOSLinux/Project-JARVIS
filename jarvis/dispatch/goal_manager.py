@@ -17,6 +17,7 @@ from enum import Enum
 from dataclasses import dataclass, field, asdict
 from typing import List, Optional, Dict, Any
 from ..core.logger import get_logger
+from ..config import Config
 
 logger = get_logger(__name__)
 
@@ -196,7 +197,9 @@ class GoalManager:
         return failed
 
     def get_context(self) -> List[Dict[str, Any]]:
-        return [g.to_context() for g in self._goals if g.status != GoalStatus.COMPLETED]
+        active = [g.to_context() for g in self._goals if g.status != GoalStatus.COMPLETED]
+        limit = getattr(Config, "MAX_GOALS_IN_CONTEXT", 20)
+        return active[-limit:] if len(active) > limit else active
 
     def clear(self):
         self._goals.clear()

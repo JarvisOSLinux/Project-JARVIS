@@ -11,6 +11,7 @@ continuity. Subsystem modes (dispatch, contextor) always start clean.
 """
 
 import json
+import re
 from ..core.logger import get_logger
 from .base import BaseLLMProvider
 
@@ -96,6 +97,23 @@ class LLM:
         self._mode = mode
         self.chat_history = self._histories[mode]
 
+    # Mode-specific retry hints so the LLM knows what actions are valid
+    _MODE_RETRY_HINTS: dict[str, str] = {
+        "root": (
+            'Valid actions for your current mode: "respond", "dispatch", "contextor".\n'
+            'Example: {"action": "respond", "output": "your message", "goal_updates": []}'
+        ),
+        "dispatch": (
+            'Valid actions: "search", "list_tools", "install", "dispatch", '
+            '"wait", "kill", "defer", "done".\n'
+            'Example: {"action": "done", "summary": "result summary"}'
+        ),
+        "contextor": (
+            'Valid actions: "store", "recall", "search_memory", "list_memory", "done".\n'
+            'Example: {"action": "done", "summary": "result summary"}'
+        ),
+    }
+
     def ask(self, prompt: str, _retries_left: int | None = None) -> dict:
         """Ask the LLM a question in the current mode and return parsed JSON."""
         if _retries_left is None:
@@ -106,28 +124,100 @@ class LLM:
             "content": prompt,
         })
 
-        response_text = self.provider.chat(self.chat_history)
+        try:
+            response_text = self.provider.chat(self.chat_history)
+        except Exception as e:
+            logger.error(f"LLM [{self._mode}] provider error: {e}")
+            response_text = ""
+
         logger.debug(f"LLM [{self._mode}] Responded:\n{response_text}\n----------")
 
-        try:
-            parsed = json.loads(response_text)
+        if not response_text or not response_text.strip():
+            logger.warning(f"LLM [{self._mode}] returned empty response")
+            self.chat_history.pop()
+            if _retries_left > 0:
+                return self.ask(prompt, _retries_left - 1)
+            return self._fallback_response()
+
+        parsed = self._extract_json(response_text)
+        if parsed is not None:
+            clean = json.dumps(parsed)
             self.chat_history.append({
                 "role": "assistant",
-                "content": response_text,
+                "content": clean,
             })
             return parsed
-        except json.JSONDecodeError:
-            if _retries_left > 0:
-                logger.warning(
-                    f"LLM response was not valid JSON, retrying "
-                    f"({_retries_left} attempts left)..."
-                )
-                return self.ask(self._wrong_json_message, _retries_left - 1)
-            logger.error("LLM failed to return valid JSON after all retries")
-            return {
-                "action": "respond",
-                "output": "I had trouble formatting my response. Could you try again?",
-            }
+
+        if _retries_left > 0:
+            preview = response_text[:200].replace("\n", "\\n")
+            logger.warning(
+                f"LLM [{self._mode}] response was not valid JSON, retrying "
+                f"({_retries_left} left). Raw: {preview}"
+            )
+            hint = self._MODE_RETRY_HINTS.get(self._mode, "")
+            retry_msg = f"{self._wrong_json_message}\n{hint}"
+            return self.ask(retry_msg, _retries_left - 1)
+
+        logger.error("LLM failed to return valid JSON after all retries")
+        return self._fallback_response()
+
+    def _fallback_response(self) -> dict:
+        """Return a safe fallback when all retries are exhausted."""
+        msg = "I had trouble formatting my response. Could you try again?"
+        if self._mode != "root":
+            return {"action": "done", "summary": msg}
+        return {"action": "respond", "output": msg}
+
+    @staticmethod
+    def _extract_json(text: str) -> dict | None:
+        """
+        Try to extract a JSON object from LLM output that may be wrapped
+        in markdown fences, thinking tags, or preamble text.
+        """
+        # 1. Direct parse
+        try:
+            obj = json.loads(text)
+            if isinstance(obj, dict):
+                return obj
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+        # 2. Strip <think>...</think> or <reasoning>...</reasoning> tags
+        cleaned = re.sub(
+            r"<(?:think|thinking|reasoning)>.*?</(?:think|thinking|reasoning)>",
+            "", text, flags=re.DOTALL,
+        ).strip()
+        if cleaned != text:
+            try:
+                obj = json.loads(cleaned)
+                if isinstance(obj, dict):
+                    return obj
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+        # 3. Strip markdown code fences
+        fence_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
+        if fence_match:
+            try:
+                obj = json.loads(fence_match.group(1).strip())
+                if isinstance(obj, dict):
+                    return obj
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+        # 4. Find the first { ... } block (greedy from first { to last })
+        first_brace = text.find("{")
+        last_brace = text.rfind("}")
+        if first_brace != -1 and last_brace > first_brace:
+            candidate = text[first_brace:last_brace + 1]
+            try:
+                obj = json.loads(candidate)
+                if isinstance(obj, dict):
+                    return obj
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+        return None
 
     def reset_history(self):
         """Reset current mode's history to system prompt only."""

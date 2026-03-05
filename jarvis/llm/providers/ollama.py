@@ -7,6 +7,8 @@ from ..base import BaseLLMProvider
 
 logger = get_logger(__name__)
 
+LLM_TIMEOUT = 60  # seconds — prevents indefinite hangs on cloud API
+
 
 class OllamaProvider(BaseLLMProvider):
     """Provider for local Ollama instances."""
@@ -29,6 +31,8 @@ class OllamaProvider(BaseLLMProvider):
             os.environ["OLLAMA_API_KEY"] = api_key
 
         try:
+            from ollama import Client
+            self._client = Client(host=self.base_url, timeout=LLM_TIMEOUT)
             import ollama as _ollama
             self._ollama = _ollama
         except ImportError:
@@ -40,7 +44,7 @@ class OllamaProvider(BaseLLMProvider):
 
     def chat(self, messages: List[Dict[str, str]]) -> str:
         try:
-            response = self._ollama.chat(
+            response = self._client.chat(
                 model=self.model,
                 messages=messages,
                 format="json",
@@ -52,7 +56,7 @@ class OllamaProvider(BaseLLMProvider):
                 logger.warning("Model not found during chat, attempting to ensure model is available...")
                 if self.ensure_model():
                     try:
-                        response = self._ollama.chat(
+                        response = self._client.chat(
                             model=self.model,
                             messages=messages,
                             format="json",

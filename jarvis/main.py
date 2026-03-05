@@ -145,6 +145,11 @@ class Jarvis:
                 await self._feed_root_summary("DISPATCH_SUMMARY", summary, depth)
 
         elif action == "contextor":
+            if not self.contextor:
+                self.output_manager.handle_response({
+                    "output": "Memory is disabled. I can't remember or recall information.",
+                })
+                return
             summary = await self._run_contextor_subchain(parsed["intent"])
             await self._feed_root_summary("CONTEXTOR_SUMMARY", summary, depth)
 
@@ -315,6 +320,7 @@ class Jarvis:
 
     def _ask_llm(self, context: str, tag: str = "") -> Dict[str, Any]:
         """Single LLM call with timing logs."""
+        logger.info(f"JARVIS [{tag}]: Calling LLM (mode={self.llm.mode})...")
         logger.debug(f"JARVIS [{tag}]: LLM context:\n{context}")
 
         t0 = time.perf_counter()

@@ -71,10 +71,17 @@ class ComponentFactory:
             version=system_info['version'],
             machine=system_info['machine'],
             shell=system_info['shell'],
+            data_consent_note=Config.DATA_CONSENT_NOTE,
+        )
+
+        root_prompt = (
+            Config.LLM_ROOT_PROMPT.format(**fmt)
+            if Config.CONTEXTOR_ENABLED
+            else Config.LLM_ROOT_PROMPT_NO_CONTEXTOR.format(**fmt)
         )
 
         prompts = {
-            "root": Config.LLM_ROOT_PROMPT.format(**fmt),
+            "root": root_prompt,
             "dispatch": Config.LLM_DISPATCH_PROMPT.format(**fmt) if "{system}" in Config.LLM_DISPATCH_PROMPT else Config.LLM_DISPATCH_PROMPT,
             "contextor": Config.LLM_CONTEXTOR_PROMPT,
         }
@@ -263,7 +270,9 @@ class ComponentFactory:
         # Core components (always needed)
         components['llm'] = ComponentFactory.create_llm()
         components['dispatch_adapter'] = ComponentFactory.create_dispatch_adapter()
-        components['contextor'] = ComponentFactory.create_contextor()
+        components['contextor'] = (
+            ComponentFactory.create_contextor() if Config.CONTEXTOR_ENABLED else None
+        )
         components['goal_manager'] = ComponentFactory.create_goal_manager()
         components['event_merger'] = ComponentFactory.create_event_merger()
         components['task_parser'] = ComponentFactory.create_task_parser()
