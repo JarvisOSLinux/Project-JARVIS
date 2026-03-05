@@ -175,7 +175,7 @@ class Jarvis:
             await self._do_install(parsed["server_id"])
 
     async def _do_dispatch(self, tasks):
-        """Send tasks to dispatch and link PIDs to goals."""
+        """Send tasks to dispatch, then feed results back to the LLM."""
         if not self.dispatch.is_connected:
             logger.warning("JARVIS: Dispatch not connected, cannot send tasks")
             self.output_manager.handle_response({
@@ -184,11 +184,17 @@ class Jarvis:
             return
 
         result = await self.dispatch.send_tasks(tasks)
-        if "error" in result:
+
+        if isinstance(result, dict) and "error" in result:
             logger.error(f"JARVIS: Dispatch error: {result['error']}")
+            context = self._build_context()
+            context += f"\nDISPATCH_ERROR: {json.dumps(result)}"
         else:
-            pids = result.get("pids", result.get("pid", "N/A"))
-            logger.info(f"JARVIS: Dispatched {len(tasks)} task(s), assigned PIDs: {pids}")
+            logger.info(f"JARVIS: Dispatch completed — feeding results to LLM")
+            context = self._build_context()
+            context += f"\nDISPATCH_RESULT: {json.dumps(result)}"
+
+        await self._continue_llm(context)
 
     async def _do_kill(self, pids):
         """Kill tasks via dispatch."""

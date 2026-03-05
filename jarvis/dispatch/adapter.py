@@ -221,24 +221,32 @@ class DispatchAdapter:
             logger.error(f"Dispatch: Failed to get signals: {e}")
             return []
 
-    def _extract_content(self, result) -> Any:
-        """Extract content from MCP result."""
+    def _extract_content(self, result) -> Dict[str, Any]:
+        """
+        Extract content from an MCP CallToolResult.
+
+        Always returns a dict. Text content that isn't valid JSON is wrapped
+        as {"output": "<text>"} so callers can safely use .get().
+        """
         if hasattr(result, 'structuredContent') and result.structuredContent is not None:
             return result.structuredContent
-        elif hasattr(result, 'content') and result.content:
-            import json
+
+        if hasattr(result, 'content') and result.content:
             texts = []
             for block in result.content:
                 if hasattr(block, 'text') and block.text:
                     texts.append(block.text)
-            combined = "\n".join(texts) if texts else str(result)
+            combined = "\n".join(texts) if texts else ""
+
             try:
-                return json.loads(combined)
+                parsed = json.loads(combined)
+                if isinstance(parsed, dict):
+                    return parsed
+                return {"output": parsed}
             except (json.JSONDecodeError, ValueError):
-                logger.debug(f"Dispatch: MCP result was not JSON, using raw text ({len(combined)} chars)")
-                return combined
-        logger.debug(f"Dispatch: MCP result had no content, returning str representation")
-        return str(result)
+                return {"output": combined}
+
+        return {"output": str(result)}
 
     # ------------------------------------------------------------------
     # MCP server discovery via dmcp (on-demand, keyword-based)
