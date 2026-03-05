@@ -14,6 +14,7 @@ import os
 import time
 from typing import Dict, Any, List, Optional
 from ..core.logger import get_logger
+from ..config import Config
 
 logger = get_logger(__name__)
 
@@ -31,6 +32,46 @@ class ContextorAdapter:
     def _theme_path(self, theme: str) -> str:
         safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in theme.lower())
         return os.path.join(self._memory_dir, f"{safe}.jsonl")
+
+    def _prune_theme(self, path: str) -> None:
+        """
+        Prune theme file: remove entries older than retention days, then cap by
+        max entries per theme (FIFO — oldest dropped first).
+        """
+        if not os.path.exists(path):
+            return
+        retention_days = getattr(Config, "MEMORY_RETENTION_DAYS", 90)
+        max_entries = getattr(Config, "MAX_ENTRIES_PER_THEME", 500)
+        cutoff = time.time() - (retention_days * 86400)
+        entries: List[Dict[str, Any]] = []
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                        stored_at = entry.get("stored_at", 0)
+                        if stored_at >= cutoff:
+                            entries.append(entry)
+                    except json.JSONDecodeError:
+                        continue
+        except OSError as e:
+            logger.warning(f"Contextor: Failed to read for prune: {e}")
+            return
+        if len(entries) > max_entries:
+            entries = entries[-max_entries:]
+        try:
+            if not entries:
+                os.remove(path)
+                logger.debug(f"Contextor: Removed empty theme file {path}")
+            else:
+                with open(path, "w", encoding="utf-8") as f:
+                    for entry in entries:
+                        f.write(json.dumps(entry) + "\n")
+        except OSError as e:
+            logger.warning(f"Contextor: Failed to rewrite after prune: {e}")
 
     # ------------------------------------------------------------------
     # Core operations
@@ -52,6 +93,7 @@ class ContextorAdapter:
         try:
             with open(path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry) + "\n")
+            self._prune_theme(path)
             logger.info(f"Contextor: Stored under theme '{theme}' ({len(content)} chars)")
             return {"stored": True, "theme": theme}
         except OSError as e:

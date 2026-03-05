@@ -76,6 +76,10 @@ class Config:
     # Context window sustainability — cap goals sent to LLM to avoid overflow
     MAX_GOALS_IN_CONTEXT = int(os.getenv("MAX_GOALS_IN_CONTEXT", "20"))
 
+    # Memory (contextor) pruning — age-based + FIFO per theme
+    MEMORY_RETENTION_DAYS = int(os.getenv("MEMORY_RETENTION_DAYS", "90"))
+    MAX_ENTRIES_PER_THEME = int(os.getenv("MAX_ENTRIES_PER_THEME", "500"))
+
     # Logging Configuration
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()  # DEBUG, INFO, WARNING, ERROR, CRITICAL
     LOG_FILE = os.getenv("LOG_FILE", "")  # Optional: path to log file (empty = no file logging)
