@@ -38,6 +38,7 @@ class Jarvis:
 
         self.llm = self.components['llm']
         self.dispatch = self.components['dispatch_adapter']
+        self.contextor = self.components['contextor']
         self.goals = self.components['goal_manager']
         self.events = self.components['event_merger']
         self.task_parser = self.components['task_parser']
@@ -259,14 +260,13 @@ class Jarvis:
         await self._act_on_root_response(response, depth + 1)
 
     # ------------------------------------------------------------------
-    # CONTEXTOR sub-chain (placeholder — backend not wired yet)
+    # CONTEXTOR sub-chain — long-term memory
     # ------------------------------------------------------------------
 
     async def _run_contextor_subchain(self, intent: str) -> str:
         """
-        Enter contextor mode, give it the intent.
-        Currently the contextor prompt tells the LLM that memory is not
-        yet available, so it should return "done" immediately.
+        Enter contextor mode, give it the intent, and loop until it
+        returns "done" with a summary.
         """
         self.llm.switch_mode("contextor")
 
@@ -286,14 +286,25 @@ class Jarvis:
                 logger.info(f"JARVIS: Contextor sub-chain completed: {parsed['summary']}")
                 return parsed["summary"]
 
-            # Future: handle store, recall, search_memory, list_memory
-            if action in ("store", "recall", "search_memory", "list_memory"):
-                logger.info(f"JARVIS: Contextor action '{action}' — backend not yet connected")
-                context = f"CONTEXTOR_STATUS: The '{action}' backend is not yet available. Return done with a note."
-                continue
+            if action == "store":
+                result = self.contextor.store(parsed["theme"], parsed["content"])
+                context = f"STORE_RESULT: {json.dumps(result)}"
 
-            logger.warning(f"JARVIS: Unexpected contextor action '{action}'")
-            return f"Unexpected action: {action}"
+            elif action == "recall":
+                result = self.contextor.recall(parsed["theme"])
+                context = f"RECALL_RESULT: {json.dumps(result)}"
+
+            elif action == "search_memory":
+                result = self.contextor.search(parsed["keywords"])
+                context = f"SEARCH_MEMORY_RESULT: {json.dumps(result)}"
+
+            elif action == "list_memory":
+                result = self.contextor.list_themes()
+                context = f"LIST_MEMORY_RESULT: {json.dumps(result)}"
+
+            else:
+                logger.warning(f"JARVIS: Unexpected contextor action '{action}'")
+                return f"Unexpected action: {action}"
 
         logger.error("JARVIS: Contextor sub-chain hit max steps")
         return "Memory operation timed out."

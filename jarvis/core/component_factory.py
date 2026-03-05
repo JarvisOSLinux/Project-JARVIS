@@ -4,6 +4,7 @@ from ..config import Config
 from ..llm import LLM
 from ..llm.providers import create_provider as create_llm_provider
 from ..dispatch import DispatchAdapter, GoalManager, EventMerger
+from ..contextor import ContextorAdapter
 from ..kernel_client import KernelClient, provider_from_config
 from .system_info import SystemInfo
 from .command_parser import TaskParser
@@ -101,6 +102,12 @@ class ComponentFactory:
         """Create EventMerger for dual-input event loop."""
         logger.info("Initiating Event merger...")
         return EventMerger()
+
+    @staticmethod
+    def create_contextor() -> ContextorAdapter:
+        """Create ContextorAdapter for long-term memory management."""
+        logger.info("Initiating Contextor adapter...")
+        return ContextorAdapter()
 
     @staticmethod
     def create_task_parser() -> TaskParser:
@@ -256,6 +263,7 @@ class ComponentFactory:
         # Core components (always needed)
         components['llm'] = ComponentFactory.create_llm()
         components['dispatch_adapter'] = ComponentFactory.create_dispatch_adapter()
+        components['contextor'] = ComponentFactory.create_contextor()
         components['goal_manager'] = ComponentFactory.create_goal_manager()
         components['event_merger'] = ComponentFactory.create_event_merger()
         components['task_parser'] = ComponentFactory.create_task_parser()

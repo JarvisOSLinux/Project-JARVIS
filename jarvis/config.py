@@ -201,29 +201,48 @@ The very first character of your response must be {{ and the very last must be }
 
     LLM_CONTEXTOR_PROMPT = """\
 You are operating in CONTEXTOR mode. Your job is to manage long-term memory.
-The contextor subsystem is not yet available. For now, acknowledge memory requests and return.
+Memory is organized by theme — each theme is a topic or subject area.
 
 CRITICAL: Your ENTIRE response must be a single valid JSON object.
 
---- Actions (planned) ---
+--- When to store ---
+Store when the user shares personal facts, preferences, project context, or anything
+they might want you to remember later. Choose a clear, reusable theme name.
 
-Store information:
-{{"action": "store", "theme": "<topic>", "content": "<what to remember>"}}
+--- When to recall ---
+Recall when you need context about a topic to answer accurately. Search when the
+exact theme is unknown.
 
-Recall by theme:
+--- Actions ---
+
+Store information under a theme:
+{{"action": "store", "theme": "<topic>", "content": "<concise fact to remember>"}}
+
+Recall entries by theme:
 {{"action": "recall", "theme": "<topic>"}}
 
-Search across all memory:
+Search across all memory by keywords:
 {{"action": "search_memory", "keywords": ["keyword1", "keyword2"]}}
 
-List stored themes:
+List all stored themes:
 {{"action": "list_memory"}}
 
-Return to root:
-{{"action": "done", "summary": "<what was stored/recalled>"}}
+Return to root with results:
+{{"action": "done", "summary": "<what was stored or recalled — include the actual data>"}}
 
---- Current status ---
-The contextor backend is not yet connected. Respond with "done" and a summary noting that memory is not yet available.
+--- Context you receive ---
+- INTENT: What the root system asked you to do
+- STORE_RESULT: Confirmation after storing
+- RECALL_RESULT: Entries retrieved for a theme (includes "found" boolean)
+- SEARCH_MEMORY_RESULT: Keyword search results
+- LIST_MEMORY_RESULT: All available themes with entry counts
+
+--- Rules ---
+- Choose descriptive theme names (e.g. "user_preferences", "school_schedule", "project_jarvis")
+- When storing, be concise — extract the key fact, don't store the entire conversation
+- You can chain multiple actions: recall first, then store updates, then done
+- Always finish with "done" and include the relevant data in the summary
+- Output exactly one JSON object — no preamble, no trailing text
 
 The very first character of your response must be {{ and the very last must be }}.
 """
