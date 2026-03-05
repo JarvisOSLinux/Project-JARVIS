@@ -1,14 +1,15 @@
 """
 JARVIS — the brain.
 
-This is the single orchestrator that ties all components together.
-It runs an async event loop that reacts to two input sources:
-1. User input (text or voice)
-2. Dispatch signals (task completions, reminders, failures)
+Hierarchical orchestrator with three prompt modes:
 
-No other class makes decisions. LLM is pure inference, DispatchAdapter
-is pure transport, GoalManager is pure state, EventMerger is pure
-multiplexing. Jarvis is the only one that knows the workflow.
+  ROOT  →  routes to DISPATCH or CONTEXTOR subsystems, or responds directly
+  DISPATCH  →  tool discovery and execution sub-chain (search → install → dispatch → done)
+  CONTEXTOR →  long-term memory sub-chain (store / recall / done)
+
+Each subsystem runs in its own LLM mode with an isolated conversation
+history. When a subsystem finishes (action "done"), its summary is fed
+back to the ROOT prompt which decides the next step.
 """
 
 import asyncio
@@ -22,34 +23,25 @@ from .dispatch.event_merger import Event, EventType
 
 logger = get_logger(__name__)
 
+MAX_CHAIN_DEPTH = 15
+
 
 class Jarvis:
     def __init__(self, text_mode=False):
-        """
-        Initialize JARVIS AI Assistant.
-
-        Args:
-            text_mode: If True, skip voice input components (STT, Voice Activation)
-                       for CLI text-only mode.
-        """
         self.text_mode = text_mode
         self._running = False
 
-        # Create all components using factory
         self.components = ComponentFactory.create_all_components(
             text_mode=text_mode,
             on_voice_command=self._handle_voice_command,
         )
 
-        # Extract components for easy access
         self.llm = self.components['llm']
         self.dispatch = self.components['dispatch_adapter']
         self.goals = self.components['goal_manager']
         self.events = self.components['event_merger']
         self.task_parser = self.components['task_parser']
         self.output_manager = self.components['output_manager']
-
-        # Voice manager only exists in voice mode
         self.voice_manager = self.components.get('voice_manager')
 
     # ------------------------------------------------------------------
@@ -57,20 +49,14 @@ class Jarvis:
     # ------------------------------------------------------------------
 
     async def run(self):
-        """
-        Main event loop. Listens for user input and dispatch signals,
-        wakes the LLM when either arrives, and acts on its decision.
-        """
         self._running = True
 
-        # Connect to dispatch
         try:
             await self.dispatch.connect()
         except Exception as e:
             logger.warning(f"JARVIS: Could not connect to dispatch: {e}")
             logger.info("JARVIS: Running in conversation-only mode")
 
-        # Start event merger with input sources
         self.events.start(
             user_source=self._await_user_input,
             signal_source=self._await_dispatch_signal,
@@ -87,120 +73,283 @@ class Jarvis:
             await self._shutdown()
 
     async def _handle_event(self, event: Event):
-        """Route an event to the appropriate handler."""
         if event.type == EventType.USER_INPUT:
             await self._on_user_input(event.data)
         elif event.type == EventType.DISPATCH_SIGNAL:
             await self._on_dispatch_signal(event.data)
 
-    async def _on_user_input(self, text: str):
-        """Handle new user input — add as goal, ask LLM what to do."""
-        logger.info(f"JARVIS: User input: '{text}'")
+    # ------------------------------------------------------------------
+    # ROOT-level handlers
+    # ------------------------------------------------------------------
 
+    async def _on_user_input(self, text: str):
+        logger.info(f"JARVIS: User input: '{text}'")
         self.goals.add_goal(text)
 
-        context = self._build_context(new_input=text)
-        logger.debug(f"JARVIS: LLM context:\n{context}")
+        self.llm.switch_mode("root")
+        context = self._build_root_context(new_input=text)
 
-        t0 = time.perf_counter()
-        response = self.llm.ask(context)
-        elapsed = time.perf_counter() - t0
-        logger.info(f"JARVIS: LLM responded in {elapsed:.2f}s")
-        logger.debug(f"JARVIS: LLM raw response: {response}")
-
-        await self._act_on_response(response)
+        response = self._ask_llm(context, tag="root")
+        await self._act_on_root_response(response)
 
     async def _on_dispatch_signal(self, signal: Dict[str, Any]):
-        """Handle a dispatch signal — update goals, ask LLM what to do."""
-        logger.info(f"JARVIS: Dispatch signal: type={signal.get('type')}, pid={signal.get('pid')}, data={signal.get('data', '')}")
+        sig_type = signal.get("type")
+        sig_pid = signal.get("pid")
+        logger.info(f"JARVIS: Dispatch signal: type={sig_type}, pid={sig_pid}")
 
         self.goals.update_from_signal(signal)
 
-        context = self._build_context(signal=signal)
-        logger.debug(f"JARVIS: LLM context:\n{context}")
+        self.llm.switch_mode("root")
+        context = self._build_root_context(signal=signal)
 
-        t0 = time.perf_counter()
-        response = self.llm.ask(context)
-        elapsed = time.perf_counter() - t0
-        logger.info(f"JARVIS: LLM responded in {elapsed:.2f}s")
-        logger.debug(f"JARVIS: LLM raw response: {response}")
+        response = self._ask_llm(context, tag="root")
+        await self._act_on_root_response(response)
 
-        await self._act_on_response(response)
+    async def _act_on_root_response(self, response: Dict[str, Any], depth: int = 0):
+        """Handle a ROOT-mode LLM response."""
+        if depth >= MAX_CHAIN_DEPTH:
+            logger.error("JARVIS: Max chain depth reached, forcing respond")
+            self.output_manager.handle_response({
+                "output": "I got stuck in a loop. Could you try again?",
+            })
+            return
 
-    async def _act_on_response(self, response: Dict[str, Any]):
-        """Parse LLM response and execute the chosen action."""
         parsed = self.task_parser.parse(response)
 
         if "error" in parsed:
-            logger.warning(f"JARVIS: LLM response parse error: {parsed['error']}")
-            logger.debug(f"JARVIS: Raw response that failed parsing: {parsed.get('raw', response)}")
+            logger.warning(f"JARVIS: Root parse error: {parsed['error']}")
             self.output_manager.handle_response({
-                "output": "I had trouble processing that. Could you try again?"
+                "output": "I had trouble processing that. Could you try again?",
             })
             return
 
         action = parsed["action"]
-        logger.info(f"JARVIS: Parsed action='{action}'")
+        logger.info(f"JARVIS: Root action='{action}'")
 
-        goal_updates = parsed.get("goal_updates", [])
-        if goal_updates:
-            logger.info(f"JARVIS: Applying {len(goal_updates)} goal update(s): {goal_updates}")
-        self._apply_goal_updates(goal_updates)
+        self._apply_goal_updates(parsed.get("goal_updates", []))
 
-        if action == "dispatch":
-            await self._do_dispatch(parsed["tasks"])
-
-        elif action == "respond":
+        if action == "respond":
             self.output_manager.handle_response({"output": parsed["output"]})
             dismissed = self.goals.dismiss_completed()
             if dismissed:
                 logger.info(f"JARVIS: Dismissed {len(dismissed)} completed goal(s)")
+            if Config.RESET_HISTORY_AFTER_RESPONSE:
+                self.llm.reset_history()
 
-        elif action == "wait":
-            logger.info("JARVIS: LLM chose to wait")
+        elif action == "dispatch":
+            if "tasks" in parsed:
+                await self._dispatch_execute_tasks(parsed["tasks"], depth)
+            else:
+                summary = await self._run_dispatch_subchain(parsed["intent"])
+                await self._feed_root_summary("DISPATCH_SUMMARY", summary, depth)
 
-        elif action == "kill":
-            await self._do_kill(parsed["pids"])
+        elif action == "contextor":
+            summary = await self._run_contextor_subchain(parsed["intent"])
+            await self._feed_root_summary("CONTEXTOR_SUMMARY", summary, depth)
 
-        elif action == "defer":
-            await self._do_defer(parsed["goal_id"], parsed["duration"], parsed.get("reason", ""))
+    async def _feed_root_summary(self, label: str, summary: str, depth: int):
+        """Feed a subsystem summary back into ROOT for the next decision."""
+        self.llm.switch_mode("root")
+        context = self._build_root_context()
+        context += f"\n{label}: {summary}"
 
-        elif action == "search":
-            await self._do_search(parsed["keywords"])
+        response = self._ask_llm(context, tag="root-chain")
+        await self._act_on_root_response(response, depth + 1)
 
-        elif action == "list_tools":
-            await self._do_list_tools(parsed["server_id"])
+    # ------------------------------------------------------------------
+    # DISPATCH sub-chain
+    # ------------------------------------------------------------------
 
-        elif action == "install":
-            await self._do_install(parsed["server_id"])
+    async def _run_dispatch_subchain(self, intent: str) -> str:
+        """
+        Enter dispatch mode, give it the intent, and loop until it
+        returns "done" with a summary.
+        """
+        self.llm.switch_mode("dispatch")
 
-    async def _do_dispatch(self, tasks):
-        """Send tasks to dispatch, then feed results back to the LLM."""
+        context_parts = [f"INTENT: {intent}"]
+        goals = self.goals.get_context()
+        if goals:
+            context_parts.append(f"GOALS: {json.dumps(goals)}")
+        context = "\n".join(context_parts)
+
+        for step in range(MAX_CHAIN_DEPTH):
+            response = self._ask_llm(context, tag=f"dispatch-step-{step}")
+            parsed = self.task_parser.parse(response)
+
+            if "error" in parsed:
+                logger.warning(f"JARVIS: Dispatch sub-chain parse error: {parsed['error']}")
+                return f"Error: {parsed['error']}"
+
+            action = parsed["action"]
+            self._apply_goal_updates(parsed.get("goal_updates", []))
+
+            if action == "done":
+                logger.info(f"JARVIS: Dispatch sub-chain completed: {parsed['summary']}")
+                return parsed["summary"]
+
+            if action == "search":
+                result = await self.dispatch.search_servers(parsed["keywords"])
+                context = f"SEARCH_RESULTS: {json.dumps(result)}"
+
+            elif action == "list_tools":
+                result = await self.dispatch.list_server_tools(parsed["server_id"])
+                context = f"TOOLS: {json.dumps(result)}"
+
+            elif action == "install":
+                result = await self.dispatch.install_server(parsed["server_id"])
+                context = f"INSTALL_RESULT: {json.dumps(result)}"
+
+            elif action == "dispatch" and "tasks" in parsed:
+                result = await self._dispatch_send(parsed["tasks"])
+                if isinstance(result, dict) and "error" in result:
+                    context = f"DISPATCH_ERROR: {json.dumps(result)}"
+                else:
+                    context = f"DISPATCH_RESULT: {json.dumps(result)}"
+
+            elif action == "wait":
+                logger.info("JARVIS: Dispatch sub-chain waiting")
+                return "Waiting for tasks to complete."
+
+            elif action == "kill":
+                await self._do_kill(parsed["pids"])
+                context = f"KILL_RESULT: Killed PID(s) {parsed['pids']}"
+
+            elif action == "defer":
+                await self._do_defer(
+                    parsed["goal_id"], parsed["duration"], parsed.get("reason", ""),
+                )
+                return f"Deferred goal {parsed['goal_id']} for {parsed['duration']}s."
+
+            elif action == "respond":
+                self.output_manager.handle_response({"output": parsed["output"]})
+                return parsed["output"]
+
+            else:
+                logger.warning(f"JARVIS: Unexpected dispatch action '{action}'")
+                return f"Unexpected action: {action}"
+
+        logger.error("JARVIS: Dispatch sub-chain hit max steps")
+        return "Tool execution timed out (too many steps)."
+
+    async def _dispatch_send(self, tasks) -> Dict[str, Any]:
+        """Low-level send to dispatch adapter."""
         if not self.dispatch.is_connected:
-            logger.warning("JARVIS: Dispatch not connected, cannot send tasks")
+            return {"error": "Dispatch not connected"}
+        return await self.dispatch.send_tasks(tasks)
+
+    async def _dispatch_execute_tasks(self, tasks, depth: int):
+        """Handle a dispatch action that already has concrete tasks (from root)."""
+        if not self.dispatch.is_connected:
             self.output_manager.handle_response({
-                "output": "I can't execute tools right now — dispatch is not connected."
+                "output": "I can't execute tools right now — dispatch is not connected.",
             })
             return
 
         result = await self.dispatch.send_tasks(tasks)
 
+        self.llm.switch_mode("root")
+        context = self._build_root_context()
         if isinstance(result, dict) and "error" in result:
-            logger.error(f"JARVIS: Dispatch error: {result['error']}")
-            context = self._build_context()
             context += f"\nDISPATCH_ERROR: {json.dumps(result)}"
         else:
-            logger.info(f"JARVIS: Dispatch completed — feeding results to LLM")
-            context = self._build_context()
             context += f"\nDISPATCH_RESULT: {json.dumps(result)}"
 
-        await self._continue_llm(context)
+        response = self._ask_llm(context, tag="root-dispatch-result")
+        await self._act_on_root_response(response, depth + 1)
+
+    # ------------------------------------------------------------------
+    # CONTEXTOR sub-chain (placeholder — backend not wired yet)
+    # ------------------------------------------------------------------
+
+    async def _run_contextor_subchain(self, intent: str) -> str:
+        """
+        Enter contextor mode, give it the intent.
+        Currently the contextor prompt tells the LLM that memory is not
+        yet available, so it should return "done" immediately.
+        """
+        self.llm.switch_mode("contextor")
+
+        context = f"INTENT: {intent}"
+
+        for step in range(MAX_CHAIN_DEPTH):
+            response = self._ask_llm(context, tag=f"contextor-step-{step}")
+            parsed = self.task_parser.parse(response)
+
+            if "error" in parsed:
+                logger.warning(f"JARVIS: Contextor sub-chain parse error: {parsed['error']}")
+                return f"Error: {parsed['error']}"
+
+            action = parsed["action"]
+
+            if action == "done":
+                logger.info(f"JARVIS: Contextor sub-chain completed: {parsed['summary']}")
+                return parsed["summary"]
+
+            # Future: handle store, recall, search_memory, list_memory
+            if action in ("store", "recall", "search_memory", "list_memory"):
+                logger.info(f"JARVIS: Contextor action '{action}' — backend not yet connected")
+                context = f"CONTEXTOR_STATUS: The '{action}' backend is not yet available. Return done with a note."
+                continue
+
+            logger.warning(f"JARVIS: Unexpected contextor action '{action}'")
+            return f"Unexpected action: {action}"
+
+        logger.error("JARVIS: Contextor sub-chain hit max steps")
+        return "Memory operation timed out."
+
+    # ------------------------------------------------------------------
+    # Shared helpers
+    # ------------------------------------------------------------------
+
+    def _ask_llm(self, context: str, tag: str = "") -> Dict[str, Any]:
+        """Single LLM call with timing logs."""
+        logger.debug(f"JARVIS [{tag}]: LLM context:\n{context}")
+
+        t0 = time.perf_counter()
+        response = self.llm.ask(context)
+        elapsed = time.perf_counter() - t0
+
+        logger.info(f"JARVIS [{tag}]: LLM responded in {elapsed:.2f}s")
+        logger.debug(f"JARVIS [{tag}]: LLM raw response: {response}")
+        return response
+
+    def _build_root_context(
+        self,
+        new_input: Optional[str] = None,
+        signal: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        parts = []
+
+        active_goals = self.goals.get_context()
+        if active_goals:
+            parts.append(f"GOALS: {json.dumps(active_goals)}")
+
+        if signal:
+            parts.append(f"SIGNAL: {json.dumps(signal)}")
+
+        if new_input:
+            parts.append(f"NEW INPUT: {new_input}")
+
+        return "\n".join(parts) if parts else "No active context."
+
+    def _apply_goal_updates(self, updates):
+        for update in updates:
+            goal_id = update.get("id")
+            status = update.get("status")
+            if not goal_id or not status:
+                continue
+
+            if status == "completed":
+                self.goals.complete_goal(goal_id, update.get("result"))
+            elif status == "failed":
+                self.goals.fail_goal(goal_id, update.get("result"))
+            elif status == "active":
+                self.goals.link_tasks(goal_id, update.get("pids", []))
 
     async def _do_kill(self, pids):
-        """Kill tasks via dispatch."""
         if not self.dispatch.is_connected:
             return
-
         result = await self.dispatch.kill_tasks(pids)
         if "error" in result:
             logger.error(f"JARVIS: Kill error: {result['error']}")
@@ -208,11 +357,10 @@ class Jarvis:
             logger.info(f"JARVIS: Killed PID(s): {pids}")
 
     async def _do_defer(self, goal_id: str, duration: int, reason: str = ""):
-        """Defer a goal by setting a timer in dispatch."""
         if not self.dispatch.is_connected:
             logger.warning("JARVIS: Dispatch not connected, cannot defer goal")
             self.output_manager.handle_response({
-                "output": "I can't defer goals right now — dispatch is not connected."
+                "output": "I can't defer goals right now — dispatch is not connected.",
             })
             return
 
@@ -226,110 +374,20 @@ class Jarvis:
         if "error" in result:
             logger.error(f"JARVIS: Timer error: {result['error']}")
         else:
-            # Extract timer PID from result
             timer_pid = result.get("pid", 0)
             self.goals.defer_goal(goal_id, timer_pid)
             logger.info(f"JARVIS: Deferred goal [{goal_id}] for {duration}s (timer PID {timer_pid})")
-
-    # ------------------------------------------------------------------
-    # Tool discovery actions (search → list_tools → install → dispatch)
-    # ------------------------------------------------------------------
-
-    async def _do_search(self, keywords):
-        """Search for MCP servers and feed results back to the LLM."""
-        result = await self.dispatch.search_servers(keywords)
-        context = self._build_context()
-        context += f"\nSEARCH_RESULTS: {json.dumps(result)}"
-        await self._continue_llm(context)
-
-    async def _do_list_tools(self, server_id):
-        """List tools on a server and feed results back to the LLM."""
-        result = await self.dispatch.list_server_tools(server_id)
-        context = self._build_context()
-        context += f"\nTOOLS: {json.dumps(result)}"
-        await self._continue_llm(context)
-
-    async def _do_install(self, server_id):
-        """Install a server and feed results back to the LLM."""
-        result = await self.dispatch.install_server(server_id)
-        context = self._build_context()
-        context += f"\nINSTALL_RESULT: {json.dumps(result)}"
-        await self._continue_llm(context)
-
-    async def _continue_llm(self, context: str):
-        """Feed context back to the LLM for the next action in a multi-step chain."""
-        logger.debug(f"JARVIS: Continuing LLM with context:\n{context}")
-
-        t0 = time.perf_counter()
-        response = self.llm.ask(context)
-        elapsed = time.perf_counter() - t0
-        logger.info(f"JARVIS: LLM follow-up responded in {elapsed:.2f}s")
-        logger.debug(f"JARVIS: LLM raw follow-up response: {response}")
-
-        await self._act_on_response(response)
-
-    # ------------------------------------------------------------------
-    # Context building
-    # ------------------------------------------------------------------
-
-    def _build_context(
-        self,
-        new_input: Optional[str] = None,
-        signal: Optional[Dict[str, Any]] = None,
-    ) -> str:
-        """
-        Build the context string sent to the LLM.
-
-        Includes: active goals, recent signals, and any new user input.
-        """
-        parts = []
-
-        # Goals
-        active_goals = self.goals.get_context()
-        if active_goals:
-            parts.append(f"GOALS: {json.dumps(active_goals)}")
-
-        # Signal
-        if signal:
-            parts.append(f"SIGNAL: {json.dumps(signal)}")
-
-        # New user input
-        if new_input:
-            parts.append(f"NEW INPUT: {new_input}")
-
-        return "\n".join(parts) if parts else "No active context."
-
-    def _apply_goal_updates(self, updates):
-        """Apply goal status updates from LLM response."""
-        for update in updates:
-            goal_id = update.get("id")
-            status = update.get("status")
-            if not goal_id or not status:
-                continue
-
-            if status == "completed":
-                self.goals.complete_goal(goal_id, update.get("result"))
-            elif status == "failed":
-                self.goals.fail_goal(goal_id, update.get("result"))
-            elif status == "active":
-                self.goals.link_tasks(goal_id, update.get("pids", []))
-            elif status == "deferred":
-                # Deferral is handled by the defer action; this is just
-                # a status acknowledgement from the LLM.
-                pass
 
     # ------------------------------------------------------------------
     # Input sources (fed to EventMerger)
     # ------------------------------------------------------------------
 
     async def _await_user_input(self) -> str:
-        """Async source for user input (text mode)."""
         return await asyncio.get_event_loop().run_in_executor(
-            None, input, ""
+            None, input, "",
         )
 
     async def _await_dispatch_signal(self) -> Optional[Dict[str, Any]]:
-        """Async source for dispatch signals."""
         if not self.dispatch.is_connected:
             await asyncio.sleep(1)
             return None
@@ -337,7 +395,10 @@ class Jarvis:
         signals = await self.dispatch.get_signal_window()
         if signals:
             latest = signals[-1]
-            logger.debug(f"JARVIS: Received {len(signals)} signal(s), forwarding latest: type={latest.get('type')}, pid={latest.get('pid')}")
+            logger.debug(
+                f"JARVIS: Received {len(signals)} signal(s), forwarding latest: "
+                f"type={latest.get('type')}, pid={latest.get('pid')}",
+            )
             return latest
 
         await asyncio.sleep(0.5)
@@ -348,29 +409,17 @@ class Jarvis:
     # ------------------------------------------------------------------
 
     def ask(self, prompt: str) -> Dict[str, Any]:
-        """
-        Synchronous single-prompt interface.
-
-        Sends a prompt to the LLM without the full event loop.
-        Useful for one-shot CLI usage and testing.
-        """
+        """Synchronous single-prompt interface for one-shot CLI usage."""
         logger.info(f"JARVIS: Processing: '{prompt}'")
 
         self.goals.add_goal(prompt)
-        context = self._build_context(new_input=prompt)
-        logger.debug(f"JARVIS: LLM context:\n{context}")
+        self.llm.switch_mode("root")
+        context = self._build_root_context(new_input=prompt)
 
-        t0 = time.perf_counter()
-        response = self.llm.ask(context)
-        elapsed = time.perf_counter() - t0
-        logger.info(f"JARVIS: LLM responded in {elapsed:.2f}s")
-        logger.debug(f"JARVIS: LLM raw response: {response}")
-
+        response = self._ask_llm(context, tag="ask")
         parsed = self.task_parser.parse(response)
-        logger.info(f"JARVIS: Parsed action='{parsed.get('action', 'error')}'")
 
         if "error" in parsed:
-            logger.warning(f"JARVIS: Parse error: {parsed['error']}")
             result = {"output": "I had trouble processing that. Could you try again?"}
         elif parsed["action"] == "respond":
             result = {"output": parsed["output"]}
@@ -385,7 +434,6 @@ class Jarvis:
         return result
 
     def _handle_voice_command(self, text: str) -> dict:
-        """Handle voice command from voice manager."""
         response = self.ask(prompt=text)
         logger.info(f"Response: {response['output']}")
         return response
@@ -395,21 +443,18 @@ class Jarvis:
     # ------------------------------------------------------------------
 
     async def _shutdown(self):
-        """Clean shutdown."""
         self._running = False
         await self.events.stop()
         await self.dispatch.disconnect()
         logger.info("JARVIS: Shutdown complete")
 
     def listen_with_activation(self):
-        """Listen with voice activation (wake word detection)."""
         if not self.voice_manager:
             logger.error("Voice manager not available in text mode")
             return
         self.voice_manager.start_voice_activation_mode()
 
     def listen(self):
-        """Legacy continuous listening mode (without wake word detection)."""
         if not self.voice_manager:
             logger.error("Voice manager not available in text mode")
             return

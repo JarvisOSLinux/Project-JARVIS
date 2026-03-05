@@ -64,8 +64,7 @@ class ComponentFactory:
                         "Please install it or enable auto-pull."
                     )
 
-        # Build system prompt from template + system info
-        system_prompt = Config.LLM_RULE.format(
+        fmt = dict(
             system=system_info['system'],
             release=system_info['release'],
             version=system_info['version'],
@@ -73,9 +72,15 @@ class ComponentFactory:
             shell=system_info['shell'],
         )
 
+        prompts = {
+            "root": Config.LLM_ROOT_PROMPT.format(**fmt),
+            "dispatch": Config.LLM_DISPATCH_PROMPT.format(**fmt) if "{system}" in Config.LLM_DISPATCH_PROMPT else Config.LLM_DISPATCH_PROMPT,
+            "contextor": Config.LLM_CONTEXTOR_PROMPT,
+        }
+
         return LLM(
             provider=llm_provider,
-            system_prompt=system_prompt,
+            prompts=prompts,
             wrong_json_message=Config.LLM_WRONG_JSON_FORMAT_MESSAGE,
         )
 
