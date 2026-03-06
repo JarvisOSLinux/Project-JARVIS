@@ -24,8 +24,9 @@ services:
       - /dev/snd:/dev/snd
 
     volumes:
-      # Mount custom .env (create from jarvis/.env.example first)
-      # - ./jarvis/.env:/app/jarvis/.env:ro
+      # Mount your .env (LLM, API keys, etc.)
+      # Ensure jarvis/.env exists first: cp jarvis/.env.example jarvis/.env
+      - ./jarvis/.env:/app/jarvis/.env:ro
       # Optional: persistent memory
       # - jarvis-data:/home/jarvisuser/.jarvis
 

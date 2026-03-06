@@ -1,0 +1,9 @@
+[submodule "dispatch"]
+	path = dispatch
+	url = git@github.com:YakupAtahanov/dispatch.git
+[submodule "dmcp"]
+	path = dmcp
+	url = git@github.com:YakupAtahanov/dmcp.git
+[submodule "contextor"]
+	path = contextor
+	url = git@github.com:YakupAtahanov/contextor.git

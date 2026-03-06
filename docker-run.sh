@@ -52,6 +52,11 @@ MODE="${1:-voice}"
 # Build Docker command
 DOCKER_CMD="docker run -it --rm"
 
+# Mount .env if it exists (for LLM config, API keys, etc.)
+if [ -f "jarvis/.env" ]; then
+    DOCKER_CMD="$DOCKER_CMD -v $(pwd)/jarvis/.env:/app/jarvis/.env:ro"
+fi
+
 # OS-specific settings
 if [[ "$OSTYPE" == "linux-gnu"* ]]; then
     DOCKER_CMD="$DOCKER_CMD --network host"
