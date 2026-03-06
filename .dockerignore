@@ -58,7 +58,6 @@ config.env
 # Logs
 *.log
 logs/
-jarvis/SuperMCP/ShellMCP/logs/
 
 # Temporary files
 tmp/

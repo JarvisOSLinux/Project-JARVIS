@@ -133,13 +133,13 @@ Run JARVIS in Docker for easy cross-platform deployment and testing!
 # 1. Make sure Ollama is running on your host
 ollama serve
 
-# 2. Build the Docker image (includes models)
+# 2. Build the Docker image
 ./docker-build.sh        # Linux/Mac
 docker-build.bat         # Windows
 
 # 3. Run JARVIS
-./docker-run.sh          # Linux/Mac - auto-detects voice/text
-docker-run.bat           # Windows
+./docker-run.sh chat     # Text chat mode (recommended first test)
+./docker-run.sh          # Dual input (voice + socket)
 # OR use docker-compose
 docker-compose up
 ```
@@ -147,17 +147,17 @@ docker-compose up
 ### **Docker Benefits**
 - ✅ **Cross-platform**: Same environment on Linux, Mac, Windows
 - ✅ **Isolated**: No OS-level dependencies to manage
-- ✅ **Portable**: Models baked into image (~2-3GB)
+- ✅ **Portable**: Models baked into image
 - ✅ **Easy testing**: Quick setup for development
 
 ### **Docker Commands**
 
 ```bash
-# Text mode (recommended for first test)
-docker run -it --rm --network host jarvis-ai python -m jarvis.main --text
+# Text chat mode (recommended for first test)
+docker run -it --rm --network host jarvis-ai:latest python -m jarvis.main chat
 
-# Voice mode (Linux with audio)
-docker run -it --rm --network host --device /dev/snd jarvis-ai
+# Dual input (voice + socket, Linux with audio)
+docker run -it --rm --network host --device /dev/snd jarvis-ai:latest
 
 # Using docker-compose
 docker-compose up
