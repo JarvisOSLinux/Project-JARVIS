@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
 JARVIS System Daemon
-Main entry point for JARVIS when running as a system service
+Main entry point for JARVIS when running as a system service.
+Supports dual input: voice + socket (jarvis send).
 """
 
 import sys
 import os
+import asyncio
 import signal
 import logging
 from pathlib import Path
@@ -46,61 +48,46 @@ class JarvisDaemon:
             
     def setup_environment(self):
         """Setup environment for system service"""
-        # Ensure required directories exist
-        for dir_name in ['JARVIS_DATA_DIR', 'JARVIS_MODELS_DIR', 'JARVIS_LOG_DIR']:
-            dir_path = Path(os.environ.get(dir_name))
-            dir_path.mkdir(parents=True, exist_ok=True)
-            
-        # Set default model paths if not configured
-        models_dir = Path(os.environ.get('JARVIS_MODELS_DIR', '/var/lib/jarvis/models'))
-        if not os.getenv('TTS_MODEL_ONNX'):
-            os.environ['TTS_MODEL_ONNX'] = str(models_dir / 'piper' / 'en_US-libritts_r-medium.onnx')
-        if not os.getenv('TTS_MODEL_JSON'):
-            os.environ['TTS_MODEL_JSON'] = str(models_dir / 'piper' / 'en_US-libritts_r-medium.onnx.json')
-        if not os.getenv('STT_MODEL'):
-            os.environ['STT_MODEL'] = 'base'
-        if not os.getenv('LLM_MODEL'):
-            os.environ['LLM_MODEL'] = 'codegemma:7b-instruct-q5_K_M'
+        data_dir = Path(os.environ.get('JARVIS_DATA_DIR', '/var/lib/jarvis'))
+        models_dir = Path(os.environ.get('JARVIS_MODELS_DIR', str(data_dir / 'models')))
+        log_dir = Path(os.environ.get('JARVIS_LOG_DIR', '/var/log/jarvis'))
+        for d in (data_dir, models_dir, log_dir):
+            d.mkdir(parents=True, exist_ok=True)
+        # Do not override model paths — user selects via config/app
             
     def run(self):
         """Main daemon loop"""
         self.logger.info("Starting JARVIS daemon...")
-        
+
         # Setup signal handlers
         signal.signal(signal.SIGTERM, self.signal_handler)
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGHUP, self.signal_handler)
-        
+
         try:
             # Setup environment
             self.setup_environment()
-            
+
+            # Check LLM model is configured (required)
+            if not Config.LLM_MODEL or not str(Config.LLM_MODEL).strip():
+                self.logger.error("LLM_MODEL not configured. Configure model before starting.")
+                return 1
+
             # Initialize JARVIS
             self.logger.info("Initializing JARVIS...")
             self.jarvis = Jarvis()
-            
+
             self.running = True
-            self.logger.info("JARVIS daemon started successfully")
-            
-            # Main service loop
-            while self.running:
-                try:
-                    # Keep the service alive and responsive
-                    self.jarvis.run()
-                except Exception as e:
-                    self.logger.error(f"Error in main loop: {e}", exc_info=True)
-                    if self.running:
-                        self.logger.info("Restarting main loop...")
-                        continue
-                    else:
-                        break
-                        
+            self.logger.info("JARVIS daemon started successfully (dual input: voice + socket)")
+
+            asyncio.run(self.jarvis.run())
+
         except Exception as e:
             self.logger.error(f"Fatal error starting JARVIS: {e}", exc_info=True)
             return 1
         finally:
             self.logger.info("JARVIS daemon stopped")
-            
+
         return 0
 
 if __name__ == '__main__':

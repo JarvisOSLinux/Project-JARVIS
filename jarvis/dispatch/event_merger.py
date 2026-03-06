@@ -1,12 +1,13 @@
 """
 EventMerger — async dual-input listener.
 
-Merges two input sources into a single event stream:
-1. User input (text typed or voice transcribed)
+Merges multiple input sources into a single event stream:
+1. User input (voice, stdin, socket, or injected)
 2. Dispatch signals (task completions, reminders, etc.)
 
-Whichever fires first wakes Jarvis. This is what allows the user
-to keep talking while dispatch tasks are running.
+Supports inject_user_input() for thread-safe injection from voice,
+socket listeners, or CLI "jarvis send" — enabling dual input
+(voice + app/CLI) in daemon or interactive mode.
 """
 
 import asyncio
@@ -49,14 +50,17 @@ class EventMerger:
     """
     Merges user input and dispatch signals into a single async event queue.
 
+    Supports dual input: voice, stdin, socket, or inject_user_input() all feed
+    the same pipeline. Use inject_user_input() for thread-safe injection from
+    voice callbacks, socket listeners, or "jarvis send".
+
     Usage:
         merger = EventMerger()
-        merger.start(user_source, signal_source)
+        merger.start(user_source=..., signal_source=...)
+        merger.inject_user_input("hello")  # thread-safe, from any thread
 
         async for event in merger:
             if event.type == EventType.USER_INPUT:
-                ...
-            elif event.type == EventType.DISPATCH_SIGNAL:
                 ...
     """
 
@@ -64,27 +68,65 @@ class EventMerger:
         self._queue: asyncio.Queue = asyncio.Queue(maxsize=max_queue_size)
         self._running = False
         self._tasks: List[asyncio.Task] = []
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+
+    def inject_user_input(self, text: str) -> None:
+        """
+        Inject user input from any thread (voice, socket, CLI).
+        Thread-safe. Drops empty or whitespace-only input.
+        """
+        if not text or not str(text).strip():
+            return
+        t = str(text).strip()
+        if self._loop is None:
+            logger.warning("EventMerger: inject_user_input called before start, dropping input")
+            return
+
+        def _put() -> None:
+            try:
+                self._queue.put_nowait(Event.user_input(t))
+                logger.debug(f"EventMerger: Injected user input ({len(t)} chars)")
+            except asyncio.QueueFull:
+                logger.warning("EventMerger: User input queue full, dropping")
+
+        self._loop.call_soon_threadsafe(_put)
+
+    def request_shutdown(self) -> None:
+        """Thread-safe request to shut down the event loop (e.g. from signal handler)."""
+        if self._loop is None:
+            return
+
+        def _push() -> None:
+            asyncio.create_task(self._push_shutdown())
+
+        self._loop.call_soon_threadsafe(_push)
+
+    async def _push_shutdown(self) -> None:
+        """Push SHUTDOWN event to end the async iteration."""
+        await self._queue.put(Event.shutdown())
 
     def start(
         self,
-        user_source: Callable[[], Awaitable[str]],
         signal_source: Callable[[], Awaitable[Optional[Dict[str, Any]]]],
+        user_source: Optional[Callable[[], Awaitable[str]]] = None,
     ):
         """
-        Start listening to both input sources.
+        Start listening to input sources.
 
         Args:
-            user_source: Async callable that awaits and returns user text input.
-                         Called in a loop — each call blocks until user provides input.
             signal_source: Async callable that awaits and returns the next dispatch signal.
                            Returns None if no signal (timeout). Called in a loop.
+            user_source: Optional. Async callable that awaits and returns user text input.
+                         When provided (e.g. stdin for chat mode), runs in parallel.
+                         When None (daemon mode), only inject_user_input and socket feed input.
         """
         self._running = True
-        self._tasks = [
-            asyncio.create_task(self._listen_user(user_source)),
-            asyncio.create_task(self._listen_signals(signal_source)),
-        ]
-        logger.info("EventMerger: Started listening")
+        self._loop = asyncio.get_running_loop()
+        tasks = [asyncio.create_task(self._listen_signals(signal_source))]
+        if user_source is not None:
+            tasks.append(asyncio.create_task(self._listen_user_source(user_source)))
+        self._tasks = tasks
+        logger.info("EventMerger: Started listening (dual input enabled)")
 
     async def stop(self):
         """Stop listening and clean up."""
@@ -104,14 +146,14 @@ class EventMerger:
         """Manually push an event (e.g., for shutdown)."""
         await self._queue.put(event)
 
-    async def _listen_user(self, source: Callable[[], Awaitable[str]]):
-        """Loop: await user input, push as event."""
+    async def _listen_user_source(self, source: Callable[[], Awaitable[str]]):
+        """Loop: await user input from stdin/chat, push as event."""
         while self._running:
             try:
                 text = await source()
-                if text and text.strip():
-                    logger.debug(f"EventMerger: Queued user input ({len(text.strip())} chars)")
-                    await self._queue.put(Event.user_input(text.strip()))
+                if text and str(text).strip():
+                    logger.debug(f"EventMerger: Queued user input ({len(str(text).strip())} chars)")
+                    await self._queue.put(Event.user_input(str(text).strip()))
             except asyncio.CancelledError:
                 break
             except Exception as e:

@@ -197,8 +197,11 @@ jarvis
 
 | Command | Description |
 |---------|-------------|
-| `jarvis` | Start voice activation mode (wake word detection) |
-| `jarvis ask "<message>"` | Ask a question via text input |
+| `jarvis` | Start dual-input mode (voice + socket) |
+| `jarvis run` | Same as `jarvis` — event loop with voice and socket |
+| `jarvis send "<message>"` | Send message to running JARVIS (from another terminal) |
+| `jarvis chat` | Interactive text chat (stdin only) |
+| `jarvis ask "<message>"` | Ask a question (one-shot, no daemon) |
 | `jarvis text` | Set output mode to text |
 | `jarvis voice` | Set output mode to voice (TTS) |
 | `jarvis output-type` | Show current output mode |
@@ -206,6 +209,19 @@ jarvis
 | `jarvis history-reset off` | Disable history reset (maintain context) |
 | `jarvis history-reset` | Show current history reset setting |
 | `jarvis --help` | Show help message |
+
+### **Dual Input (Two Terminals)**
+
+```bash
+# Terminal 1: Start JARVIS (voice + socket)
+$ jarvis
+Starting JARVIS (dual input: voice + socket)...
+  Say 'Hey Jarvis' for voice, or use 'jarvis send <msg>' from another terminal.
+
+# Terminal 2: Send a message
+$ jarvis send "what is 2+2?"
+Sent.
+```
 
 ### **Usage Examples**
 

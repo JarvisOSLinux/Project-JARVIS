@@ -2,8 +2,16 @@ from dotenv import load_dotenv
 # import multiprocessing
 import os
 
-# Load .env file from the jarvis directory
-load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
+# Load config: JARVIS_CONFIG_DIR (system install) or jarvis/.env (dev)
+_config_dir = os.getenv("JARVIS_CONFIG_DIR")
+if _config_dir:
+    _env_path = os.path.join(_config_dir, "jarvis.conf")
+    if os.path.isfile(_env_path):
+        load_dotenv(_env_path)
+    else:
+        load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
+else:
+    load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 
 class Config:
     # Models base directory
@@ -79,6 +87,12 @@ class Config:
     # Memory (contextor) pruning — age-based + FIFO per theme
     MEMORY_RETENTION_DAYS = int(os.getenv("MEMORY_RETENTION_DAYS", "90"))
     MAX_ENTRIES_PER_THEME = int(os.getenv("MAX_ENTRIES_PER_THEME", "500"))
+
+    # Dual input — Unix socket for "jarvis send" and app integration
+    JARVIS_INPUT_SOCKET = os.getenv(
+        "JARVIS_INPUT_SOCKET",
+        os.path.join(os.path.expanduser("~"), ".jarvis", "input.sock"),
+    )
 
     # Logging Configuration
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()  # DEBUG, INFO, WARNING, ERROR, CRITICAL

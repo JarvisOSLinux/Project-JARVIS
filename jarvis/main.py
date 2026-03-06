@@ -10,10 +10,17 @@ Hierarchical orchestrator with three prompt modes:
 Each subsystem runs in its own LLM mode with an isolated conversation
 history. When a subsystem finishes (action "done"), its summary is fed
 back to the ROOT prompt which decides the next step.
+
+Dual input: voice (wake word) and socket/CLI ("jarvis send") feed the same
+event queue. Both can be active simultaneously.
 """
 
 import asyncio
 import json
+import os
+import signal
+import sys
+import threading
 import time
 from typing import Dict, Any, Optional
 from .config import Config
@@ -52,16 +59,39 @@ class Jarvis:
     async def run(self):
         self._running = True
 
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            try:
+                loop.add_signal_handler(sig, lambda: self.stop())
+            except (ValueError, OSError):
+                pass
+
         try:
             await self.dispatch.connect()
         except Exception as e:
             logger.warning(f"JARVIS: Could not connect to dispatch: {e}")
             logger.info("JARVIS: Running in conversation-only mode")
 
+        user_source = self._await_user_input if self._has_stdin() else None
         self.events.start(
-            user_source=self._await_user_input,
             signal_source=self._await_dispatch_signal,
+            user_source=user_source,
         )
+
+        voice_thread: Optional[threading.Thread] = None
+        if self.voice_manager:
+            voice_thread = threading.Thread(
+                target=self._run_voice_activation,
+                daemon=True,
+                name="jarvis-voice",
+            )
+            voice_thread.start()
+            logger.info("JARVIS: Voice activation started (dual input)")
+
+        socket_task: Optional[asyncio.Task] = None
+        if Config.JARVIS_INPUT_SOCKET:
+            socket_task = asyncio.create_task(self._run_socket_listener())
+            logger.info(f"JARVIS: Socket listener at {Config.JARVIS_INPUT_SOCKET}")
 
         logger.info("JARVIS: Event loop started")
 
@@ -71,6 +101,8 @@ class Jarvis:
         except KeyboardInterrupt:
             logger.info("JARVIS: Interrupted")
         finally:
+            if socket_task and not socket_task.done():
+                socket_task.cancel()
             await self._shutdown()
 
     async def _handle_event(self, event: Event):
@@ -399,6 +431,103 @@ class Jarvis:
     # Input sources (fed to EventMerger)
     # ------------------------------------------------------------------
 
+    def _has_stdin(self) -> bool:
+        """True if stdin is a TTY (interactive chat mode)."""
+        return hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
+
+    def _run_voice_activation(self) -> None:
+        """Run voice activation in a thread; commands are injected into the event loop."""
+        vm = self.voice_manager
+        vm._wake_word_detected = False
+        try:
+            if hasattr(vm.activation, "on_wake_word"):
+                vm.activation.on_wake_word = lambda: setattr(vm, "_wake_word_detected", True)
+            if not self.voice_manager.activation.start_listening():
+                logger.error("JARVIS: Failed to start voice activation")
+                return
+            while self._running:
+                if getattr(self.voice_manager, "_wake_word_detected", False):
+                    self.voice_manager._wake_word_detected = False
+                    self._process_voice_command_inject()
+                time.sleep(0.3)
+        except Exception as e:
+            logger.error(f"JARVIS: Voice thread error: {e}", exc_info=True)
+        finally:
+            if hasattr(self.voice_manager, "activation"):
+                self.voice_manager.activation.cleanup()
+
+    def _process_voice_command_inject(self) -> None:
+        """Process voice command and inject into event loop (no direct ask)."""
+        try:
+            self.voice_manager.activation.stop_listening()
+            self.voice_manager.stt.start()
+            try:
+                for text, is_final in self.voice_manager.stt.iter_results():
+                    if is_final and text.strip():
+                        logger.info(f"Voice input: {text}")
+                        self.events.inject_user_input(text.strip())
+                        break
+            finally:
+                self.voice_manager.stt.stop()
+        except Exception as e:
+            logger.error(f"JARVIS: Voice processing error: {e}")
+        finally:
+            if self._running and hasattr(self.voice_manager, "activation"):
+                self.voice_manager.activation.start_listening()
+
+    async def _run_socket_listener(self) -> None:
+        """Listen on Unix socket for text input (jarvis send, apps)."""
+        path = Config.JARVIS_INPUT_SOCKET
+        if not path:
+            return
+        sock_dir = os.path.dirname(path)
+        os.makedirs(sock_dir, exist_ok=True)
+        if os.path.exists(path):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        server = await asyncio.start_unix_server(
+            self._handle_socket_connection,
+            path=path,
+        )
+        try:
+            await asyncio.Future()
+        except asyncio.CancelledError:
+            pass
+        finally:
+            server.close()
+            await server.wait_closed()
+            if os.path.exists(path):
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
+
+    async def _handle_socket_connection(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        """Handle one socket connection; read lines and inject."""
+        try:
+            while self._running:
+                line = await reader.readline()
+                if not line:
+                    break
+                text = line.decode("utf-8", errors="replace").strip()
+                if text:
+                    self.events.inject_user_input(text)
+                    logger.info(f"JARVIS: Socket input: {text[:80]}...")
+        except (ConnectionResetError, BrokenPipeError):
+            pass
+        finally:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+
     async def _await_user_input(self) -> str:
         return await asyncio.get_event_loop().run_in_executor(
             None, input, "",
@@ -451,13 +580,25 @@ class Jarvis:
         return result
 
     def _handle_voice_command(self, text: str) -> dict:
-        response = self.ask(prompt=text)
-        logger.info(f"Response: {response['output']}")
-        return response
+        """Voice callback: inject into event loop when running, else call ask() directly."""
+        if self._running and self.events._running:
+            self.events.inject_user_input(text)
+            return {}
+        return self.ask(prompt=text)
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
+
+    def stop(self) -> None:
+        """Request graceful shutdown (e.g. from signal handler)."""
+        self._running = False
+        if self.voice_manager and hasattr(self.voice_manager, "activation"):
+            try:
+                self.voice_manager.activation.stop_listening()
+            except Exception:
+                pass
+        self.events.request_shutdown()
 
     async def _shutdown(self):
         self._running = False

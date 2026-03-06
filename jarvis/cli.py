@@ -2,14 +2,17 @@
 CLI interface for JARVIS AI Assistant
 
 Usage:
-    jarvis                    # Start voice activation mode
-    jarvis chat               # Start interactive text chat (async event loop)
+    jarvis                    # Start dual-input mode (voice + socket, or chat)
+    jarvis run                # Same as jarvis — event loop with voice + socket
+    jarvis chat               # Interactive text chat (stdin only)
+    jarvis send "<message>"   # Send message to running jarvis (via socket)
+    jarvis ask "<message>"    # Ask a single question (one-shot, no daemon)
     jarvis text               # Set text output mode
     jarvis voice              # Set voice output mode
-    jarvis ask "<message>"    # Ask a single question
     jarvis output-type        # Show current output mode
 """
 
+import socket
 import sys
 import os
 import asyncio
@@ -20,6 +23,33 @@ from .core.logger import get_logger
 logger = get_logger(__name__)
 
 ENV_FILE = Path(__file__).parent / ".env"
+
+
+def _cmd_send() -> None:
+    """Send a message to a running JARVIS instance via Unix socket."""
+    if len(sys.argv) < 3:
+        print("Usage: jarvis send <message>")
+        print("  Sends the message to a running JARVIS instance.")
+        print("  Start JARVIS with 'jarvis' or 'jarvis run' first.")
+        sys.exit(1)
+    msg = " ".join(sys.argv[2:]).strip()
+    if not msg:
+        print("Error: Message cannot be empty")
+        sys.exit(1)
+    path = Config.JARVIS_INPUT_SOCKET
+    if not path or not os.path.exists(path):
+        print(f"Error: JARVIS socket not found at {path}")
+        print("  Is JARVIS running? Start with 'jarvis' or 'jarvis run'.")
+        sys.exit(1)
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(5)
+            sock.connect(path)
+            sock.sendall((msg + "\n").encode("utf-8"))
+        print("Sent.")
+    except (socket.error, OSError) as e:
+        print(f"Error: Could not send to JARVIS: {e}")
+        sys.exit(1)
 
 
 def set_output_mode(mode: str) -> None:
@@ -248,33 +278,41 @@ def main() -> None:
     """Main CLI entry point."""
     from .main import Jarvis
 
-    # No arguments - start voice activation
-    if len(sys.argv) == 1:
-        print("Starting JARVIS in voice activation mode...")
-
-        capabilities = _check_capabilities()
-        if not capabilities['voice_input']:
-            print("Warning: No audio input devices detected.")
-            print("  Voice activation will not work. Use 'jarvis chat' for text mode.")
-            print()
+    # No arguments or "run" — dual-input mode (voice + socket + optional stdin)
+    if len(sys.argv) == 1 or (len(sys.argv) > 1 and sys.argv[1] == "run"):
+        if len(sys.argv) > 1:
+            sys.argv.pop(1)
+        if not Config.LLM_MODEL or not str(Config.LLM_MODEL).strip():
+            print("Error: LLM model not configured.")
+            print("  Run: jarvis model <model-name>")
+            print("  Example: jarvis model qwen3:4b")
+            sys.exit(1)
+        print("Starting JARVIS (dual input: voice + socket)...")
+        print("  Say 'Hey Jarvis' for voice, or use 'jarvis send <msg>' from another terminal.")
+        print("  Press Ctrl+C to stop.\n")
 
         try:
             jarvis = Jarvis()
-            if not jarvis.voice_manager:
-                print("Voice manager unavailable. Use 'jarvis chat' for interactive text mode.")
-                sys.exit(1)
-            jarvis.listen_with_activation()
+            asyncio.run(jarvis.run())
+        except KeyboardInterrupt:
+            print("\nGoodbye.")
         except Exception as e:
             logger.error(f"Failed to start JARVIS: {e}")
             print(f"\nError: {e}")
-            print("\nTip: Use 'jarvis chat' for interactive text mode.")
+            print("\nTip: Use 'jarvis chat' for text-only mode.")
             sys.exit(1)
         return
 
     command = sys.argv[1]
 
+    if command == "send":
+        _cmd_send()
+        return
+
     if command == "chat":
-        # Interactive text chat — runs the async event loop
+        if not Config.LLM_MODEL or not str(Config.LLM_MODEL).strip():
+            print("Error: LLM model not configured. Run: jarvis model <model-name>")
+            sys.exit(1)
         print("Starting JARVIS interactive chat...")
         print("Type your messages. Press Ctrl+C to exit.\n")
         try:
