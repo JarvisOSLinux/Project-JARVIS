@@ -88,10 +88,16 @@ class Config:
     MEMORY_RETENTION_DAYS = int(os.getenv("MEMORY_RETENTION_DAYS", "90"))
     MAX_ENTRIES_PER_THEME = int(os.getenv("MAX_ENTRIES_PER_THEME", "500"))
 
+    # Data directory — when set (e.g. systemd JARVIS_DATA_DIR=/var/lib/jarvis),
+    # memory, goal archive, and default socket use this base path
+    _DEFAULT_DATA_DIR = os.path.join(os.path.expanduser("~"), ".jarvis")
+    JARVIS_DATA_DIR = os.getenv("JARVIS_DATA_DIR", _DEFAULT_DATA_DIR)
+
     # Dual input — Unix socket for "jarvis send" and app integration
+    # Default: JARVIS_DATA_DIR/input.sock (or ~/.jarvis/input.sock)
     JARVIS_INPUT_SOCKET = os.getenv(
         "JARVIS_INPUT_SOCKET",
-        os.path.join(os.path.expanduser("~"), ".jarvis", "input.sock"),
+        os.path.join(JARVIS_DATA_DIR, "input.sock"),
     )
 
     # Logging Configuration

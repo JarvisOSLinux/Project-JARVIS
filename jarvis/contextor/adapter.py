@@ -18,7 +18,7 @@ from ..config import Config
 
 logger = get_logger(__name__)
 
-_DEFAULT_MEMORY_DIR = os.path.join(os.path.expanduser("~"), ".jarvis", "memory")
+_DEFAULT_MEMORY_DIR = os.path.join(Config.JARVIS_DATA_DIR, "memory")
 
 
 class ContextorAdapter:

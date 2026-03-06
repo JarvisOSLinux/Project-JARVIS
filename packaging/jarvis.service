@@ -10,6 +10,8 @@ Type=simple
 User=jarvis
 Group=jarvis
 WorkingDirectory=/usr/lib/jarvis
+RuntimeDirectory=jarvis
+RuntimeDirectoryMode=0775
 ExecStart=/usr/bin/jarvis-daemon
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
@@ -22,7 +24,7 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths=/var/lib/jarvis /var/log/jarvis /tmp
+ReadWritePaths=/var/lib/jarvis /var/log/jarvis /run/jarvis /tmp
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
@@ -39,6 +41,7 @@ LimitNPROC=4096
 # Environment
 Environment=JARVIS_CONFIG_DIR=/etc/jarvis
 Environment=JARVIS_DATA_DIR=/var/lib/jarvis
+Environment=JARVIS_INPUT_SOCKET=/run/jarvis/input.sock
 Environment=JARVIS_LOG_DIR=/var/log/jarvis
 Environment=JARVIS_MODELS_DIR=/var/lib/jarvis/models
 Environment=PYTHONPATH=/usr/lib/jarvis

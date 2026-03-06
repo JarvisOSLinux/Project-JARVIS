@@ -36,9 +36,15 @@ def _cmd_send() -> None:
     if not msg:
         print("Error: Message cannot be empty")
         sys.exit(1)
-    path = Config.JARVIS_INPUT_SOCKET
-    if not path or not os.path.exists(path):
-        print(f"Error: JARVIS socket not found at {path}")
+    candidates = [Config.JARVIS_INPUT_SOCKET, "/run/jarvis/input.sock"]
+    path = None
+    for p in candidates:
+        if p and os.path.exists(p):
+            path = p
+            break
+    if not path:
+        print("Error: JARVIS socket not found.")
+        print("  Tried:", ", ".join(p for p in candidates if p))
         print("  Is JARVIS running? Start with 'jarvis' or 'jarvis run'.")
         sys.exit(1)
     try:

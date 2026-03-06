@@ -492,6 +492,11 @@ class Jarvis:
             path=path,
         )
         try:
+            if os.path.exists(path):
+                try:
+                    os.chmod(path, 0o660)
+                except OSError:
+                    pass
             await asyncio.Future()
         except asyncio.CancelledError:
             pass

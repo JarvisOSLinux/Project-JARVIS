@@ -138,8 +138,16 @@ sudo journalctl -u jarvis --since "1 hour ago"
 ### **Configuration**
 - Main config: `/etc/jarvis/jarvis.conf`
 - Logs: `/var/log/jarvis/`
-- Data: `/var/lib/jarvis/`
+- Data: `/var/lib/jarvis/` (memory, goal archive)
 - Models: `/var/lib/jarvis/models/`
+- Input socket: `/run/jarvis/input.sock` (for `jarvis send` and app integration)
+
+### **Sending to the Daemon**
+When JARVIS runs as a system service, use `jarvis send` from another terminal:
+```bash
+jarvis send "what is the weather?"
+```
+The CLI automatically tries `/run/jarvis/input.sock` when the default socket is not found. For multi-user access, add users to the `jarvis` group.
 
 ---
 

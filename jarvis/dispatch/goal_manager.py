@@ -21,7 +21,7 @@ from ..config import Config
 
 logger = get_logger(__name__)
 
-_DEFAULT_ARCHIVE_DIR = os.path.join(os.path.expanduser("~"), ".jarvis")
+_DEFAULT_ARCHIVE_DIR = Config.JARVIS_DATA_DIR
 _ARCHIVE_FILENAME = "goal_archive.jsonl"
 
 
