@@ -141,6 +141,7 @@ sudo journalctl -u jarvis --since "1 hour ago"
 - Data: `/var/lib/jarvis/` (memory, goal archive)
 - Models: `/var/lib/jarvis/models/`
 - Input socket: `/run/jarvis/input.sock` (for `jarvis send` and app integration)
+- Output socket: `/run/jarvis/output.sock` (for apps/widgets to receive responses as JSON lines)
 
 ### **Sending to the Daemon**
 When JARVIS runs as a system service, use `jarvis send` from another terminal:
@@ -148,6 +149,9 @@ When JARVIS runs as a system service, use `jarvis send` from another terminal:
 jarvis send "what is the weather?"
 ```
 The CLI automatically tries `/run/jarvis/input.sock` when the default socket is not found. For multi-user access, add users to the `jarvis` group.
+
+### **Receiving from the Daemon**
+Apps and widgets connect to the output socket to receive responses. Each response is a JSON line, e.g. `{"output": "Hello!"}\n`. Connect, stay connected, and read lines.
 
 ---
 

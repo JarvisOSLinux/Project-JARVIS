@@ -100,6 +100,13 @@ class Config:
         os.path.join(JARVIS_DATA_DIR, "input.sock"),
     )
 
+    # Output IPC — Unix socket for apps/widgets to receive responses
+    # Clients connect and receive JSON lines: {"output": "...", ...}
+    JARVIS_OUTPUT_SOCKET = os.getenv(
+        "JARVIS_OUTPUT_SOCKET",
+        os.path.join(JARVIS_DATA_DIR, "output.sock"),
+    )
+
     # Logging Configuration
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()  # DEBUG, INFO, WARNING, ERROR, CRITICAL
     LOG_FILE = os.getenv("LOG_FILE", "")  # Optional: path to log file (empty = no file logging)

@@ -22,7 +22,7 @@ import signal
 import sys
 import threading
 import time
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from .config import Config
 from .core import ComponentFactory
 from .core.logger import get_logger
@@ -51,6 +51,7 @@ class Jarvis:
         self.task_parser = self.components['task_parser']
         self.output_manager = self.components['output_manager']
         self.voice_manager = self.components.get('voice_manager')
+        self._output_clients: List[asyncio.StreamWriter] = []
 
     # ------------------------------------------------------------------
     # Event-driven main loop
@@ -93,6 +94,12 @@ class Jarvis:
             socket_task = asyncio.create_task(self._run_socket_listener())
             logger.info(f"JARVIS: Socket listener at {Config.JARVIS_INPUT_SOCKET}")
 
+        output_task: Optional[asyncio.Task] = None
+        if Config.JARVIS_OUTPUT_SOCKET:
+            self.output_manager.add_output_callback(self._on_output_for_broadcast)
+            output_task = asyncio.create_task(self._run_output_socket_listener())
+            logger.info(f"JARVIS: Output socket at {Config.JARVIS_OUTPUT_SOCKET}")
+
         logger.info("JARVIS: Event loop started")
 
         try:
@@ -103,6 +110,8 @@ class Jarvis:
         finally:
             if socket_task and not socket_task.done():
                 socket_task.cancel()
+            if output_task and not output_task.done():
+                output_task.cancel()
             await self._shutdown()
 
     async def _handle_event(self, event: Event):
@@ -533,6 +542,91 @@ class Jarvis:
             except Exception:
                 pass
 
+    def _on_output_for_broadcast(self, response: Dict[str, Any]) -> None:
+        """Callback: schedule broadcast to output socket clients."""
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._broadcast_to_output_clients(response))
+        except RuntimeError:
+            pass
+
+    async def _broadcast_to_output_clients(self, response: Dict[str, Any]) -> None:
+        """Send response as JSON line to all connected output clients."""
+        line = json.dumps(response, ensure_ascii=False) + "\n"
+        data = line.encode("utf-8")
+        dead: List[asyncio.StreamWriter] = []
+        for w in self._output_clients:
+            try:
+                w.write(data)
+                await w.drain()
+            except (ConnectionResetError, BrokenPipeError, OSError):
+                dead.append(w)
+        for w in dead:
+            if w in self._output_clients:
+                self._output_clients.remove(w)
+            try:
+                w.close()
+                await w.wait_closed()
+            except Exception:
+                pass
+
+    async def _run_output_socket_listener(self) -> None:
+        """Listen on Unix socket for output subscribers (apps, widgets)."""
+        path = Config.JARVIS_OUTPUT_SOCKET
+        if not path:
+            return
+        sock_dir = os.path.dirname(path)
+        os.makedirs(sock_dir, exist_ok=True)
+        if os.path.exists(path):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        server = await asyncio.start_unix_server(
+            self._handle_output_connection,
+            path=path,
+        )
+        try:
+            if os.path.exists(path):
+                try:
+                    os.chmod(path, 0o660)
+                except OSError:
+                    pass
+            await asyncio.Future()
+        except asyncio.CancelledError:
+            pass
+        finally:
+            self._output_clients.clear()
+            server.close()
+            await server.wait_closed()
+            if os.path.exists(path):
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
+
+    async def _handle_output_connection(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        """Handle output subscriber: add to list, wait for disconnect."""
+        self._output_clients.append(writer)
+        logger.info(f"JARVIS: Output subscriber connected ({len(self._output_clients)} total)")
+        try:
+            await reader.read()
+        except (ConnectionResetError, BrokenPipeError):
+            pass
+        finally:
+            if writer in self._output_clients:
+                self._output_clients.remove(writer)
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+            logger.debug("JARVIS: Output subscriber disconnected")
+
     async def _await_user_input(self) -> str:
         return await asyncio.get_event_loop().run_in_executor(
             None, input, "",
@@ -607,6 +701,7 @@ class Jarvis:
 
     async def _shutdown(self):
         self._running = False
+        self.output_manager.remove_output_callback(self._on_output_for_broadcast)
         await self.events.stop()
         await self.dispatch.disconnect()
         logger.info("JARVIS: Shutdown complete")
