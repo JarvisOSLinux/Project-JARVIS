@@ -107,6 +107,21 @@ class Config:
         os.path.join(JARVIS_DATA_DIR, "output.sock"),
     )
 
+    # Tool-Level Action (TLA) Confirmation
+    # - "allow_all": never ask, run everything (power users / trusted environments)
+    # - "smart":     only ask when tool has confirmation_required=true (default)
+    # - "ask_all":   ask for every tool call, regardless of metadata
+    CONFIRMATION_MODE = os.getenv("CONFIRMATION_MODE", "smart")
+
+    # Default notification style for confirmation prompts:
+    # - false: show desktop notification (notify-send)
+    # - true:  suppress desktop notification; only use socket/CLI
+    #          (lets external apps render their own confirmation UI)
+    NOTIFICATION_SILENT = os.getenv("NOTIFICATION_SILENT", "false").lower() == "true"
+
+    # Timeout (seconds) for user to respond to a confirmation prompt
+    CONFIRMATION_TIMEOUT = int(os.getenv("CONFIRMATION_TIMEOUT", "30"))
+
     # Logging Configuration
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()  # DEBUG, INFO, WARNING, ERROR, CRITICAL
     LOG_FILE = os.getenv("LOG_FILE", "")  # Optional: path to log file (empty = no file logging)

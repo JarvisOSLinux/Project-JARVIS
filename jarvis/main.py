@@ -50,6 +50,7 @@ class Jarvis:
         self.events = self.components['event_merger']
         self.task_parser = self.components['task_parser']
         self.output_manager = self.components['output_manager']
+        self.confirmation = self.components['confirmation_manager']
         self.voice_manager = self.components.get('voice_manager')
         self._output_clients: List[asyncio.StreamWriter] = []
 
@@ -97,6 +98,10 @@ class Jarvis:
         output_task: Optional[asyncio.Task] = None
         if Config.JARVIS_OUTPUT_SOCKET:
             self.output_manager.add_output_callback(self._on_output_for_broadcast)
+            self.confirmation.set_output_callback(
+                self._on_output_for_broadcast,
+                has_clients=lambda: len(self._output_clients) > 0,
+            )
             output_task = asyncio.create_task(self._run_output_socket_listener())
             logger.info(f"JARVIS: Output socket at {Config.JARVIS_OUTPUT_SOCKET}")
 
@@ -249,10 +254,18 @@ class Jarvis:
 
             elif action == "dispatch" and "tasks" in parsed:
                 result = await self._dispatch_send(parsed["tasks"])
-                if isinstance(result, dict) and "error" in result:
+                if isinstance(result, dict) and result.get("denied"):
+                    context = f"USER_DENIAL: {result['message']}"
+                elif isinstance(result, dict) and "error" in result:
                     context = f"DISPATCH_ERROR: {json.dumps(result)}"
                 else:
-                    context = f"DISPATCH_RESULT: {json.dumps(result)}"
+                    if isinstance(result, dict) and "partial_denial" in result:
+                        context = (
+                            f"DISPATCH_RESULT: {json.dumps(result)}\n"
+                            f"USER_DENIAL: {result['partial_denial']}"
+                        )
+                    else:
+                        context = f"DISPATCH_RESULT: {json.dumps(result)}"
 
             elif action == "wait":
                 logger.info("JARVIS: Dispatch sub-chain waiting")
@@ -280,10 +293,87 @@ class Jarvis:
         return "Tool execution timed out (too many steps)."
 
     async def _dispatch_send(self, tasks) -> Dict[str, Any]:
-        """Low-level send to dispatch adapter."""
+        """Low-level send to dispatch adapter, gated by TLA confirmation.
+
+        For each task whose tool declares ``confirmation_required``, the
+        ConfirmationManager is consulted before execution.  Denied tasks
+        are removed from the batch; if *all* tasks are denied the caller
+        receives an informative ``denied`` result instead.
+        """
         if not self.dispatch.is_connected:
             return {"error": "Dispatch not connected"}
-        return await self.dispatch.send_tasks(tasks)
+
+        approved_tasks = []
+        denied_tools: List[str] = []
+
+        for task in tasks:
+            tool_name = f"{task.get('server', '?')}.{task.get('tool', '?')}"
+            tool_meta = await self._get_tool_metadata(task)
+
+            if self.confirmation.should_confirm(tool_meta):
+                summary = task.get("tool", tool_name)
+                params = task.get("params", {})
+                notification_silent = tool_meta.get(
+                    "notification_silent", Config.NOTIFICATION_SILENT,
+                )
+
+                approved = await self.confirmation.request_confirmation(
+                    tool=tool_name,
+                    summary=summary,
+                    params=params,
+                    notification_silent=notification_silent,
+                    timeout=Config.CONFIRMATION_TIMEOUT,
+                )
+
+                if approved:
+                    approved_tasks.append(task)
+                else:
+                    denied_tools.append(tool_name)
+                    logger.info(f"JARVIS: Tool denied by user: {tool_name}")
+            else:
+                approved_tasks.append(task)
+
+        if denied_tools and not approved_tasks:
+            denied_list = ", ".join(denied_tools)
+            return {
+                "denied": True,
+                "message": f"Action {denied_list} was denied by the user",
+            }
+
+        if denied_tools:
+            denied_list = ", ".join(denied_tools)
+            result = await self.dispatch.send_tasks(approved_tasks)
+            if isinstance(result, dict):
+                result["partial_denial"] = (
+                    f"Action {denied_list} was denied by the user"
+                )
+            return result
+
+        return await self.dispatch.send_tasks(approved_tasks)
+
+    async def _get_tool_metadata(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        """Retrieve tool metadata (including confirmation_required) from the
+        MCP server registry.
+
+        Falls back to an empty dict if metadata is unavailable so that
+        unconfigured tools default to no confirmation (safe for the
+        ``smart`` mode).
+        """
+        server_id = task.get("server")
+        tool_name = task.get("tool")
+        if not server_id or not tool_name:
+            return {}
+
+        try:
+            tools = await self.dispatch.list_server_tools(server_id)
+            if isinstance(tools, dict) and "tools" in tools:
+                for t in tools["tools"]:
+                    if t.get("name") == tool_name:
+                        return t
+        except Exception as e:
+            logger.debug(f"Could not fetch metadata for {server_id}.{tool_name}: {e}")
+
+        return {}
 
     async def _dispatch_execute_tasks(self, tasks, depth: int):
         """Handle a dispatch action that already has concrete tasks (from root)."""
@@ -293,14 +383,22 @@ class Jarvis:
             })
             return
 
-        result = await self.dispatch.send_tasks(tasks)
+        result = await self._dispatch_send(tasks)
 
         self.llm.switch_mode("root")
         context = self._build_root_context()
-        if isinstance(result, dict) and "error" in result:
+        if isinstance(result, dict) and result.get("denied"):
+            context += f"\nUSER_DENIAL: {result['message']}"
+        elif isinstance(result, dict) and "error" in result:
             context += f"\nDISPATCH_ERROR: {json.dumps(result)}"
         else:
-            context += f"\nDISPATCH_RESULT: {json.dumps(result)}"
+            if isinstance(result, dict) and "partial_denial" in result:
+                context += (
+                    f"\nDISPATCH_RESULT: {json.dumps(result)}"
+                    f"\nUSER_DENIAL: {result['partial_denial']}"
+                )
+            else:
+                context += f"\nDISPATCH_RESULT: {json.dumps(result)}"
 
         response = self._ask_llm(context, tag="root-dispatch-result")
         await self._act_on_root_response(response, depth + 1)
@@ -523,16 +621,32 @@ class Jarvis:
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
     ) -> None:
-        """Handle one socket connection; read lines and inject."""
+        """Handle one socket connection; read lines and inject.
+
+        Lines that parse as JSON with ``"type": "confirmation_response"``
+        are routed to the ConfirmationManager instead of the event queue.
+        """
         try:
             while self._running:
                 line = await reader.readline()
                 if not line:
                     break
                 text = line.decode("utf-8", errors="replace").strip()
-                if text:
-                    self.events.inject_user_input(text)
-                    logger.info(f"JARVIS: Socket input: {text[:80]}...")
+                if not text:
+                    continue
+
+                # Check for confirmation responses.
+                if text.startswith("{"):
+                    try:
+                        msg = json.loads(text)
+                        if msg.get("type") == "confirmation_response":
+                            self.confirmation.handle_confirmation_response(msg)
+                            continue
+                    except json.JSONDecodeError:
+                        pass
+
+                self.events.inject_user_input(text)
+                logger.info(f"JARVIS: Socket input: {text[:80]}...")
         except (ConnectionResetError, BrokenPipeError):
             pass
         finally:

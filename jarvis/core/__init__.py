@@ -8,12 +8,14 @@ and testability.
 
 from .system_info import SystemInfo
 from .command_parser import TaskParser
+from .confirmation_manager import ConfirmationManager
 from .output_manager import OutputManager
 from .component_factory import ComponentFactory
 
 __all__ = [
     'SystemInfo',
     'TaskParser',
+    'ConfirmationManager',
     'OutputManager',
     'ComponentFactory',
 ]

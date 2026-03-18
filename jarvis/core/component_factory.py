@@ -8,6 +8,7 @@ from ..contextor import ContextorAdapter
 from ..kernel_client import KernelClient, provider_from_config
 from .system_info import SystemInfo
 from .command_parser import TaskParser
+from .confirmation_manager import ConfirmationManager
 from .output_manager import OutputManager
 from ..voice.audio import check_audio_output_available, check_audio_input_available, AudioUnavailableError
 from .logger import get_logger
@@ -120,6 +121,12 @@ class ComponentFactory:
     def create_task_parser() -> TaskParser:
         """Create TaskParser for validating LLM dispatch responses."""
         return TaskParser()
+
+    @staticmethod
+    def create_confirmation_manager() -> ConfirmationManager:
+        """Create ConfirmationManager for TLA confirmation gates."""
+        logger.info("Initiating Confirmation manager...")
+        return ConfirmationManager()
 
     @staticmethod
     def create_tts_optional() -> Optional[any]:
@@ -276,6 +283,7 @@ class ComponentFactory:
         components['goal_manager'] = ComponentFactory.create_goal_manager()
         components['event_merger'] = ComponentFactory.create_event_merger()
         components['task_parser'] = ComponentFactory.create_task_parser()
+        components['confirmation_manager'] = ComponentFactory.create_confirmation_manager()
 
         # TTS (optional - only if voice output enabled and available)
         components['tts'] = ComponentFactory.create_tts_optional()
