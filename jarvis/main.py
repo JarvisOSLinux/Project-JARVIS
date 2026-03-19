@@ -50,6 +50,7 @@ class Jarvis:
         self.events = self.components['event_merger']
         self.task_parser = self.components['task_parser']
         self.output_manager = self.components['output_manager']
+        self.confirmation = self.components['confirmation_manager']
         self.voice_manager = self.components.get('voice_manager')
         self._output_clients: List[asyncio.StreamWriter] = []
 
@@ -94,9 +95,17 @@ class Jarvis:
             socket_task = asyncio.create_task(self._run_socket_listener())
             logger.info(f"JARVIS: Socket listener at {Config.JARVIS_INPUT_SOCKET}")
 
+        # Wire confirmation manager's event injector so responses flow
+        # through the event loop instead of blocking.
+        self.confirmation.set_event_injector(self.events.inject_confirmation_response)
+
         output_task: Optional[asyncio.Task] = None
         if Config.JARVIS_OUTPUT_SOCKET:
             self.output_manager.add_output_callback(self._on_output_for_broadcast)
+            self.confirmation.set_output_callback(
+                self._on_output_for_broadcast,
+                has_clients=lambda: len(self._output_clients) > 0,
+            )
             output_task = asyncio.create_task(self._run_output_socket_listener())
             logger.info(f"JARVIS: Output socket at {Config.JARVIS_OUTPUT_SOCKET}")
 
@@ -119,6 +128,8 @@ class Jarvis:
             await self._on_user_input(event.data)
         elif event.type == EventType.DISPATCH_SIGNAL:
             await self._on_dispatch_signal(event.data)
+        elif event.type == EventType.CONFIRMATION_RESPONSE:
+            await self._on_confirmation_response(event.data)
 
     # ------------------------------------------------------------------
     # ROOT-level handlers
@@ -146,6 +157,54 @@ class Jarvis:
 
         response = self._ask_llm(context, tag="root")
         await self._act_on_root_response(response)
+
+    async def _on_confirmation_response(self, data: Dict[str, Any]):
+        """Handle a CONFIRMATION_RESPONSE event from the event loop.
+
+        Resolves the pending confirmation, then either dispatches the
+        approved tasks or feeds USER_DENIAL back to ROOT so the LLM
+        keeps communicating with the user.
+        """
+        pending = self.confirmation.resolve(data)
+        if pending is None:
+            # Already expired / resolved — ignore.
+            return
+
+        logger.info(
+            f"JARVIS: Confirmation resolved: id={pending.request_id}, "
+            f"approved={len(pending.approved_tasks)}, "
+            f"denied={len(pending.denied_tools)}"
+        )
+
+        # All denied — feed USER_DENIAL to ROOT.
+        if pending.denied_tools and not pending.approved_tasks:
+            denied_list = ", ".join(pending.denied_tools)
+            self.llm.switch_mode("root")
+            context = self._build_root_context()
+            context += f"\nUSER_DENIAL: Action {denied_list} was denied by the user"
+            response = self._ask_llm(context, tag="root-confirmation-denied")
+            await self._act_on_root_response(response)
+            return
+
+        # Some or all approved — dispatch the approved tasks.
+        if pending.approved_tasks:
+            result = await self.dispatch.send_tasks(pending.approved_tasks)
+
+            self.llm.switch_mode("root")
+            context = self._build_root_context()
+
+            if isinstance(result, dict) and "error" in result:
+                context += f"\nDISPATCH_ERROR: {json.dumps(result)}"
+            else:
+                context += f"\nDISPATCH_RESULT: {json.dumps(result)}"
+
+            # Include partial denial if some tools were denied.
+            if pending.denied_tools:
+                denied_list = ", ".join(pending.denied_tools)
+                context += f"\nUSER_DENIAL: Action {denied_list} was denied by the user"
+
+            response = self._ask_llm(context, tag="root-confirmation-result")
+            await self._act_on_root_response(response)
 
     async def _act_on_root_response(self, response: Dict[str, Any], depth: int = 0):
         """Handle a ROOT-mode LLM response."""
@@ -249,7 +308,15 @@ class Jarvis:
 
             elif action == "dispatch" and "tasks" in parsed:
                 result = await self._dispatch_send(parsed["tasks"])
-                if isinstance(result, dict) and "error" in result:
+                if isinstance(result, dict) and result.get("awaiting_confirmation"):
+                    # Non-blocking: confirmation sent, return to event loop.
+                    # Dispatch will resume when CONFIRMATION_RESPONSE arrives.
+                    logger.info(
+                        f"JARVIS: Dispatch sub-chain paused for confirmation "
+                        f"id={result['confirmation_id']}"
+                    )
+                    return "Waiting for user confirmation."
+                elif isinstance(result, dict) and "error" in result:
                     context = f"DISPATCH_ERROR: {json.dumps(result)}"
                 else:
                     context = f"DISPATCH_RESULT: {json.dumps(result)}"
@@ -279,11 +346,94 @@ class Jarvis:
         logger.error("JARVIS: Dispatch sub-chain hit max steps")
         return "Tool execution timed out (too many steps)."
 
-    async def _dispatch_send(self, tasks) -> Dict[str, Any]:
-        """Low-level send to dispatch adapter."""
+    async def _dispatch_send(self, tasks, dispatch_context=None) -> Dict[str, Any]:
+        """Low-level send to dispatch adapter, gated by TLA confirmation.
+
+        **Non-blocking**: if any tool requires confirmation, the tasks are
+        stashed and a notification is sent.  The method returns immediately
+        with ``{"awaiting_confirmation": True, ...}``.  When the user
+        responds, the ``CONFIRMATION_RESPONSE`` event triggers
+        ``_on_confirmation_response()`` which resumes the dispatch.
+
+        If no tools need confirmation, tasks are dispatched immediately.
+        """
         if not self.dispatch.is_connected:
             return {"error": "Dispatch not connected"}
-        return await self.dispatch.send_tasks(tasks)
+
+        approved_tasks = []
+        tools_needing_confirmation = []
+
+        for task in tasks:
+            tool_name = f"{task.get('server', '?')}.{task.get('tool', '?')}"
+            tool_meta = await self._get_tool_metadata(task)
+
+            if self.confirmation.should_confirm(tool_meta):
+                notification_silent = tool_meta.get(
+                    "notification_silent", Config.NOTIFICATION_SILENT,
+                )
+                tools_needing_confirmation.append({
+                    "tool_name": tool_name,
+                    "task": task,
+                    "params": task.get("params", {}),
+                    "notification_silent": notification_silent,
+                })
+            else:
+                approved_tasks.append(task)
+
+        # No confirmation needed — dispatch everything now.
+        if not tools_needing_confirmation:
+            return await self.dispatch.send_tasks(approved_tasks)
+
+        # Some tools need confirmation — stash and notify, return immediately.
+        import uuid
+        request_id = str(uuid.uuid4())[:8]
+
+        # Use the first tool's notification_silent preference for the batch.
+        notification_silent = tools_needing_confirmation[0].get(
+            "notification_silent", Config.NOTIFICATION_SILENT,
+        )
+
+        await self.confirmation.request_confirmation(
+            request_id=request_id,
+            tasks=tasks,
+            tools_needing_confirmation=tools_needing_confirmation,
+            approved_tasks=approved_tasks,
+            denied_tools=[],
+            dispatch_context=dispatch_context,
+            notification_silent=notification_silent,
+            timeout=Config.CONFIRMATION_TIMEOUT,
+        )
+
+        tool_names = [t["tool_name"] for t in tools_needing_confirmation]
+        return {
+            "awaiting_confirmation": True,
+            "confirmation_id": request_id,
+            "tools_pending": tool_names,
+        }
+
+    async def _get_tool_metadata(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        """Retrieve tool metadata (including confirmation_required) from the
+        MCP server registry.
+
+        Falls back to an empty dict if metadata is unavailable so that
+        unconfigured tools default to no confirmation (safe for the
+        ``smart`` mode).
+        """
+        server_id = task.get("server")
+        tool_name = task.get("tool")
+        if not server_id or not tool_name:
+            return {}
+
+        try:
+            tools = await self.dispatch.list_server_tools(server_id)
+            if isinstance(tools, dict) and "tools" in tools:
+                for t in tools["tools"]:
+                    if t.get("name") == tool_name:
+                        return t
+        except Exception as e:
+            logger.debug(f"Could not fetch metadata for {server_id}.{tool_name}: {e}")
+
+        return {}
 
     async def _dispatch_execute_tasks(self, tasks, depth: int):
         """Handle a dispatch action that already has concrete tasks (from root)."""
@@ -293,7 +443,16 @@ class Jarvis:
             })
             return
 
-        result = await self.dispatch.send_tasks(tasks)
+        result = await self._dispatch_send(tasks)
+
+        # If awaiting confirmation, return to event loop — the
+        # CONFIRMATION_RESPONSE event will resume this flow.
+        if isinstance(result, dict) and result.get("awaiting_confirmation"):
+            logger.info(
+                f"JARVIS: Root dispatch paused for confirmation "
+                f"id={result['confirmation_id']}"
+            )
+            return
 
         self.llm.switch_mode("root")
         context = self._build_root_context()
@@ -523,16 +682,32 @@ class Jarvis:
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
     ) -> None:
-        """Handle one socket connection; read lines and inject."""
+        """Handle one socket connection; read lines and inject.
+
+        Lines that parse as JSON with ``"type": "confirmation_response"``
+        are routed to the ConfirmationManager instead of the event queue.
+        """
         try:
             while self._running:
                 line = await reader.readline()
                 if not line:
                     break
                 text = line.decode("utf-8", errors="replace").strip()
-                if text:
-                    self.events.inject_user_input(text)
-                    logger.info(f"JARVIS: Socket input: {text[:80]}...")
+                if not text:
+                    continue
+
+                # Check for confirmation responses — inject into event loop.
+                if text.startswith("{"):
+                    try:
+                        msg = json.loads(text)
+                        if msg.get("type") == "confirmation_response":
+                            self.events.inject_confirmation_response(msg)
+                            continue
+                    except json.JSONDecodeError:
+                        pass
+
+                self.events.inject_user_input(text)
+                logger.info(f"JARVIS: Socket input: {text[:80]}...")
         except (ConnectionResetError, BrokenPipeError):
             pass
         finally:

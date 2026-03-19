@@ -22,6 +22,7 @@ logger = get_logger(__name__)
 class EventType(Enum):
     USER_INPUT = "user_input"
     DISPATCH_SIGNAL = "dispatch_signal"
+    CONFIRMATION_RESPONSE = "confirmation_response"
     SHUTDOWN = "shutdown"
 
 
@@ -40,6 +41,10 @@ class Event:
     @staticmethod
     def dispatch_signal(signal: Dict[str, Any]) -> 'Event':
         return Event(type=EventType.DISPATCH_SIGNAL, data=signal)
+
+    @staticmethod
+    def confirmation_response(data: Dict[str, Any]) -> 'Event':
+        return Event(type=EventType.CONFIRMATION_RESPONSE, data=data)
 
     @staticmethod
     def shutdown() -> 'Event':
@@ -88,6 +93,24 @@ class EventMerger:
                 logger.debug(f"EventMerger: Injected user input ({len(t)} chars)")
             except asyncio.QueueFull:
                 logger.warning("EventMerger: User input queue full, dropping")
+
+        self._loop.call_soon_threadsafe(_put)
+
+    def inject_confirmation_response(self, data: Dict[str, Any]) -> None:
+        """
+        Inject a confirmation response from any thread (socket, notification).
+        Thread-safe.
+        """
+        if self._loop is None:
+            logger.warning("EventMerger: inject_confirmation_response called before start")
+            return
+
+        def _put() -> None:
+            try:
+                self._queue.put_nowait(Event.confirmation_response(data))
+                logger.debug(f"EventMerger: Injected confirmation response id={data.get('id')}")
+            except asyncio.QueueFull:
+                logger.warning("EventMerger: Queue full, dropping confirmation response")
 
         self._loop.call_soon_threadsafe(_put)
 
