@@ -1,0 +1,18 @@
+{
+    "id": "ShellMCP",
+    "name": "ShellMCP",
+    "version": "1.0.0",
+    "description": "Shell command execution MCP server for JARVIS system operations",
+    "scope": "user",
+    "transports": [
+        {
+            "type": "stdio",
+            "command": "python3",
+            "args": ["src/server.py"],
+            "description": "Shell command execution"
+        }
+    ],
+    "tools": ["run_command"],
+    "categories": ["system", "shell"],
+    "keywords": ["shell", "command", "system", "terminal", "execute"]
+}
