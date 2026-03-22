@@ -1,14 +1,21 @@
 [Unit]
 Description=JARVIS AI Voice Assistant
 Documentation=https://github.com/YakupAtahanov/Project-JARVIS
-After=network.target sound.target
-Wants=network.target
-Requires=systemd-user-sessions.service
+After=network.target sound.target ollama.service
+Wants=network.target ollama.service
 
 [Service]
 Type=simple
 User=jarvis
 Group=jarvis
+# Hardware and system access groups needed for autonomous operation:
+#   audio          — PipeWire microphone/speaker
+#   video          — GPU/DRM access
+#   network        — NetworkManager CLI socket
+#   systemd-journal — journalctl log reading
+#   storage        — block device access
+SupplementaryGroups=audio video network systemd-journal storage
+
 WorkingDirectory=/usr/lib/jarvis
 RuntimeDirectory=jarvis
 RuntimeDirectoryMode=0775
@@ -19,20 +26,29 @@ RestartSec=10
 TimeoutStartSec=60
 TimeoutStopSec=30
 
-# Security settings
-NoNewPrivileges=yes
+# /dev/jarvis requires CAP_SYS_ADMIN (kernel driver enforces it).
+# CAP_NET_ADMIN allows direct network interface operations.
+# CAP_SYS_NICE allows rtkit real-time scheduling for PipeWire audio.
+# These are granted as ambient capabilities so the daemon inherits them
+# at exec without needing a setuid binary.
+AmbientCapabilities=CAP_SYS_ADMIN CAP_NET_ADMIN CAP_SYS_NICE
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_NET_ADMIN CAP_SYS_NICE
+
+# NoNewPrivileges and RestrictSUIDSGID are intentionally absent:
+# the daemon spawns `sudo` for system management (pacman, systemctl, etc.).
+# sudo is a setuid binary — NO_NEW_PRIVS makes setuid a no-op, breaking it.
+# The jarvis policy engine (SAFE/ELEVATED/DANGEROUS/FORBIDDEN) and the
+# sudoers rules in /etc/sudoers.d/10-jarvis are the access-control layer.
+
+# ProtectSystem is intentionally absent: package management (pacman) writes
+# to /usr, /etc, and /var.  ProtectSystem=strict would create a read-only
+# bind-mount namespace that blocks those writes even when running as root
+# via sudo.
+
 PrivateTmp=yes
-ProtectSystem=strict
-ProtectHome=yes
-ReadWritePaths=/var/lib/jarvis /var/log/jarvis /run/jarvis /tmp
 ProtectKernelTunables=yes
-ProtectKernelModules=yes
 ProtectControlGroups=yes
 RestrictRealtime=yes
-RestrictSUIDSGID=yes
-MemoryDenyWriteExecute=yes
-SystemCallFilter=@system-service
-SystemCallErrorNumber=EPERM
 
 # Resource limits
 LimitNOFILE=65536
