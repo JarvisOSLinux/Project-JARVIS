@@ -6,14 +6,21 @@ conversation histories per mode. Each mode has its own system prompt
 and history — switching resets the target mode's history to its system
 prompt so subsystems always start fresh.
 
-ROOT mode keeps a sliding window of recent exchanges for conversational
-continuity. Subsystem modes (dispatch, contextor) always start clean.
+ROOT mode uses a three-tier context management system:
+- Tier 1 (Hot): Sliding window of recent exchanges — full fidelity
+- Tier 2 (Warm): Rolling summary of evicted exchanges — compressed
+- Tier 3 (Cold): RAG retrieval from vector store — semantic search
+
+Subsystem modes (dispatch, contextor) always start clean — they don't
+need tiered memory since each sub-chain is short-lived.
 """
 
 import json
 import re
+from typing import Optional, Any
 from ..core.logger import get_logger
 from .base import BaseLLMProvider
+from .context_manager import ContextManager
 
 logger = get_logger(__name__)
 
@@ -21,7 +28,7 @@ ROOT_HISTORY_WINDOW = 3
 
 
 class LLM:
-    """Main LLM interface with hierarchical mode support."""
+    """Main LLM interface with hierarchical mode support and tiered context."""
 
     MAX_JSON_RETRIES = 3
 
@@ -31,6 +38,9 @@ class LLM:
         prompts: dict[str, str],
         wrong_json_message: str = "",
         root_window: int = ROOT_HISTORY_WINDOW,
+        contextor: Optional[Any] = None,
+        rag_top_k: int = 5,
+        rag_min_score: float = 0.3,
     ):
         """
         Args:
@@ -39,7 +49,11 @@ class LLM:
                      Must contain at least "root".
             wrong_json_message: Message sent to the LLM when it returns invalid JSON.
             root_window: Number of recent user/assistant exchange pairs to
-                         keep in ROOT mode for conversational continuity.
+                         keep in Tier 1 (hot) for conversational continuity.
+            contextor: ContextorAdapter instance — enables Tier 3 RAG retrieval.
+                       When None, only Tier 1 and Tier 2 are active.
+            rag_top_k: Number of memories to retrieve per RAG query.
+            rag_min_score: Minimum relevance score for RAG results (0-1).
         """
         self.provider = provider
         self._wrong_json_message = wrong_json_message
@@ -49,6 +63,7 @@ class LLM:
 
         logger.info(f"Using LLM provider: {self.provider.model}")
 
+        # --- Tier 1: Per-mode conversation histories ---
         self._histories: dict[str, list[dict]] = {}
         for mode, prompt in prompts.items():
             self._histories[mode] = [
@@ -56,6 +71,16 @@ class LLM:
             ]
 
         self.chat_history = list(self._histories["root"])
+
+        # --- Tiered context manager (ROOT mode only) ---
+        self._context_manager = ContextManager(
+            provider=provider,
+            system_prompt=prompts.get("root", ""),
+            hot_window=root_window,
+            contextor=contextor,
+            rag_top_k=rag_top_k,
+            rag_min_score=rag_min_score,
+        )
 
         logger.info("LLM: Initiating Preload...")
         try:
@@ -69,12 +94,17 @@ class LLM:
     def mode(self) -> str:
         return self._mode
 
+    @property
+    def context_manager(self) -> ContextManager:
+        """Access the tiered context manager (for external inspection/control)."""
+        return self._context_manager
+
     def switch_mode(self, mode: str):
         """
         Switch to a different prompt mode (root, dispatch, contextor).
 
-        For root: preserves a sliding window of recent exchanges so the
-        LLM maintains short-term conversational continuity.
+        For root: preserves a sliding window of recent exchanges with
+        compression of evicted messages into a rolling summary (Tier 2).
 
         For subsystems: always starts with a clean slate (system prompt only).
         """
@@ -124,8 +154,19 @@ class LLM:
             "content": prompt,
         })
 
+        # For ROOT mode, use tiered context (augmented system prompt with
+        # rolling summary + RAG). For subsystem modes, use plain history.
+        if self._mode == "root":
+            hot_exchanges = self._get_hot_exchanges()
+            messages = self._context_manager.build_messages(
+                hot_exchanges=hot_exchanges,
+                new_input=None,  # Already appended to chat_history above
+            )
+        else:
+            messages = self.chat_history
+
         try:
-            response_text = self.provider.chat(self.chat_history)
+            response_text = self.provider.chat(messages)
         except Exception as e:
             logger.error(f"LLM [{self._mode}] provider error: {e}")
             response_text = ""
@@ -160,6 +201,11 @@ class LLM:
 
         logger.error("LLM failed to return valid JSON after all retries")
         return self._fallback_response()
+
+    def _get_hot_exchanges(self) -> list[dict]:
+        """Extract non-system messages from current root history (Tier 1)."""
+        history = self._histories.get("root", [])
+        return [msg for msg in history if msg["role"] != "system"]
 
     def _fallback_response(self) -> dict:
         """Return a safe fallback when all retries are exhausted."""
@@ -221,6 +267,18 @@ class LLM:
 
     def reset_history(self):
         """Reset current mode's history to system prompt only."""
+        if self._mode == "root":
+            # Soft reset: clear hot window but keep the rolling summary
+            self._context_manager.soft_reset()
+
+        self._histories[self._mode] = [
+            {"role": "system", "content": self._prompts[self._mode]},
+        ]
+        self.chat_history = self._histories[self._mode]
+
+    def full_reset(self):
+        """Hard reset: clear all tiers including rolling summary."""
+        self._context_manager.reset()
         self._histories[self._mode] = [
             {"role": "system", "content": self._prompts[self._mode]},
         ]
@@ -230,6 +288,9 @@ class LLM:
         """
         Trim ROOT history to the system prompt + last N exchange pairs.
         An exchange pair is a (user, assistant) message pair.
+
+        UPGRADED: Evicted exchanges are now compressed into a rolling
+        summary (Tier 2) instead of being silently dropped.
         """
         history = self._histories["root"]
         if len(history) <= 1:
@@ -248,12 +309,27 @@ class LLM:
             pairs.append(current_pair)
 
         keep = pairs[-self._root_window:] if len(pairs) > self._root_window else pairs
+
+        # Identify evicted pairs for compression
+        evicted_pairs = pairs[:-self._root_window] if len(pairs) > self._root_window else []
+
+        if evicted_pairs:
+            # Flatten evicted pairs into a message list for summarization
+            evicted_messages = []
+            for pair in evicted_pairs:
+                evicted_messages.extend(pair)
+
+            # Compress evicted messages into rolling summary (Tier 2)
+            self._context_manager.compress_evicted(evicted_messages)
+
+            dropped = len(evicted_pairs)
+            logger.debug(
+                f"LLM: Trimmed root history — kept {len(keep)} exchanges, "
+                f"compressed {dropped} into rolling summary"
+            )
+
         trimmed = [history[0]]
         for pair in keep:
             trimmed.extend(pair)
-
-        if len(trimmed) < len(history):
-            dropped = (len(history) - len(trimmed)) // 2
-            logger.debug(f"LLM: Trimmed root history — kept {len(keep)} exchanges, dropped {dropped}")
 
         self._histories["root"] = trimmed

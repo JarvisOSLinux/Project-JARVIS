@@ -18,8 +18,15 @@ logger = get_logger(__name__)
 
 class ComponentFactory:
     @staticmethod
-    def create_llm() -> LLM:
-        """Create LLM with provider selected by ``Config.LLM_PROVIDER``."""
+    def create_llm(contextor: Optional[ContextorAdapter] = None) -> LLM:
+        """
+        Create LLM with provider selected by ``Config.LLM_PROVIDER``.
+
+        Args:
+            contextor: Optional ContextorAdapter — when provided and RAG is
+                       enabled, the LLM will use tiered context management
+                       with semantic memory retrieval.
+        """
         import json as _json
 
         logger.info("Getting system information...")
@@ -91,6 +98,9 @@ class ComponentFactory:
             provider=llm_provider,
             prompts=prompts,
             wrong_json_message=Config.LLM_WRONG_JSON_FORMAT_MESSAGE,
+            contextor=contextor,
+            rag_top_k=getattr(Config, "RAG_TOP_K", 5),
+            rag_min_score=getattr(Config, "RAG_MIN_SCORE", 0.3),
         )
 
     @staticmethod
@@ -113,9 +123,51 @@ class ComponentFactory:
 
     @staticmethod
     def create_contextor() -> ContextorAdapter:
-        """Create ContextorAdapter for long-term memory management."""
+        """
+        Create ContextorAdapter for long-term memory management.
+
+        When RAG_ENABLED=true, also initializes:
+        - OllamaEmbeddings (for generating vector embeddings)
+        - VectorStore (ChromaDB-backed semantic search index)
+
+        Falls back gracefully to keyword-only search if embedding model
+        or ChromaDB is unavailable.
+        """
         logger.info("Initiating Contextor adapter...")
-        return ContextorAdapter()
+
+        vector_store = None
+
+        if getattr(Config, "RAG_ENABLED", False):
+            try:
+                from ..contextor.embeddings import OllamaEmbeddings
+                from ..contextor.vector_store import VectorStore
+
+                logger.info(
+                    f"RAG enabled — initializing embeddings "
+                    f"(model: {Config.EMBED_MODEL})..."
+                )
+                embeddings = OllamaEmbeddings(model=Config.EMBED_MODEL)
+
+                if embeddings.ensure_model():
+                    vector_store = VectorStore(embeddings=embeddings)
+                    logger.info(
+                        f"Vector store ready ({vector_store.count} entries)"
+                    )
+                else:
+                    logger.warning(
+                        f"Embedding model '{Config.EMBED_MODEL}' not available. "
+                        f"RAG disabled — falling back to keyword search. "
+                        f"Pull the model with: ollama pull {Config.EMBED_MODEL}"
+                    )
+            except ImportError as e:
+                logger.warning(
+                    f"RAG dependencies not available: {e}. "
+                    f"Install with: pip install chromadb"
+                )
+            except Exception as e:
+                logger.warning(f"RAG initialization failed (non-fatal): {e}")
+
+        return ContextorAdapter(vector_store=vector_store)
 
     @staticmethod
     def create_task_parser() -> TaskParser:
@@ -275,11 +327,14 @@ class ComponentFactory:
         components['kernel_client'] = ComponentFactory.create_kernel_client()
 
         # Core components (always needed)
-        components['llm'] = ComponentFactory.create_llm()
-        components['dispatch_adapter'] = ComponentFactory.create_dispatch_adapter()
+        # Contextor is created first so it can be passed to LLM for RAG
         components['contextor'] = (
             ComponentFactory.create_contextor() if Config.CONTEXTOR_ENABLED else None
         )
+        components['llm'] = ComponentFactory.create_llm(
+            contextor=components['contextor'],
+        )
+        components['dispatch_adapter'] = ComponentFactory.create_dispatch_adapter()
         components['goal_manager'] = ComponentFactory.create_goal_manager()
         components['event_merger'] = ComponentFactory.create_event_merger()
         components['task_parser'] = ComponentFactory.create_task_parser()
