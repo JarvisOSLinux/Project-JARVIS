@@ -88,6 +88,16 @@ class Config:
     MEMORY_RETENTION_DAYS = int(os.getenv("MEMORY_RETENTION_DAYS", "90"))
     MAX_ENTRIES_PER_THEME = int(os.getenv("MAX_ENTRIES_PER_THEME", "500"))
 
+    # --- Context Retrieval (RAG) ---
+    # Embedding model for semantic search (runs on Ollama)
+    EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")
+    # Enable semantic search via vector store (requires chromadb + embed model)
+    RAG_ENABLED = os.getenv("RAG_ENABLED", "true").lower() == "true"
+    # Number of memories to retrieve per RAG query
+    RAG_TOP_K = int(os.getenv("RAG_TOP_K", "5"))
+    # Minimum cosine similarity for RAG results (0.0-1.0)
+    RAG_MIN_SCORE = float(os.getenv("RAG_MIN_SCORE", "0.3"))
+
     # Data directory — when set (e.g. systemd JARVIS_DATA_DIR=/var/lib/jarvis),
     # memory, goal archive, and default socket use this base path
     _DEFAULT_DATA_DIR = os.path.join(os.path.expanduser("~"), ".jarvis")

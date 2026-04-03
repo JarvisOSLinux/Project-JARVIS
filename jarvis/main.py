@@ -545,6 +545,20 @@ class Jarvis:
         if signal:
             parts.append(f"SIGNAL: {json.dumps(signal)}")
 
+        # Tier 3 (Cold): RAG retrieval — inject relevant memories from
+        # the vector store based on the current user input.
+        # This happens here (in addition to the context manager's system
+        # prompt augmentation) so the ROOT context string itself contains
+        # relevant memories for the LLM to reference.
+        if new_input and self.contextor:
+            rag_context = self.contextor.retrieve_context(
+                query=new_input,
+                top_k=getattr(Config, "RAG_TOP_K", 5),
+                min_score=getattr(Config, "RAG_MIN_SCORE", 0.3),
+            )
+            if rag_context:
+                parts.append(rag_context)
+
         if new_input:
             parts.append(f"NEW INPUT: {new_input}")
 
