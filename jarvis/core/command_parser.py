@@ -18,8 +18,8 @@ VALID_ACTIONS = {
     # Root
     "respond", "dispatch", "contextor",
     # Dispatch subsystem
-    "search", "list_tools", "install", "wait", "kill", "defer", "done",
-    # Contextor subsystem (placeholders)
+    "plan", "search", "list_tools", "install", "wait", "kill", "defer", "done",
+    # Contextor subsystem
     "store", "recall", "search_memory", "list_memory",
 }
 
@@ -86,6 +86,10 @@ class TaskParser:
             return f", pids={result.get('pids', [])}"
         if action == "defer":
             return f", goal_id={result.get('goal_id')}, duration={result.get('duration')}s"
+        if action == "plan":
+            tasks = result.get("tasks", [])
+            intents = [t.get("intent", "")[:40] for t in tasks]
+            return f", tasks={intents}"
         if action == "search":
             return f", keywords={result.get('keywords', [])}"
         if action == "list_tools":
@@ -175,6 +179,41 @@ def _parse_contextor(response: Dict[str, Any]) -> Dict[str, Any]:
 # ------------------------------------------------------------------
 # DISPATCH subsystem actions
 # ------------------------------------------------------------------
+
+@_parser("plan")
+def _parse_plan(response: Dict[str, Any]) -> Dict[str, Any]:
+    """Parse plan action — LLM breaks intent into sub-tasks for tool discovery."""
+    tasks = response.get("tasks", [])
+    if not isinstance(tasks, list) or not tasks:
+        return {"error": "Plan action requires a non-empty 'tasks' list", "raw": response}
+
+    validated_tasks = []
+    for i, task in enumerate(tasks):
+        if not isinstance(task, dict):
+            logger.warning(f"TaskParser: Plan task {i} is not a dict, skipping")
+            continue
+
+        intent = task.get("intent", "")
+        if not intent:
+            logger.warning(f"TaskParser: Plan task {i} missing 'intent', skipping")
+            continue
+
+        validated_tasks.append({
+            "intent": str(intent),
+            "keywords": [str(k) for k in task.get("keywords", [])],
+            "top_k": int(task.get("top_k", 5)),
+            "min_score": float(task.get("min_score", 0.3)),
+        })
+
+    if not validated_tasks:
+        return {"error": "No valid sub-tasks in plan action", "raw": response}
+
+    return {
+        "action": "plan",
+        "tasks": validated_tasks,
+        "goal_updates": response.get("goal_updates", []),
+    }
+
 
 @_parser("search")
 def _parse_search(response: Dict[str, Any]) -> Dict[str, Any]:
