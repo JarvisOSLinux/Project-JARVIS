@@ -48,6 +48,7 @@ class Jarvis:
         self.contextor = self.components['contextor']
         self.goals = self.components['goal_manager']
         self.events = self.components['event_merger']
+        self._embeddings = self.components.get('embeddings')
         self.task_parser = self.components['task_parser']
         self.output_manager = self.components['output_manager']
         self.confirmation = self.components['confirmation_manager']
@@ -73,6 +74,15 @@ class Jarvis:
         except Exception as e:
             logger.warning(f"JARVIS: Could not connect to dispatch: {e}")
             logger.info("JARVIS: Running in conversation-only mode")
+
+        # Startup: sync tool vector index and ensure embedding model
+        if self.dispatch.is_connected and self._embeddings:
+            try:
+                await self.dispatch.ensure_embedding_model(self._embeddings)
+                await self.dispatch.sync_index()
+                logger.info("JARVIS: Tool vector index synced")
+            except Exception as e:
+                logger.warning(f"JARVIS: Tool index sync failed (non-fatal): {e}")
 
         user_source = self._await_user_input if self._has_stdin() else None
         self.events.start(
@@ -270,6 +280,12 @@ class Jarvis:
         """
         Enter dispatch mode, give it the intent, and loop until it
         returns "done" with a summary.
+
+        The LLM starts with a "plan" action to split the intent into
+        sub-tasks. JARVIS then searches for matching tools (semantic
+        vectors + keyword fallback) and injects AVAILABLE TOOLS into
+        the next prompt. The LLM can then dispatch directly without
+        manual search/list_tools steps.
         """
         self.llm.switch_mode("dispatch")
 
@@ -294,7 +310,26 @@ class Jarvis:
                 logger.info(f"JARVIS: Dispatch sub-chain completed: {parsed['summary']}")
                 return parsed["summary"]
 
-            if action == "search":
+            if action == "plan":
+                # LLM split the intent into sub-tasks — search for tools
+                sub_tasks = parsed.get("tasks", [])
+                logger.info(f"JARVIS: Plan has {len(sub_tasks)} sub-task(s)")
+
+                available_tools = await self.dispatch.discover_tools(
+                    tasks=sub_tasks,
+                    embeddings=self._get_embeddings(),
+                )
+
+                if available_tools:
+                    context = f"{available_tools}\n\nINTENT: {intent}"
+                else:
+                    context = (
+                        "NO_TOOLS_FOUND: Semantic and keyword search returned no matches. "
+                        "Use 'search' with different keywords, or try 'list_tools' on a known server.\n"
+                        f"INTENT: {intent}"
+                    )
+
+            elif action == "search":
                 result = await self.dispatch.search_servers(parsed["keywords"])
                 context = f"SEARCH_RESULTS: {json.dumps(result)}"
 
@@ -305,6 +340,14 @@ class Jarvis:
             elif action == "install":
                 result = await self.dispatch.install_server(parsed["server_id"])
                 context = f"INSTALL_RESULT: {json.dumps(result)}"
+
+                # Auto-index non-approved servers after successful install
+                server_id = parsed.get("server_id", "")
+                if "error" not in result and server_id:
+                    await self.dispatch.auto_index_server(
+                        server_id=server_id,
+                        embeddings=self._get_embeddings(),
+                    )
 
             elif action == "dispatch" and "tasks" in parsed:
                 result = await self._dispatch_send(parsed["tasks"])
@@ -517,6 +560,10 @@ class Jarvis:
     # ------------------------------------------------------------------
     # Shared helpers
     # ------------------------------------------------------------------
+
+    def _get_embeddings(self):
+        """Return the OllamaEmbeddings instance, or None if unavailable."""
+        return self._embeddings
 
     def _ask_llm(self, context: str, tag: str = "") -> Dict[str, Any]:
         """Single LLM call with timing logs."""

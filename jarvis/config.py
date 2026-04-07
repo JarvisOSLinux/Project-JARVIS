@@ -98,6 +98,14 @@ class Config:
     # Minimum cosine similarity for RAG results (0.0-1.0)
     RAG_MIN_SCORE = float(os.getenv("RAG_MIN_SCORE", "0.3"))
 
+    # --- Semantic Tool Discovery ---
+    # Master switch for vector-based tool search via dispatch/dmcp
+    ALLOW_EMBEDDING_SEARCH = os.getenv("ALLOW_EMBEDDING_SEARCH", "true").lower() == "true"
+    # Bypass threshold — use vector search regardless of server count
+    ENFORCE_EMBEDDING_SEARCH = os.getenv("ENFORCE_EMBEDDING_SEARCH", "false").lower() == "true"
+    # Minimum visible servers before vector search auto-enables
+    EMBEDDING_SEARCH_THRESHOLD = int(os.getenv("EMBEDDING_SEARCH_THRESHOLD", "100"))
+
     # Data directory — when set (e.g. systemd JARVIS_DATA_DIR=/var/lib/jarvis),
     # memory, goal archive, and default socket use this base path
     _DEFAULT_DATA_DIR = os.path.join(os.path.expanduser("~"), ".jarvis")
@@ -237,20 +245,32 @@ Output exactly one JSON object. First char {{, last char }}.
 
     LLM_DISPATCH_PROMPT = """\
 You are operating in DISPATCH mode. Your job is to find and execute MCP server tools.
-You do NOT have a pre-loaded list of tools. Discover them on demand by searching.
 
 CRITICAL: Your ENTIRE response must be a single valid JSON object.
 
 --- Workflow ---
-1. search: Find MCP servers by keywords
-2. list_tools: See what tools a server offers and their parameter schemas
-3. install: Install a server that isn't installed yet (runs setup automatically)
-4. dispatch: Execute tasks on installed servers
-5. done: Return a summary to the root system when finished
+1. plan: ALWAYS start here. Break down your intent into sub-tasks with keywords for each.
+   The system will search for matching tools (semantic + keyword) and return AVAILABLE TOOLS.
+2. If AVAILABLE TOOLS are provided: skip search/list_tools and dispatch directly.
+3. If no tools were found: fall back to search → list_tools → install → dispatch.
+4. done: Return a summary to the root system when finished.
 
 --- Actions ---
 
-Search for servers:
+Plan sub-tasks (ALWAYS start with this):
+{{
+    "action": "plan",
+    "tasks": [
+        {{"intent": "get weather forecast for Berlin", "keywords": ["weather", "forecast"], "top_k": 3, "min_score": 0.7}},
+        {{"intent": "convert 50 EUR to USD", "keywords": ["currency", "exchange", "convert"], "top_k": 3, "min_score": 0.7}}
+    ]
+}}
+- intent: Natural language description of what this sub-task needs
+- keywords: Fallback keywords if semantic search finds nothing
+- top_k: Max results per sub-task (default 5)
+- min_score: Min relevance threshold 0.0-1.0 (default 0.3, use higher for precise queries)
+
+Search for servers (fallback — use only if plan returned no tools):
 {{"action": "search", "keywords": ["calculator", "math"]}}
 
 List tools on a server:
@@ -282,7 +302,8 @@ Return to root with results:
 --- Context you receive ---
 - INTENT: What the root system asked you to do
 - GOALS: Active goals
-- SEARCH_RESULTS: Server search results
+- AVAILABLE_TOOLS: Tools matched by semantic/keyword search (after plan action)
+- SEARCH_RESULTS: Server search results (legacy keyword search)
 - TOOLS: Tool listings from a server
 - INSTALL_RESULT: Installation outcome
 - DISPATCH_RESULT: Task execution results (signal window with PIDs, INIT/EXIT events)
@@ -297,7 +318,10 @@ Return to root with results:
 - KILL: Task was terminated
 
 --- Rules ---
-- Do NOT guess server IDs or tool names — always search first
+- ALWAYS start with "plan" to break down the intent — even for single tasks
+- If AVAILABLE TOOLS appear after planning, dispatch directly (skip search/list_tools)
+- Fall back to "search" only when plan returned no matching tools
+- Do NOT guess server IDs or tool names — let the system find them
 - You can dispatch multiple tasks for parallelism
 - When tasks complete, use "done" to return the summary to root
 - Output exactly one JSON object — no preamble, no trailing text

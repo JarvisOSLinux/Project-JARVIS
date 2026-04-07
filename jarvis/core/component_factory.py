@@ -326,6 +326,25 @@ class ComponentFactory:
         # Kernel integration client (started first — LLM providers may use keyring)
         components['kernel_client'] = ComponentFactory.create_kernel_client()
 
+        # Shared embeddings instance — used by both contextor (memory RAG)
+        # and dispatch (semantic tool discovery). Created once, shared.
+        embeddings = None
+        if Config.RAG_ENABLED or Config.ALLOW_EMBEDDING_SEARCH:
+            try:
+                from ..contextor.embeddings import OllamaEmbeddings
+                embeddings = OllamaEmbeddings(model=Config.EMBED_MODEL)
+                if not embeddings.ensure_model():
+                    logger.warning(
+                        f"Embedding model '{Config.EMBED_MODEL}' not available. "
+                        f"Semantic search disabled."
+                    )
+                    embeddings = None
+            except ImportError as e:
+                logger.warning(f"Embeddings unavailable: {e}")
+            except Exception as e:
+                logger.warning(f"Embeddings init failed (non-fatal): {e}")
+        components['embeddings'] = embeddings
+
         # Core components (always needed)
         # Contextor is created first so it can be passed to LLM for RAG
         components['contextor'] = (

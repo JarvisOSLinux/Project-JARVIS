@@ -6,8 +6,15 @@ as an MCP server via `dispatch serve`. This adapter connects to it over
 stdio and provides methods to send task batches, kill tasks, and receive
 signals.
 
-The adapter is intentionally thin — it translates Python calls into MCP
-tool invocations and surfaces results. All decision-making lives in Jarvis.
+The adapter also handles semantic tool discovery:
+- Embeds sub-task intents via Ollama (when embedding search is enabled)
+- Passes vectors to dispatch → dmcp for cosine similarity search
+- Falls back to keyword search when vector search is unavailable or
+  returns no results
+- Auto-indexes non-approved servers after installation
+
+All decision-making lives in JARVIS — dispatch and dmcp are tools that
+do what they're told.
 """
 
 import asyncio
@@ -336,6 +343,455 @@ class DispatchAdapter:
 
         logger.info(f"Dispatch: Server '{server_id}' has {len(tools)} tool(s)")
         return {"server": server_id, "tools": tools}
+
+    # ------------------------------------------------------------------
+    # Semantic tool discovery (vector-based via dispatch → dmcp)
+    # ------------------------------------------------------------------
+
+    async def server_count(self) -> Dict[str, Any]:
+        """
+        Get the number of visible MCP servers from dmcp.
+
+        Returns dict with total, local, registry counts.
+        JARVIS uses this to decide whether to enable embedding search.
+        """
+        if not self._connected:
+            # Fall back to direct dmcp call if dispatch isn't connected
+            raw = await self._run_dmcp("count", "--json")
+            if raw is None:
+                return {"total": 0, "local": 0, "registry": 0}
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError:
+                # Plain number output
+                try:
+                    return {"total": int(raw.strip()), "local": 0, "registry": 0}
+                except ValueError:
+                    return {"total": 0, "local": 0, "registry": 0}
+
+        try:
+            result = await asyncio.wait_for(
+                self.session.call_tool("server_count", {}),
+                timeout=self.timeout,
+            )
+            content = self._extract_content(result)
+            logger.info(f"Dispatch: Server count: {content}")
+            return content
+        except Exception as e:
+            logger.warning(f"Dispatch: server_count failed: {e}")
+            return {"total": 0, "local": 0, "registry": 0}
+
+    async def embedding_spec(self) -> Optional[Dict[str, Any]]:
+        """
+        Get the registry's embedding model spec from dmcp.
+
+        Returns: {"model": "nomic-embed-text", "version": "v1.5", "dimensions": 768}
+        or None if not available.
+        """
+        if not self._connected:
+            raw = await self._run_dmcp("embedding-spec")
+            if raw is None:
+                return None
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError:
+                return None
+
+        try:
+            result = await asyncio.wait_for(
+                self.session.call_tool("embedding_spec", {}),
+                timeout=self.timeout,
+            )
+            content = self._extract_content(result)
+            if "error" in content:
+                logger.warning(f"Dispatch: embedding_spec: {content['error']}")
+                return None
+            logger.info(f"Dispatch: Embedding spec: {content}")
+            return content
+        except Exception as e:
+            logger.warning(f"Dispatch: embedding_spec failed: {e}")
+            return None
+
+    async def sync_index(self) -> Dict[str, Any]:
+        """Trigger dmcp sync-index to refresh the vector index from registries."""
+        if not self._connected:
+            raw = await self._run_dmcp("sync-index")
+            if raw is None:
+                return {"error": "dmcp sync-index failed"}
+            return {"output": raw.strip()}
+
+        try:
+            result = await asyncio.wait_for(
+                self.session.call_tool("sync_index", {}),
+                timeout=self.timeout,
+            )
+            content = self._extract_content(result)
+            logger.info(f"Dispatch: sync_index result: {content}")
+            return content
+        except Exception as e:
+            logger.warning(f"Dispatch: sync_index failed: {e}")
+            return {"error": f"sync_index failed: {e}"}
+
+    async def browse_vector(
+        self,
+        vector: List[float],
+        top_k: int = 5,
+        min_score: float = 0.3,
+    ) -> Dict[str, Any]:
+        """
+        Semantic search: find MCP servers/tools by vector similarity.
+
+        Passes the vector to dispatch → dmcp browse --vector for cosine
+        similarity search against the local vector index.
+        """
+        if not self._connected:
+            vector_json = json.dumps(vector)
+            raw = await self._run_dmcp(
+                "browse", "--vector", vector_json,
+                "--top-k", str(top_k),
+                "--min-score", str(min_score),
+                "--json",
+            )
+            if raw is None:
+                return {"results": []}
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError:
+                return {"results": []}
+
+        try:
+            result = await asyncio.wait_for(
+                self.session.call_tool("browse_vector", {
+                    "vector": vector,
+                    "top_k": top_k,
+                    "min_score": min_score,
+                }),
+                timeout=self.timeout,
+            )
+            content = self._extract_content(result)
+            return content
+        except Exception as e:
+            logger.warning(f"Dispatch: browse_vector failed: {e}")
+            return {"results": []}
+
+    async def browse_vectors_batch(
+        self,
+        vectors: List[List[float]],
+        top_k: int = 5,
+        min_score: float = 0.3,
+    ) -> Dict[str, Any]:
+        """
+        Batch semantic search: search multiple vectors in one call.
+
+        Returns grouped results — one result set per input vector.
+        """
+        if not self._connected:
+            vectors_json = json.dumps(vectors)
+            raw = await self._run_dmcp(
+                "browse", "--vectors", vectors_json,
+                "--top-k", str(top_k),
+                "--min-score", str(min_score),
+                "--json",
+            )
+            if raw is None:
+                return {"results": [[] for _ in vectors]}
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError:
+                return {"results": [[] for _ in vectors]}
+
+        try:
+            result = await asyncio.wait_for(
+                self.session.call_tool("browse_vectors", {
+                    "vectors": vectors,
+                    "top_k": top_k,
+                    "min_score": min_score,
+                }),
+                timeout=self.timeout,
+            )
+            content = self._extract_content(result)
+            return content
+        except Exception as e:
+            logger.warning(f"Dispatch: browse_vectors_batch failed: {e}")
+            return {"results": [[] for _ in vectors]}
+
+    async def index_server(
+        self,
+        server_id: str,
+        vectors: Dict[str, Any],
+        name: str = "",
+        description: str = "",
+    ) -> Dict[str, Any]:
+        """
+        Index a non-approved server's vectors for semantic search.
+
+        Called after installing a server that doesn't have pre-computed
+        vectors in the registry. JARVIS embeds the tool descriptions
+        locally via Ollama and passes the vectors here for storage.
+
+        Args:
+            server_id: The MCP server ID.
+            vectors: {"server": [...], "tools": {"tool_name": [...]}}
+            name: Optional server name.
+            description: Optional server description.
+        """
+        if not self._connected:
+            args = ["index-server", server_id, "--vectors", json.dumps(vectors)]
+            if name:
+                args.extend(["--name", name])
+            if description:
+                args.extend(["--description", description])
+            raw = await self._run_dmcp(*args)
+            if raw is None:
+                return {"error": f"Failed to index server '{server_id}'"}
+            return {"indexed": server_id, "output": raw.strip()}
+
+        try:
+            params: Dict[str, Any] = {
+                "server_id": server_id,
+                "vectors": json.dumps(vectors),
+            }
+            if name:
+                params["name"] = name
+            if description:
+                params["description"] = description
+
+            result = await asyncio.wait_for(
+                self.session.call_tool("index_server", params),
+                timeout=self.timeout,
+            )
+            content = self._extract_content(result)
+            logger.info(f"Dispatch: Indexed server '{server_id}': {content}")
+            return content
+        except Exception as e:
+            logger.warning(f"Dispatch: index_server failed: {e}")
+            return {"error": f"Failed to index server: {e}"}
+
+    async def discover_tools(
+        self,
+        tasks: List[Dict[str, Any]],
+        embeddings: Optional[Any] = None,
+    ) -> str:
+        """
+        Semantic tool discovery — the main entry point.
+
+        Takes a list of sub-tasks from the LLM's "plan" action, searches
+        for matching tools using vectors (preferred) with keyword fallback,
+        and returns a formatted AVAILABLE TOOLS string for prompt injection.
+
+        Args:
+            tasks: List of dicts with "intent", "keywords", "top_k", "min_score".
+            embeddings: OllamaEmbeddings instance for local embedding.
+
+        Returns:
+            Formatted string of matched tools, or empty string if nothing found.
+        """
+        count = await self.server_count()
+        total = count.get("total", 0)
+
+        use_vectors = (
+            Config.ALLOW_EMBEDDING_SEARCH
+            and embeddings is not None
+            and (
+                total >= Config.EMBEDDING_SEARCH_THRESHOLD
+                or Config.ENFORCE_EMBEDDING_SEARCH
+            )
+        )
+
+        logger.info(
+            f"Dispatch: discover_tools — {len(tasks)} sub-task(s), "
+            f"{total} visible servers, use_vectors={use_vectors}"
+        )
+
+        all_results: List[Dict[str, Any]] = []
+
+        if use_vectors:
+            # Embed all intents and do batch vector search
+            intents = [t.get("intent", "") for t in tasks]
+            try:
+                vectors = embeddings.embed_batch(intents)
+                # Use the most restrictive top_k/min_score from the tasks
+                top_k = max(t.get("top_k", 5) for t in tasks)
+                min_score = min(t.get("min_score", 0.3) for t in tasks)
+
+                batch_result = await self.browse_vectors_batch(
+                    vectors=vectors,
+                    top_k=top_k,
+                    min_score=min_score,
+                )
+
+                result_sets = batch_result.get("results", [])
+                if isinstance(result_sets, list):
+                    for i, result_set in enumerate(result_sets):
+                        if isinstance(result_set, list) and result_set:
+                            for r in result_set:
+                                r["_source_task"] = intents[i]
+                            all_results.extend(result_set)
+                        else:
+                            # No vector match for this task — keyword fallback
+                            kw_results = await self._keyword_fallback(tasks[i])
+                            all_results.extend(kw_results)
+
+            except Exception as e:
+                logger.warning(f"Dispatch: Vector search failed, falling back to keywords: {e}")
+                for task in tasks:
+                    all_results.extend(await self._keyword_fallback(task))
+        else:
+            # Vector search disabled — keyword only
+            for task in tasks:
+                all_results.extend(await self._keyword_fallback(task))
+
+        if not all_results:
+            logger.info("Dispatch: discover_tools found no matching tools")
+            return ""
+
+        return self._format_available_tools(all_results)
+
+    async def _keyword_fallback(self, task: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Keyword search fallback for a single sub-task."""
+        keywords = task.get("keywords", [])
+        if not keywords:
+            # Extract basic keywords from intent
+            intent = task.get("intent", "")
+            keywords = [w for w in intent.lower().split() if len(w) > 3]
+
+        if not keywords:
+            return []
+
+        result = await self.search_servers(keywords)
+        servers = result.get("servers", [])
+
+        # Convert to tool-level results for consistent formatting
+        tool_results = []
+        for server in servers:
+            server_id = server.get("id", server.get("server_id", ""))
+            tool_results.append({
+                "server_id": server_id,
+                "server_name": server.get("name", server_id),
+                "description": server.get("description", ""),
+                "installed": server.get("installed", False),
+                "score": 0,  # keyword matches don't have scores
+                "_source": "keyword",
+                "_source_task": task.get("intent", ""),
+            })
+
+        return tool_results
+
+    @staticmethod
+    def _format_available_tools(results: List[Dict[str, Any]]) -> str:
+        """Format search results as AVAILABLE TOOLS for the LLM prompt."""
+        # Deduplicate by server_id + tool_name
+        seen = set()
+        unique = []
+        for r in results:
+            key = (r.get("server_id", ""), r.get("tool_name", ""))
+            if key not in seen:
+                seen.add(key)
+                unique.append(r)
+
+        parts = []
+        for r in unique:
+            server_id = r.get("server_id", "unknown")
+            tool_name = r.get("tool_name", "")
+            description = r.get("description", "")
+            params = r.get("params", r.get("parameter_schema", ""))
+            score = r.get("score", 0)
+            installed = r.get("installed", True)
+
+            if tool_name:
+                line = f"  {server_id}/{tool_name}"
+            else:
+                line = f"  {server_id}"
+
+            if score:
+                line += f" (relevance: {score:.0%})"
+            if not installed:
+                line += " [NOT INSTALLED]"
+            if description:
+                line += f"\n    {description}"
+            if params:
+                params_str = json.dumps(params) if isinstance(params, dict) else str(params)
+                line += f"\n    params: {params_str}"
+
+            parts.append(line)
+
+        return "AVAILABLE_TOOLS:\n" + "\n".join(parts)
+
+    async def auto_index_server(
+        self,
+        server_id: str,
+        embeddings: Optional[Any] = None,
+    ) -> None:
+        """
+        Auto-index a non-approved server after installation.
+
+        Reads the server's tool descriptions, embeds them locally via
+        Ollama, and stores the vectors in dmcp's local index.
+        Does nothing if embeddings are unavailable.
+        """
+        if embeddings is None:
+            logger.debug(f"Dispatch: Skipping auto-index for '{server_id}' (no embeddings)")
+            return
+
+        # Get tool descriptions from the installed server
+        tools_result = await self.list_server_tools(server_id)
+        tools = tools_result.get("tools", [])
+        if not tools:
+            logger.debug(f"Dispatch: No tools found for '{server_id}', skipping index")
+            return
+
+        try:
+            # Build texts to embed
+            server_desc = f"{server_id}"
+            tool_texts = {}
+            for tool in tools:
+                name = tool.get("name", "")
+                desc = tool.get("description", "")
+                params = tool.get("params", tool.get("inputSchema", {}))
+                text = f"{server_id} | {name} | {desc} | params: {json.dumps(params)}"
+                tool_texts[name] = text
+
+            # Embed server description
+            server_vector = embeddings.embed_single(server_desc)
+
+            # Embed each tool
+            tool_vectors = {}
+            for name, text in tool_texts.items():
+                tool_vectors[name] = embeddings.embed_single(text)
+
+            # Store in dmcp's index
+            vectors = {
+                "server": server_vector,
+                "tools": tool_vectors,
+            }
+            result = await self.index_server(server_id, vectors)
+            logger.info(f"Dispatch: Auto-indexed '{server_id}' ({len(tool_vectors)} tools): {result}")
+
+        except Exception as e:
+            # Non-fatal — server is installed, just not vector-indexed
+            logger.warning(f"Dispatch: Auto-index failed for '{server_id}' (non-fatal): {e}")
+
+    async def ensure_embedding_model(self, embeddings: Optional[Any] = None) -> None:
+        """
+        On startup, check the registry's embedding spec and ensure
+        the correct model is available locally.
+        """
+        if embeddings is None:
+            return
+
+        spec = await self.embedding_spec()
+        if spec is None:
+            logger.info("Dispatch: No embedding spec from registry (index may not be synced)")
+            return
+
+        registry_model = spec.get("model", "")
+        if registry_model and registry_model != embeddings.model:
+            logger.warning(
+                f"Dispatch: Registry embedding model '{registry_model}' differs from "
+                f"local model '{embeddings.model}'. Updating local model."
+            )
+            embeddings.model = registry_model
+            embeddings.ensure_model()
 
     async def __aenter__(self):
         await self.connect()
