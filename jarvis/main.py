@@ -149,6 +149,11 @@ class Jarvis:
         logger.info(f"JARVIS: User input: '{text}'")
         self.goals.add_goal(text)
 
+        # Auto-store every user prompt for long-term recall.
+        # No LLM decision — every prompt gets persisted + embedded.
+        if self.contextor:
+            self.contextor.auto_store_prompt(text)
+
         self.llm.switch_mode("root")
         context = self._build_root_context(new_input=text)
 
@@ -543,7 +548,12 @@ class Jarvis:
                 context = f"RECALL_RESULT: {json.dumps(result)}"
 
             elif action == "search_memory":
-                result = self.contextor.search(parsed["keywords"])
+                result = self.contextor.semantic_search(
+                    query=parsed["query"],
+                    top_k=parsed.get("top_k", 5),
+                    offset=parsed.get("offset", 0),
+                    min_score=parsed.get("min_score", 0.3),
+                )
                 context = f"SEARCH_MEMORY_RESULT: {json.dumps(result)}"
 
             elif action == "list_memory":

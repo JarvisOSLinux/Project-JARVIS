@@ -1,19 +1,20 @@
 """
 ContextorAdapter — manages long-term memory for JARVIS.
 
-Provides a local file-based memory backend that works out of the box.
-Memory is organized by theme — each theme gets its own JSON file under
-``~/.jarvis/memory/``. Themes are created on demand.
+Embeddings-only memory retrieval:
+- Every user prompt is automatically stored with its embedding vector
+- Retrieval is purely semantic (cosine similarity via vector store)
+- No keyword substring search — if embeddings are unavailable, search
+  returns empty results with a clear "unavailable" flag
+- JSONL files remain the persistence source of truth
+- Vector store (ChromaDB) is the search index, kept in sync on store()
 
-Upgraded with semantic search (RAG):
-- On store(), entries are indexed in a ChromaDB vector store
-- semantic_search() uses embeddings for meaning-based retrieval
-- retrieve_context() is the main RAG entry point — call it before
-  each LLM invocation to inject relevant memories into the prompt
-- Original keyword search is preserved as a fallback
+Storage location follows XDG:
+  ~/.local/share/jarvis/memory/       (JSONL themes)
+  ~/.local/share/jarvis/chroma_db/    (vector index)
 
-When the Rust contextor binary is ready, this adapter can be extended
-to delegate to it via stdio (same pattern as DispatchAdapter).
+When the Rust contextor binary is ready, this adapter becomes a thin
+MCP client over stdio — same pattern as DispatchAdapter.
 """
 
 import json
@@ -29,7 +30,7 @@ _DEFAULT_MEMORY_DIR = os.path.join(Config.JARVIS_DATA_DIR, "memory")
 
 
 class ContextorAdapter:
-    """File-based long-term memory for JARVIS with semantic search."""
+    """Embeddings-only long-term memory for JARVIS."""
 
     def __init__(
         self,
@@ -39,15 +40,25 @@ class ContextorAdapter:
         self._memory_dir = memory_dir or _DEFAULT_MEMORY_DIR
         os.makedirs(self._memory_dir, exist_ok=True)
 
-        # Vector store is optional — when provided, enables semantic search.
-        # When None, falls back to keyword search only (graceful degradation).
         self._vector_store = vector_store
+        self._available = vector_store is not None
 
-        vs_status = f"enabled ({vector_store.count} entries)" if vector_store else "disabled"
-        logger.info(
-            f"Contextor: Memory directory: {self._memory_dir}, "
-            f"vector store: {vs_status}"
-        )
+        if self._available:
+            logger.info(
+                f"Contextor: Memory directory: {self._memory_dir}, "
+                f"vector store: enabled ({vector_store.count} entries)"
+            )
+        else:
+            logger.warning(
+                "Contextor: Vector store NOT available — memory search is disabled. "
+                "Store and recall by theme still work. "
+                "Ensure EMBED_MODEL is pulled and chromadb is installed."
+            )
+
+    @property
+    def search_available(self) -> bool:
+        """Whether semantic search is operational."""
+        return self._available
 
     def _theme_path(self, theme: str) -> str:
         safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in theme.lower())
@@ -101,8 +112,8 @@ class ContextorAdapter:
         """
         Store a piece of information under a theme.
 
-        Each entry is timestamped. Themes are created on demand.
-        Also indexes in the vector store for semantic retrieval.
+        Each entry is timestamped, written to JSONL (source of truth),
+        and indexed in the vector store for semantic retrieval.
         """
         entry = {
             "content": content,
@@ -130,10 +141,46 @@ class ContextorAdapter:
             logger.error(f"Contextor: Failed to store under '{theme}': {e}")
             return {"error": f"Failed to store: {e}"}
 
+    def auto_store_prompt(self, text: str) -> None:
+        """
+        Automatically store a user prompt for long-term recall.
+
+        Called on every user input — no LLM decision needed. This creates
+        a complete searchable history of everything the user has ever said.
+        Stored under the "conversation_log" theme.
+        """
+        entry = {
+            "content": text,
+            "stored_at": time.time(),
+            "stored_iso": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "type": "user_prompt",
+        }
+
+        path = self._theme_path("conversation_log")
+        try:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry) + "\n")
+
+            # Index in vector store — this is what makes old prompts searchable
+            if self._vector_store:
+                try:
+                    self._vector_store.add(
+                        content=text,
+                        theme="conversation_log",
+                        metadata={"type": "user_prompt"},
+                    )
+                except Exception as e:
+                    logger.debug(f"Contextor: Auto-store vector indexing failed: {e}")
+
+            logger.debug(f"Contextor: Auto-stored user prompt ({len(text)} chars)")
+        except OSError as e:
+            logger.debug(f"Contextor: Auto-store failed (non-fatal): {e}")
+
     def recall(self, theme: str, limit: int = 20) -> Dict[str, Any]:
         """
         Recall entries stored under a theme.
         Returns the most recent ``limit`` entries (newest last).
+        This is a direct theme lookup — no embeddings needed.
         """
         path = self._theme_path(theme)
         if not os.path.exists(path):
@@ -158,111 +205,77 @@ class ContextorAdapter:
         logger.info(f"Contextor: Recalled {len(recent)} entries for theme '{theme}'")
         return {"theme": theme, "entries": recent, "found": True}
 
-    def search(self, keywords: List[str], limit: int = 20) -> Dict[str, Any]:
-        """
-        Search across all themes for entries matching any of the keywords.
-        This is the original keyword-based search (exact substring matching).
-        """
-        keywords_lower = [k.lower() for k in keywords]
-        matches: list[dict] = []
-
-        try:
-            for filename in os.listdir(self._memory_dir):
-                if not filename.endswith(".jsonl"):
-                    continue
-
-                theme = filename[:-6]  # strip .jsonl
-                path = os.path.join(self._memory_dir, filename)
-
-                try:
-                    with open(path, "r", encoding="utf-8") as f:
-                        for line in f:
-                            line = line.strip()
-                            if not line:
-                                continue
-                            try:
-                                entry = json.loads(line)
-                            except json.JSONDecodeError:
-                                continue
-
-                            text = entry.get("content", "").lower()
-                            if any(kw in text for kw in keywords_lower):
-                                matches.append({**entry, "theme": theme})
-                                if len(matches) >= limit:
-                                    break
-                except OSError:
-                    continue
-
-                if len(matches) >= limit:
-                    break
-        except OSError as e:
-            logger.error(f"Contextor: Failed to search memory: {e}")
-            return {"error": f"Search failed: {e}", "results": []}
-
-        logger.info(f"Contextor: Search found {len(matches)} match(es) for keywords {keywords}")
-        return {"results": matches}
-
     def semantic_search(
         self,
         query: str,
         top_k: int = 5,
+        offset: int = 0,
         theme: str | None = None,
         min_score: float = 0.3,
     ) -> Dict[str, Any]:
         """
-        Semantic search — find memories by meaning, not just keywords.
+        Semantic search — find memories by meaning using embeddings.
 
-        Uses the vector store to find the most semantically relevant entries
-        for a given query. Falls back to keyword search if vector store is
-        unavailable.
+        Embeddings-only: returns empty results when vector store is
+        unavailable. No keyword fallback.
 
         Args:
             query: Natural language query.
             top_k: Number of results to return.
+            offset: Skip the top N closest results (for pagination/digging deeper).
             theme: Optional theme filter.
-            min_score: Minimum cosine similarity (0-1). Default 0.3 filters
-                       out clearly irrelevant results while keeping loose matches.
+            min_score: Minimum cosine similarity (0-1).
         """
         if not self._vector_store:
-            logger.debug("Contextor: No vector store, falling back to keyword search")
-            keywords = query.lower().split()
-            return self.search(keywords, limit=top_k)
+            logger.warning("Contextor: Semantic search unavailable (no vector store)")
+            return {
+                "results": [],
+                "available": False,
+                "reason": "Vector store not initialized — ensure embedding model is pulled and chromadb is installed",
+            }
+
+        # Fetch top_k + offset results, then slice off the offset
+        fetch_count = top_k + offset
 
         results = self._vector_store.query(
             query_text=query,
-            top_k=top_k,
+            top_k=fetch_count,
             theme=theme,
             min_score=min_score,
         )
 
+        # Apply offset — skip the N most similar results
+        if offset > 0 and results:
+            results = results[offset:]
+
         logger.info(
             f"Contextor: Semantic search for '{query[:50]}' "
-            f"returned {len(results)} results"
+            f"returned {len(results)} results (offset={offset}, top_k={top_k})"
         )
-        return {"results": results, "method": "semantic"}
+        return {"results": results, "available": True}
 
     def retrieve_context(
         self,
         query: str,
         top_k: int = 5,
+        offset: int = 0,
         min_score: float = 0.3,
     ) -> str:
         """
         RAG entry point — retrieve relevant memories and format them
         for injection into the LLM context.
 
-        This is the method to call from _build_root_context() before
-        each LLM invocation. Returns a formatted string ready to be
-        included in the prompt, or empty string if nothing relevant.
-
-        Args:
-            query: The current user input or context to search against.
-            top_k: Max number of memories to retrieve.
-            min_score: Minimum relevance threshold.
+        Returns a formatted string ready for prompt inclusion, or empty
+        string if nothing relevant or search is unavailable.
         """
-        result = self.semantic_search(query, top_k=top_k, min_score=min_score)
-        entries = result.get("results", [])
+        result = self.semantic_search(
+            query, top_k=top_k, offset=offset, min_score=min_score,
+        )
 
+        if not result.get("available", False):
+            return ""
+
+        entries = result.get("results", [])
         if not entries:
             return ""
 
@@ -279,9 +292,7 @@ class ContextorAdapter:
         return formatted
 
     def list_themes(self) -> Dict[str, Any]:
-        """
-        List all stored themes with entry counts.
-        """
+        """List all stored themes with entry counts."""
         themes: list[dict] = []
 
         try:
@@ -321,7 +332,6 @@ class ContextorAdapter:
         try:
             os.remove(path)
 
-            # Also clean up vector store
             if self._vector_store:
                 try:
                     self._vector_store.delete_by_theme(theme)
@@ -337,9 +347,7 @@ class ContextorAdapter:
     def reindex_vector_store(self) -> Dict[str, Any]:
         """
         Rebuild the vector store index from JSONL source files.
-
         Useful after migration or if the vector store gets corrupted.
-        JSONL files are always the source of truth.
         """
         if not self._vector_store:
             return {"error": "No vector store configured"}
@@ -371,6 +379,7 @@ class ContextorAdapter:
                                         metadata={
                                             "stored_at": entry.get("stored_at", 0),
                                             "stored_iso": entry.get("stored_iso", ""),
+                                            "type": entry.get("type", ""),
                                         },
                                     )
                                     indexed += 1

@@ -101,7 +101,9 @@ class TaskParser:
         if action == "recall":
             return f", theme={result.get('theme')}"
         if action == "search_memory":
-            return f", keywords={result.get('keywords', [])}"
+            query = result.get("query", "")[:40]
+            offset = result.get("offset", 0)
+            return f", query='{query}', top_k={result.get('top_k', 5)}, offset={offset}"
         return ""
 
 
@@ -328,12 +330,16 @@ def _parse_recall(response: Dict[str, Any]) -> Dict[str, Any]:
 
 @_parser("search_memory")
 def _parse_search_memory(response: Dict[str, Any]) -> Dict[str, Any]:
-    keywords = response.get("keywords", [])
-    if not isinstance(keywords, list) or not keywords:
-        return {"error": "search_memory requires a non-empty 'keywords' list", "raw": response}
+    """Parse search_memory — semantic search with natural language query."""
+    query = response.get("query", "")
+    if not query:
+        return {"error": "search_memory requires a 'query' string", "raw": response}
     return {
         "action": "search_memory",
-        "keywords": [str(k) for k in keywords],
+        "query": str(query),
+        "top_k": int(response.get("top_k", 5)),
+        "offset": int(response.get("offset", 0)),
+        "min_score": float(response.get("min_score", 0.3)),
     }
 
 

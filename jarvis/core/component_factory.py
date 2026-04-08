@@ -126,12 +126,11 @@ class ComponentFactory:
         """
         Create ContextorAdapter for long-term memory management.
 
-        When RAG_ENABLED=true, also initializes:
-        - OllamaEmbeddings (for generating vector embeddings)
-        - VectorStore (ChromaDB-backed semantic search index)
-
-        Falls back gracefully to keyword-only search if embedding model
-        or ChromaDB is unavailable.
+        Initializes the vector store (ChromaDB) for embeddings-only
+        semantic search. When the vector store is unavailable:
+        - store() and recall() still work (JSONL-based)
+        - semantic_search() returns {"available": false} explicitly
+        - No silent keyword fallback — degraded mode is visible
         """
         logger.info("Initiating Contextor adapter...")
 
@@ -143,7 +142,7 @@ class ComponentFactory:
                 from ..contextor.vector_store import VectorStore
 
                 logger.info(
-                    f"RAG enabled — initializing embeddings "
+                    f"Initializing embeddings "
                     f"(model: {Config.EMBED_MODEL})..."
                 )
                 embeddings = OllamaEmbeddings(model=Config.EMBED_MODEL)
@@ -154,18 +153,24 @@ class ComponentFactory:
                         f"Vector store ready ({vector_store.count} entries)"
                     )
                 else:
-                    logger.warning(
-                        f"Embedding model '{Config.EMBED_MODEL}' not available. "
-                        f"RAG disabled — falling back to keyword search. "
-                        f"Pull the model with: ollama pull {Config.EMBED_MODEL}"
+                    logger.error(
+                        f"DEGRADED MODE: Embedding model '{Config.EMBED_MODEL}' not available. "
+                        f"Memory search will be disabled. Store and recall by theme still work. "
+                        f"Fix: ollama pull {Config.EMBED_MODEL}"
                     )
             except ImportError as e:
-                logger.warning(
-                    f"RAG dependencies not available: {e}. "
-                    f"Install with: pip install chromadb"
+                logger.error(
+                    f"DEGRADED MODE: {e}. "
+                    f"Memory search will be disabled. "
+                    f"Fix: pip install chromadb"
                 )
             except Exception as e:
-                logger.warning(f"RAG initialization failed (non-fatal): {e}")
+                logger.error(f"DEGRADED MODE: Vector store init failed: {e}")
+        else:
+            logger.warning(
+                "RAG_ENABLED=false — memory search is disabled. "
+                "Only store and recall by theme are available."
+            )
 
         return ContextorAdapter(vector_store=vector_store)
 
