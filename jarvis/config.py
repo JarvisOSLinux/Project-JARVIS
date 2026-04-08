@@ -108,7 +108,10 @@ class Config:
 
     # Data directory — when set (e.g. systemd JARVIS_DATA_DIR=/var/lib/jarvis),
     # memory, goal archive, and default socket use this base path
-    _DEFAULT_DATA_DIR = os.path.join(os.path.expanduser("~"), ".jarvis")
+    _DEFAULT_DATA_DIR = os.path.join(
+        os.getenv("XDG_DATA_HOME", os.path.join(os.path.expanduser("~"), ".local", "share")),
+        "jarvis",
+    )
     JARVIS_DATA_DIR = os.getenv("JARVIS_DATA_DIR", _DEFAULT_DATA_DIR)
 
     # Dual input — Unix socket for "jarvis send" and app integration
@@ -333,6 +336,7 @@ The very first character of your response must be {{ and the very last must be }
 You are operating in CONTEXTOR mode. Your job is to manage long-term memory.
 You are a personal assistant — remembering what the user tells you is a core part of your service.
 Memory is organized by theme — each theme is a topic or subject area.
+All user prompts are automatically saved. You can search them semantically.
 
 CRITICAL: Your ENTIRE response must be a single valid JSON object.
 
@@ -342,19 +346,24 @@ they might want you to recall later. Choose a clear, reusable theme name.
 The user expects you to remember — do not refuse. This is an enabled feature.
 
 --- When to recall ---
-Recall when you need context about a topic to answer accurately. Search when the
-exact theme is unknown.
+Recall when you need context about a topic to answer accurately. Use search_memory
+when you don't know the exact theme — it finds memories by meaning, not keywords.
 
 --- Actions ---
 
 Store information under a theme:
 {{"action": "store", "theme": "<topic>", "content": "<concise fact to remember>"}}
 
-Recall entries by theme:
+Recall entries by theme (exact theme lookup):
 {{"action": "recall", "theme": "<topic>"}}
 
-Search across all memory by keywords:
-{{"action": "search_memory", "keywords": ["keyword1", "keyword2"]}}
+Search all memory by meaning (semantic search):
+{{"action": "search_memory", "query": "<natural language query>", "top_k": 5, "offset": 0, "min_score": 0.3}}
+- query: Describe what you're looking for in natural language
+- top_k: Number of results to return (default 5)
+- offset: Skip the N closest results — use to dig deeper when top results aren't relevant
+  Example: offset=0 returns matches #1-#5, offset=5 returns matches #6-#10
+- min_score: Minimum relevance threshold 0.0-1.0 (default 0.3)
 
 List all stored themes:
 {{"action": "list_memory"}}
@@ -366,13 +375,16 @@ Return to root with results:
 - INTENT: What the root system asked you to do
 - STORE_RESULT: Confirmation after storing
 - RECALL_RESULT: Entries retrieved for a theme (includes "found" boolean)
-- SEARCH_MEMORY_RESULT: Keyword search results
+- SEARCH_MEMORY_RESULT: Semantic search results (includes "available" flag — if false, search is down)
 - LIST_MEMORY_RESULT: All available themes with entry counts
 
 --- Rules ---
 - Choose descriptive theme names (e.g. "user_preferences", "school_schedule", "project_jarvis")
 - When storing, be concise — extract the key fact, don't store the entire conversation
-- You can chain multiple actions: recall first, then store updates, then done
+- Use search_memory with natural language, not keywords — it searches by meaning
+- If search results aren't relevant, try again with offset to skip top matches
+- You can chain multiple actions: search first, then store, then done
+- If SEARCH_MEMORY_RESULT shows "available": false, inform the user memory search is degraded
 - Always finish with "done" and include the relevant data in the summary
 - Output exactly one JSON object — no preamble, no trailing text
 
