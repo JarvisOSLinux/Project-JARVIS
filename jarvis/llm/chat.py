@@ -1,18 +1,18 @@
 """
 LLM chat interface for JARVIS.
 
-Supports mode switching (root / dispatch / contextor) with isolated
-conversation histories per mode. Each mode has its own system prompt
-and history — switching resets the target mode's history to its system
-prompt so subsystems always start fresh.
+Supports mode switching (root / dispatch) with isolated conversation
+histories per mode. Each mode has its own system prompt and history —
+switching resets the target mode's history to its system prompt so
+subsystems always start fresh.
 
-ROOT mode uses a three-tier context management system:
+ROOT mode uses a two-tier context management system:
 - Tier 1 (Hot): Sliding window of recent exchanges — full fidelity
 - Tier 2 (Warm): Rolling summary of evicted exchanges — compressed
-- Tier 3 (Cold): RAG retrieval from vector store — semantic search
 
-Subsystem modes (dispatch, contextor) always start clean — they don't
-need tiered memory since each sub-chain is short-lived.
+RAG retrieval (Tier 3 / Cold) is handled in main.py via
+``_build_root_context()`` which injects relevant memories from the
+contextor subsystem into the ROOT context string.
 """
 
 import json
@@ -38,22 +38,15 @@ class LLM:
         prompts: dict[str, str],
         wrong_json_message: str = "",
         root_window: int = ROOT_HISTORY_WINDOW,
-        contextor: Optional[Any] = None,
-        rag_top_k: int = 5,
-        rag_min_score: float = 0.3,
     ):
         """
         Args:
             provider: A ready-to-use LLM provider instance.
-            prompts: Mapping of mode name → formatted system prompt.
+            prompts: Mapping of mode name -> formatted system prompt.
                      Must contain at least "root".
             wrong_json_message: Message sent to the LLM when it returns invalid JSON.
             root_window: Number of recent user/assistant exchange pairs to
                          keep in Tier 1 (hot) for conversational continuity.
-            contextor: ContextorAdapter instance — enables Tier 3 RAG retrieval.
-                       When None, only Tier 1 and Tier 2 are active.
-            rag_top_k: Number of memories to retrieve per RAG query.
-            rag_min_score: Minimum relevance score for RAG results (0-1).
         """
         self.provider = provider
         self._wrong_json_message = wrong_json_message
@@ -77,9 +70,6 @@ class LLM:
             provider=provider,
             system_prompt=prompts.get("root", ""),
             hot_window=root_window,
-            contextor=contextor,
-            rag_top_k=rag_top_k,
-            rag_min_score=rag_min_score,
         )
 
         logger.info("LLM: Initiating Preload...")
@@ -101,7 +91,7 @@ class LLM:
 
     def switch_mode(self, mode: str):
         """
-        Switch to a different prompt mode (root, dispatch, contextor).
+        Switch to a different prompt mode (root, dispatch).
 
         For root: preserves a sliding window of recent exchanges with
         compression of evicted messages into a rolling summary (Tier 2).
@@ -115,7 +105,7 @@ class LLM:
         if mode == self._mode:
             return
 
-        logger.info(f"LLM: Switching mode {self._mode} → {mode}")
+        logger.info(f"LLM: Switching mode {self._mode} -> {mode}")
 
         if mode == "root":
             self._trim_root_history()
@@ -130,16 +120,13 @@ class LLM:
     # Mode-specific retry hints so the LLM knows what actions are valid
     _MODE_RETRY_HINTS: dict[str, str] = {
         "root": (
-            'Valid actions for your current mode: "respond", "dispatch", "contextor".\n'
+            'Valid actions: "respond", "dispatch", "store", "recall", '
+            '"search_memory", "list_memory".\n'
             'Example: {"action": "respond", "output": "your message", "goal_updates": []}'
         ),
         "dispatch": (
             'Valid actions: "search", "list_tools", "install", "dispatch", '
             '"wait", "kill", "defer", "done".\n'
-            'Example: {"action": "done", "summary": "result summary"}'
-        ),
-        "contextor": (
-            'Valid actions: "store", "recall", "search_memory", "list_memory", "done".\n'
             'Example: {"action": "done", "summary": "result summary"}'
         ),
     }
@@ -155,7 +142,7 @@ class LLM:
         })
 
         # For ROOT mode, use tiered context (augmented system prompt with
-        # rolling summary + RAG). For subsystem modes, use plain history.
+        # rolling summary). For subsystem modes, use plain history.
         if self._mode == "root":
             hot_exchanges = self._get_hot_exchanges()
             messages = self._context_manager.build_messages(
@@ -289,8 +276,8 @@ class LLM:
         Trim ROOT history to the system prompt + last N exchange pairs.
         An exchange pair is a (user, assistant) message pair.
 
-        UPGRADED: Evicted exchanges are now compressed into a rolling
-        summary (Tier 2) instead of being silently dropped.
+        Evicted exchanges are compressed into a rolling summary (Tier 2)
+        instead of being silently dropped.
         """
         history = self._histories["root"]
         if len(history) <= 1:

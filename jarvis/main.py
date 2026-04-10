@@ -1,15 +1,16 @@
 """
 JARVIS — the brain.
 
-Hierarchical orchestrator with three prompt modes:
+Hierarchical orchestrator:
 
-  ROOT  →  routes to DISPATCH or CONTEXTOR subsystems, or responds directly
-  DISPATCH  →  tool discovery and execution sub-chain (search → install → dispatch → done)
-  CONTEXTOR →  long-term memory sub-chain (store / recall / done)
+  ROOT  →  responds directly, runs memory ops (store/recall/search),
+           or routes to DISPATCH subsystem
+  DISPATCH  →  tool discovery and execution sub-chain
+               (plan → search → install → dispatch → done)
 
-Each subsystem runs in its own LLM mode with an isolated conversation
-history. When a subsystem finishes (action "done"), its summary is fed
-back to the ROOT prompt which decides the next step.
+Memory operations (store, recall, search_memory, list_memory) are
+ROOT-level actions — no separate LLM sub-chain.  The Rust contextor
+binary handles storage and vector search; JARVIS calls it directly.
 
 Dual input: voice (wake word) and socket/CLI ("jarvis send") feed the same
 event queue. Both can be active simultaneously.
@@ -245,7 +246,15 @@ class Jarvis:
         self._apply_goal_updates(parsed.get("goal_updates", []))
 
         if action == "respond":
-            self.output_manager.handle_response({"output": parsed["output"]})
+            output = parsed["output"]
+            if not output.strip():
+                logger.warning("JARVIS: LLM returned empty respond — retrying")
+                context = self._build_root_context()
+                context += "\nYour previous response had an empty output. Please respond to the user."
+                response = self._ask_llm(context, tag="root-retry-empty")
+                await self._act_on_root_response(response, depth + 1)
+                return
+            self.output_manager.handle_response({"output": output})
             dismissed = self.goals.dismiss_completed()
             if dismissed:
                 logger.info(f"JARVIS: Dismissed {len(dismissed)} completed goal(s)")
@@ -259,14 +268,50 @@ class Jarvis:
                 summary = await self._run_dispatch_subchain(parsed["intent"])
                 await self._feed_root_summary("DISPATCH_SUMMARY", summary, depth)
 
-        elif action == "contextor":
+        # -- Memory actions (direct, no sub-chain) --
+
+        elif action == "store":
             if not self.contextor:
-                self.output_manager.handle_response({
-                    "output": "Memory is disabled. I can't remember or recall information.",
-                })
+                await self._feed_root_summary(
+                    "STORE_RESULT", json.dumps({"error": "Memory is disabled"}), depth,
+                )
                 return
-            summary = await self._run_contextor_subchain(parsed["intent"])
-            await self._feed_root_summary("CONTEXTOR_SUMMARY", summary, depth)
+            result = self.contextor.store(parsed["theme"], parsed["content"])
+            await self._feed_root_summary("STORE_RESULT", json.dumps(result), depth)
+
+        elif action == "recall":
+            if not self.contextor:
+                await self._feed_root_summary(
+                    "RECALL_RESULT", json.dumps({"error": "Memory is disabled"}), depth,
+                )
+                return
+            result = self.contextor.recall(parsed["theme"])
+            await self._feed_root_summary("RECALL_RESULT", json.dumps(result), depth)
+
+        elif action == "search_memory":
+            if not self.contextor:
+                await self._feed_root_summary(
+                    "SEARCH_MEMORY_RESULT",
+                    json.dumps({"results": [], "available": False, "reason": "Memory is disabled"}),
+                    depth,
+                )
+                return
+            result = self.contextor.semantic_search(
+                query=parsed["query"],
+                top_k=parsed.get("top_k", 5),
+                offset=parsed.get("offset", 0),
+                min_score=parsed.get("min_score", 0.3),
+            )
+            await self._feed_root_summary("SEARCH_MEMORY_RESULT", json.dumps(result), depth)
+
+        elif action == "list_memory":
+            if not self.contextor:
+                await self._feed_root_summary(
+                    "LIST_MEMORY_RESULT", json.dumps({"themes": []}), depth,
+                )
+                return
+            result = self.contextor.list_themes()
+            await self._feed_root_summary("LIST_MEMORY_RESULT", json.dumps(result), depth)
 
     async def _feed_root_summary(self, label: str, summary: str, depth: int):
         """Feed a subsystem summary back into ROOT for the next decision."""
@@ -513,61 +558,6 @@ class Jarvis:
         await self._act_on_root_response(response, depth + 1)
 
     # ------------------------------------------------------------------
-    # CONTEXTOR sub-chain — long-term memory
-    # ------------------------------------------------------------------
-
-    async def _run_contextor_subchain(self, intent: str) -> str:
-        """
-        Enter contextor mode, give it the intent, and loop until it
-        returns "done" with a summary.
-        """
-        self.llm.switch_mode("contextor")
-
-        context = f"INTENT: {intent}"
-
-        for step in range(MAX_CHAIN_DEPTH):
-            response = self._ask_llm(context, tag=f"contextor-step-{step}")
-            parsed = self.task_parser.parse(response)
-
-            if "error" in parsed:
-                logger.warning(f"JARVIS: Contextor sub-chain parse error: {parsed['error']}")
-                return f"Error: {parsed['error']}"
-
-            action = parsed["action"]
-
-            if action == "done":
-                logger.info(f"JARVIS: Contextor sub-chain completed: {parsed['summary']}")
-                return parsed["summary"]
-
-            if action == "store":
-                result = self.contextor.store(parsed["theme"], parsed["content"])
-                context = f"STORE_RESULT: {json.dumps(result)}"
-
-            elif action == "recall":
-                result = self.contextor.recall(parsed["theme"])
-                context = f"RECALL_RESULT: {json.dumps(result)}"
-
-            elif action == "search_memory":
-                result = self.contextor.semantic_search(
-                    query=parsed["query"],
-                    top_k=parsed.get("top_k", 5),
-                    offset=parsed.get("offset", 0),
-                    min_score=parsed.get("min_score", 0.3),
-                )
-                context = f"SEARCH_MEMORY_RESULT: {json.dumps(result)}"
-
-            elif action == "list_memory":
-                result = self.contextor.list_themes()
-                context = f"LIST_MEMORY_RESULT: {json.dumps(result)}"
-
-            else:
-                logger.warning(f"JARVIS: Unexpected contextor action '{action}'")
-                return f"Unexpected action: {action}"
-
-        logger.error("JARVIS: Contextor sub-chain hit max steps")
-        return "Memory operation timed out."
-
-    # ------------------------------------------------------------------
     # Shared helpers
     # ------------------------------------------------------------------
 
@@ -602,11 +592,8 @@ class Jarvis:
         if signal:
             parts.append(f"SIGNAL: {json.dumps(signal)}")
 
-        # Tier 3 (Cold): RAG retrieval — inject relevant memories from
-        # the vector store based on the current user input.
-        # This happens here (in addition to the context manager's system
-        # prompt augmentation) so the ROOT context string itself contains
-        # relevant memories for the LLM to reference.
+        # RAG retrieval — inject relevant memories from the contextor
+        # based on the current user input.
         if new_input and self.contextor:
             rag_context = self.contextor.retrieve_context(
                 query=new_input,
@@ -950,6 +937,8 @@ class Jarvis:
         self.output_manager.remove_output_callback(self._on_output_for_broadcast)
         await self.events.stop()
         await self.dispatch.disconnect()
+        if self.contextor:
+            self.contextor.disconnect()
         logger.info("JARVIS: Shutdown complete")
 
     def listen_with_activation(self):

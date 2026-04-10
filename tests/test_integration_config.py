@@ -112,25 +112,25 @@ class TestPathResolution:
 class TestLLMRuleFormatting:
     """Test LLM rule formatting with system information."""
 
-    def test_llm_rule_formats_with_system_info(self):
-        """Test LLM_RULE correctly formats with system information."""
+    def test_llm_root_prompt_formats_with_system_info(self):
+        """Test LLM_ROOT_PROMPT correctly formats with system information."""
         from jarvis.config import Config
 
         system_info = {
             'system': 'Linux',
             'release': '5.4.0-42-generic',
-            'version': '#46-Ubuntu SMP',
             'machine': 'x86_64',
             'shell': ['/bin/bash', '--login'],
+            'data_consent_note': 'Test consent note',
         }
 
-        formatted_rule = Config.LLM_RULE.format(**system_info)
-        assert 'Linux' in formatted_rule
-        assert '5.4.0-42-generic' in formatted_rule
-        assert 'x86_64' in formatted_rule
+        formatted = Config.LLM_ROOT_PROMPT.format(**system_info)
+        assert 'Linux' in formatted
+        assert '5.4.0-42-generic' in formatted
+        assert 'x86_64' in formatted
 
-    def test_llm_rule_handles_missing_system_info(self):
-        """Test LLM_RULE handles missing system information gracefully."""
+    def test_llm_root_prompt_handles_missing_system_info(self):
+        """Test LLM_ROOT_PROMPT handles missing system information gracefully."""
         from jarvis.config import Config
 
         incomplete_info = {
@@ -138,30 +138,30 @@ class TestLLMRuleFormatting:
             'machine': 'x86_64',
         }
         try:
-            formatted_rule = Config.LLM_RULE.format(**incomplete_info)
-            assert 'Windows' in formatted_rule
+            formatted = Config.LLM_ROOT_PROMPT.format(**incomplete_info)
+            assert 'Windows' in formatted
         except KeyError:
             pass  # Expected if required fields are missing
 
-    def test_llm_rule_preserves_dispatch_instructions(self):
-        """Test LLM_RULE preserves dispatch action format instructions."""
+    def test_llm_root_prompt_preserves_action_instructions(self):
+        """Test LLM_ROOT_PROMPT preserves action format instructions."""
         from jarvis.config import Config
 
         system_info = {
             'system': 'Linux',
             'release': '5.4.0',
-            'version': 'Debian',
             'machine': 'x86_64',
             'shell': ['/bin/bash'],
+            'data_consent_note': 'Test consent note',
         }
 
-        formatted_rule = Config.LLM_RULE.format(**system_info)
-        assert '"action"' in formatted_rule
-        assert '"dispatch"' in formatted_rule
-        assert '"respond"' in formatted_rule
-        assert '"wait"' in formatted_rule
-        assert '"kill"' in formatted_rule
-        assert '"defer"' in formatted_rule
+        formatted = Config.LLM_ROOT_PROMPT.format(**system_info)
+        assert '"action"' in formatted
+        assert '"dispatch"' in formatted
+        assert '"respond"' in formatted
+        assert '"store"' in formatted
+        assert '"recall"' in formatted
+        assert '"search_memory"' in formatted
 
 
 @pytest.mark.integration
@@ -223,12 +223,16 @@ class TestConfigurationIntegration:
             mock_create_all.return_value = {
                 'llm': Mock(),
                 'dispatch_adapter': Mock(),
+                'contextor': None,
+                'embeddings': None,
                 'goal_manager': Mock(),
                 'event_merger': Mock(),
                 'task_parser': Mock(),
+                'confirmation_manager': Mock(),
                 'output_manager': Mock(),
                 'tts': None,
                 'voice_manager': None,
+                'kernel_client': Mock(),
             }
             jarvis = Jarvis(text_mode=True)
             assert jarvis is not None

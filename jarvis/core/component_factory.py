@@ -18,15 +18,8 @@ logger = get_logger(__name__)
 
 class ComponentFactory:
     @staticmethod
-    def create_llm(contextor: Optional[ContextorAdapter] = None) -> LLM:
-        """
-        Create LLM with provider selected by ``Config.LLM_PROVIDER``.
-
-        Args:
-            contextor: Optional ContextorAdapter — when provided and RAG is
-                       enabled, the LLM will use tiered context management
-                       with semantic memory retrieval.
-        """
+    def create_llm() -> LLM:
+        """Create LLM with provider selected by ``Config.LLM_PROVIDER``."""
         import json as _json
 
         logger.info("Getting system information...")
@@ -91,16 +84,12 @@ class ComponentFactory:
         prompts = {
             "root": root_prompt,
             "dispatch": Config.LLM_DISPATCH_PROMPT.format(**fmt) if "{system}" in Config.LLM_DISPATCH_PROMPT else Config.LLM_DISPATCH_PROMPT,
-            "contextor": Config.LLM_CONTEXTOR_PROMPT,
         }
 
         return LLM(
             provider=llm_provider,
             prompts=prompts,
             wrong_json_message=Config.LLM_WRONG_JSON_FORMAT_MESSAGE,
-            contextor=contextor,
-            rag_top_k=getattr(Config, "RAG_TOP_K", 5),
-            rag_min_score=getattr(Config, "RAG_MIN_SCORE", 0.3),
         )
 
     @staticmethod
@@ -122,57 +111,17 @@ class ComponentFactory:
         return EventMerger()
 
     @staticmethod
-    def create_contextor() -> ContextorAdapter:
+    def create_contextor(embeddings=None) -> ContextorAdapter:
         """
-        Create ContextorAdapter for long-term memory management.
+        Create ContextorAdapter — thin stdio client to the Rust binary.
 
-        Initializes the vector store (ChromaDB) for embeddings-only
-        semantic search. When the vector store is unavailable:
-        - store() and recall() still work (JSONL-based)
-        - semantic_search() returns {"available": false} explicitly
-        - No silent keyword fallback — degraded mode is visible
+        The binary handles SQLite storage, vector indexing, and cosine
+        search.  JARVIS passes pre-computed vectors via the adapter.
         """
         logger.info("Initiating Contextor adapter...")
-
-        vector_store = None
-
-        if getattr(Config, "RAG_ENABLED", False):
-            try:
-                from ..contextor.embeddings import OllamaEmbeddings
-                from ..contextor.vector_store import VectorStore
-
-                logger.info(
-                    f"Initializing embeddings "
-                    f"(model: {Config.EMBED_MODEL})..."
-                )
-                embeddings = OllamaEmbeddings(model=Config.EMBED_MODEL)
-
-                if embeddings.ensure_model():
-                    vector_store = VectorStore(embeddings=embeddings)
-                    logger.info(
-                        f"Vector store ready ({vector_store.count} entries)"
-                    )
-                else:
-                    logger.error(
-                        f"DEGRADED MODE: Embedding model '{Config.EMBED_MODEL}' not available. "
-                        f"Memory search will be disabled. Store and recall by theme still work. "
-                        f"Fix: ollama pull {Config.EMBED_MODEL}"
-                    )
-            except ImportError as e:
-                logger.error(
-                    f"DEGRADED MODE: {e}. "
-                    f"Memory search will be disabled. "
-                    f"Fix: pip install chromadb"
-                )
-            except Exception as e:
-                logger.error(f"DEGRADED MODE: Vector store init failed: {e}")
-        else:
-            logger.warning(
-                "RAG_ENABLED=false — memory search is disabled. "
-                "Only store and recall by theme are available."
-            )
-
-        return ContextorAdapter(vector_store=vector_store)
+        adapter = ContextorAdapter(embeddings=embeddings)
+        adapter.connect()
+        return adapter
 
     @staticmethod
     def create_task_parser() -> TaskParser:
@@ -331,7 +280,7 @@ class ComponentFactory:
         # Kernel integration client (started first — LLM providers may use keyring)
         components['kernel_client'] = ComponentFactory.create_kernel_client()
 
-        # Shared embeddings instance — used by both contextor (memory RAG)
+        # Shared embeddings instance — used by both contextor (memory)
         # and dispatch (semantic tool discovery). Created once, shared.
         embeddings = None
         if Config.RAG_ENABLED or Config.ALLOW_EMBEDDING_SEARCH:
@@ -350,14 +299,21 @@ class ComponentFactory:
                 logger.warning(f"Embeddings init failed (non-fatal): {e}")
         components['embeddings'] = embeddings
 
-        # Core components (always needed)
-        # Contextor is created first so it can be passed to LLM for RAG
-        components['contextor'] = (
-            ComponentFactory.create_contextor() if Config.CONTEXTOR_ENABLED else None
-        )
-        components['llm'] = ComponentFactory.create_llm(
-            contextor=components['contextor'],
-        )
+        # Contextor — spawns the Rust binary, passes shared embeddings
+        if Config.CONTEXTOR_ENABLED:
+            try:
+                components['contextor'] = ComponentFactory.create_contextor(
+                    embeddings=embeddings
+                )
+            except Exception as e:
+                logger.warning(f"Contextor init failed (non-fatal): {e}")
+                components['contextor'] = None
+        else:
+            components['contextor'] = None
+
+        # LLM — no longer needs contextor (RAG is handled in main.py)
+        components['llm'] = ComponentFactory.create_llm()
+
         components['dispatch_adapter'] = ComponentFactory.create_dispatch_adapter()
         components['goal_manager'] = ComponentFactory.create_goal_manager()
         components['event_merger'] = ComponentFactory.create_event_merger()

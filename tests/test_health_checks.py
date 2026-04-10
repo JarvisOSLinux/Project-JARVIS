@@ -178,15 +178,15 @@ class TestConfig:
         assert isinstance(Config.LOG_LEVEL, str)
         assert Config.DISPATCH_TIMEOUT > 0
 
-    def test_llm_rule_formatting(self):
+    def test_llm_root_prompt_formatting(self):
         from jarvis.config import Config
         system_info = {
             'system': 'linux',
             'release': '5.4.0',
-            'version': '#1 SMP Debian',
             'machine': 'x86_64',
-            'shell': ['bash', '-lc']
+            'shell': ['bash', '-lc'],
+            'data_consent_note': 'Test consent note',
         }
-        formatted_rule = Config.LLM_RULE.format(**system_info)
-        assert 'linux' in formatted_rule
-        assert 'dispatch' in formatted_rule.lower() or 'action' in formatted_rule.lower()
+        formatted = Config.LLM_ROOT_PROMPT.format(**system_info)
+        assert 'linux' in formatted
+        assert 'dispatch' in formatted.lower() or 'action' in formatted.lower()

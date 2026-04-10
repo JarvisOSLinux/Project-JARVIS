@@ -3,10 +3,10 @@ Task parser for JARVIS hierarchical prompt system.
 
 Validates and parses LLM responses into structured actions.
 
-ROOT mode actions:  respond, dispatch (route), contextor (route)
-DISPATCH mode actions: search, list_tools, install, dispatch (tasks),
+ROOT mode actions:  respond, dispatch (route),
+                    store, recall, search_memory, list_memory (memory)
+DISPATCH mode actions: plan, search, list_tools, install, dispatch (tasks),
                        wait, kill, defer, done
-CONTEXTOR mode actions: store, recall, search_memory, list_memory, done
 """
 
 from typing import Dict, Any
@@ -15,12 +15,12 @@ from .logger import get_logger
 logger = get_logger(__name__)
 
 VALID_ACTIONS = {
-    # Root
-    "respond", "dispatch", "contextor",
+    # Root — core
+    "respond", "dispatch",
+    # Root — memory (direct operations, no sub-chain)
+    "store", "recall", "search_memory", "list_memory",
     # Dispatch subsystem
     "plan", "search", "list_tools", "install", "wait", "kill", "defer", "done",
-    # Contextor subsystem
-    "store", "recall", "search_memory", "list_memory",
 }
 
 _PARSERS = {}
@@ -67,10 +67,6 @@ class TaskParser:
             if tasks:
                 parts = [f"{t.get('server')}/{t.get('tool')}" for t in tasks]
                 return f", tasks=[{', '.join(parts)}]"
-            intent = result.get("intent", "")
-            preview = (intent[:80] + "...") if len(intent) > 80 else intent
-            return f", intent='{preview}'"
-        if action == "contextor":
             intent = result.get("intent", "")
             preview = (intent[:80] + "...") if len(intent) > 80 else intent
             return f", intent='{preview}'"
@@ -162,18 +158,6 @@ def _parse_dispatch(response: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "action": "dispatch",
         "tasks": validated_tasks,
-        "goal_updates": response.get("goal_updates", []),
-    }
-
-
-@_parser("contextor")
-def _parse_contextor(response: Dict[str, Any]) -> Dict[str, Any]:
-    intent = response.get("intent")
-    if not intent:
-        return {"error": "Contextor action requires 'intent'", "raw": response}
-    return {
-        "action": "contextor",
-        "intent": str(intent),
         "goal_updates": response.get("goal_updates", []),
     }
 
@@ -301,7 +285,7 @@ def _parse_done(response: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ------------------------------------------------------------------
-# CONTEXTOR subsystem actions (placeholders — backend not yet wired)
+# ROOT-level memory actions (direct operations, no sub-chain)
 # ------------------------------------------------------------------
 
 @_parser("store")
@@ -314,6 +298,7 @@ def _parse_store(response: Dict[str, Any]) -> Dict[str, Any]:
         "action": "store",
         "theme": str(theme),
         "content": str(content),
+        "goal_updates": response.get("goal_updates", []),
     }
 
 
@@ -325,6 +310,7 @@ def _parse_recall(response: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "action": "recall",
         "theme": str(theme),
+        "goal_updates": response.get("goal_updates", []),
     }
 
 
@@ -340,9 +326,13 @@ def _parse_search_memory(response: Dict[str, Any]) -> Dict[str, Any]:
         "top_k": int(response.get("top_k", 5)),
         "offset": int(response.get("offset", 0)),
         "min_score": float(response.get("min_score", 0.3)),
+        "goal_updates": response.get("goal_updates", []),
     }
 
 
 @_parser("list_memory")
 def _parse_list_memory(response: Dict[str, Any]) -> Dict[str, Any]:
-    return {"action": "list_memory"}
+    return {
+        "action": "list_memory",
+        "goal_updates": response.get("goal_updates", []),
+    }
