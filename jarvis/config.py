@@ -37,6 +37,10 @@ class Config:
     # Ollama-specific
     LLM_AUTO_PULL = os.getenv("LLM_AUTO_PULL", "false").lower() == "true"
 
+    # Sampling temperature for LLM responses (0.0 = deterministic, 1.0+ = creative)
+    # Default 0.7 gives a balance of consistency and variety.
+    LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
+
     TTS_MODEL_ONNX = os.getenv("TTS_MODEL_ONNX")
     TTS_MODEL_JSON = os.getenv("TTS_MODEL_JSON")
 

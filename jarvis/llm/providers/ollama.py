@@ -19,10 +19,12 @@ class OllamaProvider(BaseLLMProvider):
         base_url: Optional[str] = None,
         api_key: Optional[str] = None,
         auto_pull: bool = False,
+        temperature: Optional[float] = None,
     ):
         super().__init__(model)
         self.base_url = base_url or "http://localhost:11434"
         self.auto_pull = auto_pull
+        self.temperature = temperature
 
         import os
         if base_url and base_url != "http://localhost:11434":
@@ -43,11 +45,16 @@ class OllamaProvider(BaseLLMProvider):
     # -- BaseLLMProvider interface -------------------------------------------
 
     def chat(self, messages: List[Dict[str, str]]) -> str:
+        options = {}
+        if self.temperature is not None:
+            options["temperature"] = self.temperature
+
         try:
             response = self._client.chat(
                 model=self.model,
                 messages=messages,
                 format="json",
+                options=options or None,
             )
             return response["message"]["content"]
         except Exception as e:
@@ -60,6 +67,7 @@ class OllamaProvider(BaseLLMProvider):
                             model=self.model,
                             messages=messages,
                             format="json",
+                            options=options or None,
                         )
                         return response["message"]["content"]
                     except Exception as retry_error:

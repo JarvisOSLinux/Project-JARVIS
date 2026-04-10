@@ -63,7 +63,7 @@ class LLM:
                 {"role": "system", "content": prompt},
             ]
 
-        self.chat_history = list(self._histories["root"])
+        self.chat_history = self._histories["root"]
 
         # --- Tiered context manager (ROOT mode only) ---
         self._context_manager = ContextManager(
@@ -74,7 +74,9 @@ class LLM:
 
         logger.info("LLM: Initiating Preload...")
         try:
-            self.provider.chat(self.chat_history)
+            # Preload with a copy — warms Ollama's KV cache for the system
+            # prompt without affecting the live chat_history reference.
+            self.provider.chat(list(self.chat_history))
             logger.info("LLM: Initiation Complete!")
         except Exception as e:
             logger.warning(f"LLM preload failed (this may be expected): {e}")
