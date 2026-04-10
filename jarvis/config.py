@@ -94,6 +94,9 @@ class Config:
     # --- Context Retrieval (RAG) ---
     # Embedding model for semantic search (runs on Ollama)
     EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")
+    # Ollama URL for embeddings — defaults to local instance, NOT LLM_URL
+    # (the LLM may live on a remote server; embeddings always need local Ollama)
+    EMBED_URL = os.getenv("EMBED_URL", "http://localhost:11434")
     # Enable semantic search via contextor binary (requires embed model)
     RAG_ENABLED = os.getenv("RAG_ENABLED", "true").lower() == "true"
     # Number of memories to retrieve per RAG query

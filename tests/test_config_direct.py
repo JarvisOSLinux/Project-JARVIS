@@ -34,15 +34,15 @@ class TestConfigDirect:
         assert Config.TTS_MODEL_JSON == 'test.json'
         assert Config.DISPATCH_TIMEOUT == 60
 
-    def test_llm_rule_content(self):
-        """Test LLM_RULE contains dispatch action instructions"""
+    def test_llm_root_prompt_content(self):
+        """Test LLM_ROOT_PROMPT contains action instructions"""
         from jarvis.config import Config
-        assert '"action"' in Config.LLM_RULE
-        assert '"dispatch"' in Config.LLM_RULE
-        assert '"respond"' in Config.LLM_RULE
-        assert '"wait"' in Config.LLM_RULE
-        assert '"kill"' in Config.LLM_RULE
-        assert '"defer"' in Config.LLM_RULE
+        assert '"action"' in Config.LLM_ROOT_PROMPT
+        assert '"dispatch"' in Config.LLM_ROOT_PROMPT
+        assert '"respond"' in Config.LLM_ROOT_PROMPT
+        assert '"store"' in Config.LLM_ROOT_PROMPT
+        assert '"recall"' in Config.LLM_ROOT_PROMPT
+        assert '"search_memory"' in Config.LLM_ROOT_PROMPT
 
     def test_llm_wrong_json_format_message(self):
         """Test LLM_WRONG_JSON_FORMAT_MESSAGE content"""
@@ -52,22 +52,22 @@ class TestConfigDirect:
         assert 'JSON' in message
         assert 'action' in message
 
-    def test_llm_rule_formatting(self):
-        """Test LLM_RULE formatting with system information"""
+    def test_llm_root_prompt_formatting(self):
+        """Test LLM_ROOT_PROMPT formatting with system information"""
         from jarvis.config import Config
         system_info = {
             'system': 'linux',
             'release': '5.4.0',
-            'version': '#1 SMP Debian',
             'machine': 'x86_64',
             'shell': ['bash', '-lc'],
+            'data_consent_note': 'Test consent note',
         }
 
-        formatted_rule = Config.LLM_RULE.format(**system_info)
+        formatted = Config.LLM_ROOT_PROMPT.format(**system_info)
 
-        assert 'System: linux' in formatted_rule
-        assert 'Release: 5.4.0' in formatted_rule
-        assert 'Machine: x86_64' in formatted_rule
+        assert 'linux' in formatted
+        assert '5.4.0' in formatted
+        assert 'x86_64' in formatted
 
     def test_default_values(self):
         """Test default values when environment variables are not set"""

@@ -30,7 +30,7 @@ class OllamaEmbeddings:
         base_url: str | None = None,
     ):
         self.model = model or getattr(Config, "EMBED_MODEL", DEFAULT_EMBED_MODEL)
-        self.base_url = base_url or Config.LLM_URL
+        self.base_url = base_url or getattr(Config, "EMBED_URL", "http://localhost:11434")
 
         try:
             from ollama import Client

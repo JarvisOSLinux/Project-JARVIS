@@ -246,7 +246,15 @@ class Jarvis:
         self._apply_goal_updates(parsed.get("goal_updates", []))
 
         if action == "respond":
-            self.output_manager.handle_response({"output": parsed["output"]})
+            output = parsed["output"]
+            if not output.strip():
+                logger.warning("JARVIS: LLM returned empty respond — retrying")
+                context = self._build_root_context()
+                context += "\nYour previous response had an empty output. Please respond to the user."
+                response = self._ask_llm(context, tag="root-retry-empty")
+                await self._act_on_root_response(response, depth + 1)
+                return
+            self.output_manager.handle_response({"output": output})
             dismissed = self.goals.dismiss_completed()
             if dismissed:
                 logger.info(f"JARVIS: Dismissed {len(dismissed)} completed goal(s)")
