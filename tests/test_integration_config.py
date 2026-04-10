@@ -223,12 +223,16 @@ class TestConfigurationIntegration:
             mock_create_all.return_value = {
                 'llm': Mock(),
                 'dispatch_adapter': Mock(),
+                'contextor': None,
+                'embeddings': None,
                 'goal_manager': Mock(),
                 'event_merger': Mock(),
                 'task_parser': Mock(),
+                'confirmation_manager': Mock(),
                 'output_manager': Mock(),
                 'tts': None,
                 'voice_manager': None,
+                'kernel_client': Mock(),
             }
             jarvis = Jarvis(text_mode=True)
             assert jarvis is not None

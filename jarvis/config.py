@@ -81,6 +81,9 @@ class Config:
     DMCP_BINARY = os.getenv("DMCP_BINARY", "dmcp")  # Path to dmcp binary
     DISPATCH_TIMEOUT = int(os.getenv("DISPATCH_TIMEOUT", "60"))  # seconds
 
+    # Contextor (memory) binary — Rust subprocess over stdio
+    CONTEXTOR_BINARY = os.getenv("CONTEXTOR_BINARY", "contextor")
+
     # Context window sustainability — cap goals sent to LLM to avoid overflow
     MAX_GOALS_IN_CONTEXT = int(os.getenv("MAX_GOALS_IN_CONTEXT", "20"))
 
@@ -91,7 +94,7 @@ class Config:
     # --- Context Retrieval (RAG) ---
     # Embedding model for semantic search (runs on Ollama)
     EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")
-    # Enable semantic search via vector store (requires chromadb + embed model)
+    # Enable semantic search via contextor binary (requires embed model)
     RAG_ENABLED = os.getenv("RAG_ENABLED", "true").lower() == "true"
     # Number of memories to retrieve per RAG query
     RAG_TOP_K = int(os.getenv("RAG_TOP_K", "5"))
@@ -152,7 +155,9 @@ class Config:
     # os.environ["OLLAMA_NUM_THREADS"] = str(multiprocessing.cpu_count())
 
     # ------------------------------------------------------------------
-    # Hierarchical prompt system: ROOT → DISPATCH / CONTEXTOR
+    # Hierarchical prompt system: ROOT → DISPATCH
+    # Memory actions (store, recall, search, list) are ROOT-level —
+    # no separate CONTEXTOR LLM sub-chain.
     # ------------------------------------------------------------------
 
     LLM_WRONG_JSON_FORMAT_MESSAGE = """\
@@ -163,15 +168,15 @@ Valid formats:
 
 {{"action": "respond", "output": "your message", "goal_updates": []}}
 
-{{"action": "contextor", "intent": "what to store or recall"}}
-
 {{"action": "dispatch", "intent": "what to accomplish"}}
 
-{{"action": "search", "keywords": ["keyword1"]}}
+{{"action": "store", "theme": "topic", "content": "fact", "goal_updates": []}}
 
-{{"action": "store", "theme": "topic", "content": "fact"}}
+{{"action": "recall", "theme": "topic", "goal_updates": []}}
 
-{{"action": "recall", "theme": "topic"}}
+{{"action": "search_memory", "query": "natural language query", "goal_updates": []}}
+
+{{"action": "list_memory", "goal_updates": []}}
 
 {{"action": "done", "summary": "result summary"}}
 
@@ -185,8 +190,11 @@ OS: {system} {release} ({machine}), Shell: {shell}
 
 --- When to use each action ---
 
-respond — Direct reply. Use for chat, greetings, general knowledge, or after a subsystem returns a summary.
-contextor — Remember or recall personal info. Use your memory system (contextor) to help the user.
+respond — Direct reply. Use for chat, greetings, general knowledge, or after a subsystem returns a result.
+store — Remember a personal fact or preference under a topic theme.
+recall — Recall stored facts by exact theme name.
+search_memory — Search all memories by meaning (semantic search). Use when you need context.
+list_memory — List all stored memory themes.
 {data_consent_note}
 dispatch — Run tools (calc, files, web, etc.). Use when user wants to DO something that needs external tools.
 
@@ -199,8 +207,30 @@ dispatch — Run tools (calc, files, web, etc.). Use when user wants to DO somet
 }}
 
 {{
-    "action": "contextor",
-    "intent": "<what to remember or recall>"
+    "action": "store",
+    "theme": "<topic>",
+    "content": "<concise fact to remember>",
+    "goal_updates": []
+}}
+
+{{
+    "action": "recall",
+    "theme": "<topic>",
+    "goal_updates": []
+}}
+
+{{
+    "action": "search_memory",
+    "query": "<natural language query>",
+    "top_k": 5,
+    "offset": 0,
+    "min_score": 0.3,
+    "goal_updates": []
+}}
+
+{{
+    "action": "list_memory",
+    "goal_updates": []
 }}
 
 {{
@@ -209,8 +239,16 @@ dispatch — Run tools (calc, files, web, etc.). Use when user wants to DO somet
 }}
 
 --- Context ---
-You receive: GOALS (with IDs), NEW INPUT, and optionally DISPATCH_SUMMARY or CONTEXTOR_SUMMARY from subsystems.
+You receive: GOALS (with IDs), NEW INPUT, and optionally DISPATCH_SUMMARY from dispatch.
+Memory operation results appear as STORE_RESULT, RECALL_RESULT, SEARCH_MEMORY_RESULT, LIST_MEMORY_RESULT.
+RELEVANT MEMORIES may be included automatically based on user input (RAG retrieval).
 Include goal_updates in respond: "completed" or "failed" with result.
+
+--- Memory guidelines ---
+- Choose descriptive theme names (e.g. "user_preferences", "school_schedule")
+- When storing, extract the key fact — be concise
+- Use search_memory with natural language — it searches by meaning, not keywords
+- If search results aren't relevant, try again with a higher offset to dig deeper
 
 Output exactly one JSON object. First char {{, last char }}.
 """
@@ -224,7 +262,7 @@ OS: {system} {release} ({machine}), Shell: {shell}
 
 respond — Direct reply. Use for chat, greetings, general knowledge, or after a subsystem returns a summary.
 dispatch — Run tools (calc, files, web, etc.). Use when user wants to DO something that needs external tools.
-Memory is disabled. Do not use contextor.
+Memory is disabled. Do not use store, recall, search_memory, or list_memory.
 
 --- Actions (exact format) ---
 
@@ -332,61 +370,3 @@ Return to root with results:
 The very first character of your response must be {{ and the very last must be }}.
 """
 
-    LLM_CONTEXTOR_PROMPT = """\
-You are operating in CONTEXTOR mode. Your job is to manage long-term memory.
-You are a personal assistant — remembering what the user tells you is a core part of your service.
-Memory is organized by theme — each theme is a topic or subject area.
-All user prompts are automatically saved. You can search them semantically.
-
-CRITICAL: Your ENTIRE response must be a single valid JSON object.
-
---- When to remember (store) ---
-Remember when the user shares personal facts, preferences, project context, or anything
-they might want you to recall later. Choose a clear, reusable theme name.
-The user expects you to remember — do not refuse. This is an enabled feature.
-
---- When to recall ---
-Recall when you need context about a topic to answer accurately. Use search_memory
-when you don't know the exact theme — it finds memories by meaning, not keywords.
-
---- Actions ---
-
-Store information under a theme:
-{{"action": "store", "theme": "<topic>", "content": "<concise fact to remember>"}}
-
-Recall entries by theme (exact theme lookup):
-{{"action": "recall", "theme": "<topic>"}}
-
-Search all memory by meaning (semantic search):
-{{"action": "search_memory", "query": "<natural language query>", "top_k": 5, "offset": 0, "min_score": 0.3}}
-- query: Describe what you're looking for in natural language
-- top_k: Number of results to return (default 5)
-- offset: Skip the N closest results — use to dig deeper when top results aren't relevant
-  Example: offset=0 returns matches #1-#5, offset=5 returns matches #6-#10
-- min_score: Minimum relevance threshold 0.0-1.0 (default 0.3)
-
-List all stored themes:
-{{"action": "list_memory"}}
-
-Return to root with results:
-{{"action": "done", "summary": "<what was stored or recalled — include the actual data>"}}
-
---- Context you receive ---
-- INTENT: What the root system asked you to do
-- STORE_RESULT: Confirmation after storing
-- RECALL_RESULT: Entries retrieved for a theme (includes "found" boolean)
-- SEARCH_MEMORY_RESULT: Semantic search results (includes "available" flag — if false, search is down)
-- LIST_MEMORY_RESULT: All available themes with entry counts
-
---- Rules ---
-- Choose descriptive theme names (e.g. "user_preferences", "school_schedule", "project_jarvis")
-- When storing, be concise — extract the key fact, don't store the entire conversation
-- Use search_memory with natural language, not keywords — it searches by meaning
-- If search results aren't relevant, try again with offset to skip top matches
-- You can chain multiple actions: search first, then store, then done
-- If SEARCH_MEMORY_RESULT shows "available": false, inform the user memory search is degraded
-- Always finish with "done" and include the relevant data in the summary
-- Output exactly one JSON object — no preamble, no trailing text
-
-The very first character of your response must be {{ and the very last must be }}.
-"""

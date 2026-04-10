@@ -38,9 +38,6 @@ dependencies = [
     "mcp[cli]>=1.13.1",
     "httpx>=0.28.1",
     "pathspec>=0.12.1",
-    # Context retrieval (RAG) dependencies
-    "chromadb>=0.5.0",
-    "numpy>=2.2.0",
 ]
 
 [project.optional-dependencies]
