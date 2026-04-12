@@ -233,6 +233,8 @@ class LLM:
         Try to extract a JSON object from LLM output that may be wrapped
         in markdown fences, thinking tags, or preamble text.
         """
+        decoder = json.JSONDecoder()
+
         # 1. Direct parse
         try:
             obj = json.loads(text)
@@ -257,24 +259,33 @@ class LLM:
         # 3. Strip markdown code fences
         fence_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
         if fence_match:
+            fenced = fence_match.group(1).strip()
             try:
-                obj = json.loads(fence_match.group(1).strip())
+                obj = json.loads(fenced)
+                if isinstance(obj, dict):
+                    return obj
+            except (json.JSONDecodeError, ValueError):
+                pass
+            # Also try raw_decode on fenced content — handles trailing noise
+            try:
+                obj, _ = decoder.raw_decode(fenced)
                 if isinstance(obj, dict):
                     return obj
             except (json.JSONDecodeError, ValueError):
                 pass
 
-        # 4. Find the first { ... } block (greedy from first { to last })
-        first_brace = text.find("{")
-        last_brace = text.rfind("}")
-        if first_brace != -1 and last_brace > first_brace:
-            candidate = text[first_brace:last_brace + 1]
+        # 4. Scan for the first valid JSON object from any "{" — handles
+        #    preamble text AND trailing garbage (e.g. double closing brace
+        #    "{...}}" which breaks whole-string parsers).
+        for i, ch in enumerate(text):
+            if ch != "{":
+                continue
             try:
-                obj = json.loads(candidate)
-                if isinstance(obj, dict):
-                    return obj
+                obj, _ = decoder.raw_decode(text[i:])
             except (json.JSONDecodeError, ValueError):
-                pass
+                continue
+            if isinstance(obj, dict):
+                return obj
 
         return None
 

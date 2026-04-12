@@ -41,6 +41,14 @@ class Config:
     # Default 0.7 gives a balance of consistency and variety.
     LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
 
+    # Ollama strict JSON mode (format="json"). Default off because reasoning
+    # models (qwen3, gpt-oss, deepseek-r1, ...) emit thinking tokens that
+    # conflict with grammar-constrained decoding and return empty content.
+    # JARVIS's _extract_json strips thinking tags, code fences, and trailing
+    # noise — it does not need server-side JSON enforcement. Set true only
+    # when using a non-reasoning model that benefits from strict mode.
+    LLM_STRICT_JSON = os.getenv("LLM_STRICT_JSON", "false").lower() == "true"
+
     TTS_MODEL_ONNX = os.getenv("TTS_MODEL_ONNX")
     TTS_MODEL_JSON = os.getenv("TTS_MODEL_JSON")
 

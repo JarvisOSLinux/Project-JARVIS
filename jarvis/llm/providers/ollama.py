@@ -20,11 +20,13 @@ class OllamaProvider(BaseLLMProvider):
         api_key: Optional[str] = None,
         auto_pull: bool = False,
         temperature: Optional[float] = None,
+        strict_json: bool = False,
     ):
         super().__init__(model)
         self.base_url = base_url or "http://localhost:11434"
         self.auto_pull = auto_pull
         self.temperature = temperature
+        self.strict_json = strict_json
 
         import os
         if base_url and base_url != "http://localhost:11434":
@@ -49,13 +51,18 @@ class OllamaProvider(BaseLLMProvider):
         if self.temperature is not None:
             options["temperature"] = self.temperature
 
+        kwargs: Dict[str, object] = {
+            "model": self.model,
+            "messages": messages,
+            "options": options or None,
+        }
+        if self.strict_json:
+            # Grammar-constrained JSON. Conflicts with thinking-mode models —
+            # leave off unless the user explicitly opts in.
+            kwargs["format"] = "json"
+
         try:
-            response = self._client.chat(
-                model=self.model,
-                messages=messages,
-                format="json",
-                options=options or None,
-            )
+            response = self._client.chat(**kwargs)
             return response["message"]["content"]
         except Exception as e:
             error_str = str(e).lower()
@@ -63,12 +70,7 @@ class OllamaProvider(BaseLLMProvider):
                 logger.warning("Model not found during chat, attempting to ensure model is available...")
                 if self.ensure_model():
                     try:
-                        response = self._client.chat(
-                            model=self.model,
-                            messages=messages,
-                            format="json",
-                            options=options or None,
-                        )
+                        response = self._client.chat(**kwargs)
                         return response["message"]["content"]
                     except Exception as retry_error:
                         logger.error(f"Ollama chat error after model pull: {retry_error}")
