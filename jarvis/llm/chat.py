@@ -91,6 +91,30 @@ class LLM:
         """Access the tiered context manager (for external inspection/control)."""
         return self._context_manager
 
+    def set_prompt(self, mode: str, prompt: str) -> bool:
+        """
+        Update the system prompt for a given mode.
+
+        Returns True if the prompt actually changed. When the target mode
+        is the current mode, the history is rebuilt to apply the new
+        prompt on the next turn.
+        """
+        current = self._prompts.get(mode)
+        if current == prompt:
+            return False
+
+        self._prompts[mode] = prompt
+        # Rebuild history for non-root modes so the new prompt takes effect
+        # immediately. Root has its own window/summary machinery; changing
+        # its prompt mid-session isn't a supported operation here.
+        if mode != "root":
+            self._histories[mode] = [
+                {"role": "system", "content": prompt},
+            ]
+            if self._mode == mode:
+                self.chat_history = self._histories[mode]
+        return True
+
     def switch_mode(self, mode: str):
         """
         Switch to a different prompt mode (root, dispatch).
@@ -209,6 +233,8 @@ class LLM:
         Try to extract a JSON object from LLM output that may be wrapped
         in markdown fences, thinking tags, or preamble text.
         """
+        decoder = json.JSONDecoder()
+
         # 1. Direct parse
         try:
             obj = json.loads(text)
@@ -233,24 +259,33 @@ class LLM:
         # 3. Strip markdown code fences
         fence_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
         if fence_match:
+            fenced = fence_match.group(1).strip()
             try:
-                obj = json.loads(fence_match.group(1).strip())
+                obj = json.loads(fenced)
+                if isinstance(obj, dict):
+                    return obj
+            except (json.JSONDecodeError, ValueError):
+                pass
+            # Also try raw_decode on fenced content — handles trailing noise
+            try:
+                obj, _ = decoder.raw_decode(fenced)
                 if isinstance(obj, dict):
                     return obj
             except (json.JSONDecodeError, ValueError):
                 pass
 
-        # 4. Find the first { ... } block (greedy from first { to last })
-        first_brace = text.find("{")
-        last_brace = text.rfind("}")
-        if first_brace != -1 and last_brace > first_brace:
-            candidate = text[first_brace:last_brace + 1]
+        # 4. Scan for the first valid JSON object from any "{" — handles
+        #    preamble text AND trailing garbage (e.g. double closing brace
+        #    "{...}}" which breaks whole-string parsers).
+        for i, ch in enumerate(text):
+            if ch != "{":
+                continue
             try:
-                obj = json.loads(candidate)
-                if isinstance(obj, dict):
-                    return obj
+                obj, _ = decoder.raw_decode(text[i:])
             except (json.JSONDecodeError, ValueError):
-                pass
+                continue
+            if isinstance(obj, dict):
+                return obj
 
         return None
 

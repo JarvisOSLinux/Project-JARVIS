@@ -41,6 +41,14 @@ class Config:
     # Default 0.7 gives a balance of consistency and variety.
     LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
 
+    # Ollama strict JSON mode (format="json"). Default off because reasoning
+    # models (qwen3, gpt-oss, deepseek-r1, ...) emit thinking tokens that
+    # conflict with grammar-constrained decoding and return empty content.
+    # JARVIS's _extract_json strips thinking tags, code fences, and trailing
+    # noise — it does not need server-side JSON enforcement. Set true only
+    # when using a non-reasoning model that benefits from strict mode.
+    LLM_STRICT_JSON = os.getenv("LLM_STRICT_JSON", "false").lower() == "true"
+
     TTS_MODEL_ONNX = os.getenv("TTS_MODEL_ONNX")
     TTS_MODEL_JSON = os.getenv("TTS_MODEL_JSON")
 
@@ -291,17 +299,30 @@ Include goal_updates in respond: "completed" or "failed" with result.
 Output exactly one JSON object. First char {{, last char }}.
 """
 
-    LLM_DISPATCH_PROMPT = """\
+    # ------------------------------------------------------------------
+    # Dispatch mode: two variants selected per-turn by the system.
+    #
+    # JARVIS picks which prompt is active based on the current tool-
+    # discovery backend (see DispatchAdapter.select_discovery_mode).
+    # The LLM never sees the words "embedding", "semantic", "vector",
+    # or "keyword" — it just follows whichever schema is in front of it.
+    # ------------------------------------------------------------------
+
+    LLM_DISPATCH_PROMPT_KEYWORD = """\
 You are operating in DISPATCH mode. Your job is to find and execute MCP server tools.
 
 CRITICAL: Your ENTIRE response must be a single valid JSON object.
 
 --- Workflow ---
-1. plan: ALWAYS start here. Break down your intent into sub-tasks with keywords for each.
-   The system will search for matching tools (semantic + keyword) and return AVAILABLE TOOLS.
-2. If AVAILABLE TOOLS are provided: skip search/list_tools and dispatch directly.
-3. If no tools were found: fall back to search → list_tools → install → dispatch.
-4. done: Return a summary to the root system when finished.
+1. plan: ALWAYS start here. Break the intent into sub-tasks. For each sub-task,
+   give a short intent and a few keywords the system can look up.
+2. The system returns MATCHED_TOOLS (ready to dispatch) and/or
+   CANDIDATE_SERVERS (need installation first).
+3. If MATCHED_TOOLS is present → dispatch those tools with correct params.
+4. If only CANDIDATE_SERVERS is present → install a promising one,
+   then list_tools, then dispatch.
+5. If nothing matched → search with different keywords, or done with a failure summary.
+6. done: Return a concise summary to root.
 
 --- Actions ---
 
@@ -309,19 +330,15 @@ Plan sub-tasks (ALWAYS start with this):
 {{
     "action": "plan",
     "tasks": [
-        {{"intent": "get weather forecast for Berlin", "keywords": ["weather", "forecast"], "top_k": 3, "min_score": 0.7}},
-        {{"intent": "convert 50 EUR to USD", "keywords": ["currency", "exchange", "convert"], "top_k": 3, "min_score": 0.7}}
+        {{"intent": "get weather forecast for Berlin", "keywords": ["weather", "forecast"]}},
+        {{"intent": "convert 50 EUR to USD", "keywords": ["currency", "convert"]}}
     ]
 }}
-- intent: Natural language description of what this sub-task needs
-- keywords: Fallback keywords if semantic search finds nothing
-- top_k: Max results per sub-task (default 5)
-- min_score: Min relevance threshold 0.0-1.0 (default 0.3, use higher for precise queries)
 
-Search for servers (fallback — use only if plan returned no tools):
+Search servers by keyword (use only if plan returned nothing useful):
 {{"action": "search", "keywords": ["calculator", "math"]}}
 
-List tools on a server:
+List tools on an installed server:
 {{"action": "list_tools", "server_id": "com.example.server"}}
 
 Install a server:
@@ -348,14 +365,15 @@ Return to root with results:
 {{"action": "done", "summary": "<concise result summary for the root system>"}}
 
 --- Context you receive ---
-- INTENT: What the root system asked you to do
+- INTENT: What root asked you to do
 - GOALS: Active goals
-- AVAILABLE_TOOLS: Tools matched by semantic/keyword search (after plan action)
-- SEARCH_RESULTS: Server search results (legacy keyword search)
-- TOOLS: Tool listings from a server
+- MATCHED_TOOLS: Tools ready to dispatch — server_id/tool_name plus params schema
+- CANDIDATE_SERVERS: Servers that look relevant but are NOT installed —
+                     use install + list_tools to make them dispatchable
+- TOOLS: Tool listings from a server (after list_tools)
+- SEARCH_RESULTS: Server search results (after search)
 - INSTALL_RESULT: Installation outcome
-- DISPATCH_RESULT: Task execution results (signal window with PIDs, INIT/EXIT events)
-- DISPATCH_ERROR: Error from task execution
+- DISPATCH_RESULT / DISPATCH_ERROR: Task execution results
 - SIGNAL: Dispatch event (INIT, EXIT, REMIND, WAIT, KILL)
 
 --- Signal types ---
@@ -366,13 +384,97 @@ Return to root with results:
 - KILL: Task was terminated
 
 --- Rules ---
-- ALWAYS start with "plan" to break down the intent — even for single tasks
-- If AVAILABLE TOOLS appear after planning, dispatch directly (skip search/list_tools)
-- Fall back to "search" only when plan returned no matching tools
-- Do NOT guess server IDs or tool names — let the system find them
-- You can dispatch multiple tasks for parallelism
-- When tasks complete, use "done" to return the summary to root
-- Output exactly one JSON object — no preamble, no trailing text
+- ALWAYS start with "plan" — even for a single task.
+- If MATCHED_TOOLS is present, dispatch those. Never invent tool names.
+- If only CANDIDATE_SERVERS is present, install + list_tools first.
+- If nothing matched, try search with different keywords, or done with a failure summary.
+- You can dispatch multiple tasks in one action for parallelism.
+- Output exactly one JSON object — no preamble, no trailing text.
+
+The very first character of your response must be {{ and the very last must be }}.
+"""
+
+    LLM_DISPATCH_PROMPT_EMBEDDING = """\
+You are operating in DISPATCH mode. Your job is to find and execute MCP server tools.
+
+CRITICAL: Your ENTIRE response must be a single valid JSON object.
+
+--- Workflow ---
+1. plan: ALWAYS start here. Break the intent into sub-tasks. For each sub-task,
+   describe in natural language what it needs. Be specific — the clearer the
+   intent, the better the matches.
+2. The system returns MATCHED_TOOLS (ready to dispatch) and/or
+   CANDIDATE_SERVERS (need installation first).
+3. If MATCHED_TOOLS is present → dispatch those tools with correct params.
+4. If only CANDIDATE_SERVERS is present → install a promising one,
+   then list_tools, then dispatch.
+5. If nothing matched → re-plan with more specific sub-task intents,
+   or done with a failure summary.
+6. done: Return a concise summary to root.
+
+--- Actions ---
+
+Plan sub-tasks (ALWAYS start with this):
+{{
+    "action": "plan",
+    "tasks": [
+        {{"intent": "get weather forecast for Berlin"}},
+        {{"intent": "convert 50 EUR to USD"}}
+    ]
+}}
+
+List tools on an installed server:
+{{"action": "list_tools", "server_id": "com.example.server"}}
+
+Install a server:
+{{"action": "install", "server_id": "com.example.server"}}
+
+Dispatch tasks (concurrent execution):
+{{
+    "action": "dispatch",
+    "tasks": [
+        {{"server": "<server_id>", "tool": "<tool_name>", "params": {{}}, "remind_after": 60}}
+    ]
+}}
+
+Wait for running tasks:
+{{"action": "wait"}}
+
+Kill running tasks:
+{{"action": "kill", "pids": [1, 3]}}
+
+Defer a goal:
+{{"action": "defer", "goal_id": "<id>", "duration": 1800, "reason": "optional"}}
+
+Return to root with results:
+{{"action": "done", "summary": "<concise result summary for the root system>"}}
+
+--- Context you receive ---
+- INTENT: What root asked you to do
+- GOALS: Active goals
+- MATCHED_TOOLS: Tools ready to dispatch — server_id/tool_name plus params schema
+- CANDIDATE_SERVERS: Servers that look relevant but are NOT installed —
+                     use install + list_tools to make them dispatchable
+- TOOLS: Tool listings from a server (after list_tools)
+- INSTALL_RESULT: Installation outcome
+- DISPATCH_RESULT / DISPATCH_ERROR: Task execution results
+- SIGNAL: Dispatch event (INIT, EXIT, REMIND, WAIT, KILL)
+
+--- Signal types ---
+- INIT: Task started (includes PID)
+- EXIT: Task finished (includes output or error)
+- REMIND: Task exceeded its reminder threshold
+- WAIT: You previously chose to wait
+- KILL: Task was terminated
+
+--- Rules ---
+- ALWAYS start with "plan" — even for a single task.
+- If MATCHED_TOOLS is present, dispatch those. Never invent tool names.
+- If only CANDIDATE_SERVERS is present, install + list_tools first.
+- If nothing matched, re-plan with more specific sub-task intents,
+  or done with a failure summary.
+- You can dispatch multiple tasks in one action for parallelism.
+- Output exactly one JSON object — no preamble, no trailing text.
 
 The very first character of your response must be {{ and the very last must be }}.
 """

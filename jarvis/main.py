@@ -362,12 +362,24 @@ class Jarvis:
         Enter dispatch mode, give it the intent, and loop until it
         returns "done" with a summary.
 
+        Before entering dispatch, JARVIS picks the active discovery
+        backend (embedding or keyword) and installs the matching
+        system prompt — the LLM never sees which backend is active.
+
         The LLM starts with a "plan" action to split the intent into
-        sub-tasks. JARVIS then searches for matching tools (semantic
-        vectors + keyword fallback) and injects AVAILABLE TOOLS into
-        the next prompt. The LLM can then dispatch directly without
-        manual search/list_tools steps.
+        sub-tasks. JARVIS runs the selected discovery backend and
+        injects MATCHED_TOOLS / CANDIDATE_SERVERS into the next prompt.
         """
+        # Pick the discovery backend before switching modes so the
+        # dispatch system prompt matches the runtime behavior.
+        mode = await self.dispatch.select_discovery_mode(self._get_embeddings())
+        dispatch_prompt = (
+            Config.LLM_DISPATCH_PROMPT_EMBEDDING
+            if mode == "embedding"
+            else Config.LLM_DISPATCH_PROMPT_KEYWORD
+        )
+        self.llm.set_prompt("dispatch", dispatch_prompt)
+
         self.llm.switch_mode("dispatch")
 
         context_parts = [f"INTENT: {intent}"]
@@ -405,8 +417,9 @@ class Jarvis:
                     context = f"{available_tools}\n\nINTENT: {intent}"
                 else:
                     context = (
-                        "NO_TOOLS_FOUND: Semantic and keyword search returned no matches. "
-                        "Use 'search' with different keywords, or try 'list_tools' on a known server.\n"
+                        "NO_TOOLS_FOUND: No matching tools were found. "
+                        "Re-plan with different sub-task intents, or use 'done' "
+                        "if the request cannot be fulfilled.\n"
                         f"INTENT: {intent}"
                     )
 

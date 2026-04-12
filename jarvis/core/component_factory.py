@@ -36,6 +36,7 @@ class ComponentFactory:
             provider_kwargs["api_key"] = Config.LLM_API_KEY
             provider_kwargs["auto_pull"] = getattr(Config, "LLM_AUTO_PULL", False)
             provider_kwargs["temperature"] = getattr(Config, "LLM_TEMPERATURE", 0.7)
+            provider_kwargs["strict_json"] = getattr(Config, "LLM_STRICT_JSON", False)
         elif provider_type == "api":
             if not Config.LLM_URL:
                 raise ValueError("LLM_URL must be set when using API provider")
@@ -82,9 +83,16 @@ class ComponentFactory:
             else Config.LLM_ROOT_PROMPT_NO_CONTEXTOR.format(**fmt)
         )
 
+        # Default dispatch prompt is the keyword variant. main.py swaps
+        # in the embedding variant at dispatch entry when the gate selects
+        # that backend (see DispatchAdapter.select_discovery_mode).
+        default_dispatch_prompt = Config.LLM_DISPATCH_PROMPT_KEYWORD
+        if "{system}" in default_dispatch_prompt:
+            default_dispatch_prompt = default_dispatch_prompt.format(**fmt)
+
         prompts = {
             "root": root_prompt,
-            "dispatch": Config.LLM_DISPATCH_PROMPT.format(**fmt) if "{system}" in Config.LLM_DISPATCH_PROMPT else Config.LLM_DISPATCH_PROMPT,
+            "dispatch": default_dispatch_prompt,
         }
 
         return LLM(
@@ -298,6 +306,15 @@ class ComponentFactory:
                 logger.warning(f"Embeddings unavailable: {e}")
             except Exception as e:
                 logger.warning(f"Embeddings init failed (non-fatal): {e}")
+
+        # One-shot warning when embedding tool discovery was requested but
+        # no embeddings instance was produced. Dispatch will silently fall
+        # back to keyword discovery.
+        if Config.ALLOW_EMBEDDING_SEARCH and embeddings is None:
+            logger.warning(
+                "ALLOW_EMBEDDING_SEARCH is enabled but embeddings are unavailable — "
+                "dispatch will use keyword discovery for this session."
+            )
         components['embeddings'] = embeddings
 
         # Contextor — spawns the Rust binary, passes shared embeddings
