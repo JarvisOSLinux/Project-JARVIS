@@ -680,7 +680,14 @@ class DispatchAdapter:
         return self._format_available_tools(all_results)
 
     async def _keyword_fallback(self, task: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Keyword search fallback for a single sub-task."""
+        """Keyword search fallback for a single sub-task.
+
+        For installed servers, expand each server into per-tool rows with
+        real ``tool_name`` / ``description`` / ``params`` so the LLM can
+        dispatch directly without guessing. Non-installed matches stay
+        server-level — the LLM must install them before they become
+        dispatchable.
+        """
         keywords = task.get("keywords", [])
         if not keywords:
             # Extract basic keywords from intent
@@ -693,18 +700,57 @@ class DispatchAdapter:
         result = await self.search_servers(keywords)
         servers = result.get("servers", [])
 
-        # Convert to tool-level results for consistent formatting
-        tool_results = []
+        source_task = task.get("intent", "")
+        tool_results: List[Dict[str, Any]] = []
+
         for server in servers:
             server_id = server.get("id", server.get("server_id", ""))
+            if not server_id:
+                continue
+
+            installed = bool(server.get("installed", False))
+            server_name = server.get("name", server_id)
+            server_desc = server.get("description", "")
+
+            if installed:
+                # Expand installed servers to per-tool rows
+                tools_result = await self.list_server_tools(server_id)
+                tools = tools_result.get("tools", []) if isinstance(tools_result, dict) else []
+
+                if tools:
+                    for tool in tools:
+                        if not isinstance(tool, dict):
+                            continue
+                        tool_name = tool.get("name", "")
+                        if not tool_name:
+                            continue
+                        tool_results.append({
+                            "server_id": server_id,
+                            "server_name": server_name,
+                            "tool_name": tool_name,
+                            "description": tool.get("description", ""),
+                            "params": tool.get("inputSchema", tool.get("params", {})),
+                            "installed": True,
+                            "score": 0,  # keyword matches don't have scores
+                            "_source": "keyword",
+                            "_source_task": source_task,
+                        })
+                    continue
+
+                # Installed but no tool info — fall through to server-level row
+                logger.debug(
+                    f"Dispatch: installed server '{server_id}' exposed no tools "
+                    "via list_server_tools; emitting server-level row"
+                )
+
             tool_results.append({
                 "server_id": server_id,
-                "server_name": server.get("name", server_id),
-                "description": server.get("description", ""),
-                "installed": server.get("installed", False),
-                "score": 0,  # keyword matches don't have scores
+                "server_name": server_name,
+                "description": server_desc,
+                "installed": installed,
+                "score": 0,
                 "_source": "keyword",
-                "_source_task": task.get("intent", ""),
+                "_source_task": source_task,
             })
 
         return tool_results
