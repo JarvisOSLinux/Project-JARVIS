@@ -28,6 +28,7 @@ from .config import Config
 from .core import ComponentFactory
 from .core.logger import get_logger
 from .dispatch.event_merger import Event, EventType
+from .sessions import SessionManager
 
 logger = get_logger(__name__)
 
@@ -55,6 +56,11 @@ class Jarvis:
         self.confirmation = self.components['confirmation_manager']
         self.voice_manager = self.components.get('voice_manager')
         self._output_clients: List[asyncio.StreamWriter] = []
+
+        # Chat sessions — scopes conversation_log + memory to the active chat.
+        # Session metadata lives in the contextor binary; SessionManager
+        # just tracks the current-session pointer on the Python side.
+        self.sessions = SessionManager(self.contextor)
 
     # ------------------------------------------------------------------
     # Event-driven main loop
@@ -148,12 +154,25 @@ class Jarvis:
 
     async def _on_user_input(self, text: str):
         logger.info(f"JARVIS: User input: '{text}'")
+
+        # Slash-commands are session-control shortcuts, not LLM input.
+        if text.startswith("/"):
+            handled = self._handle_slash_command(text)
+            if handled:
+                return
+
+        # Ensure we have a session to log against.  First-ever input
+        # lazily creates one so history is always session-scoped.
+        self.sessions.ensure_session()
+
         self.goals.add_goal(text)
 
         # Auto-store every user prompt for long-term recall.
         # No LLM decision — every prompt gets persisted + embedded.
         if self.contextor:
-            self.contextor.auto_store_prompt(text)
+            self.contextor.auto_store_prompt(
+                text, session_id=self.sessions.current_id,
+            )
 
         self.llm.switch_mode("root")
         context = self._build_root_context(new_input=text)
@@ -276,7 +295,13 @@ class Jarvis:
                     "STORE_RESULT", json.dumps({"error": "Memory is disabled"}), depth,
                 )
                 return
-            result = self.contextor.store(parsed["theme"], parsed["content"])
+            # Global scope when LLM explicitly sets scope="global";
+            # otherwise file under the active session.
+            scope = parsed.get("scope", "session")
+            sid = None if scope == "global" else self.sessions.current_id
+            result = self.contextor.store(
+                parsed["theme"], parsed["content"], session_id=sid,
+            )
             await self._feed_root_summary("STORE_RESULT", json.dumps(result), depth)
 
         elif action == "recall":
@@ -285,7 +310,9 @@ class Jarvis:
                     "RECALL_RESULT", json.dumps({"error": "Memory is disabled"}), depth,
                 )
                 return
-            result = self.contextor.recall(parsed["theme"])
+            result = self.contextor.recall(
+                parsed["theme"], session_id=self.sessions.current_id,
+            )
             await self._feed_root_summary("RECALL_RESULT", json.dumps(result), depth)
 
         elif action == "search_memory":
@@ -301,6 +328,8 @@ class Jarvis:
                 top_k=parsed.get("top_k", 5),
                 offset=parsed.get("offset", 0),
                 min_score=parsed.get("min_score", 0.3),
+                session_id=self.sessions.current_id,
+                include_global=True,
             )
             await self._feed_root_summary("SEARCH_MEMORY_RESULT", json.dumps(result), depth)
 
@@ -310,7 +339,9 @@ class Jarvis:
                     "LIST_MEMORY_RESULT", json.dumps({"themes": []}), depth,
                 )
                 return
-            result = self.contextor.list_themes()
+            result = self.contextor.list_themes(
+                session_id=self.sessions.current_id,
+            )
             await self._feed_root_summary("LIST_MEMORY_RESULT", json.dumps(result), depth)
 
     async def _feed_root_summary(self, label: str, summary: str, depth: int):
@@ -558,6 +589,101 @@ class Jarvis:
         await self._act_on_root_response(response, depth + 1)
 
     # ------------------------------------------------------------------
+    # Session slash-commands
+    # ------------------------------------------------------------------
+
+    def _handle_slash_command(self, text: str) -> bool:
+        """Handle /new, /sessions, /switch, /rename, /delete.
+
+        Returns True if the input was a slash-command (handled), else
+        False so it falls through to normal LLM routing.
+        """
+        parts = text.strip().split(maxsplit=1)
+        cmd = parts[0].lower()
+        arg = parts[1].strip() if len(parts) > 1 else ""
+
+        if cmd == "/new":
+            if not self.sessions.available:
+                self._session_reply("Memory is disabled — sessions unavailable.")
+                return True
+            session = self.sessions.new_session(title=arg or None)
+            if session:
+                self._session_reply(
+                    f"Started new session {session.short_id()}"
+                    + (f" ('{session.title}')" if session.title else ""),
+                )
+            else:
+                self._session_reply("Could not create a new session.")
+            return True
+
+        if cmd == "/sessions":
+            if not self.sessions.available:
+                self._session_reply("Memory is disabled — sessions unavailable.")
+                return True
+            sessions = self.sessions.list(limit=50)
+            if not sessions:
+                self._session_reply("No sessions yet.")
+                return True
+            current_id = self.sessions.current_id
+            lines = ["Sessions (most recent first):"]
+            for s in sessions:
+                marker = "* " if s.id == current_id else "  "
+                lines.append(f"{marker}{s.short_id()}  {s.display_label()}")
+            self._session_reply("\n".join(lines))
+            return True
+
+        if cmd == "/switch":
+            if not arg:
+                self._session_reply("Usage: /switch <session_id_prefix>")
+                return True
+            session = self.sessions.switch(arg)
+            if session:
+                self._session_reply(
+                    f"Switched to {session.short_id()} ('{session.title}')"
+                )
+            else:
+                self._session_reply(f"No session matches '{arg}'.")
+            return True
+
+        if cmd == "/rename":
+            if not arg:
+                self._session_reply("Usage: /rename <new title>")
+                return True
+            if not self.sessions.current:
+                self._session_reply("No active session to rename.")
+                return True
+            if self.sessions.rename(arg):
+                self._session_reply(f"Renamed to '{arg}'.")
+            else:
+                self._session_reply("Rename failed.")
+            return True
+
+        if cmd == "/delete":
+            if not arg:
+                self._session_reply("Usage: /delete <session_id_prefix>")
+                return True
+            sessions = self.sessions.list(limit=500)
+            matches = [s for s in sessions if s.id.startswith(arg)]
+            if len(matches) != 1:
+                self._session_reply(
+                    f"Need a unique id prefix; got {len(matches)} match(es)."
+                )
+                return True
+            if self.sessions.delete(matches[0].id):
+                self._session_reply(f"Deleted session {matches[0].short_id()}.")
+            else:
+                self._session_reply("Delete failed.")
+            return True
+
+        # Unknown slash-command — let it through to the LLM so the user
+        # can still type "/foo" as literal input if they insist.
+        return False
+
+    def _session_reply(self, message: str) -> None:
+        """Emit a local reply for slash-commands (no LLM roundtrip)."""
+        self.output_manager.handle_response({"output": message})
+
+    # ------------------------------------------------------------------
     # Shared helpers
     # ------------------------------------------------------------------
 
@@ -593,15 +719,24 @@ class Jarvis:
             parts.append(f"SIGNAL: {json.dumps(signal)}")
 
         # RAG retrieval — inject relevant memories from the contextor
-        # based on the current user input.
+        # based on the current user input.  Scoped to the active session
+        # (plus global entries) so sibling chats don't bleed through.
         if new_input and self.contextor:
             rag_context = self.contextor.retrieve_context(
                 query=new_input,
                 top_k=getattr(Config, "RAG_TOP_K", 5),
                 min_score=getattr(Config, "RAG_MIN_SCORE", 0.3),
+                session_id=self.sessions.current_id,
+                include_global=True,
             )
             if rag_context:
                 parts.append(rag_context)
+
+        # Tier-2 rolling summary — gives the LLM a compressed view of
+        # older turns without blowing the context window.
+        summary = self.sessions.load_summary()
+        if summary:
+            parts.append(f"CONVERSATION_SUMMARY: {summary}")
 
         if new_input:
             parts.append(f"NEW INPUT: {new_input}")

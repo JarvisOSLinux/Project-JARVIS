@@ -12,6 +12,16 @@ The binary never calls Ollama or any ML runtime.
 Protocol:
   JARVIS  -->  {"cmd": "store", ...}\n   -->  contextor (stdin)
   JARVIS  <--  {"ok": true, ...}\n       <--  contextor (stdout)
+
+Sessions (chat conversations):
+  Every memory entry has an optional ``session_id``.  Entries without
+  one are *global* and visible to every session (facts the user wants
+  to carry across conversations).  Entries with a ``session_id`` are
+  scoped to that conversation.
+
+  Session commands:
+    create_session, list_sessions, get_session,
+    update_session, delete_session
 """
 
 import json
@@ -139,8 +149,20 @@ class ContextorAdapter:
     # Core operations
     # ------------------------------------------------------------------
 
-    def store(self, theme: str, content: str) -> Dict[str, Any]:
-        """Store a fact under a theme.  Embeds content and sends vector."""
+    def store(
+        self,
+        theme: str,
+        content: str,
+        session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Store a fact under a theme.
+
+        Args:
+            theme: Topic name the entry is filed under.
+            content: The fact/content to remember.
+            session_id: If given, scope to that chat session.  None = global
+                (visible to every session).
+        """
         if not self._connected:
             return {"error": "Contextor not connected"}
 
@@ -151,21 +173,34 @@ class ContextorAdapter:
             "content": content,
             "vector": vector,
             "metadata": {},
+            "session_id": session_id,
         })
 
         if result.get("ok"):
-            logger.info(f"Contextor: Stored under '{theme}' ({len(content)} chars)")
-            return {"stored": True, "theme": theme}
+            scope = f"session={session_id[:8]}" if session_id else "global"
+            logger.info(
+                f"Contextor: Stored under '{theme}' ({len(content)} chars, {scope})"
+            )
+            return {"stored": True, "theme": theme, "session_id": session_id}
 
         logger.warning(f"Contextor: Store failed: {result.get('error')}")
         return {"error": result.get("error", "Store failed")}
 
-    def auto_store_prompt(self, text: str) -> None:
+    def auto_store_prompt(
+        self,
+        text: str,
+        session_id: Optional[str] = None,
+    ) -> None:
         """
         Automatically store every user prompt for long-term recall.
 
         No LLM decision — fires on every input.  Creates a complete
         searchable history under the ``conversation_log`` theme.
+
+        Args:
+            text: The user's utterance.
+            session_id: If given, log under this session so the
+                conversation history is session-scoped.
         """
         if not self._connected:
             return
@@ -177,15 +212,35 @@ class ContextorAdapter:
             "content": text,
             "vector": vector,
             "metadata": {"type": "user_prompt"},
+            "session_id": session_id,
         })
-        logger.debug(f"Contextor: Auto-stored prompt ({len(text)} chars)")
+        scope = f"session={session_id[:8]}" if session_id else "global"
+        logger.debug(f"Contextor: Auto-stored prompt ({len(text)} chars, {scope})")
 
-    def recall(self, theme: str, limit: int = 20) -> Dict[str, Any]:
-        """Recall entries by exact theme (no embeddings needed)."""
+    def recall(
+        self,
+        theme: str,
+        limit: int = 20,
+        session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Recall entries by exact theme (no embeddings needed).
+
+        Args:
+            theme: Topic name.
+            limit: Max entries to return.
+            session_id: If given, only return entries belonging to this
+                session plus any global entries.  None = all entries
+                regardless of session.
+        """
         if not self._connected:
             return {"theme": theme, "entries": [], "found": False}
 
-        result = self._send({"cmd": "recall", "theme": theme, "limit": limit})
+        result = self._send({
+            "cmd": "recall",
+            "theme": theme,
+            "limit": limit,
+            "session_id": session_id,
+        })
         if result.get("ok"):
             entries = result.get("entries", [])
             logger.info(f"Contextor: Recalled {len(entries)} entries for '{theme}'")
@@ -198,14 +253,28 @@ class ContextorAdapter:
         query: str,
         top_k: int = 5,
         offset: int = 0,
-        theme: str | None = None,
+        theme: Optional[str] = None,
         min_score: float = 0.3,
+        session_id: Optional[str] = None,
+        include_global: bool = True,
     ) -> Dict[str, Any]:
         """
-        Semantic search across all memories using vector similarity.
+        Semantic search across memories using vector similarity.
 
         Returns ``{"available": false}`` when the binary or embeddings
         are unavailable — no silent keyword fallback.
+
+        Args:
+            query: Natural language search query.
+            top_k: Max results.
+            offset: Skip this many top results (for pagination / dig-deeper).
+            theme: Restrict to one theme.  None = all themes.
+            min_score: Cosine similarity floor (0.0–1.0).
+            session_id: If given, restrict to entries in this session.
+                Combine with ``include_global=True`` to also include
+                session-less (global) entries.
+            include_global: When ``session_id`` is set, whether to also
+                match global entries.  Ignored if ``session_id`` is None.
         """
         if not self._connected or not self._embeddings:
             return {
@@ -229,6 +298,8 @@ class ContextorAdapter:
             "offset": offset,
             "min_score": min_score,
             "theme": theme,
+            "session_id": session_id,
+            "include_global": include_global,
         })
 
         if result.get("ok"):
@@ -251,15 +322,29 @@ class ContextorAdapter:
         top_k: int = 5,
         offset: int = 0,
         min_score: float = 0.3,
+        session_id: Optional[str] = None,
+        include_global: bool = True,
     ) -> str:
         """
         RAG entry point — retrieve relevant memories and format them
         for injection into the LLM context.
 
         Returns a formatted string, or empty string if nothing relevant.
+
+        Args:
+            query: The user's utterance.
+            top_k, offset, min_score: Standard search knobs.
+            session_id: Scope to this session (falls back to global
+                entries as well when ``include_global=True``).
+            include_global: See ``semantic_search``.
         """
         result = self.semantic_search(
-            query, top_k=top_k, offset=offset, min_score=min_score,
+            query,
+            top_k=top_k,
+            offset=offset,
+            min_score=min_score,
+            session_id=session_id,
+            include_global=include_global,
         )
 
         if not result.get("available", False):
@@ -282,12 +367,20 @@ class ContextorAdapter:
         )
         return formatted
 
-    def list_themes(self) -> Dict[str, Any]:
-        """List all stored themes with entry counts."""
+    def list_themes(
+        self,
+        session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """List all stored themes with entry counts.
+
+        Args:
+            session_id: If given, restrict counts to this session (plus
+                global entries).  None = count across all sessions.
+        """
         if not self._connected:
             return {"themes": []}
 
-        result = self._send({"cmd": "list"})
+        result = self._send({"cmd": "list", "session_id": session_id})
         if result.get("ok"):
             themes = result.get("themes", [])
             logger.info(f"Contextor: {len(themes)} theme(s) in memory")
@@ -295,12 +388,26 @@ class ContextorAdapter:
 
         return {"themes": [], "error": result.get("error")}
 
-    def delete_theme(self, theme: str) -> Dict[str, Any]:
-        """Delete all entries for a theme."""
+    def delete_theme(
+        self,
+        theme: str,
+        session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Delete all entries for a theme.
+
+        Args:
+            theme: Theme name.
+            session_id: If given, only delete entries in this session.
+                None = delete across all sessions (destructive).
+        """
         if not self._connected:
             return {"deleted": False, "reason": "Not connected"}
 
-        result = self._send({"cmd": "delete", "theme": theme})
+        result = self._send({
+            "cmd": "delete",
+            "theme": theme,
+            "session_id": session_id,
+        })
         if result.get("ok"):
             logger.info(f"Contextor: Deleted theme '{theme}'")
             return {"deleted": True, "theme": theme}
@@ -318,3 +425,137 @@ class ContextorAdapter:
             return {"reindexed": result.get("indexed", 0)}
 
         return {"error": result.get("error", "Reindex failed")}
+
+    # ------------------------------------------------------------------
+    # Sessions (chat conversations)
+    # ------------------------------------------------------------------
+
+    def create_session(
+        self,
+        title: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Create a new chat session.
+
+        Args:
+            title: Human-readable label.  If None, the binary picks a
+                default (e.g. ``"Chat 2026-04-12 14:30"``).
+            metadata: Arbitrary JSON metadata (e.g. which client started
+                the session).
+
+        Returns:
+            ``{"session": {...}}`` on success with the full session
+            object (id, title, created_at, updated_at, summary, metadata).
+            ``{"error": "..."}`` on failure.
+        """
+        if not self._connected:
+            return {"error": "Contextor not connected"}
+
+        result = self._send({
+            "cmd": "create_session",
+            "title": title,
+            "metadata": metadata or {},
+        })
+        if result.get("ok"):
+            session = result.get("session", {})
+            logger.info(
+                f"Contextor: Created session id={session.get('id', '?')[:8]} "
+                f"title='{session.get('title', '')}'"
+            )
+            return {"session": session}
+
+        logger.warning(f"Contextor: create_session failed: {result.get('error')}")
+        return {"error": result.get("error", "create_session failed")}
+
+    def list_sessions(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        """List sessions, most-recently-updated first.
+
+        Returns:
+            ``{"sessions": [{"id", "title", "created_at", "updated_at",
+            "summary", "entry_count"}, ...]}``
+        """
+        if not self._connected:
+            return {"sessions": []}
+
+        result = self._send({
+            "cmd": "list_sessions",
+            "limit": limit,
+            "offset": offset,
+        })
+        if result.get("ok"):
+            sessions = result.get("sessions", [])
+            logger.info(f"Contextor: Listed {len(sessions)} session(s)")
+            return {"sessions": sessions}
+
+        return {"sessions": [], "error": result.get("error")}
+
+    def get_session(self, session_id: str) -> Dict[str, Any]:
+        """Fetch a single session's full record."""
+        if not self._connected:
+            return {"error": "Contextor not connected"}
+
+        result = self._send({"cmd": "get_session", "session_id": session_id})
+        if result.get("ok"):
+            return {"session": result.get("session", {})}
+
+        return {"error": result.get("error", "get_session failed")}
+
+    def update_session(
+        self,
+        session_id: str,
+        title: Optional[str] = None,
+        summary: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Update a session's title, rolling summary, or metadata.
+
+        Only provided fields are updated; omitted fields are left alone.
+        """
+        if not self._connected:
+            return {"error": "Contextor not connected"}
+
+        cmd: Dict[str, Any] = {"cmd": "update_session", "session_id": session_id}
+        if title is not None:
+            cmd["title"] = title
+        if summary is not None:
+            cmd["summary"] = summary
+        if metadata is not None:
+            cmd["metadata"] = metadata
+
+        result = self._send(cmd)
+        if result.get("ok"):
+            logger.info(f"Contextor: Updated session {session_id[:8]}")
+            return {"session": result.get("session", {})}
+
+        return {"error": result.get("error", "update_session failed")}
+
+    def delete_session(
+        self,
+        session_id: str,
+        delete_entries: bool = True,
+    ) -> Dict[str, Any]:
+        """Delete a session.
+
+        Args:
+            session_id: Which session to delete.
+            delete_entries: If True, also delete every memory entry
+                belonging to this session.  If False, entries are
+                orphaned (session_id set to null → they become global).
+        """
+        if not self._connected:
+            return {"error": "Contextor not connected"}
+
+        result = self._send({
+            "cmd": "delete_session",
+            "session_id": session_id,
+            "delete_entries": delete_entries,
+        })
+        if result.get("ok"):
+            logger.info(f"Contextor: Deleted session {session_id[:8]}")
+            return {"deleted": True, "session_id": session_id}
+
+        return {"error": result.get("error", "delete_session failed")}

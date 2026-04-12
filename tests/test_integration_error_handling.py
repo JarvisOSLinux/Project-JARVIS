@@ -35,6 +35,10 @@ def _make_jarvis(llm_responses=None, llm_side_effect=None):
         'event_merger': Mock(),
         'task_parser': TaskParser(),
         'output_manager': Mock(),
+        'contextor': None,
+        'embeddings': None,
+        'kernel_client': Mock(available=False),
+        'confirmation_manager': Mock(),
         'tts': None,
         'voice_manager': None,
     }
@@ -161,6 +165,10 @@ class TestMultipleRequestIsolation:
             'event_merger': Mock(),
             'task_parser': TaskParser(),
             'output_manager': Mock(),
+            'contextor': None,
+            'embeddings': None,
+            'kernel_client': Mock(available=False),
+            'confirmation_manager': Mock(),
             'tts': None,
             'voice_manager': None,
         }
