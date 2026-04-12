@@ -82,9 +82,16 @@ class ComponentFactory:
             else Config.LLM_ROOT_PROMPT_NO_CONTEXTOR.format(**fmt)
         )
 
+        # Default dispatch prompt is the keyword variant. main.py swaps
+        # in the embedding variant at dispatch entry when the gate selects
+        # that backend (see DispatchAdapter.select_discovery_mode).
+        default_dispatch_prompt = Config.LLM_DISPATCH_PROMPT_KEYWORD
+        if "{system}" in default_dispatch_prompt:
+            default_dispatch_prompt = default_dispatch_prompt.format(**fmt)
+
         prompts = {
             "root": root_prompt,
-            "dispatch": Config.LLM_DISPATCH_PROMPT.format(**fmt) if "{system}" in Config.LLM_DISPATCH_PROMPT else Config.LLM_DISPATCH_PROMPT,
+            "dispatch": default_dispatch_prompt,
         }
 
         return LLM(
@@ -298,6 +305,15 @@ class ComponentFactory:
                 logger.warning(f"Embeddings unavailable: {e}")
             except Exception as e:
                 logger.warning(f"Embeddings init failed (non-fatal): {e}")
+
+        # One-shot warning when embedding tool discovery was requested but
+        # no embeddings instance was produced. Dispatch will silently fall
+        # back to keyword discovery.
+        if Config.ALLOW_EMBEDDING_SEARCH and embeddings is None:
+            logger.warning(
+                "ALLOW_EMBEDDING_SEARCH is enabled but embeddings are unavailable — "
+                "dispatch will use keyword discovery for this session."
+            )
         components['embeddings'] = embeddings
 
         # Contextor — spawns the Rust binary, passes shared embeddings

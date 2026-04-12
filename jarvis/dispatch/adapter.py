@@ -599,50 +599,59 @@ class DispatchAdapter:
             logger.warning(f"Dispatch: index_server failed: {e}")
             return {"error": f"Failed to index server: {e}"}
 
+    async def select_discovery_mode(
+        self,
+        embeddings: Optional[Any] = None,
+    ) -> str:
+        """
+        Return the active tool-discovery backend: ``"embedding"`` or ``"keyword"``.
+
+        Chosen from config + runtime state:
+          - embedding:  ALLOW_EMBEDDING_SEARCH, embeddings available,
+                        and (visible_servers >= threshold OR enforce flag)
+          - keyword:    everything else
+
+        The LLM never sees these names — this only drives which dispatch
+        system prompt JARVIS installs and which search path runs.
+        """
+        if not Config.ALLOW_EMBEDDING_SEARCH or embeddings is None:
+            return "keyword"
+
+        count = await self.server_count()
+        total = count.get("total", 0)
+
+        if Config.ENFORCE_EMBEDDING_SEARCH or total >= Config.EMBEDDING_SEARCH_THRESHOLD:
+            return "embedding"
+        return "keyword"
+
     async def discover_tools(
         self,
         tasks: List[Dict[str, Any]],
         embeddings: Optional[Any] = None,
     ) -> str:
         """
-        Semantic tool discovery — the main entry point.
+        Tool discovery — the main entry point after a ``plan`` action.
 
-        Takes a list of sub-tasks from the LLM's "plan" action, searches
-        for matching tools using vectors (preferred) with keyword fallback,
-        and returns a formatted AVAILABLE TOOLS string for prompt injection.
+        Runs whichever backend ``select_discovery_mode`` picked (embedding or
+        keyword) and returns a formatted ``MATCHED_TOOLS`` / ``CANDIDATE_SERVERS``
+        block for prompt injection. Empty string if nothing matched.
 
         Args:
-            tasks: List of dicts with "intent", "keywords", "top_k", "min_score".
+            tasks: List of dicts with "intent" (required) and optional
+                   "keywords", "top_k", "min_score".
             embeddings: OllamaEmbeddings instance for local embedding.
-
-        Returns:
-            Formatted string of matched tools, or empty string if nothing found.
         """
-        count = await self.server_count()
-        total = count.get("total", 0)
-
-        use_vectors = (
-            Config.ALLOW_EMBEDDING_SEARCH
-            and embeddings is not None
-            and (
-                total >= Config.EMBEDDING_SEARCH_THRESHOLD
-                or Config.ENFORCE_EMBEDDING_SEARCH
-            )
-        )
-
+        mode = await self.select_discovery_mode(embeddings)
         logger.info(
-            f"Dispatch: discover_tools — {len(tasks)} sub-task(s), "
-            f"{total} visible servers, use_vectors={use_vectors}"
+            f"Dispatch: discover_tools — {len(tasks)} sub-task(s), mode={mode}"
         )
 
         all_results: List[Dict[str, Any]] = []
 
-        if use_vectors:
-            # Embed all intents and do batch vector search
+        if mode == "embedding":
             intents = [t.get("intent", "") for t in tasks]
             try:
                 vectors = embeddings.embed_batch(intents)
-                # Use the most restrictive top_k/min_score from the tasks
                 top_k = max(t.get("top_k", 5) for t in tasks)
                 min_score = min(t.get("min_score", 0.3) for t in tasks)
 
@@ -660,16 +669,17 @@ class DispatchAdapter:
                                 r["_source_task"] = intents[i]
                             all_results.extend(result_set)
                         else:
-                            # No vector match for this task — keyword fallback
-                            kw_results = await self._keyword_fallback(tasks[i])
-                            all_results.extend(kw_results)
+                            # No vector match for this task — fall back to
+                            # keyword search so the user still gets candidates.
+                            all_results.extend(await self._keyword_fallback(tasks[i]))
 
             except Exception as e:
-                logger.warning(f"Dispatch: Vector search failed, falling back to keywords: {e}")
+                logger.warning(
+                    f"Dispatch: Embedding discovery failed, falling back to keywords: {e}"
+                )
                 for task in tasks:
                     all_results.extend(await self._keyword_fallback(task))
         else:
-            # Vector search disabled — keyword only
             for task in tasks:
                 all_results.extend(await self._keyword_fallback(task))
 
@@ -757,43 +767,77 @@ class DispatchAdapter:
 
     @staticmethod
     def _format_available_tools(results: List[Dict[str, Any]]) -> str:
-        """Format search results as AVAILABLE TOOLS for the LLM prompt."""
-        # Deduplicate by server_id + tool_name
-        seen = set()
-        unique = []
+        """
+        Render discovery results into the two blocks the LLM prompt names:
+
+          MATCHED_TOOLS       — installed + has tool_name; dispatch-ready
+          CANDIDATE_SERVERS   — not installed, or no tool_name yet; needs
+                                install + list_tools before dispatch
+
+        Deduplicated by (server_id, tool_name) for tool rows and by
+        server_id for server rows.
+        """
+        matched: List[Dict[str, Any]] = []
+        candidates: List[Dict[str, Any]] = []
+
+        seen_tools: set = set()
+        seen_servers: set = set()
+
         for r in results:
-            key = (r.get("server_id", ""), r.get("tool_name", ""))
-            if key not in seen:
-                seen.add(key)
-                unique.append(r)
-
-        parts = []
-        for r in unique:
-            server_id = r.get("server_id", "unknown")
+            server_id = r.get("server_id", "")
+            if not server_id:
+                continue
             tool_name = r.get("tool_name", "")
-            description = r.get("description", "")
-            params = r.get("params", r.get("parameter_schema", ""))
-            score = r.get("score", 0)
-            installed = r.get("installed", True)
+            installed = bool(r.get("installed", True))
 
-            if tool_name:
-                line = f"  {server_id}/{tool_name}"
+            is_dispatchable = bool(tool_name) and installed
+            if is_dispatchable:
+                key = (server_id, tool_name)
+                if key in seen_tools:
+                    continue
+                seen_tools.add(key)
+                matched.append(r)
             else:
+                if server_id in seen_servers:
+                    continue
+                seen_servers.add(server_id)
+                candidates.append(r)
+
+        sections: List[str] = []
+
+        if matched:
+            lines = ["MATCHED_TOOLS:"]
+            for r in matched:
+                server_id = r.get("server_id", "unknown")
+                tool_name = r.get("tool_name", "")
+                line = f"  {server_id}/{tool_name}"
+                score = r.get("score", 0)
+                if score:
+                    line += f" (relevance: {score:.0%})"
+                description = r.get("description", "")
+                if description:
+                    line += f"\n    {description}"
+                params = r.get("params", r.get("parameter_schema", ""))
+                if params:
+                    params_str = (
+                        json.dumps(params) if isinstance(params, dict) else str(params)
+                    )
+                    line += f"\n    params: {params_str}"
+                lines.append(line)
+            sections.append("\n".join(lines))
+
+        if candidates:
+            lines = ["CANDIDATE_SERVERS (not installed — use install + list_tools):"]
+            for r in candidates:
+                server_id = r.get("server_id", "unknown")
                 line = f"  {server_id}"
+                description = r.get("description", "")
+                if description:
+                    line += f"\n    {description}"
+                lines.append(line)
+            sections.append("\n".join(lines))
 
-            if score:
-                line += f" (relevance: {score:.0%})"
-            if not installed:
-                line += " [NOT INSTALLED]"
-            if description:
-                line += f"\n    {description}"
-            if params:
-                params_str = json.dumps(params) if isinstance(params, dict) else str(params)
-                line += f"\n    params: {params_str}"
-
-            parts.append(line)
-
-        return "AVAILABLE_TOOLS:\n" + "\n".join(parts)
+        return "\n\n".join(sections)
 
     async def auto_index_server(
         self,
