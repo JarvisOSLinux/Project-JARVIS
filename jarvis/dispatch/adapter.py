@@ -352,8 +352,11 @@ class DispatchAdapter:
         """
         Get the number of visible MCP servers from dmcp.
 
-        Returns dict with total, local, registry counts.
-        JARVIS uses this to decide whether to enable embedding search.
+        Returns a dict normalized to ``{"total", "local", "registry"}``.
+        Handles three response shapes from the dispatch binary / dmcp:
+            - full dict       : {"total": N, "local": L, "registry": R}
+            - bare number     : wrapped as {"output": N}
+            - plain text "N"  : fallback from --json parse failure
         """
         if not self._connected:
             # Fall back to direct dmcp call if dispatch isn't connected
@@ -361,7 +364,8 @@ class DispatchAdapter:
             if raw is None:
                 return {"total": 0, "local": 0, "registry": 0}
             try:
-                return json.loads(raw)
+                parsed = json.loads(raw)
+                return self._normalize_count(parsed)
             except json.JSONDecodeError:
                 # Plain number output
                 try:
@@ -375,11 +379,39 @@ class DispatchAdapter:
                 timeout=self.timeout,
             )
             content = self._extract_content(result)
-            logger.info(f"Dispatch: Server count: {content}")
-            return content
+            normalized = self._normalize_count(content)
+            logger.info(f"Dispatch: Server count: {normalized}")
+            return normalized
         except Exception as e:
             logger.warning(f"Dispatch: server_count failed: {e}")
             return {"total": 0, "local": 0, "registry": 0}
+
+    @staticmethod
+    def _normalize_count(content: Any) -> Dict[str, int]:
+        """Coerce a server-count response into {total, local, registry}."""
+        default = {"total": 0, "local": 0, "registry": 0}
+        if isinstance(content, int):
+            return {"total": content, "local": 0, "registry": 0}
+        if not isinstance(content, dict):
+            return default
+
+        if "total" in content:
+            return {
+                "total": int(content.get("total", 0) or 0),
+                "local": int(content.get("local", 0) or 0),
+                "registry": int(content.get("registry", 0) or 0),
+            }
+
+        # Bare number wrapped by _extract_content as {"output": N}
+        val = content.get("output")
+        if isinstance(val, int):
+            return {"total": val, "local": 0, "registry": 0}
+        if isinstance(val, str):
+            try:
+                return {"total": int(val.strip()), "local": 0, "registry": 0}
+            except ValueError:
+                return default
+        return default
 
     async def embedding_spec(self) -> Optional[Dict[str, Any]]:
         """
