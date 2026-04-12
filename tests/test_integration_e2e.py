@@ -36,6 +36,10 @@ class TestEndToEndWorkflows:
             'event_merger': Mock(),
             'task_parser': TaskParser(),
             'output_manager': Mock(),
+            'contextor': None,
+            'embeddings': None,
+            'kernel_client': Mock(available=False),
+            'confirmation_manager': Mock(),
             'tts': None,
             'voice_manager': None,
         }
