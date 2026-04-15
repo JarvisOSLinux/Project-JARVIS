@@ -321,29 +321,28 @@ LOG_COLORS=true               # Colored console output
 
 ## 🔧 How It Works
 
-### **Workflow Architecture (Current)**
-1. **Unified Input Collection**: Voice, stdin chat, and `jarvis send` socket input are merged into one async event queue.
-2. **ROOT Decision Loop**: ROOT LLM mode receives `GOALS`, optional `SIGNAL`, session RAG context, rolling summary, and new input.
-3. **Action Selection**: ROOT returns one action: `respond`, direct memory operation (`store`, `recall`, `search_memory`, `list_memory`), or `dispatch`.
-4. **DISPATCH Sub-Chain (if needed)**: DISPATCH mode iterates through `plan/search/list_tools/install/dispatch/wait/done`.
-5. **Tool Execution**: `dispatch` binary executes MCP tasks concurrently and emits signals (`INIT`, `EXIT`, `REMIND`, etc.).
-6. **Signal Feedback**: Signals are re-injected into ROOT so the model can decide follow-up actions or user-facing responses.
-7. **Output Handling**: Responses go to console/socket and optionally TTS, then the system returns to listening for new events.
+JARVIS is designed as a conversational controller that can either answer directly or use tools when needed.
 
-### **Discovery Strategy**
-- **Embedding mode** (preferred): enabled when embeddings are available and configured thresholds are met.
-- **Keyword mode** (fallback/default): used when embeddings are disabled/unavailable or no semantic matches are found.
-- Installed servers are expanded to concrete tools so DISPATCH can call exact `server/tool` pairs.
+### **High-Level Workflow**
+1. **You speak or type a request** (voice wake word, chat input, or `jarvis send`).
+2. **JARVIS interprets intent** and decides whether the request needs tools.
+3. **If tools are needed, JARVIS discovers and runs them** (including parallel execution when useful).
+4. **Results are gathered and summarized** back into a single assistant response.
+5. **JARVIS responds in text or voice** and waits for your next request.
 
-### **Memory + Sessions**
-- Memory is managed by the local `contextor` binary (storage + semantic retrieval).
-- Each chat runs in an active session; user prompts are auto-stored and RAG is session-scoped (+ optional global memory).
-- Slash commands (`/new`, `/sessions`, `/switch`, `/rename`, `/delete`) manage sessions without an LLM roundtrip.
+### **Memory and Context**
+- JARVIS can keep session context and use memory to improve follow-up answers.
+- Conversation and memory handling are scoped to your active session.
+- Session controls are available with slash commands like `/new`, `/sessions`, and `/switch`.
 
-### **Confirmation Gate**
-- Tool calls can require user approval via metadata (`confirmation_required`).
-- Confirmation is non-blocking and event-driven (desktop notification, socket UI, or CLI prompt).
-- While waiting for approval, JARVIS keeps processing other events.
+### **Safety and Control**
+- Potentially sensitive tool actions can require user approval.
+- The assistant stays responsive while waiting for approvals or long-running tasks.
+
+### **For Technical Details**
+If you want internals (state machine, dispatch loop, signal model, confirmation flow), see:
+- `docs/jarvis-workflow-investigation.md`
+- `docs/README-dispatch-2.md`
 
 ### **Example MCP Servers**
 - **ShellMCP**: Terminal command execution
