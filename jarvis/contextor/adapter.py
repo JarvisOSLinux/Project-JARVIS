@@ -266,6 +266,37 @@ class ContextorAdapter:
         scope = f"session={session_id[:8]}" if session_id else "global"
         logger.debug(f"Contextor: Auto-stored prompt ({len(text)} chars, {scope})")
 
+    def auto_store_assistant_reply(
+        self,
+        text: str,
+        session_id: Optional[str] = None,
+    ) -> None:
+        """
+        Store assistant-visible replies under ``conversation_log`` so each
+        session has a searchable transcript (user prompts + assistant text),
+        similar to a multi-turn chat product.
+        """
+        if not self._connected or not session_id or not (text or "").strip():
+            return
+        # Avoid pathological embedding / DB size on huge tool dumps.
+        max_chars = 100_000
+        if len(text) > max_chars:
+            text = text[:max_chars] + "\n… [truncated]"
+
+        vector = self._embed(text) or []
+        self._send({
+            "cmd": "store",
+            "theme": "conversation_log",
+            "content": text,
+            "vector": vector,
+            "metadata": {"type": "assistant_reply"},
+            "session_id": session_id,
+        })
+        logger.debug(
+            f"Contextor: Auto-stored assistant reply ({len(text)} chars, "
+            f"session={session_id[:8]})"
+        )
+
     def recall(
         self,
         theme: str,
@@ -511,13 +542,28 @@ class ContextorAdapter:
         if self._supports_sessions is False:
             return {"error": "Session commands unsupported by contextor binary"}
 
-        result = self._send({
+        # Rust expects `title` as a string; JSON null is rejected.
+        cmd: Dict[str, Any] = {
             "cmd": "create_session",
-            "title": title,
-            "metadata": metadata or {},
-        })
+            "title": title if title is not None else "",
+        }
+        if metadata:
+            cmd["metadata"] = metadata
+
+        result = self._send(cmd)
         if result.get("ok"):
-            session = result.get("session", {})
+            # Binary returns session_id + created_at, not a full session row.
+            sid = result.get("session_id") or ""
+            if sid:
+                fetched = self.get_session(sid)
+                if "session" in fetched:
+                    session = fetched["session"]
+                    logger.info(
+                        f"Contextor: Created session id={session.get('id', '?')[:8]} "
+                        f"title='{session.get('title', '')}'"
+                    )
+                    return {"session": session}
+            session = result.get("session") or {}
             logger.info(
                 f"Contextor: Created session id={session.get('id', '?')[:8]} "
                 f"title='{session.get('title', '')}'"

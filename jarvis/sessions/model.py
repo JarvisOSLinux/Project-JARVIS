@@ -24,14 +24,19 @@ class Session:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Session":
         """Build a Session from the contextor's JSON response."""
+        summary = data.get("summary") or data.get("rolling_summary") or ""
+        entry_count = data.get("entry_count")
+        if entry_count is None and data.get("message_count") is not None:
+            entry_count = int(data["message_count"])
+
         return cls(
             id=data.get("id", ""),
             title=data.get("title", ""),
             created_at=data.get("created_at", ""),
             updated_at=data.get("updated_at", ""),
-            summary=data.get("summary", ""),
+            summary=summary,
             metadata=data.get("metadata") or {},
-            entry_count=data.get("entry_count"),
+            entry_count=entry_count,
         )
 
     def to_dict(self) -> Dict[str, Any]:

@@ -281,6 +281,7 @@ class Jarvis:
                 await self._act_on_root_response(response, depth + 1)
                 return
             self.output_manager.handle_response({"output": output})
+            self._persist_assistant_turn(output)
             dismissed = self.goals.dismiss_completed()
             if dismissed:
                 logger.info(f"JARVIS: Dismissed {len(dismissed)} completed goal(s)")
@@ -493,8 +494,10 @@ class Jarvis:
                 return f"Deferred goal {parsed['goal_id']} for {parsed['duration']}s."
 
             elif action == "respond":
-                self.output_manager.handle_response({"output": parsed["output"]})
-                return parsed["output"]
+                out = parsed["output"]
+                self.output_manager.handle_response({"output": out})
+                self._persist_assistant_turn(out)
+                return out
 
             else:
                 logger.warning(f"JARVIS: Unexpected dispatch action '{action}'")
@@ -723,6 +726,17 @@ class Jarvis:
     def _get_embeddings(self):
         """Return the OllamaEmbeddings instance, or None if unavailable."""
         return self._embeddings
+
+    def _persist_assistant_turn(self, text: str) -> None:
+        """Append assistant-visible text to the session transcript in contextor."""
+        if not self.contextor or not text or not str(text).strip():
+            return
+        sid = self.sessions.current_id
+        if not sid:
+            return
+        self.contextor.auto_store_assistant_reply(
+            str(text).strip(), session_id=sid,
+        )
 
     def _ask_llm(self, context: str, tag: str = "") -> Dict[str, Any]:
         """Single LLM call with timing logs."""
@@ -1097,6 +1111,12 @@ class Jarvis:
         """Synchronous single-prompt interface for one-shot CLI usage."""
         logger.info(f"JARVIS: Processing: '{prompt}'")
 
+        self.sessions.ensure_session()
+        if self.contextor:
+            self.contextor.auto_store_prompt(
+                prompt, session_id=self.sessions.current_id,
+            )
+
         self.goals.add_goal(prompt)
         self.llm.switch_mode("root")
         context = self._build_root_context(new_input=prompt)
@@ -1112,6 +1132,8 @@ class Jarvis:
             result = {"output": f"Action: {parsed.get('action', 'unknown')}"}
 
         self.output_manager.handle_response(result)
+        if "error" not in parsed and parsed.get("action") == "respond":
+            self._persist_assistant_turn(result.get("output", ""))
 
         if Config.RESET_HISTORY_AFTER_RESPONSE:
             self.llm.reset_history()

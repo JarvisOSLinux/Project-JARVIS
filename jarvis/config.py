@@ -60,7 +60,8 @@ class Config:
     OUTPUT_MODE = os.getenv("OUTPUT_MODE", "voice")  # voice or text
 
     # Conversation History Configuration
-    RESET_HISTORY_AFTER_RESPONSE = os.getenv("RESET_HISTORY_AFTER_RESPONSE", "true").lower() == "true"
+    # false: multi-turn chat (Claude-like); true: one-shot / stateless per reply
+    RESET_HISTORY_AFTER_RESPONSE = os.getenv("RESET_HISTORY_AFTER_RESPONSE", "false").lower() == "true"
 
     # Data consent for memory (contextor)
     # - true: Proactively remember what the user shares (name, preferences, etc.)
