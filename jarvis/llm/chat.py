@@ -161,6 +161,7 @@ class LLM:
         """Ask the LLM a question in the current mode and return parsed JSON."""
         if _retries_left is None:
             _retries_left = self.MAX_JSON_RETRIES
+        attempt = self.MAX_JSON_RETRIES - _retries_left + 1
 
         self.chat_history.append({
             "role": "user",
@@ -184,29 +185,39 @@ class LLM:
             logger.error(f"LLM [{self._mode}] provider error: {e}")
             response_text = ""
 
-        logger.debug(f"LLM [{self._mode}] Responded:\n{response_text}\n----------")
+        logger.debug(
+            f"LLM [{self._mode}] attempt={attempt} responded "
+            f"(chars={len(response_text or '')})\n{response_text}\n----------"
+        )
 
         if not response_text or not response_text.strip():
-            logger.warning(f"LLM [{self._mode}] returned empty response")
+            logger.warning(
+                f"LLM [{self._mode}] returned empty response "
+                f"(attempt={attempt}, retries_left={_retries_left})"
+            )
             self.chat_history.pop()
             if _retries_left > 0:
                 return self.ask(prompt, _retries_left - 1)
             return self._fallback_response()
 
-        parsed = self._extract_json(response_text)
+        parsed, parse_source = self._extract_json(response_text)
         if parsed is not None:
             clean = json.dumps(parsed)
             self.chat_history.append({
                 "role": "assistant",
                 "content": clean,
             })
+            logger.debug(
+                f"LLM [{self._mode}] JSON parse succeeded via '{parse_source}' "
+                f"(attempt={attempt})"
+            )
             return parsed
 
         if _retries_left > 0:
             preview = response_text[:200].replace("\n", "\\n")
             logger.warning(
                 f"LLM [{self._mode}] response was not valid JSON, retrying "
-                f"({_retries_left} left). Raw: {preview}"
+                f"(attempt={attempt}, {_retries_left} left). Raw: {preview}"
             )
             hint = self._MODE_RETRY_HINTS.get(self._mode, "")
             retry_msg = f"{self._wrong_json_message}\n{hint}"
@@ -228,7 +239,7 @@ class LLM:
         return {"action": "respond", "output": msg}
 
     @staticmethod
-    def _extract_json(text: str) -> dict | None:
+    def _extract_json(text: str) -> tuple[dict | None, str]:
         """
         Try to extract a JSON object from LLM output that may be wrapped
         in markdown fences, thinking tags, or preamble text.
@@ -239,7 +250,7 @@ class LLM:
         try:
             obj = json.loads(text)
             if isinstance(obj, dict):
-                return obj
+                return obj, "direct"
         except (json.JSONDecodeError, ValueError):
             pass
 
@@ -252,7 +263,7 @@ class LLM:
             try:
                 obj = json.loads(cleaned)
                 if isinstance(obj, dict):
-                    return obj
+                    return obj, "strip_think_tags"
             except (json.JSONDecodeError, ValueError):
                 pass
 
@@ -263,14 +274,14 @@ class LLM:
             try:
                 obj = json.loads(fenced)
                 if isinstance(obj, dict):
-                    return obj
+                    return obj, "markdown_fence"
             except (json.JSONDecodeError, ValueError):
                 pass
             # Also try raw_decode on fenced content — handles trailing noise
             try:
                 obj, _ = decoder.raw_decode(fenced)
                 if isinstance(obj, dict):
-                    return obj
+                    return obj, "markdown_fence_raw_decode"
             except (json.JSONDecodeError, ValueError):
                 pass
 
@@ -285,9 +296,9 @@ class LLM:
             except (json.JSONDecodeError, ValueError):
                 continue
             if isinstance(obj, dict):
-                return obj
+                return obj, "raw_decode_scan"
 
-        return None
+        return None, "none"
 
     def reset_history(self):
         """Reset current mode's history to system prompt only."""

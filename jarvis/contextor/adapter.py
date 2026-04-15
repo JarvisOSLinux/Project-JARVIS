@@ -43,6 +43,8 @@ class ContextorAdapter:
         self._process: Optional[subprocess.Popen] = None
         self._connected = False
         self._lock = threading.Lock()
+        self._supports_sessions: Optional[bool] = None
+        self._supports_delete_scope: Optional[bool] = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -110,6 +112,12 @@ class ContextorAdapter:
     def is_connected(self) -> bool:
         return self._connected
 
+    @property
+    def supports_sessions(self) -> bool:
+        """Whether the connected binary supports session CRUD commands."""
+        # Unknown defaults to True so we only disable after a proven mismatch.
+        return self._supports_sessions is not False
+
     # ------------------------------------------------------------------
     # Wire protocol
     # ------------------------------------------------------------------
@@ -128,12 +136,53 @@ class ContextorAdapter:
                 if not response_line:
                     self._connected = False
                     return {"ok": False, "error": "No response from contextor"}
-                return json.loads(response_line.decode("utf-8"))
+                response = json.loads(response_line.decode("utf-8"))
+                self._update_capabilities_from_error(cmd, response)
+                return response
             except (BrokenPipeError, OSError) as e:
                 self._connected = False
                 return {"ok": False, "error": f"Pipe error: {e}"}
             except json.JSONDecodeError as e:
                 return {"ok": False, "error": f"Invalid JSON from contextor: {e}"}
+
+    def _update_capabilities_from_error(
+        self,
+        cmd: Dict[str, Any],
+        response: Dict[str, Any],
+    ) -> None:
+        """Infer binary capability flags from parse/validation errors."""
+        if response.get("ok", False):
+            return
+        error = str(response.get("error", "")).lower()
+        name = str(cmd.get("cmd", "")).lower()
+        if not error or not name:
+            return
+
+        if (
+            "unknown variant" in error
+            and name in {
+                "create_session", "list_sessions", "get_session",
+                "update_session", "delete_session",
+            }
+            and self._supports_sessions is not False
+        ):
+            self._supports_sessions = False
+            logger.warning(
+                "Contextor: Session commands unsupported by the connected "
+                "binary; running with single-stream memory scope."
+            )
+
+        if (
+            "unknown field" in error
+            and "session_id" in error
+            and name == "delete"
+            and self._supports_delete_scope is not False
+        ):
+            self._supports_delete_scope = False
+            logger.warning(
+                "Contextor: Scoped delete unsupported by the connected binary; "
+                "falling back to theme-wide delete."
+            )
 
     def _embed(self, text: str) -> Optional[list]:
         """Embed text via OllamaEmbeddings, or None if unavailable."""
@@ -403,11 +452,20 @@ class ContextorAdapter:
         if not self._connected:
             return {"deleted": False, "reason": "Not connected"}
 
-        result = self._send({
-            "cmd": "delete",
-            "theme": theme,
-            "session_id": session_id,
-        })
+        cmd: Dict[str, Any] = {"cmd": "delete", "theme": theme}
+        if session_id and self._supports_delete_scope is not False:
+            cmd["session_id"] = session_id
+        result = self._send(cmd)
+
+        # Compatibility fallback for older binaries that reject `session_id`.
+        if (
+            not result.get("ok")
+            and session_id
+            and "unknown field" in str(result.get("error", "")).lower()
+            and "session_id" in str(result.get("error", "")).lower()
+        ):
+            self._supports_delete_scope = False
+            result = self._send({"cmd": "delete", "theme": theme})
         if result.get("ok"):
             logger.info(f"Contextor: Deleted theme '{theme}'")
             return {"deleted": True, "theme": theme}
@@ -450,6 +508,8 @@ class ContextorAdapter:
         """
         if not self._connected:
             return {"error": "Contextor not connected"}
+        if self._supports_sessions is False:
+            return {"error": "Session commands unsupported by contextor binary"}
 
         result = self._send({
             "cmd": "create_session",
@@ -480,6 +540,8 @@ class ContextorAdapter:
         """
         if not self._connected:
             return {"sessions": []}
+        if self._supports_sessions is False:
+            return {"sessions": [], "error": "Session commands unsupported by contextor binary"}
 
         result = self._send({
             "cmd": "list_sessions",
@@ -497,6 +559,8 @@ class ContextorAdapter:
         """Fetch a single session's full record."""
         if not self._connected:
             return {"error": "Contextor not connected"}
+        if self._supports_sessions is False:
+            return {"error": "Session commands unsupported by contextor binary"}
 
         result = self._send({"cmd": "get_session", "session_id": session_id})
         if result.get("ok"):
@@ -517,14 +581,20 @@ class ContextorAdapter:
         """
         if not self._connected:
             return {"error": "Contextor not connected"}
+        if self._supports_sessions is False:
+            return {"error": "Session commands unsupported by contextor binary"}
 
         cmd: Dict[str, Any] = {"cmd": "update_session", "session_id": session_id}
         if title is not None:
             cmd["title"] = title
         if summary is not None:
-            cmd["summary"] = summary
+            # Rust protocol uses `rolling_summary`.
+            cmd["rolling_summary"] = summary
         if metadata is not None:
-            cmd["metadata"] = metadata
+            logger.debug(
+                "Contextor: update_session metadata is not supported by current "
+                "binary protocol; ignoring metadata update."
+            )
 
         result = self._send(cmd)
         if result.get("ok"):
@@ -548,11 +618,12 @@ class ContextorAdapter:
         """
         if not self._connected:
             return {"error": "Contextor not connected"}
+        if self._supports_sessions is False:
+            return {"error": "Session commands unsupported by contextor binary"}
 
         result = self._send({
             "cmd": "delete_session",
             "session_id": session_id,
-            "delete_entries": delete_entries,
         })
         if result.get("ok"):
             logger.info(f"Contextor: Deleted session {session_id[:8]}")

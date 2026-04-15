@@ -86,8 +86,15 @@ class Jarvis:
         if self.dispatch.is_connected and self._embeddings:
             try:
                 await self.dispatch.ensure_embedding_model(self._embeddings)
-                await self.dispatch.sync_index()
-                logger.info("JARVIS: Tool vector index synced")
+                count = await self.dispatch.server_count()
+                if count.get("registry", 0) > 0:
+                    await self.dispatch.sync_index()
+                    logger.info("JARVIS: Tool vector index synced")
+                else:
+                    logger.info(
+                        "JARVIS: Skipping tool vector sync "
+                        "(no registry servers visible)"
+                    )
             except Exception as e:
                 logger.warning(f"JARVIS: Tool index sync failed (non-fatal): {e}")
 
@@ -229,9 +236,9 @@ class Jarvis:
             context = self._build_root_context()
 
             if isinstance(result, dict) and "error" in result:
-                context += f"\nDISPATCH_ERROR: {json.dumps(result)}"
+                context += f"\nDISPATCH_ERROR: {self._compact_payload_for_llm(result)}"
             else:
-                context += f"\nDISPATCH_RESULT: {json.dumps(result)}"
+                context += f"\nDISPATCH_RESULT: {self._compact_payload_for_llm(result)}"
 
             # Include partial denial if some tools were denied.
             if pending.denied_tools:
@@ -302,7 +309,9 @@ class Jarvis:
             result = self.contextor.store(
                 parsed["theme"], parsed["content"], session_id=sid,
             )
-            await self._feed_root_summary("STORE_RESULT", json.dumps(result), depth)
+            await self._feed_root_summary(
+                "STORE_RESULT", self._compact_payload_for_llm(result), depth,
+            )
 
         elif action == "recall":
             if not self.contextor:
@@ -313,7 +322,9 @@ class Jarvis:
             result = self.contextor.recall(
                 parsed["theme"], session_id=self.sessions.current_id,
             )
-            await self._feed_root_summary("RECALL_RESULT", json.dumps(result), depth)
+            await self._feed_root_summary(
+                "RECALL_RESULT", self._compact_payload_for_llm(result), depth,
+            )
 
         elif action == "search_memory":
             if not self.contextor:
@@ -331,7 +342,9 @@ class Jarvis:
                 session_id=self.sessions.current_id,
                 include_global=True,
             )
-            await self._feed_root_summary("SEARCH_MEMORY_RESULT", json.dumps(result), depth)
+            await self._feed_root_summary(
+                "SEARCH_MEMORY_RESULT", self._compact_payload_for_llm(result), depth,
+            )
 
         elif action == "list_memory":
             if not self.contextor:
@@ -342,7 +355,9 @@ class Jarvis:
             result = self.contextor.list_themes(
                 session_id=self.sessions.current_id,
             )
-            await self._feed_root_summary("LIST_MEMORY_RESULT", json.dumps(result), depth)
+            await self._feed_root_summary(
+                "LIST_MEMORY_RESULT", self._compact_payload_for_llm(result), depth,
+            )
 
     async def _feed_root_summary(self, label: str, summary: str, depth: int):
         """Feed a subsystem summary back into ROOT for the next decision."""
@@ -389,6 +404,10 @@ class Jarvis:
         context = "\n".join(context_parts)
 
         for step in range(MAX_CHAIN_DEPTH):
+            logger.info(
+                "JARVIS: Dispatch iteration start "
+                f"(step={step}, context_chars={len(context)})"
+            )
             response = self._ask_llm(context, tag=f"dispatch-step-{step}")
             parsed = self.task_parser.parse(response)
 
@@ -397,6 +416,7 @@ class Jarvis:
                 return f"Error: {parsed['error']}"
 
             action = parsed["action"]
+            logger.info(f"JARVIS: Dispatch iteration action (step={step}, action={action})")
             self._apply_goal_updates(parsed.get("goal_updates", []))
 
             if action == "done":
@@ -425,15 +445,15 @@ class Jarvis:
 
             elif action == "search":
                 result = await self.dispatch.search_servers(parsed["keywords"])
-                context = f"SEARCH_RESULTS: {json.dumps(result)}"
+                context = f"SEARCH_RESULTS: {self._compact_payload_for_llm(result)}"
 
             elif action == "list_tools":
                 result = await self.dispatch.list_server_tools(parsed["server_id"])
-                context = f"TOOLS: {json.dumps(result)}"
+                context = f"TOOLS: {self._compact_payload_for_llm(result)}"
 
             elif action == "install":
                 result = await self.dispatch.install_server(parsed["server_id"])
-                context = f"INSTALL_RESULT: {json.dumps(result)}"
+                context = f"INSTALL_RESULT: {self._compact_payload_for_llm(result)}"
 
                 # Auto-index non-approved servers after successful install
                 server_id = parsed.get("server_id", "")
@@ -454,9 +474,9 @@ class Jarvis:
                     )
                     return "Waiting for user confirmation."
                 elif isinstance(result, dict) and "error" in result:
-                    context = f"DISPATCH_ERROR: {json.dumps(result)}"
+                    context = f"DISPATCH_ERROR: {self._compact_payload_for_llm(result)}"
                 else:
-                    context = f"DISPATCH_RESULT: {json.dumps(result)}"
+                    context = f"DISPATCH_RESULT: {self._compact_payload_for_llm(result)}"
 
             elif action == "wait":
                 logger.info("JARVIS: Dispatch sub-chain waiting")
@@ -594,9 +614,9 @@ class Jarvis:
         self.llm.switch_mode("root")
         context = self._build_root_context()
         if isinstance(result, dict) and "error" in result:
-            context += f"\nDISPATCH_ERROR: {json.dumps(result)}"
+            context += f"\nDISPATCH_ERROR: {self._compact_payload_for_llm(result)}"
         else:
-            context += f"\nDISPATCH_RESULT: {json.dumps(result)}"
+            context += f"\nDISPATCH_RESULT: {self._compact_payload_for_llm(result)}"
 
         response = self._ask_llm(context, tag="root-dispatch-result")
         await self._act_on_root_response(response, depth + 1)
@@ -717,6 +737,34 @@ class Jarvis:
         logger.debug(f"JARVIS [{tag}]: LLM raw response: {response}")
         return response
 
+    def _compact_payload_for_llm(
+        self,
+        payload: Any,
+        *,
+        max_chars: int = 3000,
+    ) -> str:
+        """Compact large payloads before injecting them into root context.
+
+        Keeps logs verbose but prevents giant vectors / stack traces from
+        bloating the active chat context.
+        """
+        try:
+            if isinstance(payload, (dict, list)):
+                text = json.dumps(payload, ensure_ascii=False)
+            else:
+                text = str(payload)
+        except Exception:
+            text = str(payload)
+
+        # Trim huge vector dumps while preserving diagnostic intent.
+        text = text.replace("vector", "vec")
+        text = text.replace("vectors", "vecs")
+
+        if len(text) <= max_chars:
+            return text
+        omitted = len(text) - max_chars
+        return f"{text[:max_chars]} ... [truncated {omitted} chars]"
+
     def _build_root_context(
         self,
         new_input: Optional[str] = None,
@@ -743,7 +791,13 @@ class Jarvis:
                 include_global=True,
             )
             if rag_context:
+                logger.info(
+                    "JARVIS: RAG context injected for root "
+                    f"(chars={len(rag_context)}, session_id={self.sessions.current_id})"
+                )
                 parts.append(rag_context)
+            else:
+                logger.debug("JARVIS: No RAG context injected for root")
 
         # Tier-2 rolling summary — gives the LLM a compressed view of
         # older turns without blowing the context window.
@@ -753,6 +807,11 @@ class Jarvis:
 
         if new_input:
             parts.append(f"NEW INPUT: {new_input}")
+
+        logger.debug(
+            "JARVIS: Built root context "
+            f"(parts={len(parts)}, chars={sum(len(p) for p in parts)})"
+        )
 
         return "\n".join(parts) if parts else "No active context."
 

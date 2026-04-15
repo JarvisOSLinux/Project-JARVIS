@@ -49,8 +49,10 @@ class SessionManager:
     @property
     def available(self) -> bool:
         """True when contextor is connected (sessions require it)."""
-        return self._contextor is not None and getattr(
-            self._contextor, "is_connected", False,
+        return (
+            self._contextor is not None
+            and getattr(self._contextor, "is_connected", False)
+            and getattr(self._contextor, "supports_sessions", True)
         )
 
     # ------------------------------------------------------------------

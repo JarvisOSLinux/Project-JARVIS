@@ -43,17 +43,20 @@ class TaskParser:
 
         if action not in VALID_ACTIONS:
             logger.warning(f"TaskParser: Unknown action '{action}'")
+            logger.debug(f"TaskParser: Raw response for unknown action: {response}")
             return {"error": f"Unknown action: {action}", "raw": response}
 
         parser_fn = _PARSERS.get(action)
         if not parser_fn:
             logger.warning(f"TaskParser: No parser registered for action '{action}'")
+            logger.debug(f"TaskParser: Raw response without parser: {response}")
             return {"error": f"No parser for action: {action}", "raw": response}
 
         result = parser_fn(response)
 
         if "error" in result:
             logger.warning(f"TaskParser: Validation failed for action='{action}': {result['error']}")
+            logger.debug(f"TaskParser: Validation raw payload: {response}")
         else:
             summary = TaskParser._summarize(result)
             logger.info(f"TaskParser: Parsed action='{action}'{summary}")
