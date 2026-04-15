@@ -6,16 +6,17 @@ Project JARVIS is an innovative AI-powered voice assistant that combines natural
 
 ---
 
-## ✨ Revolutionary Features
+## ✨ Core Features
 
 - **🎤 Voice-First Interface**: Real-time speech recognition and synthesis
 - **👂 Wake Word Detection**: Always-listening voice activation with customizable wake words ("Jarvis", "Hey Jarvis", etc.)
 - **💻 CLI Support**: Text-based interface with `jarvis ask` command for scripting and accessibility
-- **🧠 AI-Driven Tool Discovery**: Automatically discovers and uses available MCP servers
+- **🧠 Hierarchical Orchestration**: ROOT mode handles dialogue/memory, DISPATCH mode handles tool execution
+- **🔍 AI-Driven Tool Discovery**: Uses embedding-first discovery when available, keyword fallback otherwise
 - **🔧 Dynamic Capability Extension**: Add new tools without code changes
 - **🛡️ Secure Local Processing**: All operations run locally for privacy
 - **🌐 Cross-Platform Support**: Windows, Linux, macOS compatibility
-- **⚡ Self-Extending AI**: Can create new MCP servers on demand
+- **⚡ Event-Driven Execution**: One event queue merges voice, CLI, socket, and dispatch signals
 - **🎯 Smart Audio Management**: Automatically switches between wake word detection and command processing
 - **🔄 Flexible Output**: Choose between text or voice output for responses  
 
@@ -320,29 +321,31 @@ LOG_COLORS=true               # Colored console output
 
 ## 🔧 How It Works
 
-### **Voice Activation Mode (Default)**
-1. **👂 Always Listening**: Continuously monitors for wake words ("Jarvis", "Hey Jarvis", etc.)
-2. **🎯 Wake Word Detection**: Vosk-based real-time wake word recognition
-3. **🎤 Voice Input**: After wake word, switches to command processing mode
-4. **🧠 AI Processing**: LLM (via Ollama) analyzes the request and determines required tools
-5. **🔍 Dynamic Discovery**: SuperMCP discovers available MCP servers and their capabilities
-6. **⚡ Tool Execution**: Appropriate MCP servers execute the requested operations
-7. **🔊 Voice Output**: Piper TTS converts the response back to speech
-8. **🔄 Return to Listening**: Automatically returns to wake word detection mode
+### **Workflow Architecture (Current)**
+1. **Unified Input Collection**: Voice, stdin chat, and `jarvis send` socket input are merged into one async event queue.
+2. **ROOT Decision Loop**: ROOT LLM mode receives `GOALS`, optional `SIGNAL`, session RAG context, rolling summary, and new input.
+3. **Action Selection**: ROOT returns one action: `respond`, direct memory operation (`store`, `recall`, `search_memory`, `list_memory`), or `dispatch`.
+4. **DISPATCH Sub-Chain (if needed)**: DISPATCH mode iterates through `plan/search/list_tools/install/dispatch/wait/done`.
+5. **Tool Execution**: `dispatch` binary executes MCP tasks concurrently and emits signals (`INIT`, `EXIT`, `REMIND`, etc.).
+6. **Signal Feedback**: Signals are re-injected into ROOT so the model can decide follow-up actions or user-facing responses.
+7. **Output Handling**: Responses go to console/socket and optionally TTS, then the system returns to listening for new events.
 
-### **Legacy Continuous Mode**
-1. **🎤 Voice Input**: User speaks into microphone, Vosk converts speech to text
-2. **🧠 AI Processing**: LLM (via Ollama) analyzes the request and determines required tools
-3. **🔍 Dynamic Discovery**: SuperMCP discovers available MCP servers and their capabilities
-4. **⚡ Tool Execution**: Appropriate MCP servers execute the requested operations
-5. **🔊 Voice Output**: Piper TTS converts the response back to speech
+### **Discovery Strategy**
+- **Embedding mode** (preferred): enabled when embeddings are available and configured thresholds are met.
+- **Keyword mode** (fallback/default): used when embeddings are disabled/unavailable or no semantic matches are found.
+- Installed servers are expanded to concrete tools so DISPATCH can call exact `server/tool` pairs.
 
-**Revolutionary Architecture**:
-```
-Wake Word → Voice Activation → STT → LLM → SuperMCP → MCP Servers → Response → TTS → Return to Listening
-```
+### **Memory + Sessions**
+- Memory is managed by the local `contextor` binary (storage + semantic retrieval).
+- Each chat runs in an active session; user prompts are auto-stored and RAG is session-scoped (+ optional global memory).
+- Slash commands (`/new`, `/sessions`, `/switch`, `/rename`, `/delete`) manage sessions without an LLM roundtrip.
 
-### **Available MCP Servers**
+### **Confirmation Gate**
+- Tool calls can require user approval via metadata (`confirmation_required`).
+- Confirmation is non-blocking and event-driven (desktop notification, socket UI, or CLI prompt).
+- While waiting for approval, JARVIS keeps processing other events.
+
+### **Example MCP Servers**
 - **ShellMCP**: Terminal command execution
 - **CodeAnalysisMCP**: Code repository analysis and file operations
 - **EchoMCP**: Testing and validation
