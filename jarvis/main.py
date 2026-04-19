@@ -36,12 +36,14 @@ MAX_CHAIN_DEPTH = 15
 
 
 class Jarvis:
-    def __init__(self, text_mode=False):
-        self.text_mode = text_mode
+    def __init__(self, text_mode=False, tui_mode=False):
+        # TUI owns the terminal, so it always disables voice and stdin.
+        self.text_mode = text_mode or tui_mode
+        self.tui_mode = tui_mode
         self._running = False
 
         self.components = ComponentFactory.create_all_components(
-            text_mode=text_mode,
+            text_mode=self.text_mode,
             on_voice_command=self._handle_voice_command,
         )
 
@@ -91,7 +93,12 @@ class Jarvis:
             except Exception as e:
                 logger.warning(f"JARVIS: Tool index sync failed (non-fatal): {e}")
 
-        user_source = self._await_user_input if self._has_stdin() else None
+        # In TUI mode, the Textual app owns stdin and injects input via
+        # events.inject_user_input(), so we never install the stdin source.
+        if self.tui_mode:
+            user_source = None
+        else:
+            user_source = self._await_user_input if self._has_stdin() else None
         self.events.start(
             signal_source=self._await_dispatch_signal,
             user_source=user_source,
