@@ -89,7 +89,9 @@ UI to **query memories across sessions** (with clear scope: global vs session-sc
 
 Implemented in `jarvis/tui/app.py`: **Ctrl+L** focuses the **chat log** (scroll with arrows / PgUp), **Ctrl+I** focuses the **message input**. Shells often bind Ctrl+L to “clear line”; inside the TUI the app receives the key first, so behavior is predictable while JARVIS has focus.
 
-**Help:** **F1** opens a modal cheat sheet (`jarvis/tui/help_screen.py`); **Esc** or **F1** closes it. **`/help`** and **`/?`** in the input line open the same modal (TUI-only; not sent to the LLM).
+**Help:** **F1** opens a modal cheat sheet (`jarvis/tui/help_screen.py`); **Esc** or **F1** closes it. **`/help`** and **`/?`** in the input line open the same modal (TUI-only; not sent to the LLM). The **keyboard** table is generated from ``JarvisTUI.BINDINGS`` at open time; **session slash** descriptions live in ``jarvis/tui/slash_commands_doc.py`` and must stay aligned with ``Jarvis._handle_slash_command`` in ``main.py``.
+
+**Transcript:** **Ctrl+Shift+C** clears the on-screen log and export buffer (not contextor). **Ctrl+Shift+E** or **`/export`** writes a Markdown file under ``JARVIS_DATA_DIR/transcripts/``.
 
 ### Session search / filter
 
@@ -126,3 +128,4 @@ Deferred for now (redundant with terminal selection for many users).
 | 2026-04-18 | Initial doc: TUI definition + WIP notes.                           |
 | 2026-04-18 | WIP: operator extras vs prompts; reconnect; log locations; Ctrl+L/I. |
 | 2026-04-18 | F1 + `/help` modal help screen (`help_screen.py`).                |
+| 2026-04-18 | Help keys from `BINDINGS`; slash doc module; clear + export transcript. |

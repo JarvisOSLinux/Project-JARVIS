@@ -20,7 +20,9 @@ Keybindings:
     Ctrl+Q  — quit
     Ctrl+L  — focus chat log (scroll with arrows / PgUp)
     Ctrl+I  — focus message input
-    F1      — help (slash commands + keys)
+    Ctrl+Shift+C — clear on-screen transcript (export buffer only; not memory)
+    Ctrl+Shift+E — export transcript to ``JARVIS_DATA_DIR/transcripts/``
+    F1      — help (keys from ``BINDINGS`` + documented slash commands)
     Enter   — submit message
     Click / arrows — switch session (in sidebar)
 
@@ -34,14 +36,20 @@ Architecture:
       ``output_manager``.  The callback runs in the main asyncio loop
       (same as Textual), so it can safely write to widgets.
     * Slash commands (``/new``, ``/switch``, …) still work the old way
-      via main.py's handler; ``/help`` is handled in the TUI only (modal).
-      The sidebar refreshes after every turn to stay in sync.
+      via main.py's handler; ``/help`` and ``/export`` are handled in the
+      TUI only.  The sidebar refreshes after every turn to stay in sync.
 """
 
 from __future__ import annotations
 
 import asyncio
+import os
+import time
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from rich.text import Text
 
 from textual import on
 from textual.app import App, ComposeResult
@@ -54,8 +62,17 @@ from ..config import Config
 from ..core.logger import get_logger
 from ..sessions.model import Session
 from .help_screen import HelpScreen
+from .slash_commands_doc import build_help_markdown
 
 logger = get_logger(__name__)
+
+
+def _markup_to_plain(markup: str) -> str:
+    """Strip Rich markup for export / plain transcript buffer."""
+    try:
+        return Text.from_markup(markup, emoji=False).plain
+    except Exception:
+        return markup
 
 
 class SessionItem(ListItem):
@@ -132,9 +149,12 @@ class JarvisTUI(App):
     BINDINGS = [
         Binding("ctrl+n", "new_session", "New", show=True),
         Binding("ctrl+q", "quit", "Quit", show=True),
+        Binding("ctrl+d", "delete_selected_session", "Delete", show=True),
         Binding("ctrl+l", "focus_chat", "Log", show=True),
         Binding("ctrl+i", "focus_input", "Input", show=True),
         Binding("f1", "help", "Help", show=True),
+        Binding("ctrl+shift+c", "clear_transcript", "Clear log", show=False),
+        Binding("ctrl+shift+e", "export_transcript", "Export", show=False),
     ]
 
     status_text: reactive[str] = reactive("starting…")
@@ -144,6 +164,12 @@ class JarvisTUI(App):
         self.jarvis = None  # type: ignore[assignment]
         self._jarvis_task: Optional[asyncio.Task] = None
         self._output_cb = None
+        # Plain lines mirroring the RichLog (for Markdown export).
+        self._export_lines: list[str] = []
+        # Sidebar refresh can be requested from multiple timers/callbacks.
+        self._sidebar_refresh_lock = asyncio.Lock()
+        # Ctrl+D is a two-step confirmation keyed by session id.
+        self._pending_delete_session_id: Optional[str] = None
 
     # ------------------------------------------------------------------
     # Layout
@@ -158,7 +184,7 @@ class JarvisTUI(App):
             with Vertical(id="chat-pane"):
                 yield RichLog(id="chat-log", markup=True, wrap=True, highlight=True)
                 yield Input(
-                    placeholder="Message, /help, /sessions, /new, /switch <id>…",
+                    placeholder="Message, /help, /export, /sessions, /new…",
                     id="input",
                 )
         yield Static(self.status_text, id="status-bar")
@@ -172,8 +198,7 @@ class JarvisTUI(App):
         self.title = "JARVIS"
         self.sub_title = "interactive chat"
 
-        chat_log = self.query_one("#chat-log", RichLog)
-        chat_log.write("[dim]Booting JARVIS engine…[/dim]")
+        self._append_log("[dim]Booting JARVIS engine…[/dim]")
 
         # Defer engine start off the Textual mount path so an Ollama
         # connect or contextor spawn doesn't block the first paint.
@@ -181,8 +206,6 @@ class JarvisTUI(App):
 
     async def _start_jarvis(self) -> None:
         """Create the Jarvis engine and start its event loop."""
-        chat_log = self.query_one("#chat-log", RichLog)
-
         # Lazy import — avoids pulling engine deps when someone only
         # introspects the tui module.
         from ..main import Jarvis
@@ -191,7 +214,7 @@ class JarvisTUI(App):
             jarvis = Jarvis(tui_mode=True)
         except Exception as e:  # pragma: no cover - surfaced to the user
             logger.error(f"TUI: Failed to construct Jarvis: {e}", exc_info=True)
-            chat_log.write(f"[red]Failed to start JARVIS: {e}[/red]")
+            self._append_log(f"[red]Failed to start JARVIS: {e}[/red]")
             self._set_status(f"startup error: {e}")
             return
 
@@ -206,7 +229,9 @@ class JarvisTUI(App):
         await asyncio.sleep(0.1)
         await self._refresh_sidebar()
         self._update_status()
-        chat_log.write("[green]Ready.[/green] Type below or use Ctrl+N for a new chat.")
+        self._append_log(
+            "[green]Ready.[/green] Type below or use Ctrl+N for a new chat."
+        )
         self.query_one("#input", Input).focus()
 
     async def _run_engine(self) -> None:
@@ -250,7 +275,13 @@ class JarvisTUI(App):
 
         low = text.lower()
         if low in ("/help", "/?"):
-            self.push_screen(HelpScreen())
+            self.push_screen(HelpScreen(build_help_markdown(JarvisTUI.BINDINGS)))
+            return
+
+        if low == "/export" or low.startswith("/export "):
+            parts = text.split(maxsplit=1)
+            name_arg = parts[1].strip() if len(parts) > 1 else None
+            self._export_transcript_to_disk(name_arg)
             return
 
         if self.jarvis is None:
@@ -282,6 +313,7 @@ class JarvisTUI(App):
         except Exception:
             return
         chat_log.write(markup)
+        self._export_lines.append(_markup_to_plain(markup))
 
     @staticmethod
     def _escape(text: str) -> str:
@@ -297,30 +329,47 @@ class JarvisTUI(App):
         asyncio.create_task(self._refresh_sidebar())
 
     async def _refresh_sidebar(self) -> None:
-        if self.jarvis is None:
-            return
-        try:
-            sessions: List[Session] = self.jarvis.sessions.list(limit=50)
-        except Exception as e:
-            logger.debug(f"TUI: session list failed: {e}")
-            sessions = []
+        async with self._sidebar_refresh_lock:
+            if self.jarvis is None:
+                return
+            try:
+                sessions: List[Session] = self.jarvis.sessions.list(limit=50)
+            except Exception as e:
+                logger.debug(f"TUI: session list failed: {e}")
+                sessions = []
 
-        current_id = self.jarvis.sessions.current_id
-        try:
-            list_view = self.query_one("#session-list", ListView)
-        except Exception:
-            return
-
-        await list_view.clear()
-        if not sessions:
-            await list_view.append(ListItem(Label("[dim](no sessions yet)[/dim]")))
-        else:
+            # Guard against duplicates in fast concurrent refresh bursts and
+            # any backend-level duplicate rows.
+            seen_ids: set[str] = set()
+            unique_sessions: List[Session] = []
             for s in sessions:
-                item = SessionItem(s, is_current=(s.id == current_id))
-                if item.is_current:
-                    item.add_class("-current")
-                await list_view.append(item)
-        self._update_status()
+                if s.id in seen_ids:
+                    continue
+                seen_ids.add(s.id)
+                unique_sessions.append(s)
+            sessions = unique_sessions
+
+            current_id = self.jarvis.sessions.current_id
+            if (
+                self._pending_delete_session_id is not None
+                and self._pending_delete_session_id not in seen_ids
+            ):
+                self._pending_delete_session_id = None
+            try:
+                list_view = self.query_one("#session-list", ListView)
+            except Exception:
+                return
+
+            await list_view.clear()
+            if not sessions:
+                await list_view.append(ListItem(Label("[dim](no sessions yet)[/dim]")))
+            else:
+                for s in sessions:
+                    item = SessionItem(s, is_current=(s.id == current_id))
+                    if item.is_current:
+                        item.add_class("-current")
+                    await list_view.append(item)
+            self._update_status()
 
     @on(ListView.Selected, "#session-list")
     async def on_session_selected(self, event: ListView.Selected) -> None:
@@ -329,6 +378,7 @@ class JarvisTUI(App):
             return
         if item.session_id == self.jarvis.sessions.current_id:
             return
+        self._pending_delete_session_id = None
         session = self.jarvis.sessions.switch(item.session_id)
         if session is None:
             self._append_log(f"[red]Could not switch to {item.session_id[:8]}[/red]")
@@ -351,12 +401,59 @@ class JarvisTUI(App):
             return
         session = self.jarvis.sessions.new_session()
         if session:
+            self._pending_delete_session_id = None
             self._append_log(
                 f"[dim]— started new session {session.short_id()} —[/dim]"
             )
             await self._refresh_sidebar()
         else:
             self._append_log("[red]Could not create a new session.[/red]")
+
+    async def action_delete_selected_session(self) -> None:
+        """Delete the highlighted (or current) session with two-step confirm."""
+        if self.jarvis is None:
+            return
+        if not self.jarvis.sessions.available:
+            self._append_log("[yellow]Memory is disabled — sessions unavailable.[/yellow]")
+            return
+        target = self._get_delete_target_session()
+        if target is None:
+            self._append_log("[yellow]No session selected to delete.[/yellow]")
+            return
+
+        sid = target.id
+        if self._pending_delete_session_id != sid:
+            self._pending_delete_session_id = sid
+            self._append_log(
+                f"[yellow]Press Ctrl+D again to delete {target.short_id()} "
+                f"('{target.title or 'untitled'}').[/yellow]"
+            )
+            return
+
+        self._pending_delete_session_id = None
+        if self.jarvis.sessions.delete(sid):
+            self._append_log(f"[dim]— deleted session {target.short_id()} —[/dim]")
+            await self._refresh_sidebar()
+        else:
+            self._append_log(f"[red]Delete failed for {target.short_id()}.[/red]")
+
+    def _get_delete_target_session(self) -> Optional[Session]:
+        """Prefer highlighted sidebar session; fall back to current session."""
+        try:
+            list_view = self.query_one("#session-list", ListView)
+            highlighted = list_view.highlighted_child
+        except Exception:
+            highlighted = None
+
+        if isinstance(highlighted, SessionItem) and self.jarvis is not None:
+            sessions = self.jarvis.sessions.list(limit=500)
+            for s in sessions:
+                if s.id == highlighted.session_id:
+                    return s
+            return None
+        if self.jarvis is not None:
+            return self.jarvis.sessions.current
+        return None
 
     def action_focus_chat(self) -> None:
         """Move focus to the transcript for keyboard scrolling (arrows / PgUp)."""
@@ -374,7 +471,83 @@ class JarvisTUI(App):
 
     def action_help(self) -> None:
         """Open the help modal (Esc / F1 closes while help is focused)."""
-        self.push_screen(HelpScreen())
+        self.push_screen(HelpScreen(build_help_markdown(JarvisTUI.BINDINGS)))
+
+    def action_clear_transcript(self) -> None:
+        """Clear the RichLog and export buffer only (does not touch contextor)."""
+        try:
+            log = self.query_one("#chat-log", RichLog)
+            log.clear()
+        except Exception:
+            return
+        self._export_lines.clear()
+        self._append_log(
+            "[dim]Transcript cleared (on-screen only; session memory unchanged.)[/dim]"
+        )
+
+    def action_export_transcript(self) -> None:
+        """Write ``_export_lines`` to ``JARVIS_DATA_DIR/transcripts/``."""
+        self._export_transcript_to_disk(None)
+
+    def _export_transcript_to_disk(self, filename: Optional[str]) -> None:
+        """Save plain transcript as Markdown under ``JARVIS_DATA_DIR/transcripts``."""
+        root = Path(Config.JARVIS_DATA_DIR).expanduser().resolve()
+        out_dir = root / "transcripts"
+        try:
+            out_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            self._append_log(f"[red]Export failed (mkdir): {e}[/red]")
+            return
+
+        if filename:
+            base = os.path.basename(filename.strip())
+            if not base or base in (".", ".."):
+                self._append_log("[red]Export: invalid filename.[/red]")
+                return
+            if not base.lower().endswith(".md"):
+                base = f"{base}.md"
+        else:
+            sid = "no-session"
+            if self.jarvis is not None and self.jarvis.sessions.current:
+                sid = self.jarvis.sessions.current.short_id()
+            base = f"{sid}_{int(time.time())}.md"
+
+        out_resolved = out_dir.resolve()
+        path = (out_resolved / base).resolve()
+        try:
+            path.relative_to(out_resolved)
+        except ValueError:
+            self._append_log("[red]Export: path must stay under transcripts/.[/red]")
+            return
+
+        sid2 = "none"
+        model = getattr(Config, "LLM_MODEL", None) or "(unset)"
+        if self.jarvis is not None and self.jarvis.sessions.current:
+            sid2 = self.jarvis.sessions.current.id
+
+        header = "\n".join(
+            [
+                "# JARVIS transcript export",
+                "",
+                f"- Exported (UTC): {datetime.now(timezone.utc).isoformat()}",
+                f"- Session id: `{sid2}`",
+                f"- Model: `{model}`",
+                "",
+                "---",
+                "",
+            ]
+        )
+        body_lines = self._export_lines if self._export_lines else ["_(no transcript lines yet)_"]
+        body = "\n".join(body_lines)
+        text_out = header + body + "\n"
+
+        try:
+            path.write_text(text_out, encoding="utf-8")
+        except OSError as e:
+            self._append_log(f"[red]Export failed: {e}[/red]")
+            return
+
+        self._append_log(f"[green]Exported transcript to[/green] {path}")
 
     # ------------------------------------------------------------------
     # Status bar
@@ -391,7 +564,10 @@ class JarvisTUI(App):
         provider = getattr(Config, "LLM_PROVIDER", "?")
         parts.append(f"model: {model}")
         parts.append(f"provider: {provider}")
-        parts.append("Ctrl+N new · Ctrl+Q quit · Ctrl+L log · Ctrl+I input · F1 help")
+        parts.append(
+            "Ctrl+N new · Ctrl+D delete · Ctrl+Q quit · Ctrl+L log · Ctrl+I input · F1 help · "
+            "Ctrl+Shift+C clear · Ctrl+Shift+E export"
+        )
 
         self.status_text = "  |  ".join(parts)
 
