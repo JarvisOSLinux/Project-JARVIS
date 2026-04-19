@@ -20,6 +20,7 @@ Keybindings:
     Ctrl+Q  — quit
     Ctrl+L  — focus chat log (scroll with arrows / PgUp)
     Ctrl+I  — focus message input
+    F1      — help (slash commands + keys)
     Enter   — submit message
     Click / arrows — switch session (in sidebar)
 
@@ -33,8 +34,8 @@ Architecture:
       ``output_manager``.  The callback runs in the main asyncio loop
       (same as Textual), so it can safely write to widgets.
     * Slash commands (``/new``, ``/switch``, …) still work the old way
-      via main.py's handler; the sidebar refreshes after every turn to
-      stay in sync.
+      via main.py's handler; ``/help`` is handled in the TUI only (modal).
+      The sidebar refreshes after every turn to stay in sync.
 """
 
 from __future__ import annotations
@@ -52,6 +53,7 @@ from textual.widgets import Footer, Header, Input, Label, ListItem, ListView, Ri
 from ..config import Config
 from ..core.logger import get_logger
 from ..sessions.model import Session
+from .help_screen import HelpScreen
 
 logger = get_logger(__name__)
 
@@ -132,6 +134,7 @@ class JarvisTUI(App):
         Binding("ctrl+q", "quit", "Quit", show=True),
         Binding("ctrl+l", "focus_chat", "Log", show=True),
         Binding("ctrl+i", "focus_input", "Input", show=True),
+        Binding("f1", "help", "Help", show=True),
     ]
 
     status_text: reactive[str] = reactive("starting…")
@@ -155,7 +158,7 @@ class JarvisTUI(App):
             with Vertical(id="chat-pane"):
                 yield RichLog(id="chat-log", markup=True, wrap=True, highlight=True)
                 yield Input(
-                    placeholder="Type a message or /sessions, /new, /switch <id>…",
+                    placeholder="Message, /help, /sessions, /new, /switch <id>…",
                     id="input",
                 )
         yield Static(self.status_text, id="status-bar")
@@ -244,6 +247,12 @@ class JarvisTUI(App):
         event.input.value = ""
         if not text:
             return
+
+        low = text.lower()
+        if low in ("/help", "/?"):
+            self.push_screen(HelpScreen())
+            return
+
         if self.jarvis is None:
             self._append_log("[yellow]JARVIS is still starting up — try again in a second.[/yellow]")
             return
@@ -363,6 +372,10 @@ class JarvisTUI(App):
         except Exception:
             pass
 
+    def action_help(self) -> None:
+        """Open the help modal (Esc / F1 closes while help is focused)."""
+        self.push_screen(HelpScreen())
+
     # ------------------------------------------------------------------
     # Status bar
     # ------------------------------------------------------------------
@@ -378,7 +391,7 @@ class JarvisTUI(App):
         provider = getattr(Config, "LLM_PROVIDER", "?")
         parts.append(f"model: {model}")
         parts.append(f"provider: {provider}")
-        parts.append("Ctrl+N new · Ctrl+Q quit · Ctrl+L log · Ctrl+I input")
+        parts.append("Ctrl+N new · Ctrl+Q quit · Ctrl+L log · Ctrl+I input · F1 help")
 
         self.status_text = "  |  ".join(parts)
 
