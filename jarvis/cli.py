@@ -4,6 +4,7 @@ CLI interface for JARVIS AI Assistant
 Usage:
     jarvis                    # Start dual-input mode (voice + socket, or chat)
     jarvis run                # Same as jarvis — event loop with voice + socket
+    jarvis tui                # Interactive TUI (OpenClaw-style, needs [tui] extra)
     jarvis chat               # Interactive text chat (stdin only)
     jarvis send "<message>"   # Send message to running jarvis (via socket)
     jarvis ask "<message>"    # Ask a single question (one-shot, no daemon)
@@ -258,7 +259,8 @@ def show_usage() -> None:
     print()
     print("Usage:")
     print("  jarvis                    # Start voice activation mode")
-    print("  jarvis chat               # Start interactive text chat")
+    print("  jarvis tui                # Interactive TUI with session sidebar")
+    print("  jarvis chat               # Start interactive text chat (stdin)")
     print("  jarvis text               # Set text output mode")
     print("  jarvis voice              # Set voice output mode")
     print('  jarvis ask "<message>"    # Ask a single question')
@@ -328,6 +330,26 @@ def main() -> None:
             print("\nGoodbye.")
         except Exception as e:
             logger.error(f"Failed to start JARVIS: {e}")
+            print(f"\nError: {e}")
+            sys.exit(1)
+
+    elif command == "tui":
+        if not Config.LLM_MODEL or not str(Config.LLM_MODEL).strip():
+            print("Error: LLM model not configured. Run: jarvis model <model-name>")
+            sys.exit(1)
+        try:
+            from .tui import run_tui
+        except ImportError as e:
+            print("Error: TUI dependencies are not installed.")
+            print("  Install with: pip install 'jarvis-ai[tui]'")
+            print(f"  (missing: {e.name if hasattr(e, 'name') else e})")
+            sys.exit(1)
+        try:
+            run_tui()
+        except KeyboardInterrupt:
+            print("\nGoodbye.")
+        except Exception as e:
+            logger.error(f"TUI crashed: {e}", exc_info=True)
             print(f"\nError: {e}")
             sys.exit(1)
 
