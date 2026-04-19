@@ -18,6 +18,8 @@ Layout:
 Keybindings:
     Ctrl+N  — new session
     Ctrl+Q  — quit
+    Ctrl+L  — focus chat log (scroll with arrows / PgUp)
+    Ctrl+I  — focus message input
     Enter   — submit message
     Click / arrows — switch session (in sidebar)
 
@@ -128,6 +130,8 @@ class JarvisTUI(App):
     BINDINGS = [
         Binding("ctrl+n", "new_session", "New", show=True),
         Binding("ctrl+q", "quit", "Quit", show=True),
+        Binding("ctrl+l", "focus_chat", "Log", show=True),
+        Binding("ctrl+i", "focus_input", "Input", show=True),
     ]
 
     status_text: reactive[str] = reactive("starting…")
@@ -345,6 +349,20 @@ class JarvisTUI(App):
         else:
             self._append_log("[red]Could not create a new session.[/red]")
 
+    def action_focus_chat(self) -> None:
+        """Move focus to the transcript for keyboard scrolling (arrows / PgUp)."""
+        try:
+            self.query_one("#chat-log", RichLog).focus()
+        except Exception:
+            pass
+
+    def action_focus_input(self) -> None:
+        """Move focus back to the message line."""
+        try:
+            self.query_one("#input", Input).focus()
+        except Exception:
+            pass
+
     # ------------------------------------------------------------------
     # Status bar
     # ------------------------------------------------------------------
@@ -360,7 +378,7 @@ class JarvisTUI(App):
         provider = getattr(Config, "LLM_PROVIDER", "?")
         parts.append(f"model: {model}")
         parts.append(f"provider: {provider}")
-        parts.append("Ctrl+N new · Ctrl+Q quit")
+        parts.append("Ctrl+N new · Ctrl+Q quit · Ctrl+L log · Ctrl+I input")
 
         self.status_text = "  |  ".join(parts)
 
