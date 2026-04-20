@@ -200,7 +200,7 @@ class Jarvis:
         context = self._build_root_context(new_input=text)
         self._activity("Thinking about your request…", kind="llm")
 
-        response = self._ask_llm(context, tag="root")
+        response = await self._ask_llm(context, tag="root")
         await self._act_on_root_response(response)
 
     async def _on_dispatch_signal(self, signal: Dict[str, Any]):
@@ -215,7 +215,7 @@ class Jarvis:
         self.llm.switch_mode("root")
         context = self._build_root_context(signal=signal)
 
-        response = self._ask_llm(context, tag="root")
+        response = await self._ask_llm(context, tag="root")
         await self._act_on_root_response(response)
 
     async def _on_confirmation_response(self, data: Dict[str, Any]):
@@ -242,7 +242,7 @@ class Jarvis:
             self.llm.switch_mode("root")
             context = self._build_root_context()
             context += f"\nUSER_DENIAL: Action {denied_list} was denied by the user"
-            response = self._ask_llm(context, tag="root-confirmation-denied")
+            response = await self._ask_llm(context, tag="root-confirmation-denied")
             await self._act_on_root_response(response)
             return
 
@@ -263,7 +263,7 @@ class Jarvis:
                 denied_list = ", ".join(pending.denied_tools)
                 context += f"\nUSER_DENIAL: Action {denied_list} was denied by the user"
 
-            response = self._ask_llm(context, tag="root-confirmation-result")
+            response = await self._ask_llm(context, tag="root-confirmation-result")
             await self._act_on_root_response(response)
 
     async def _act_on_root_response(self, response: Dict[str, Any], depth: int = 0):
@@ -301,7 +301,7 @@ class Jarvis:
                 logger.warning("JARVIS: LLM returned empty respond — retrying")
                 context = self._build_root_context()
                 context += "\nYour previous response had an empty output. Please respond to the user."
-                response = self._ask_llm(context, tag="root-retry-empty")
+                response = await self._ask_llm(context, tag="root-retry-empty")
                 await self._act_on_root_response(response, depth + 1)
                 return
             self.output_manager.handle_response({"output": output})
@@ -390,7 +390,7 @@ class Jarvis:
         context = self._build_root_context()
         context += f"\n{label}: {summary}"
 
-        response = self._ask_llm(context, tag="root-chain")
+        response = await self._ask_llm(context, tag="root-chain")
         await self._act_on_root_response(response, depth + 1)
 
     # ------------------------------------------------------------------
@@ -434,7 +434,7 @@ class Jarvis:
                 f"(step={step}, context_chars={len(context)})"
             )
             self._activity(f"Dispatch step {step + 1}: reasoning…", kind="dispatch")
-            response = self._ask_llm(context, tag=f"dispatch-step-{step}")
+            response = await self._ask_llm(context, tag=f"dispatch-step-{step}")
             parsed = self.task_parser.parse(response)
 
             if "error" in parsed:
@@ -667,7 +667,7 @@ class Jarvis:
         else:
             context += f"\nDISPATCH_RESULT: {self._compact_payload_for_llm(result)}"
 
-        response = self._ask_llm(context, tag="root-dispatch-result")
+        response = await self._ask_llm(context, tag="root-dispatch-result")
         await self._act_on_root_response(response, depth + 1)
 
     # ------------------------------------------------------------------
@@ -788,11 +788,10 @@ class Jarvis:
             str(text).strip(), session_id=sid,
         )
 
-    def _ask_llm(self, context: str, tag: str = "") -> Dict[str, Any]:
-        """Single LLM call with timing logs."""
+    def _ask_llm_sync(self, context: str, tag: str = "") -> Dict[str, Any]:
+        """Single LLM call with timing logs (synchronous)."""
         logger.info(f"JARVIS [{tag}]: Calling LLM (mode={self.llm.mode})...")
         logger.debug(f"JARVIS [{tag}]: LLM context:\n{context}")
-        self._activity(f"LLM ({self.llm.mode}) is thinking…", kind="llm")
 
         t0 = time.perf_counter()
         response = self.llm.ask(context)
@@ -800,6 +799,14 @@ class Jarvis:
 
         logger.info(f"JARVIS [{tag}]: LLM responded in {elapsed:.2f}s")
         logger.debug(f"JARVIS [{tag}]: LLM raw response: {response}")
+        return response
+
+    async def _ask_llm(self, context: str, tag: str = "") -> Dict[str, Any]:
+        """Single LLM call with timing logs (non-blocking for UI)."""
+        self._activity(f"LLM ({self.llm.mode}) is thinking…", kind="llm")
+        t0 = time.perf_counter()
+        response = await asyncio.to_thread(self._ask_llm_sync, context, tag)
+        elapsed = time.perf_counter() - t0
         self._activity(f"LLM responded in {elapsed:.1f}s.", kind="llm")
         return response
 
@@ -1179,7 +1186,7 @@ class Jarvis:
         self.llm.switch_mode("root")
         context = self._build_root_context(new_input=prompt)
 
-        response = self._ask_llm(context, tag="ask")
+        response = self._ask_llm_sync(context, tag="ask")
         parsed = self.task_parser.parse(response)
 
         if "error" in parsed:
