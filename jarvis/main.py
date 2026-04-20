@@ -198,6 +198,7 @@ class Jarvis:
 
         self.llm.switch_mode("root")
         context = self._build_root_context(new_input=text)
+        self._activity("Thinking about your request…", kind="llm")
 
         response = self._ask_llm(context, tag="root")
         await self._act_on_root_response(response)
@@ -206,6 +207,8 @@ class Jarvis:
         sig_type = signal.get("type")
         sig_pid = signal.get("pid")
         logger.info(f"JARVIS: Dispatch signal: type={sig_type}, pid={sig_pid}")
+        if sig_type:
+            self._activity(f"Dispatch signal: {sig_type} (pid {sig_pid})", kind="dispatch")
 
         self.goals.update_from_signal(signal)
 
@@ -283,6 +286,12 @@ class Jarvis:
 
         action = parsed["action"]
         logger.info(f"JARVIS: Root action='{action}'")
+        if action == "respond":
+            self._activity("Composing response…", kind="llm")
+        elif action == "dispatch":
+            self._activity("Planning tool execution…", kind="dispatch")
+        elif action in ("store", "recall", "search_memory", "list_memory"):
+            self._activity(f"Running memory action: {action}", kind="memory")
 
         self._apply_goal_updates(parsed.get("goal_updates", []))
 
@@ -424,6 +433,7 @@ class Jarvis:
                 "JARVIS: Dispatch iteration start "
                 f"(step={step}, context_chars={len(context)})"
             )
+            self._activity(f"Dispatch step {step + 1}: reasoning…", kind="dispatch")
             response = self._ask_llm(context, tag=f"dispatch-step-{step}")
             parsed = self.task_parser.parse(response)
 
@@ -437,12 +447,14 @@ class Jarvis:
 
             if action == "done":
                 logger.info(f"JARVIS: Dispatch sub-chain completed: {parsed['summary']}")
+                self._activity("Dispatch completed.", kind="dispatch")
                 return parsed["summary"]
 
             if action == "plan":
                 # LLM split the intent into sub-tasks — search for tools
                 sub_tasks = parsed.get("tasks", [])
                 logger.info(f"JARVIS: Plan has {len(sub_tasks)} sub-task(s)")
+                self._activity(f"Planned {len(sub_tasks)} sub-task(s); finding tools…", kind="dispatch")
 
                 available_tools = await self.dispatch.discover_tools(
                     tasks=sub_tasks,
@@ -460,14 +472,17 @@ class Jarvis:
                     )
 
             elif action == "search":
+                self._activity("Searching MCP servers…", kind="dispatch")
                 result = await self.dispatch.search_servers(parsed["keywords"])
                 context = f"SEARCH_RESULTS: {self._compact_payload_for_llm(result)}"
 
             elif action == "list_tools":
+                self._activity(f"Listing tools for {parsed['server_id']}…", kind="dispatch")
                 result = await self.dispatch.list_server_tools(parsed["server_id"])
                 context = f"TOOLS: {self._compact_payload_for_llm(result)}"
 
             elif action == "install":
+                self._activity(f"Installing server {parsed['server_id']}…", kind="dispatch")
                 result = await self.dispatch.install_server(parsed["server_id"])
                 context = f"INSTALL_RESULT: {self._compact_payload_for_llm(result)}"
 
@@ -480,6 +495,7 @@ class Jarvis:
                     )
 
             elif action == "dispatch" and "tasks" in parsed:
+                self._activity(f"Dispatching {len(parsed['tasks'])} task(s)…", kind="dispatch")
                 result = await self._dispatch_send(parsed["tasks"])
                 if isinstance(result, dict) and result.get("awaiting_confirmation"):
                     # Non-blocking: confirmation sent, return to event loop.
@@ -488,27 +504,36 @@ class Jarvis:
                         f"JARVIS: Dispatch sub-chain paused for confirmation "
                         f"id={result['confirmation_id']}"
                     )
+                    self._activity("Waiting for your confirmation before running tools.", kind="dispatch")
                     return "Waiting for user confirmation."
                 elif isinstance(result, dict) and "error" in result:
                     context = f"DISPATCH_ERROR: {self._compact_payload_for_llm(result)}"
                 else:
+                    self._activity("Tool results received.", kind="dispatch")
                     context = f"DISPATCH_RESULT: {self._compact_payload_for_llm(result)}"
 
             elif action == "wait":
                 logger.info("JARVIS: Dispatch sub-chain waiting")
+                self._activity("Waiting for tasks to complete…", kind="dispatch")
                 return "Waiting for tasks to complete."
 
             elif action == "kill":
+                self._activity("Stopping selected task(s)…", kind="dispatch")
                 await self._do_kill(parsed["pids"])
                 context = f"KILL_RESULT: Killed PID(s) {parsed['pids']}"
 
             elif action == "defer":
+                self._activity(
+                    f"Setting reminder for {parsed['duration']}s (goal {parsed['goal_id']})…",
+                    kind="dispatch",
+                )
                 await self._do_defer(
                     parsed["goal_id"], parsed["duration"], parsed.get("reason", ""),
                 )
                 return f"Deferred goal {parsed['goal_id']} for {parsed['duration']}s."
 
             elif action == "respond":
+                self._activity("Composing response…", kind="llm")
                 out = parsed["output"]
                 self.output_manager.handle_response({"output": out})
                 self._persist_assistant_turn(out)
@@ -533,6 +558,7 @@ class Jarvis:
         If no tools need confirmation, tasks are dispatched immediately.
         """
         if not self.dispatch.is_connected:
+            self._activity("Dispatch is unavailable right now.", kind="dispatch")
             return {"error": "Dispatch not connected"}
 
         approved_tasks = []
@@ -580,6 +606,11 @@ class Jarvis:
         )
 
         tool_names = [t["tool_name"] for t in tools_needing_confirmation]
+        self._activity(
+            "Awaiting confirmation for: " + ", ".join(tool_names[:3])
+            + ("…" if len(tool_names) > 3 else ""),
+            kind="dispatch",
+        )
         return {
             "awaiting_confirmation": True,
             "confirmation_id": request_id,
@@ -742,6 +773,10 @@ class Jarvis:
         """Return the OllamaEmbeddings instance, or None if unavailable."""
         return self._embeddings
 
+    def _activity(self, text: str, kind: str = "activity") -> None:
+        """Emit a concise, user-facing runtime status line."""
+        self.output_manager.emit_activity(text=text, kind=kind)
+
     def _persist_assistant_turn(self, text: str) -> None:
         """Append assistant-visible text to the session transcript in contextor."""
         if not self.contextor or not text or not str(text).strip():
@@ -757,6 +792,7 @@ class Jarvis:
         """Single LLM call with timing logs."""
         logger.info(f"JARVIS [{tag}]: Calling LLM (mode={self.llm.mode})...")
         logger.debug(f"JARVIS [{tag}]: LLM context:\n{context}")
+        self._activity(f"LLM ({self.llm.mode}) is thinking…", kind="llm")
 
         t0 = time.perf_counter()
         response = self.llm.ask(context)
@@ -764,6 +800,7 @@ class Jarvis:
 
         logger.info(f"JARVIS [{tag}]: LLM responded in {elapsed:.2f}s")
         logger.debug(f"JARVIS [{tag}]: LLM raw response: {response}")
+        self._activity(f"LLM responded in {elapsed:.1f}s.", kind="llm")
         return response
 
     def _compact_payload_for_llm(
@@ -870,6 +907,7 @@ class Jarvis:
     async def _do_defer(self, goal_id: str, duration: int, reason: str = ""):
         if not self.dispatch.is_connected:
             logger.warning("JARVIS: Dispatch not connected, cannot defer goal")
+            self._activity("Cannot set reminder: dispatch not connected.", kind="dispatch")
             self.output_manager.handle_response({
                 "output": "I can't defer goals right now — dispatch is not connected.",
             })
@@ -884,10 +922,15 @@ class Jarvis:
 
         if "error" in result:
             logger.error(f"JARVIS: Timer error: {result['error']}")
+            self._activity("Failed to set reminder timer.", kind="dispatch")
         else:
             timer_pid = result.get("pid", 0)
             self.goals.defer_goal(goal_id, timer_pid)
             logger.info(f"JARVIS: Deferred goal [{goal_id}] for {duration}s (timer PID {timer_pid})")
+            self._activity(
+                f"Reminder set for {duration}s (goal {goal_id}, timer pid {timer_pid}).",
+                kind="dispatch",
+            )
 
     # ------------------------------------------------------------------
     # Input sources (fed to EventMerger)

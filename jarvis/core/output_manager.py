@@ -22,6 +22,7 @@ class OutputManager:
         self.tts = tts
         self._has_tts = tts is not None
         self._output_callbacks: List[Callable[[Dict[str, Any]], None]] = []
+        self._activity_callbacks: List[Callable[[Dict[str, Any]], None]] = []
         self._suppress_stdout = suppress_stdout
 
     def add_output_callback(self, cb: Callable[[Dict[str, Any]], None]) -> None:
@@ -32,6 +33,35 @@ class OutputManager:
         """Unregister an output callback."""
         if cb in self._output_callbacks:
             self._output_callbacks.remove(cb)
+
+    def add_activity_callback(self, cb: Callable[[Dict[str, Any]], None]) -> None:
+        """Register a callback for internal activity events (TUI narrative)."""
+        self._activity_callbacks.append(cb)
+
+    def remove_activity_callback(self, cb: Callable[[Dict[str, Any]], None]) -> None:
+        """Unregister an activity callback."""
+        if cb in self._activity_callbacks:
+            self._activity_callbacks.remove(cb)
+
+    def emit_activity(
+        self,
+        text: str,
+        kind: str = "activity",
+        meta: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Emit a non-chat, UI-oriented activity update.
+
+        Activity updates are intentionally not sent to stdout/tts; they are for
+        app clients (e.g. TUI) that subscribe via add_activity_callback().
+        """
+        payload: Dict[str, Any] = {"text": str(text), "kind": str(kind)}
+        if meta:
+            payload["meta"] = dict(meta)
+        for cb in self._activity_callbacks:
+            try:
+                cb(payload)
+            except Exception as e:
+                logger.warning(f"Activity callback error: {e}")
 
     def handle_response(self, response: Dict[str, Any]) -> None:
         """

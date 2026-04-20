@@ -164,6 +164,7 @@ class JarvisTUI(App):
         self.jarvis = None  # type: ignore[assignment]
         self._jarvis_task: Optional[asyncio.Task] = None
         self._output_cb = None
+        self._activity_cb = None
         # Plain lines mirroring the RichLog (for Markdown export).
         self._export_lines: list[str] = []
         # Sidebar refresh can be requested from multiple timers/callbacks.
@@ -220,7 +221,9 @@ class JarvisTUI(App):
 
         self.jarvis = jarvis
         self._output_cb = self._on_jarvis_output
+        self._activity_cb = self._on_jarvis_activity
         jarvis.output_manager.add_output_callback(self._output_cb)
+        jarvis.output_manager.add_activity_callback(self._activity_cb)
 
         # Kick off the engine's event loop as an async task.
         self._jarvis_task = asyncio.create_task(self._run_engine(), name="jarvis-run")
@@ -249,6 +252,8 @@ class JarvisTUI(App):
             try:
                 if self._output_cb is not None:
                     self.jarvis.output_manager.remove_output_callback(self._output_cb)
+                if self._activity_cb is not None:
+                    self.jarvis.output_manager.remove_activity_callback(self._activity_cb)
             except Exception:
                 pass
             try:
@@ -302,6 +307,13 @@ class JarvisTUI(App):
         self._append_log(f"[bold magenta]jarvis[/bold magenta] > {self._escape(text)}")
         # Session might have been auto-created on first message; refresh.
         self.schedule_sidebar_refresh()
+
+    def _on_jarvis_activity(self, event: Dict[str, Any]) -> None:
+        """Internal runtime narrative (LLM/dispatch status), not chat content."""
+        text = str(event.get("text", "")).strip()
+        if not text:
+            return
+        self._append_log(f"[dim]… {self._escape(text)}[/dim]")
 
     def _append_log(self, markup: str) -> None:
         try:
