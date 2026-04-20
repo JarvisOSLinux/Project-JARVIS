@@ -13,6 +13,7 @@ from the current-session pointer.
 """
 
 from typing import List, Optional
+
 from ..core.logger import get_logger
 from .model import Session
 
@@ -157,7 +158,8 @@ class SessionManager:
             return False
 
         result = self._contextor.delete_session(
-            session_id=session_id, delete_entries=delete_entries,
+            session_id=session_id,
+            delete_entries=delete_entries,
         )
         if "error" in result:
             logger.warning(f"Sessions: delete failed: {result['error']}")
@@ -176,7 +178,8 @@ class SessionManager:
         if not self.available or not self._current:
             return False
         result = self._contextor.update_session(
-            session_id=self._current.id, summary=summary,
+            session_id=self._current.id,
+            summary=summary,
         )
         if "error" in result:
             logger.warning(f"Sessions: save_summary failed: {result['error']}")

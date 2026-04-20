@@ -18,7 +18,10 @@ from textual.binding import Binding
 # (command column, meaning) — sync with jarvis/main.py::_handle_slash_command
 SESSION_SLASH_HELP: tuple[tuple[str, str], ...] = (
     ("/new [title]", "Start a new session; optional title."),
-    ("/sessions", "List sessions (current row marked with an asterisk in text output)."),
+    (
+        "/sessions",
+        "List sessions (current row marked with an asterisk in text output).",
+    ),
     ("/switch <id>", "Switch session by short id prefix."),
     ("/rename <title>", "Rename the **current** session."),
     ("/delete <id>", "Delete session by **unique** id prefix."),

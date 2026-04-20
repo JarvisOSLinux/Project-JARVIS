@@ -51,7 +51,14 @@ class HelpScreen(ModalScreen[None]):
     }
     """
 
-    def __init__(self, body_markdown: str, *, name: str | None = None, id: str | None = None, classes: str | None = None) -> None:
+    def __init__(
+        self,
+        body_markdown: str,
+        *,
+        name: str | None = None,
+        id: str | None = None,
+        classes: str | None = None,
+    ) -> None:
         super().__init__(name=name, id=id, classes=classes)
         self._body_markdown = body_markdown
 

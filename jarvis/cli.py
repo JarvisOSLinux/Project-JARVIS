@@ -13,11 +13,12 @@ Usage:
     jarvis output-type        # Show current output mode
 """
 
+import asyncio
+import os
 import socket
 import sys
-import os
-import asyncio
 from pathlib import Path
+
 from .config import Config
 from .core.logger import get_logger
 
@@ -93,7 +94,7 @@ def set_sudo_access(enabled: bool) -> None:
     Args:
         enabled: True to enable sudo, False to disable
     """
-    from .core.sudo_manager import enable_sudo, disable_sudo
+    from .core.sudo_manager import disable_sudo, enable_sudo
 
     value = "true" if enabled else "false"
     _update_env_setting("JARVIS_SUDO_ENABLED", value)
@@ -102,13 +103,17 @@ def set_sudo_access(enabled: bool) -> None:
         if enable_sudo():
             print("Sudo access enabled for jarvis user")
         else:
-            print("Failed to enable sudo access. Please run with sudo: sudo jarvis sudo enable")
+            print(
+                "Failed to enable sudo access. Please run with sudo: sudo jarvis sudo enable"
+            )
             sys.exit(1)
     else:
         if disable_sudo():
             print("Sudo access disabled for jarvis user")
         else:
-            print("Failed to disable sudo access. Please run with sudo: sudo jarvis sudo disable")
+            print(
+                "Failed to disable sudo access. Please run with sudo: sudo jarvis sudo disable"
+            )
             sys.exit(1)
 
 
@@ -239,14 +244,18 @@ def get_output_mode() -> str:
 def _check_capabilities() -> dict:
     """Check system capabilities for voice features."""
     capabilities = {
-        'voice_input': False,
-        'voice_output': False,
+        "voice_input": False,
+        "voice_output": False,
     }
 
     try:
-        from .voice.audio import check_audio_input_available, check_audio_output_available
-        capabilities['voice_input'] = check_audio_input_available()
-        capabilities['voice_output'] = check_audio_output_available()
+        from .voice.audio import (
+            check_audio_input_available,
+            check_audio_output_available,
+        )
+
+        capabilities["voice_input"] = check_audio_input_available()
+        capabilities["voice_output"] = check_audio_output_available()
     except Exception as e:
         logger.debug(f"Error checking capabilities: {e}")
 
@@ -296,7 +305,9 @@ def main() -> None:
             print("  Example: jarvis model qwen3:4b")
             sys.exit(1)
         print("Starting JARVIS (dual input: voice + socket)...")
-        print("  Say 'Hey Jarvis' for voice, or use 'jarvis send <msg>' from another terminal.")
+        print(
+            "  Say 'Hey Jarvis' for voice, or use 'jarvis send <msg>' from another terminal."
+        )
         print("  Press Ctrl+C to stop.\n")
 
         try:
@@ -358,11 +369,11 @@ def main() -> None:
 
     elif command == "voice":
         capabilities = _check_capabilities()
-        if not capabilities['voice_output']:
+        if not capabilities["voice_output"]:
             print("Warning: No audio output devices detected.")
             print("  Voice output will fallback to text mode.")
             response = input("Continue anyway? (y/n): ").strip().lower()
-            if response not in ['y', 'yes']:
+            if response not in ["y", "yes"]:
                 print("Cancelled.")
                 sys.exit(0)
         set_output_mode("voice")
@@ -455,7 +466,7 @@ def main() -> None:
 
     elif command == "auto-pull":
         if len(sys.argv) == 2:
-            auto_pull = getattr(Config, 'LLM_AUTO_PULL', False)
+            auto_pull = getattr(Config, "LLM_AUTO_PULL", False)
             print(f"Auto-pull missing models: {'enabled' if auto_pull else 'disabled'}")
         elif len(sys.argv) == 3:
             value = sys.argv[2].lower()

@@ -13,14 +13,32 @@ import sys
 
 # Commands that require root — prefix with sudo -A
 PRIVILEGED_PREFIXES = (
-    "pacman", "systemctl enable", "systemctl disable",
-    "systemctl start", "systemctl stop", "systemctl restart",
-    "systemctl mask", "systemctl unmask", "systemctl daemon-reload",
-    "modprobe", "rmmod", "insmod", "sysctl -w",
-    "useradd", "userdel", "groupadd", "groupdel", "usermod",
-    "timedatectl set", "localectl set", "hostnamectl set",
-    "ip link set", "ip addr add",
-    "tee /etc", "tee /usr", "tee /var",
+    "pacman",
+    "systemctl enable",
+    "systemctl disable",
+    "systemctl start",
+    "systemctl stop",
+    "systemctl restart",
+    "systemctl mask",
+    "systemctl unmask",
+    "systemctl daemon-reload",
+    "modprobe",
+    "rmmod",
+    "insmod",
+    "sysctl -w",
+    "useradd",
+    "userdel",
+    "groupadd",
+    "groupdel",
+    "usermod",
+    "timedatectl set",
+    "localectl set",
+    "hostnamectl set",
+    "ip link set",
+    "ip addr add",
+    "tee /etc",
+    "tee /usr",
+    "tee /var",
 )
 
 
@@ -81,8 +99,15 @@ TOOLS = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "command": {"type": "string", "description": "Shell command to execute"},
-                "timeout": {"type": "integer", "description": "Timeout in seconds (default: 120)", "default": 120},
+                "command": {
+                    "type": "string",
+                    "description": "Shell command to execute",
+                },
+                "timeout": {
+                    "type": "integer",
+                    "description": "Timeout in seconds (default: 120)",
+                    "default": 120,
+                },
             },
             "required": ["command"],
         },
@@ -96,7 +121,8 @@ async def handle(request: dict):
 
     if method == "initialize":
         return {
-            "jsonrpc": "2.0", "id": req_id,
+            "jsonrpc": "2.0",
+            "id": req_id,
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
@@ -114,18 +140,21 @@ async def handle(request: dict):
                 int(args.get("timeout", 120)),
             )
             return {
-                "jsonrpc": "2.0", "id": req_id,
+                "jsonrpc": "2.0",
+                "id": req_id,
                 "result": {"content": [{"type": "text", "text": output}]},
             }
         return {
-            "jsonrpc": "2.0", "id": req_id,
+            "jsonrpc": "2.0",
+            "id": req_id,
             "error": {"code": -32601, "message": f"Unknown tool: {params.get('name')}"},
         }
     elif method in ("notifications/initialized", "notifications/cancelled"):
         return None
     elif req_id is not None:
         return {
-            "jsonrpc": "2.0", "id": req_id,
+            "jsonrpc": "2.0",
+            "id": req_id,
             "error": {"code": -32601, "message": f"Method not found: {method}"},
         }
     return None
@@ -134,7 +163,9 @@ async def handle(request: dict):
 async def main():
     loop = asyncio.get_event_loop()
     reader = asyncio.StreamReader()
-    await loop.connect_read_pipe(lambda: asyncio.StreamReaderProtocol(reader), sys.stdin)
+    await loop.connect_read_pipe(
+        lambda: asyncio.StreamReaderProtocol(reader), sys.stdin
+    )
     write_transport, _ = await loop.connect_write_pipe(asyncio.BaseProtocol, sys.stdout)
 
     buf = b""

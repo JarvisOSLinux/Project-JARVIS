@@ -6,7 +6,7 @@ The rest of JARVIS only depends on this interface.
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Dict
+from typing import Dict, List
 
 
 class BaseLLMProvider(ABC):

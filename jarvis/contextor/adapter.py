@@ -27,9 +27,10 @@ Sessions (chat conversations):
 import json
 import subprocess
 import threading
-from typing import Dict, Any, Optional
-from ..core.logger import get_logger
+from typing import Any, Dict, Optional
+
 from ..config import Config
+from ..core.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -81,11 +82,13 @@ class ContextorAdapter:
 
         # Run initial prune on startup
         if self._connected:
-            self._send({
-                "cmd": "prune",
-                "retention_days": Config.MEMORY_RETENTION_DAYS,
-                "max_per_theme": Config.MAX_ENTRIES_PER_THEME,
-            })
+            self._send(
+                {
+                    "cmd": "prune",
+                    "retention_days": Config.MEMORY_RETENTION_DAYS,
+                    "max_per_theme": Config.MAX_ENTRIES_PER_THEME,
+                }
+            )
 
         return self._connected
 
@@ -160,9 +163,13 @@ class ContextorAdapter:
 
         if (
             "unknown variant" in error
-            and name in {
-                "create_session", "list_sessions", "get_session",
-                "update_session", "delete_session",
+            and name
+            in {
+                "create_session",
+                "list_sessions",
+                "get_session",
+                "update_session",
+                "delete_session",
             }
             and self._supports_sessions is not False
         ):
@@ -216,14 +223,16 @@ class ContextorAdapter:
             return {"error": "Contextor not connected"}
 
         vector = self._embed(content) or []
-        result = self._send({
-            "cmd": "store",
-            "theme": theme,
-            "content": content,
-            "vector": vector,
-            "metadata": {},
-            "session_id": session_id,
-        })
+        result = self._send(
+            {
+                "cmd": "store",
+                "theme": theme,
+                "content": content,
+                "vector": vector,
+                "metadata": {},
+                "session_id": session_id,
+            }
+        )
 
         if result.get("ok"):
             scope = f"session={session_id[:8]}" if session_id else "global"
@@ -255,14 +264,16 @@ class ContextorAdapter:
             return
 
         vector = self._embed(text) or []
-        self._send({
-            "cmd": "store",
-            "theme": "conversation_log",
-            "content": text,
-            "vector": vector,
-            "metadata": {"type": "user_prompt"},
-            "session_id": session_id,
-        })
+        self._send(
+            {
+                "cmd": "store",
+                "theme": "conversation_log",
+                "content": text,
+                "vector": vector,
+                "metadata": {"type": "user_prompt"},
+                "session_id": session_id,
+            }
+        )
         scope = f"session={session_id[:8]}" if session_id else "global"
         logger.debug(f"Contextor: Auto-stored prompt ({len(text)} chars, {scope})")
 
@@ -284,14 +295,16 @@ class ContextorAdapter:
             text = text[:max_chars] + "\n… [truncated]"
 
         vector = self._embed(text) or []
-        self._send({
-            "cmd": "store",
-            "theme": "conversation_log",
-            "content": text,
-            "vector": vector,
-            "metadata": {"type": "assistant_reply"},
-            "session_id": session_id,
-        })
+        self._send(
+            {
+                "cmd": "store",
+                "theme": "conversation_log",
+                "content": text,
+                "vector": vector,
+                "metadata": {"type": "assistant_reply"},
+                "session_id": session_id,
+            }
+        )
         logger.debug(
             f"Contextor: Auto-stored assistant reply ({len(text)} chars, "
             f"session={session_id[:8]})"
@@ -315,12 +328,14 @@ class ContextorAdapter:
         if not self._connected:
             return {"theme": theme, "entries": [], "found": False}
 
-        result = self._send({
-            "cmd": "recall",
-            "theme": theme,
-            "limit": limit,
-            "session_id": session_id,
-        })
+        result = self._send(
+            {
+                "cmd": "recall",
+                "theme": theme,
+                "limit": limit,
+                "session_id": session_id,
+            }
+        )
         if result.get("ok"):
             entries = result.get("entries", [])
             logger.info(f"Contextor: Recalled {len(entries)} entries for '{theme}'")
@@ -371,16 +386,18 @@ class ContextorAdapter:
         if vector is None:
             return {"results": [], "available": False, "reason": "Embedding failed"}
 
-        result = self._send({
-            "cmd": "search",
-            "vector": vector,
-            "top_k": top_k,
-            "offset": offset,
-            "min_score": min_score,
-            "theme": theme,
-            "session_id": session_id,
-            "include_global": include_global,
-        })
+        result = self._send(
+            {
+                "cmd": "search",
+                "vector": vector,
+                "top_k": top_k,
+                "offset": offset,
+                "min_score": min_score,
+                "theme": theme,
+                "session_id": session_id,
+                "include_global": include_global,
+            }
+        )
 
         if result.get("ok"):
             results = result.get("results", [])
@@ -587,13 +604,18 @@ class ContextorAdapter:
         if not self._connected:
             return {"sessions": []}
         if self._supports_sessions is False:
-            return {"sessions": [], "error": "Session commands unsupported by contextor binary"}
+            return {
+                "sessions": [],
+                "error": "Session commands unsupported by contextor binary",
+            }
 
-        result = self._send({
-            "cmd": "list_sessions",
-            "limit": limit,
-            "offset": offset,
-        })
+        result = self._send(
+            {
+                "cmd": "list_sessions",
+                "limit": limit,
+                "offset": offset,
+            }
+        )
         if result.get("ok"):
             sessions = result.get("sessions", [])
             logger.info(f"Contextor: Listed {len(sessions)} session(s)")
@@ -667,10 +689,12 @@ class ContextorAdapter:
         if self._supports_sessions is False:
             return {"error": "Session commands unsupported by contextor binary"}
 
-        result = self._send({
-            "cmd": "delete_session",
-            "session_id": session_id,
-        })
+        result = self._send(
+            {
+                "cmd": "delete_session",
+                "session_id": session_id,
+            }
+        )
         if result.get("ok"):
             logger.info(f"Contextor: Deleted session {session_id[:8]}")
             return {"deleted": True, "session_id": session_id}

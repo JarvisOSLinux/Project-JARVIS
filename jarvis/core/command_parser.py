@@ -9,18 +9,30 @@ DISPATCH mode actions: plan, search, list_tools, install, dispatch (tasks),
                        wait, kill, defer, done
 """
 
-from typing import Dict, Any
+from typing import Any, Dict
+
 from .logger import get_logger
 
 logger = get_logger(__name__)
 
 VALID_ACTIONS = {
     # Root — core
-    "respond", "dispatch",
+    "respond",
+    "dispatch",
     # Root — memory (direct operations, no sub-chain)
-    "store", "recall", "search_memory", "list_memory",
+    "store",
+    "recall",
+    "search_memory",
+    "list_memory",
     # Dispatch subsystem
-    "plan", "search", "list_tools", "install", "wait", "kill", "defer", "done",
+    "plan",
+    "search",
+    "list_tools",
+    "install",
+    "wait",
+    "kill",
+    "defer",
+    "done",
 }
 
 _PARSERS = {}
@@ -28,9 +40,11 @@ _PARSERS = {}
 
 def _parser(action_name):
     """Register a static parse method for an action type."""
+
     def decorator(fn):
         _PARSERS[action_name] = fn
         return fn
+
     return decorator
 
 
@@ -55,7 +69,9 @@ class TaskParser:
         result = parser_fn(response)
 
         if "error" in result:
-            logger.warning(f"TaskParser: Validation failed for action='{action}': {result['error']}")
+            logger.warning(
+                f"TaskParser: Validation failed for action='{action}': {result['error']}"
+            )
             logger.debug(f"TaskParser: Validation raw payload: {response}")
         else:
             summary = TaskParser._summarize(result)
@@ -84,7 +100,9 @@ class TaskParser:
         if action == "kill":
             return f", pids={result.get('pids', [])}"
         if action == "defer":
-            return f", goal_id={result.get('goal_id')}, duration={result.get('duration')}s"
+            return (
+                f", goal_id={result.get('goal_id')}, duration={result.get('duration')}s"
+            )
         if action == "plan":
             tasks = result.get("tasks", [])
             intents = [t.get("intent", "")[:40] for t in tasks]
@@ -110,6 +128,7 @@ class TaskParser:
 # ROOT mode actions
 # ------------------------------------------------------------------
 
+
 @_parser("respond")
 def _parse_respond(response: Dict[str, Any]) -> Dict[str, Any]:
     output = response.get("output", "")
@@ -134,7 +153,10 @@ def _parse_dispatch(response: Dict[str, Any]) -> Dict[str, Any]:
         }
 
     if not isinstance(tasks, list) or not tasks:
-        return {"error": "Dispatch action requires 'intent' (routing) or non-empty 'tasks' (execution)", "raw": response}
+        return {
+            "error": "Dispatch action requires 'intent' (routing) or non-empty 'tasks' (execution)",
+            "raw": response,
+        }
 
     validated_tasks = []
     for i, task in enumerate(tasks):
@@ -148,12 +170,14 @@ def _parse_dispatch(response: Dict[str, Any]) -> Dict[str, Any]:
             logger.warning(f"TaskParser: Task {i} missing server or tool, skipping")
             continue
 
-        validated_tasks.append({
-            "server": server,
-            "tool": tool,
-            "params": task.get("params", {}),
-            "remind_after": task.get("remind_after"),
-        })
+        validated_tasks.append(
+            {
+                "server": server,
+                "tool": tool,
+                "params": task.get("params", {}),
+                "remind_after": task.get("remind_after"),
+            }
+        )
 
     if not validated_tasks:
         return {"error": "No valid tasks in dispatch action", "raw": response}
@@ -169,12 +193,16 @@ def _parse_dispatch(response: Dict[str, Any]) -> Dict[str, Any]:
 # DISPATCH subsystem actions
 # ------------------------------------------------------------------
 
+
 @_parser("plan")
 def _parse_plan(response: Dict[str, Any]) -> Dict[str, Any]:
     """Parse plan action — LLM breaks intent into sub-tasks for tool discovery."""
     tasks = response.get("tasks", [])
     if not isinstance(tasks, list) or not tasks:
-        return {"error": "Plan action requires a non-empty 'tasks' list", "raw": response}
+        return {
+            "error": "Plan action requires a non-empty 'tasks' list",
+            "raw": response,
+        }
 
     validated_tasks = []
     for i, task in enumerate(tasks):
@@ -187,12 +215,14 @@ def _parse_plan(response: Dict[str, Any]) -> Dict[str, Any]:
             logger.warning(f"TaskParser: Plan task {i} missing 'intent', skipping")
             continue
 
-        validated_tasks.append({
-            "intent": str(intent),
-            "keywords": [str(k) for k in task.get("keywords", [])],
-            "top_k": int(task.get("top_k", 5)),
-            "min_score": float(task.get("min_score", 0.3)),
-        })
+        validated_tasks.append(
+            {
+                "intent": str(intent),
+                "keywords": [str(k) for k in task.get("keywords", [])],
+                "top_k": int(task.get("top_k", 5)),
+                "min_score": float(task.get("min_score", 0.3)),
+            }
+        )
 
     if not validated_tasks:
         return {"error": "No valid sub-tasks in plan action", "raw": response}
@@ -208,7 +238,10 @@ def _parse_plan(response: Dict[str, Any]) -> Dict[str, Any]:
 def _parse_search(response: Dict[str, Any]) -> Dict[str, Any]:
     keywords = response.get("keywords", [])
     if not isinstance(keywords, list) or not keywords:
-        return {"error": "Search action requires a non-empty 'keywords' list", "raw": response}
+        return {
+            "error": "Search action requires a non-empty 'keywords' list",
+            "raw": response,
+        }
     return {
         "action": "search",
         "keywords": [str(k) for k in keywords],
@@ -252,7 +285,10 @@ def _parse_wait(response: Dict[str, Any]) -> Dict[str, Any]:
 def _parse_kill(response: Dict[str, Any]) -> Dict[str, Any]:
     pids = response.get("pids", [])
     if not isinstance(pids, list) or not pids:
-        return {"error": "Kill action requires a non-empty 'pids' list", "raw": response}
+        return {
+            "error": "Kill action requires a non-empty 'pids' list",
+            "raw": response,
+        }
     return {
         "action": "kill",
         "pids": [int(p) for p in pids],
@@ -267,7 +303,10 @@ def _parse_defer(response: Dict[str, Any]) -> Dict[str, Any]:
     if not goal_id:
         return {"error": "Defer action requires 'goal_id'", "raw": response}
     if not duration or not isinstance(duration, (int, float)) or duration <= 0:
-        return {"error": "Defer action requires a positive 'duration' (seconds)", "raw": response}
+        return {
+            "error": "Defer action requires a positive 'duration' (seconds)",
+            "raw": response,
+        }
     return {
         "action": "defer",
         "goal_id": str(goal_id),
@@ -290,6 +329,7 @@ def _parse_done(response: Dict[str, Any]) -> Dict[str, Any]:
 # ------------------------------------------------------------------
 # ROOT-level memory actions (direct operations, no sub-chain)
 # ------------------------------------------------------------------
+
 
 @_parser("store")
 def _parse_store(response: Dict[str, Any]) -> Dict[str, Any]:

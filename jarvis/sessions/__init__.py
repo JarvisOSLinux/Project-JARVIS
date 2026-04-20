@@ -12,7 +12,7 @@ Session metadata lives in the Rust contextor binary (SQLite).  JARVIS
 just keeps a pointer to the *current* session in ``SessionManager``.
 """
 
-from .model import Session
 from .manager import SessionManager
+from .model import Session
 
 __all__ = ["Session", "SessionManager"]

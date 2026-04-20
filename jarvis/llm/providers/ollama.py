@@ -1,7 +1,8 @@
 """Ollama LLM provider."""
 
 import sys
-from typing import List, Dict, Optional
+from typing import Dict, List, Optional
+
 from ...core.logger import get_logger
 from ..base import BaseLLMProvider
 
@@ -29,6 +30,7 @@ class OllamaProvider(BaseLLMProvider):
         self.strict_json = strict_json
 
         import os
+
         if base_url and base_url != "http://localhost:11434":
             os.environ["OLLAMA_HOST"] = base_url
         if api_key:
@@ -36,8 +38,10 @@ class OllamaProvider(BaseLLMProvider):
 
         try:
             from ollama import Client
+
             self._client = Client(host=self.base_url, timeout=LLM_TIMEOUT)
             import ollama as _ollama
+
             self._ollama = _ollama
         except ImportError:
             raise ImportError(
@@ -66,17 +70,25 @@ class OllamaProvider(BaseLLMProvider):
             return response["message"]["content"]
         except Exception as e:
             error_str = str(e).lower()
-            if "model" in error_str and ("not found" in error_str or "does not exist" in error_str):
-                logger.warning("Model not found during chat, attempting to ensure model is available...")
+            if "model" in error_str and (
+                "not found" in error_str or "does not exist" in error_str
+            ):
+                logger.warning(
+                    "Model not found during chat, attempting to ensure model is available..."
+                )
                 if self.ensure_model():
                     try:
                         response = self._client.chat(**kwargs)
                         return response["message"]["content"]
                     except Exception as retry_error:
-                        logger.error(f"Ollama chat error after model pull: {retry_error}")
+                        logger.error(
+                            f"Ollama chat error after model pull: {retry_error}"
+                        )
                         raise
                 else:
-                    raise RuntimeError(f"Model '{self.model}' is not available and could not be pulled")
+                    raise RuntimeError(
+                        f"Model '{self.model}' is not available and could not be pulled"
+                    )
             logger.error(f"Ollama chat error: {e}")
             raise
 
@@ -103,11 +115,15 @@ class OllamaProvider(BaseLLMProvider):
             return self._pull_model()
 
         if sys.stdin.isatty():
-            response = input(
-                f"\nModel '{self.model}' is not installed. "
-                "Would you like to pull it now? (y/n): "
-            ).strip().lower()
-            if response in ('y', 'yes'):
+            response = (
+                input(
+                    f"\nModel '{self.model}' is not installed. "
+                    "Would you like to pull it now? (y/n): "
+                )
+                .strip()
+                .lower()
+            )
+            if response in ("y", "yes"):
                 return self._pull_model()
             logger.error("Model not available and user declined to pull it")
             return False
@@ -121,14 +137,16 @@ class OllamaProvider(BaseLLMProvider):
     def _model_exists(self) -> bool:
         try:
             models_response = self._ollama.list()
-            if hasattr(models_response, 'models'):
+            if hasattr(models_response, "models"):
                 models = models_response.models
-                model_names = [m.model for m in models if hasattr(m, 'model')]
+                model_names = [m.model for m in models if hasattr(m, "model")]
             else:
                 models = models_response.get("models", [])
                 model_names = [m.get("name", "") for m in models if m.get("name")]
 
-            logger.debug(f"Looking for model '{self.model}' in available models: {model_names}")
+            logger.debug(
+                f"Looking for model '{self.model}' in available models: {model_names}"
+            )
 
             if self.model in model_names:
                 return True
@@ -157,11 +175,20 @@ class OllamaProvider(BaseLLMProvider):
 
             for chunk in self._ollama.pull(self.model, stream=True):
                 if "status" in chunk:
-                    if "downloading" in chunk["status"].lower() or "pulling" in chunk["status"].lower():
+                    if (
+                        "downloading" in chunk["status"].lower()
+                        or "pulling" in chunk["status"].lower()
+                    ):
                         completed = chunk.get("completed") or 0
                         total = chunk.get("total") or 0
-                        progress = (completed / total * 100) if total and total > 0 else 0
-                        print(f"\rPulling {self.model}: {chunk['status']} ({progress:.1f}%)", end="", flush=True)
+                        progress = (
+                            (completed / total * 100) if total and total > 0 else 0
+                        )
+                        print(
+                            f"\rPulling {self.model}: {chunk['status']} ({progress:.1f}%)",
+                            end="",
+                            flush=True,
+                        )
 
             print()
             logger.info(f"Successfully pulled model '{self.model}'")

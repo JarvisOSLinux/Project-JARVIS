@@ -5,18 +5,19 @@ Main entry point for JARVIS when running as a system service.
 Supports dual input: voice + socket (jarvis send).
 """
 
-import sys
-import os
 import asyncio
-import signal
 import logging
+import os
+import signal
+import sys
 from pathlib import Path
 
 # Add JARVIS to Python path
 sys.path.insert(0, '/usr/lib/jarvis')
 
-from jarvis.main import Jarvis
 from jarvis.config import Config
+from jarvis.main import Jarvis
+
 
 class JarvisDaemon:
     def __init__(self):

@@ -35,7 +35,7 @@ from .core.logger import JarvisLogger
 JarvisLogger.setup(
     log_level=Config.LOG_LEVEL,
     log_file=Config.LOG_FILE if Config.LOG_FILE else None,
-    enable_colors=Config.LOG_COLORS
+    enable_colors=Config.LOG_COLORS,
 )
 
 from .main import Jarvis

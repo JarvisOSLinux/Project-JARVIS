@@ -13,8 +13,8 @@ Why Ollama embeddings?
 
 from typing import List, Optional
 
-from ..core.logger import get_logger
 from ..config import Config
+from ..core.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -30,10 +30,13 @@ class OllamaEmbeddings:
         base_url: str | None = None,
     ):
         self.model = model or getattr(Config, "EMBED_MODEL", DEFAULT_EMBED_MODEL)
-        self.base_url = base_url or getattr(Config, "EMBED_URL", "http://localhost:11434")
+        self.base_url = base_url or getattr(
+            Config, "EMBED_URL", "http://localhost:11434"
+        )
 
         try:
             from ollama import Client
+
             self._client = Client(host=self.base_url, timeout=30)
         except ImportError:
             raise ImportError("ollama package required: pip install ollama")
@@ -97,6 +100,7 @@ class OllamaEmbeddings:
         """Pull the embedding model from Ollama."""
         try:
             import ollama as _ollama
+
             logger.info(f"Embeddings: Pulling model '{self.model}'...")
             _ollama.pull(self.model)
             logger.info(f"Embeddings: Successfully pulled '{self.model}'")

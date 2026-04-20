@@ -6,16 +6,16 @@ separated from the main Jarvis class for better maintainability
 and testability.
 """
 
-from .system_info import SystemInfo
 from .command_parser import TaskParser
+from .component_factory import ComponentFactory
 from .confirmation_manager import ConfirmationManager
 from .output_manager import OutputManager
-from .component_factory import ComponentFactory
+from .system_info import SystemInfo
 
 __all__ = [
-    'SystemInfo',
-    'TaskParser',
-    'ConfirmationManager',
-    'OutputManager',
-    'ComponentFactory',
+    "SystemInfo",
+    "TaskParser",
+    "ConfirmationManager",
+    "OutputManager",
+    "ComponentFactory",
 ]

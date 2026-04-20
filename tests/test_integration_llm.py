@@ -5,13 +5,15 @@ Tests LLM provider initialization, JSON response parsing,
 context management, and error handling.
 """
 
-import pytest
 import json
 from unittest.mock import Mock, patch
+
+import pytest
+
 from tests.integration_utils import (
-    mock_llm_response,
     assert_valid_json_response,
     create_mock_llm_provider,
+    mock_llm_response,
 )
 
 
@@ -21,38 +23,47 @@ class TestLLMProviderIntegration:
 
     def test_ollama_provider_initialization(self):
         from jarvis.llm.providers.ollama import OllamaProvider
+
         provider = OllamaProvider("test-model")
         assert provider is not None
         assert provider.model == "test-model"
-        assert hasattr(provider, 'chat')
-        assert hasattr(provider, 'is_available')
+        assert hasattr(provider, "chat")
+        assert hasattr(provider, "is_available")
 
     def test_ollama_provider_with_custom_url(self):
         from jarvis.llm.providers.ollama import OllamaProvider
+
         custom_url = "http://localhost:8080"
         provider = OllamaProvider("test-model", base_url=custom_url)
         assert provider.base_url == custom_url
 
     def test_api_provider_initialization(self):
         from jarvis.llm.providers.api import APIProvider
-        provider = APIProvider("test-model", api_url="http://localhost:8080", api_key="test-key")
+
+        provider = APIProvider(
+            "test-model", api_url="http://localhost:8080", api_key="test-key"
+        )
         assert provider is not None
         assert provider.model == "test-model"
 
     def test_llm_provider_factory_ollama(self):
         from jarvis.llm.providers import create_provider
+
         provider = create_provider(provider="ollama", model="test-model")
         assert provider is not None
-        assert hasattr(provider, 'chat')
+        assert hasattr(provider, "chat")
 
     def test_llm_provider_factory_api(self):
         from jarvis.llm.providers import create_provider
+
         provider = create_provider(
-            provider="api", model="gpt-3.5-turbo",
-            api_url="http://localhost:8080", api_key="test-key",
+            provider="api",
+            model="gpt-3.5-turbo",
+            api_url="http://localhost:8080",
+            api_key="test-key",
         )
         assert provider is not None
-        assert hasattr(provider, 'chat')
+        assert hasattr(provider, "chat")
 
 
 @pytest.mark.integration
@@ -130,7 +141,7 @@ class TestLLMJsonResponseParsing:
         invalid_responses = [
             '{"output": "test"}',
             '{"user_request": "Conversation"}',
-            '{}',
+            "{}",
         ]
 
         for invalid_json in invalid_responses:
@@ -149,9 +160,9 @@ class TestLLMResponseTypes:
     def test_conversation_response_workflow(self):
         from jarvis.llm import LLM
 
-        provider = create_mock_llm_provider([
-            mock_llm_response("Conversation", "Hello! I'm JARVIS.")
-        ])
+        provider = create_mock_llm_provider(
+            [mock_llm_response("Conversation", "Hello! I'm JARVIS.")]
+        )
 
         llm = LLM(provider=provider, system_prompt="test")
         result = llm.ask("Hello")
@@ -164,9 +175,7 @@ class TestLLMResponseTypes:
         from jarvis.llm import LLM
 
         commands = "list_servers(); inspect_server(EchoMCP)"
-        provider = create_mock_llm_provider([
-            mock_llm_response("SuperMCP", commands)
-        ])
+        provider = create_mock_llm_provider([mock_llm_response("SuperMCP", commands)])
 
         llm = LLM(provider=provider, system_prompt="test")
         result = llm.ask("What servers are available?")
@@ -185,7 +194,9 @@ class TestLLMResponseTypes:
             json.dumps(mock_llm_response("Conversation", "Sorry, I had trouble.")),
         ]
 
-        llm = LLM(provider=mock_provider, system_prompt="test", wrong_json_message="Fix JSON")
+        llm = LLM(
+            provider=mock_provider, system_prompt="test", wrong_json_message="Fix JSON"
+        )
         result = llm.ask("test question")
         assert_valid_json_response(result)
 
@@ -197,9 +208,9 @@ class TestLLMContextManagement:
     def test_chat_history_initialization(self):
         from jarvis.llm import LLM
 
-        provider = create_mock_llm_provider([
-            mock_llm_response("Conversation", "Hello!")
-        ])
+        provider = create_mock_llm_provider(
+            [mock_llm_response("Conversation", "Hello!")]
+        )
 
         llm = LLM(provider=provider, system_prompt="You are JARVIS")
         assert len(llm.chat_history) > 0
@@ -209,10 +220,12 @@ class TestLLMContextManagement:
     def test_chat_history_accumulation(self):
         from jarvis.llm import LLM
 
-        provider = create_mock_llm_provider([
-            mock_llm_response("Conversation", "First"),
-            mock_llm_response("Conversation", "Second"),
-        ])
+        provider = create_mock_llm_provider(
+            [
+                mock_llm_response("Conversation", "First"),
+                mock_llm_response("Conversation", "Second"),
+            ]
+        )
 
         llm = LLM(provider=provider, system_prompt="test")
         llm.ask("First question")
@@ -223,9 +236,11 @@ class TestLLMContextManagement:
     def test_chat_history_reset(self):
         from jarvis.llm import LLM
 
-        provider = create_mock_llm_provider([
-            mock_llm_response("Conversation", "Response"),
-        ])
+        provider = create_mock_llm_provider(
+            [
+                mock_llm_response("Conversation", "Response"),
+            ]
+        )
 
         llm = LLM(provider=provider, system_prompt="test")
         llm.ask("Question")
@@ -245,16 +260,18 @@ class TestLLMProviderSwitching:
 
         ollama = create_provider(provider="ollama", model="llama2")
         api = create_provider(
-            provider="api", model="gpt-3.5-turbo",
-            api_url="http://localhost:8080", api_key="test-key",
+            provider="api",
+            model="gpt-3.5-turbo",
+            api_url="http://localhost:8080",
+            api_key="test-key",
         )
         assert ollama is not None
         assert api is not None
         assert api != ollama
 
     def test_provider_availability_check(self):
-        from jarvis.llm.providers.ollama import OllamaProvider
         from jarvis.llm.providers.api import APIProvider
+        from jarvis.llm.providers.ollama import OllamaProvider
 
         ollama = OllamaProvider("test-model")
         assert isinstance(ollama.is_available(), bool)
@@ -269,11 +286,13 @@ class TestLLMErrorHandling:
 
     def test_provider_initialization_failure(self):
         from jarvis.llm.providers import create_provider
+
         with pytest.raises(ValueError):
             create_provider(provider="invalid_provider", model="test")
 
     def test_missing_model(self):
         from jarvis.llm.providers import create_provider
+
         with pytest.raises(ValueError):
             create_provider(provider="ollama", model="")
 
@@ -291,11 +310,15 @@ class TestLLMErrorHandling:
     def test_empty_llm_response(self):
         from jarvis.llm import LLM
 
-        provider = create_mock_llm_provider([
-            "",
-            mock_llm_response("Conversation", "Sorry, I didn't understand."),
-        ])
+        provider = create_mock_llm_provider(
+            [
+                "",
+                mock_llm_response("Conversation", "Sorry, I didn't understand."),
+            ]
+        )
 
-        llm = LLM(provider=provider, system_prompt="test", wrong_json_message="Fix JSON")
+        llm = LLM(
+            provider=provider, system_prompt="test", wrong_json_message="Fix JSON"
+        )
         result = llm.ask("test")
         assert_valid_json_response(result)

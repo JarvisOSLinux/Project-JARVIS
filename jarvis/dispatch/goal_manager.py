@@ -13,11 +13,12 @@ import json
 import os
 import time
 import uuid
+from dataclasses import asdict, dataclass, field
 from enum import Enum
-from dataclasses import dataclass, field, asdict
-from typing import List, Optional, Dict, Any
-from ..core.logger import get_logger
+from typing import Any, Dict, List, Optional
+
 from ..config import Config
+from ..core.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -26,11 +27,11 @@ _ARCHIVE_FILENAME = "goal_archive.jsonl"
 
 
 class GoalStatus(Enum):
-    PENDING = "pending"       # Parsed but not yet dispatched
-    ACTIVE = "active"         # Tasks dispatched, waiting for results
-    DEFERRED = "deferred"     # Parked with a timer — will reactivate on REMIND
-    COMPLETED = "completed"   # All tasks done, goal fulfilled
-    FAILED = "failed"         # Tasks failed or user cancelled
+    PENDING = "pending"  # Parsed but not yet dispatched
+    ACTIVE = "active"  # Tasks dispatched, waiting for results
+    DEFERRED = "deferred"  # Parked with a timer — will reactivate on REMIND
+    COMPLETED = "completed"  # All tasks done, goal fulfilled
+    FAILED = "failed"  # Tasks failed or user cancelled
 
 
 @dataclass
@@ -135,7 +136,7 @@ class GoalManager:
             goal.deferred_at = None
             logger.info(f"GoalManager: Goal [{goal_id}] reactivated from deferral")
 
-    def find_goal_by_timer_pid(self, pid: int) -> Optional['Goal']:
+    def find_goal_by_timer_pid(self, pid: int) -> Optional["Goal"]:
         for goal in self._goals:
             if goal.timer_pid == pid:
                 return goal
@@ -171,9 +172,11 @@ class GoalManager:
             logger.info(f"GoalManager: PID {pid} exited for goal [{goal.id}]")
 
     def get_active_goals(self) -> List[Goal]:
-        return [g for g in self._goals if g.status in (
-            GoalStatus.PENDING, GoalStatus.ACTIVE, GoalStatus.DEFERRED
-        )]
+        return [
+            g
+            for g in self._goals
+            if g.status in (GoalStatus.PENDING, GoalStatus.ACTIVE, GoalStatus.DEFERRED)
+        ]
 
     def get_all_goals(self) -> List[Goal]:
         return list(self._goals)
@@ -183,7 +186,9 @@ class GoalManager:
         completed = [g for g in self._goals if g.status == GoalStatus.COMPLETED]
         self._goals = [g for g in self._goals if g.status != GoalStatus.COMPLETED]
         if completed:
-            logger.info(f"GoalManager: Dismissing {len(completed)} completed goal(s): {[g.id for g in completed]}")
+            logger.info(
+                f"GoalManager: Dismissing {len(completed)} completed goal(s): {[g.id for g in completed]}"
+            )
             self._archive_goals(completed)
         return completed
 
@@ -192,12 +197,16 @@ class GoalManager:
         failed = [g for g in self._goals if g.status == GoalStatus.FAILED]
         self._goals = [g for g in self._goals if g.status != GoalStatus.FAILED]
         if failed:
-            logger.info(f"GoalManager: Dismissing {len(failed)} failed goal(s): {[g.id for g in failed]}")
+            logger.info(
+                f"GoalManager: Dismissing {len(failed)} failed goal(s): {[g.id for g in failed]}"
+            )
             self._archive_goals(failed)
         return failed
 
     def get_context(self) -> List[Dict[str, Any]]:
-        active = [g.to_context() for g in self._goals if g.status != GoalStatus.COMPLETED]
+        active = [
+            g.to_context() for g in self._goals if g.status != GoalStatus.COMPLETED
+        ]
         limit = getattr(Config, "MAX_GOALS_IN_CONTEXT", 20)
         return active[-limit:] if len(active) > limit else active
 
@@ -214,7 +223,9 @@ class GoalManager:
             with open(self._archive_path, "a", encoding="utf-8") as f:
                 for goal in goals:
                     f.write(json.dumps(goal.to_archive()) + "\n")
-            logger.debug(f"GoalManager: Archived {len(goals)} goal(s) to {self._archive_path}")
+            logger.debug(
+                f"GoalManager: Archived {len(goals)} goal(s) to {self._archive_path}"
+            )
         except OSError as e:
             logger.warning(f"GoalManager: Failed to archive goals: {e}")
 
@@ -242,7 +253,9 @@ class GoalManager:
 
         return entries[-limit:]
 
-    def search_archive(self, keywords: List[str], limit: int = 20) -> List[Dict[str, Any]]:
+    def search_archive(
+        self, keywords: List[str], limit: int = 20
+    ) -> List[Dict[str, Any]]:
         """
         Search archived goals by keyword match on description and result.
         Returns up to ``limit`` matching entries.
@@ -251,7 +264,9 @@ class GoalManager:
         keywords_lower = [k.lower() for k in keywords]
         matches = []
         for entry in all_entries:
-            text = (entry.get("description", "") + " " + (entry.get("result") or "")).lower()
+            text = (
+                entry.get("description", "") + " " + (entry.get("result") or "")
+            ).lower()
             if any(kw in text for kw in keywords_lower):
                 matches.append(entry)
                 if len(matches) >= limit:

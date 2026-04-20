@@ -30,15 +30,15 @@ def create_provider(
 
     if provider == "ollama":
         from .ollama import OllamaProvider
+
         return OllamaProvider(model=model, **kwargs)
 
     if provider == "api":
         from .api import APIProvider
+
         return APIProvider(model=model, **kwargs)
 
-    raise ValueError(
-        f"Unknown LLM provider: '{provider}'. Available: ollama, api"
-    )
+    raise ValueError(f"Unknown LLM provider: '{provider}'. Available: ollama, api")
 
 
 __all__ = ["BaseLLMProvider", "create_provider"]

@@ -242,9 +242,7 @@ class ConfirmationManager:
 
         # 1. Desktop notification (unless silent).
         if not notification_silent and self._has_desktop_notifications():
-            asyncio.create_task(
-                self._notify_desktop(request_id, tool_summary, timeout)
-            )
+            asyncio.create_task(self._notify_desktop(request_id, tool_summary, timeout))
             return
 
         # 2. Socket — if clients are connected.
@@ -258,19 +256,19 @@ class ConfirmationManager:
 
         # 3. CLI / TTY fallback.
         if self._has_tty():
-            asyncio.create_task(
-                self._notify_cli(request_id, tool_summary, timeout)
-            )
+            asyncio.create_task(self._notify_cli(request_id, tool_summary, timeout))
             return
 
         # No channel available — auto-deny immediately.
         logger.warning("No confirmation channel available, auto-denying")
         if self._inject_confirmation:
-            self._inject_confirmation({
-                "type": "confirmation_response",
-                "id": request_id,
-                "approved": False,
-            })
+            self._inject_confirmation(
+                {
+                    "type": "confirmation_response",
+                    "id": request_id,
+                    "approved": False,
+                }
+            )
 
     # -- Desktop (notify-send) -----------------------------------------
 
@@ -279,7 +277,10 @@ class ConfirmationManager:
         return shutil.which("notify-send") is not None
 
     async def _notify_desktop(
-        self, request_id: str, tool_summary: str, timeout: float,
+        self,
+        request_id: str,
+        tool_summary: str,
+        timeout: float,
     ) -> None:
         """Launch ``notify-send`` in the background.  When the user clicks
         an action, inject the response into the event loop.
@@ -302,20 +303,24 @@ class ConfirmationManager:
             approved = action == "allow"
 
             if self._inject_confirmation:
-                self._inject_confirmation({
-                    "type": "confirmation_response",
-                    "id": request_id,
-                    "approved": approved,
-                })
+                self._inject_confirmation(
+                    {
+                        "type": "confirmation_response",
+                        "id": request_id,
+                        "approved": approved,
+                    }
+                )
 
         except Exception as e:
             logger.warning(f"Desktop notification failed: {e}")
             if self._inject_confirmation:
-                self._inject_confirmation({
-                    "type": "confirmation_response",
-                    "id": request_id,
-                    "approved": False,
-                })
+                self._inject_confirmation(
+                    {
+                        "type": "confirmation_response",
+                        "id": request_id,
+                        "approved": False,
+                    }
+                )
 
     # -- Socket --------------------------------------------------------
 
@@ -352,7 +357,10 @@ class ConfirmationManager:
         return hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
 
     async def _notify_cli(
-        self, request_id: str, tool_summary: str, timeout: float,
+        self,
+        request_id: str,
+        tool_summary: str,
+        timeout: float,
     ) -> None:
         """Prompt the user on stdin.  Runs in an executor so it doesn't
         block the event loop.  Injects the response when done.
@@ -372,11 +380,13 @@ class ConfirmationManager:
             approved = False
 
         if self._inject_confirmation:
-            self._inject_confirmation({
-                "type": "confirmation_response",
-                "id": request_id,
-                "approved": approved,
-            })
+            self._inject_confirmation(
+                {
+                    "type": "confirmation_response",
+                    "id": request_id,
+                    "approved": approved,
+                }
+            )
 
     # -- Timeout -------------------------------------------------------
 
@@ -386,8 +396,10 @@ class ConfirmationManager:
         if request_id in self._pending:
             logger.info(f"Confirmation timed out, auto-denying: id={request_id}")
             if self._inject_confirmation:
-                self._inject_confirmation({
-                    "type": "confirmation_response",
-                    "id": request_id,
-                    "approved": False,
-                })
+                self._inject_confirmation(
+                    {
+                        "type": "confirmation_response",
+                        "id": request_id,
+                        "approved": False,
+                    }
+                )

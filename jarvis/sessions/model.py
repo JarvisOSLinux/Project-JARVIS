@@ -15,9 +15,9 @@ class Session:
 
     id: str
     title: str = ""
-    created_at: str = ""   # ISO-8601 from the binary
-    updated_at: str = ""   # ISO-8601 from the binary
-    summary: str = ""      # Rolling summary of older turns (Tier 2)
+    created_at: str = ""  # ISO-8601 from the binary
+    updated_at: str = ""  # ISO-8601 from the binary
+    summary: str = ""  # Rolling summary of older turns (Tier 2)
     metadata: Dict[str, Any] = field(default_factory=dict)
     entry_count: Optional[int] = None  # Populated by list_sessions
 

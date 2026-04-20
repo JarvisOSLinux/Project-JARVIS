@@ -1,17 +1,22 @@
 import os
 from typing import Optional
+
 from ..config import Config
+from ..contextor import ContextorAdapter
+from ..dispatch import DispatchAdapter, EventMerger, GoalManager
+from ..kernel_client import KernelClient, provider_from_config
 from ..llm import LLM
 from ..llm.providers import create_provider as create_llm_provider
-from ..dispatch import DispatchAdapter, GoalManager, EventMerger
-from ..contextor import ContextorAdapter
-from ..kernel_client import KernelClient, provider_from_config
-from .system_info import SystemInfo
+from ..voice.audio import (
+    AudioUnavailableError,
+    check_audio_input_available,
+    check_audio_output_available,
+)
 from .command_parser import TaskParser
 from .confirmation_manager import ConfirmationManager
-from .output_manager import OutputManager
-from ..voice.audio import check_audio_output_available, check_audio_input_available, AudioUnavailableError
 from .logger import get_logger
+from .output_manager import OutputManager
+from .system_info import SystemInfo
 
 logger = get_logger(__name__)
 
@@ -69,11 +74,11 @@ class ComponentFactory:
                     )
 
         fmt = dict(
-            system=system_info['system'],
-            release=system_info['release'],
-            version=system_info['version'],
-            machine=system_info['machine'],
-            shell=system_info['shell'],
+            system=system_info["system"],
+            release=system_info["release"],
+            version=system_info["version"],
+            machine=system_info["machine"],
+            shell=system_info["shell"],
             data_consent_note=Config.DATA_CONSENT_NOTE,
         )
 
@@ -171,8 +176,12 @@ class ComponentFactory:
             logger.info(f"Initiating TTS (provider: {Config.TTS_PROVIDER})...")
             tts = create_tts(
                 provider=Config.TTS_PROVIDER,
-                model_path=os.path.join(Config.MODELS_DIR, "piper", Config.TTS_MODEL_ONNX),
-                config_path=os.path.join(Config.MODELS_DIR, "piper", Config.TTS_MODEL_JSON),
+                model_path=os.path.join(
+                    Config.MODELS_DIR, "piper", Config.TTS_MODEL_ONNX
+                ),
+                config_path=os.path.join(
+                    Config.MODELS_DIR, "piper", Config.TTS_MODEL_JSON
+                ),
             )
             logger.info("TTS initialized successfully")
             return tts
@@ -218,9 +227,9 @@ class ComponentFactory:
             return None
 
         try:
-            from ..voice.stt import create_stt
             from ..voice.activation import create_activation
             from ..voice.manager import VoiceManager
+            from ..voice.stt import create_stt
         except ImportError as e:
             logger.warning(f"Voice manager dependencies not available: {e}")
             return None
@@ -294,7 +303,7 @@ class ComponentFactory:
         components = {}
 
         # Kernel integration client (started first — LLM providers may use keyring)
-        components['kernel_client'] = ComponentFactory.create_kernel_client()
+        components["kernel_client"] = ComponentFactory.create_kernel_client()
 
         # Shared embeddings instance — used by both contextor (memory)
         # and dispatch (semantic tool discovery). Created once, shared.
@@ -302,6 +311,7 @@ class ComponentFactory:
         if Config.RAG_ENABLED or Config.ALLOW_EMBEDDING_SEARCH:
             try:
                 from ..contextor.embeddings import OllamaEmbeddings
+
                 embeddings = OllamaEmbeddings(model=Config.EMBED_MODEL)
                 if not embeddings.ensure_model():
                     logger.warning(
@@ -322,48 +332,50 @@ class ComponentFactory:
                 "ALLOW_EMBEDDING_SEARCH is enabled but embeddings are unavailable — "
                 "dispatch will use keyword discovery for this session."
             )
-        components['embeddings'] = embeddings
+        components["embeddings"] = embeddings
 
         # Contextor — spawns the Rust binary, passes shared embeddings
         if Config.CONTEXTOR_ENABLED:
             try:
-                components['contextor'] = ComponentFactory.create_contextor(
+                components["contextor"] = ComponentFactory.create_contextor(
                     embeddings=embeddings
                 )
             except Exception as e:
                 logger.warning(f"Contextor init failed (non-fatal): {e}")
-                components['contextor'] = None
+                components["contextor"] = None
         else:
-            components['contextor'] = None
+            components["contextor"] = None
 
         # LLM — no longer needs contextor (RAG is handled in main.py)
-        components['llm'] = ComponentFactory.create_llm()
+        components["llm"] = ComponentFactory.create_llm()
 
-        components['dispatch_adapter'] = ComponentFactory.create_dispatch_adapter()
-        components['goal_manager'] = ComponentFactory.create_goal_manager()
-        components['event_merger'] = ComponentFactory.create_event_merger()
-        components['task_parser'] = ComponentFactory.create_task_parser()
-        components['confirmation_manager'] = ComponentFactory.create_confirmation_manager()
+        components["dispatch_adapter"] = ComponentFactory.create_dispatch_adapter()
+        components["goal_manager"] = ComponentFactory.create_goal_manager()
+        components["event_merger"] = ComponentFactory.create_event_merger()
+        components["task_parser"] = ComponentFactory.create_task_parser()
+        components["confirmation_manager"] = (
+            ComponentFactory.create_confirmation_manager()
+        )
 
         # TTS (optional - only if voice output enabled and available)
-        components['tts'] = ComponentFactory.create_tts_optional()
+        components["tts"] = ComponentFactory.create_tts_optional()
 
         # Dependent components
-        components['output_manager'] = ComponentFactory.create_output_manager(
-            components['tts'],
+        components["output_manager"] = ComponentFactory.create_output_manager(
+            components["tts"],
             suppress_stdout=suppress_stdout_output,
         )
 
         # Voice input components (only if not in text mode and available)
         if not text_mode and on_voice_command:
-            components['voice_manager'] = ComponentFactory.create_voice_manager_optional(
-                on_voice_command
+            components["voice_manager"] = (
+                ComponentFactory.create_voice_manager_optional(on_voice_command)
             )
         else:
-            components['voice_manager'] = None
+            components["voice_manager"] = None
 
         # Report active LLM provider to kernel sysfs
-        kernel_client = components['kernel_client']
+        kernel_client = components["kernel_client"]
         if kernel_client.available:
             k_provider = provider_from_config(Config.LLM_PROVIDER)
             kernel_client.report_provider(k_provider, Config.LLM_MODEL)

@@ -23,10 +23,9 @@ def create_stt(provider: str = "vosk", **kwargs) -> STTProvider:
     """
     if provider == "vosk":
         from .vosk_stt import VoskSTT
+
         return VoskSTT(**kwargs)
-    raise ValueError(
-        f"Unknown STT provider: '{provider}'. Available: vosk"
-    )
+    raise ValueError(f"Unknown STT provider: '{provider}'. Available: vosk")
 
 
 __all__ = ["STTProvider", "create_stt"]

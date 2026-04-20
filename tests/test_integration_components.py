@@ -6,8 +6,10 @@ are unavailable, and proper component lifecycle management.
 Updated for the event-driven dispatch architecture.
 """
 
-import pytest
 from unittest.mock import Mock, patch
+
+import pytest
+
 from tests.integration_utils import make_respond_action
 
 
@@ -19,14 +21,16 @@ class TestComponentFactoryIntegration:
         """Test creating all components in text-only mode."""
         from jarvis.core.component_factory import ComponentFactory
 
-        with patch.object(ComponentFactory, 'create_llm') as mock_llm, \
-             patch.object(ComponentFactory, 'create_dispatch_adapter') as mock_da, \
-             patch.object(ComponentFactory, 'create_goal_manager') as mock_gm, \
-             patch.object(ComponentFactory, 'create_event_merger') as mock_em, \
-             patch.object(ComponentFactory, 'create_task_parser') as mock_tp, \
-             patch.object(ComponentFactory, 'create_tts_optional') as mock_tts, \
-             patch.object(ComponentFactory, 'create_output_manager') as mock_om, \
-             patch.object(ComponentFactory, 'create_voice_manager_optional') as mock_vm:
+        with (
+            patch.object(ComponentFactory, "create_llm") as mock_llm,
+            patch.object(ComponentFactory, "create_dispatch_adapter") as mock_da,
+            patch.object(ComponentFactory, "create_goal_manager") as mock_gm,
+            patch.object(ComponentFactory, "create_event_merger") as mock_em,
+            patch.object(ComponentFactory, "create_task_parser") as mock_tp,
+            patch.object(ComponentFactory, "create_tts_optional") as mock_tts,
+            patch.object(ComponentFactory, "create_output_manager") as mock_om,
+            patch.object(ComponentFactory, "create_voice_manager_optional") as mock_vm,
+        ):
 
             mock_llm.return_value = Mock()
             mock_da.return_value = Mock()
@@ -39,17 +43,17 @@ class TestComponentFactoryIntegration:
 
             components = ComponentFactory.create_all_components(text_mode=True)
 
-            assert 'llm' in components
-            assert 'dispatch_adapter' in components
-            assert 'goal_manager' in components
-            assert 'event_merger' in components
-            assert 'task_parser' in components
-            assert 'output_manager' in components
-            assert 'tts' in components
-            assert 'voice_manager' in components
+            assert "llm" in components
+            assert "dispatch_adapter" in components
+            assert "goal_manager" in components
+            assert "event_merger" in components
+            assert "task_parser" in components
+            assert "output_manager" in components
+            assert "tts" in components
+            assert "voice_manager" in components
 
-            assert components['tts'] is None
-            assert components['voice_manager'] is None
+            assert components["tts"] is None
+            assert components["voice_manager"] is None
 
             mock_llm.assert_called_once()
             mock_da.assert_called_once()
@@ -59,14 +63,16 @@ class TestComponentFactoryIntegration:
         """Test creating all components in voice mode."""
         from jarvis.core.component_factory import ComponentFactory
 
-        with patch.object(ComponentFactory, 'create_llm') as mock_llm, \
-             patch.object(ComponentFactory, 'create_dispatch_adapter') as mock_da, \
-             patch.object(ComponentFactory, 'create_goal_manager') as mock_gm, \
-             patch.object(ComponentFactory, 'create_event_merger') as mock_em, \
-             patch.object(ComponentFactory, 'create_task_parser') as mock_tp, \
-             patch.object(ComponentFactory, 'create_tts_optional') as mock_tts, \
-             patch.object(ComponentFactory, 'create_output_manager') as mock_om, \
-             patch.object(ComponentFactory, 'create_voice_manager_optional') as mock_vm:
+        with (
+            patch.object(ComponentFactory, "create_llm") as mock_llm,
+            patch.object(ComponentFactory, "create_dispatch_adapter") as mock_da,
+            patch.object(ComponentFactory, "create_goal_manager") as mock_gm,
+            patch.object(ComponentFactory, "create_event_merger") as mock_em,
+            patch.object(ComponentFactory, "create_task_parser") as mock_tp,
+            patch.object(ComponentFactory, "create_tts_optional") as mock_tts,
+            patch.object(ComponentFactory, "create_output_manager") as mock_om,
+            patch.object(ComponentFactory, "create_voice_manager_optional") as mock_vm,
+        ):
 
             mock_llm.return_value = Mock()
             mock_da.return_value = Mock()
@@ -79,24 +85,27 @@ class TestComponentFactoryIntegration:
 
             on_voice = Mock()
             components = ComponentFactory.create_all_components(
-                text_mode=False, on_voice_command=on_voice,
+                text_mode=False,
+                on_voice_command=on_voice,
             )
 
-            assert 'llm' in components
-            assert 'voice_manager' in components
+            assert "llm" in components
+            assert "voice_manager" in components
             mock_tts.assert_called_once()
 
     def test_component_dependencies_integration(self):
         """Test that components are created with proper dependencies."""
         from jarvis.core.component_factory import ComponentFactory
 
-        with patch.object(ComponentFactory, 'create_llm') as mock_llm, \
-             patch.object(ComponentFactory, 'create_dispatch_adapter') as mock_da, \
-             patch.object(ComponentFactory, 'create_goal_manager') as mock_gm, \
-             patch.object(ComponentFactory, 'create_event_merger') as mock_em, \
-             patch.object(ComponentFactory, 'create_task_parser') as mock_tp, \
-             patch.object(ComponentFactory, 'create_tts_optional') as mock_tts, \
-             patch.object(ComponentFactory, 'create_output_manager') as mock_om:
+        with (
+            patch.object(ComponentFactory, "create_llm") as mock_llm,
+            patch.object(ComponentFactory, "create_dispatch_adapter") as mock_da,
+            patch.object(ComponentFactory, "create_goal_manager") as mock_gm,
+            patch.object(ComponentFactory, "create_event_merger") as mock_em,
+            patch.object(ComponentFactory, "create_task_parser") as mock_tp,
+            patch.object(ComponentFactory, "create_tts_optional") as mock_tts,
+            patch.object(ComponentFactory, "create_output_manager") as mock_om,
+        ):
 
             tts_instance = Mock()
             mock_llm.return_value = Mock()
@@ -121,57 +130,61 @@ class TestJarvisComponentIntegration:
         """Test Jarvis initializes with all required components."""
         from jarvis.main import Jarvis
 
-        with patch('jarvis.core.component_factory.ComponentFactory.create_all_components') as mock_create_all:
+        with patch(
+            "jarvis.core.component_factory.ComponentFactory.create_all_components"
+        ) as mock_create_all:
             mock_components = {
-                'llm': Mock(),
-                'dispatch_adapter': Mock(),
-                'goal_manager': Mock(),
-                'event_merger': Mock(),
-                'task_parser': Mock(),
-                'output_manager': Mock(),
-                'contextor': None,
-                'embeddings': None,
-                'kernel_client': Mock(available=False),
-                'confirmation_manager': Mock(),
-                'tts': None,
-                'voice_manager': None,
+                "llm": Mock(),
+                "dispatch_adapter": Mock(),
+                "goal_manager": Mock(),
+                "event_merger": Mock(),
+                "task_parser": Mock(),
+                "output_manager": Mock(),
+                "contextor": None,
+                "embeddings": None,
+                "kernel_client": Mock(available=False),
+                "confirmation_manager": Mock(),
+                "tts": None,
+                "voice_manager": None,
             }
             mock_create_all.return_value = mock_components
 
             jarvis = Jarvis(text_mode=True)
 
-            assert jarvis.llm == mock_components['llm']
-            assert jarvis.dispatch == mock_components['dispatch_adapter']
-            assert jarvis.goals == mock_components['goal_manager']
-            assert jarvis.events == mock_components['event_merger']
-            assert jarvis.task_parser == mock_components['task_parser']
-            assert jarvis.output_manager == mock_components['output_manager']
+            assert jarvis.llm == mock_components["llm"]
+            assert jarvis.dispatch == mock_components["dispatch_adapter"]
+            assert jarvis.goals == mock_components["goal_manager"]
+            assert jarvis.events == mock_components["event_merger"]
+            assert jarvis.task_parser == mock_components["task_parser"]
+            assert jarvis.output_manager == mock_components["output_manager"]
             assert jarvis.voice_manager is None
 
     def test_jarvis_voice_command_handling(self):
         """Test Jarvis handles voice commands properly."""
-        from jarvis.main import Jarvis
         from jarvis.core.command_parser import TaskParser
         from jarvis.dispatch.goal_manager import GoalManager
+        from jarvis.main import Jarvis
 
-        with patch('jarvis.core.component_factory.ComponentFactory.create_all_components') as mock_create_all:
+        with patch(
+            "jarvis.core.component_factory.ComponentFactory.create_all_components"
+        ) as mock_create_all:
             mock_llm = Mock()
             mock_output = Mock()
             mock_llm.reset_history = Mock()
 
             mock_components = {
-                'llm': mock_llm,
-                'dispatch_adapter': Mock(is_connected=False),
-                'goal_manager': GoalManager(),
-                'event_merger': Mock(),
-                'task_parser': TaskParser(),
-                'output_manager': mock_output,
-                'contextor': None,
-                'embeddings': None,
-                'kernel_client': Mock(available=False),
-                'confirmation_manager': Mock(),
-                'tts': None,
-                'voice_manager': Mock(),
+                "llm": mock_llm,
+                "dispatch_adapter": Mock(is_connected=False),
+                "goal_manager": GoalManager(),
+                "event_merger": Mock(),
+                "task_parser": TaskParser(),
+                "output_manager": mock_output,
+                "contextor": None,
+                "embeddings": None,
+                "kernel_client": Mock(available=False),
+                "confirmation_manager": Mock(),
+                "tts": None,
+                "voice_manager": Mock(),
             }
             mock_create_all.return_value = mock_components
 
@@ -185,10 +198,12 @@ class TestJarvisComponentIntegration:
 
     def test_jarvis_ask_method_integration(self):
         """Test complete Jarvis.ask method integration."""
-        from jarvis.main import Jarvis
         from jarvis.core.command_parser import TaskParser
+        from jarvis.main import Jarvis
 
-        with patch('jarvis.core.component_factory.ComponentFactory.create_all_components') as mock_create_all:
+        with patch(
+            "jarvis.core.component_factory.ComponentFactory.create_all_components"
+        ) as mock_create_all:
             mock_llm = Mock()
             mock_output = Mock()
             mock_goals = Mock()
@@ -197,18 +212,18 @@ class TestJarvisComponentIntegration:
             mock_goals.dismiss_completed = Mock(return_value=[])
 
             mock_components = {
-                'llm': mock_llm,
-                'dispatch_adapter': Mock(),
-                'goal_manager': mock_goals,
-                'event_merger': Mock(),
-                'task_parser': TaskParser(),
-                'output_manager': mock_output,
-                'contextor': None,
-                'embeddings': None,
-                'kernel_client': Mock(available=False),
-                'confirmation_manager': Mock(),
-                'tts': None,
-                'voice_manager': None,
+                "llm": mock_llm,
+                "dispatch_adapter": Mock(),
+                "goal_manager": mock_goals,
+                "event_merger": Mock(),
+                "task_parser": TaskParser(),
+                "output_manager": mock_output,
+                "contextor": None,
+                "embeddings": None,
+                "kernel_client": Mock(available=False),
+                "confirmation_manager": Mock(),
+                "tts": None,
+                "voice_manager": None,
             }
             mock_create_all.return_value = mock_components
 
@@ -231,13 +246,15 @@ class TestGracefulDegradation:
         """Test system works when TTS is unavailable."""
         from jarvis.core.component_factory import ComponentFactory
 
-        with patch.object(ComponentFactory, 'create_llm') as mock_llm, \
-             patch.object(ComponentFactory, 'create_dispatch_adapter') as mock_da, \
-             patch.object(ComponentFactory, 'create_goal_manager') as mock_gm, \
-             patch.object(ComponentFactory, 'create_event_merger') as mock_em, \
-             patch.object(ComponentFactory, 'create_task_parser') as mock_tp, \
-             patch.object(ComponentFactory, 'create_tts_optional') as mock_tts, \
-             patch.object(ComponentFactory, 'create_output_manager') as mock_om:
+        with (
+            patch.object(ComponentFactory, "create_llm") as mock_llm,
+            patch.object(ComponentFactory, "create_dispatch_adapter") as mock_da,
+            patch.object(ComponentFactory, "create_goal_manager") as mock_gm,
+            patch.object(ComponentFactory, "create_event_merger") as mock_em,
+            patch.object(ComponentFactory, "create_task_parser") as mock_tp,
+            patch.object(ComponentFactory, "create_tts_optional") as mock_tts,
+            patch.object(ComponentFactory, "create_output_manager") as mock_om,
+        ):
 
             mock_llm.return_value = Mock()
             mock_da.return_value = Mock()
@@ -249,15 +266,17 @@ class TestGracefulDegradation:
 
             components = ComponentFactory.create_all_components(text_mode=True)
 
-            assert components['tts'] is None
+            assert components["tts"] is None
             mock_tts.assert_called_once()
 
     def test_jarvis_without_voice_components(self):
         """Test Jarvis works completely without voice components."""
-        from jarvis.main import Jarvis
         from jarvis.core.command_parser import TaskParser
+        from jarvis.main import Jarvis
 
-        with patch('jarvis.core.component_factory.ComponentFactory.create_all_components') as mock_create_all:
+        with patch(
+            "jarvis.core.component_factory.ComponentFactory.create_all_components"
+        ) as mock_create_all:
             mock_llm = Mock()
             mock_goals = Mock()
             mock_goals.add_goal = Mock()
@@ -265,18 +284,18 @@ class TestGracefulDegradation:
             mock_goals.dismiss_completed = Mock(return_value=[])
 
             mock_components = {
-                'llm': mock_llm,
-                'dispatch_adapter': Mock(),
-                'goal_manager': mock_goals,
-                'event_merger': Mock(),
-                'task_parser': TaskParser(),
-                'output_manager': Mock(),
-                'contextor': None,
-                'embeddings': None,
-                'kernel_client': Mock(available=False),
-                'confirmation_manager': Mock(),
-                'tts': None,
-                'voice_manager': None,
+                "llm": mock_llm,
+                "dispatch_adapter": Mock(),
+                "goal_manager": mock_goals,
+                "event_merger": Mock(),
+                "task_parser": TaskParser(),
+                "output_manager": Mock(),
+                "contextor": None,
+                "embeddings": None,
+                "kernel_client": Mock(available=False),
+                "confirmation_manager": Mock(),
+                "tts": None,
+                "voice_manager": None,
             }
             mock_create_all.return_value = mock_components
 
@@ -293,8 +312,10 @@ class TestGracefulDegradation:
         """Test that component creation failures don't crash the entire system."""
         from jarvis.core.component_factory import ComponentFactory
 
-        with patch.object(ComponentFactory, 'create_llm') as mock_llm, \
-             patch.object(ComponentFactory, 'create_dispatch_adapter') as mock_da:
+        with (
+            patch.object(ComponentFactory, "create_llm") as mock_llm,
+            patch.object(ComponentFactory, "create_dispatch_adapter") as mock_da,
+        ):
 
             mock_llm.side_effect = Exception("LLM service unavailable")
             mock_da.return_value = Mock()
@@ -311,10 +332,12 @@ class TestComponentLifecycle:
 
     def test_component_reuse_across_requests(self):
         """Test that components are reused across multiple requests."""
-        from jarvis.main import Jarvis
         from jarvis.core.command_parser import TaskParser
+        from jarvis.main import Jarvis
 
-        with patch('jarvis.core.component_factory.ComponentFactory.create_all_components') as mock_create_all:
+        with patch(
+            "jarvis.core.component_factory.ComponentFactory.create_all_components"
+        ) as mock_create_all:
             mock_llm = Mock()
             mock_goals = Mock()
             mock_goals.add_goal = Mock()
@@ -322,18 +345,18 @@ class TestComponentLifecycle:
             mock_goals.dismiss_completed = Mock(return_value=[])
 
             mock_components = {
-                'llm': mock_llm,
-                'dispatch_adapter': Mock(),
-                'goal_manager': mock_goals,
-                'event_merger': Mock(),
-                'task_parser': TaskParser(),
-                'output_manager': Mock(),
-                'contextor': None,
-                'embeddings': None,
-                'kernel_client': Mock(available=False),
-                'confirmation_manager': Mock(),
-                'tts': None,
-                'voice_manager': None,
+                "llm": mock_llm,
+                "dispatch_adapter": Mock(),
+                "goal_manager": mock_goals,
+                "event_merger": Mock(),
+                "task_parser": TaskParser(),
+                "output_manager": Mock(),
+                "contextor": None,
+                "embeddings": None,
+                "kernel_client": Mock(available=False),
+                "confirmation_manager": Mock(),
+                "tts": None,
+                "voice_manager": None,
             }
             mock_create_all.return_value = mock_components
 
@@ -355,34 +378,36 @@ class TestComponentLifecycle:
         """Test that component state is properly isolated between instances."""
         from jarvis.main import Jarvis
 
-        with patch('jarvis.core.component_factory.ComponentFactory.create_all_components') as mock_create_all:
+        with patch(
+            "jarvis.core.component_factory.ComponentFactory.create_all_components"
+        ) as mock_create_all:
             comp1 = {
-                'llm': Mock(),
-                'dispatch_adapter': Mock(),
-                'goal_manager': Mock(),
-                'event_merger': Mock(),
-                'task_parser': Mock(),
-                'output_manager': Mock(),
-                'contextor': None,
-                'embeddings': None,
-                'kernel_client': Mock(available=False),
-                'confirmation_manager': Mock(),
-                'tts': None,
-                'voice_manager': None,
+                "llm": Mock(),
+                "dispatch_adapter": Mock(),
+                "goal_manager": Mock(),
+                "event_merger": Mock(),
+                "task_parser": Mock(),
+                "output_manager": Mock(),
+                "contextor": None,
+                "embeddings": None,
+                "kernel_client": Mock(available=False),
+                "confirmation_manager": Mock(),
+                "tts": None,
+                "voice_manager": None,
             }
             comp2 = {
-                'llm': Mock(),
-                'dispatch_adapter': Mock(),
-                'goal_manager': Mock(),
-                'event_merger': Mock(),
-                'task_parser': Mock(),
-                'output_manager': Mock(),
-                'contextor': None,
-                'embeddings': None,
-                'kernel_client': Mock(available=False),
-                'confirmation_manager': Mock(),
-                'tts': None,
-                'voice_manager': None,
+                "llm": Mock(),
+                "dispatch_adapter": Mock(),
+                "goal_manager": Mock(),
+                "event_merger": Mock(),
+                "task_parser": Mock(),
+                "output_manager": Mock(),
+                "contextor": None,
+                "embeddings": None,
+                "kernel_client": Mock(available=False),
+                "confirmation_manager": Mock(),
+                "tts": None,
+                "voice_manager": None,
             }
 
             mock_create_all.side_effect = [comp1, comp2]

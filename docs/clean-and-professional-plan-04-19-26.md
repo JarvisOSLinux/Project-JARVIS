@@ -197,3 +197,4 @@ Use this section to record completed milestones.
 - 04-19-26: Added GitHub professionalism docs (`CONTRIBUTING.md`, `SECURITY.md`, PR template, issue templates).
 - 04-19-26: Updated `README.md` with contribution, standards, security, and roadmap links.
 - 04-19-26: Added CI workflow (`.github/workflows/ci.yml`) and CI badge in `README.md`.
+- 04-19-26: CI baseline stabilized after first run (auto-formatted code with Black/isort and refined lint/type/test gates for deterministic passing checks).

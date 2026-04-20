@@ -6,6 +6,7 @@ into structured dispatch actions (dispatch, respond, wait, kill, defer).
 """
 
 import pytest
+
 from jarvis.core.command_parser import TaskParser
 
 
@@ -54,7 +55,11 @@ class TestDispatchActionParsing:
         response = {
             "action": "dispatch",
             "tasks": [
-                {"server": "ShellMCP", "tool": "execute_command", "params": {"command": "ls"}},
+                {
+                    "server": "ShellMCP",
+                    "tool": "execute_command",
+                    "params": {"command": "ls"},
+                },
             ],
         }
         result = parser.parse(response)
@@ -234,7 +239,9 @@ class TestUnknownActionHandling:
         result = parser.parse(response)
 
         assert "error" in result
-        assert "unknown_action" in result["error"].lower() or "Unknown" in result["error"]
+        assert (
+            "unknown_action" in result["error"].lower() or "Unknown" in result["error"]
+        )
 
     def test_missing_action_returns_error(self):
         parser = TaskParser()

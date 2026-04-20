@@ -20,7 +20,8 @@ do what they're told.
 import asyncio
 import json
 import time
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
+
 from ..config import Config
 from ..core.logger import get_logger
 
@@ -56,7 +57,9 @@ class DispatchAdapter:
             self._connected = True
             logger.info("Dispatch: Connected successfully")
         except Exception as e:
-            logger.error(f"Dispatch: Connection failed (binary='{Config.DISPATCH_BINARY}'): {e}")
+            logger.error(
+                f"Dispatch: Connection failed (binary='{Config.DISPATCH_BINARY}'): {e}"
+            )
             raise
 
     async def disconnect(self):
@@ -95,7 +98,9 @@ class DispatchAdapter:
 
         logger.info(f"Dispatch: Sending {len(tasks)} task(s)")
         for i, task in enumerate(tasks):
-            logger.info(f"Dispatch:   task[{i}]: server={task.get('server')}, tool={task.get('tool')}, params={task.get('params')}")
+            logger.info(
+                f"Dispatch:   task[{i}]: server={task.get('server')}, tool={task.get('tool')}, params={task.get('params')}"
+            )
 
         t0 = time.perf_counter()
         try:
@@ -105,11 +110,15 @@ class DispatchAdapter:
             )
             elapsed = time.perf_counter() - t0
             content = self._extract_content(result)
-            logger.info(f"Dispatch: send_tasks completed in {elapsed:.2f}s — result: {content}")
+            logger.info(
+                f"Dispatch: send_tasks completed in {elapsed:.2f}s — result: {content}"
+            )
             return content
         except asyncio.TimeoutError:
             elapsed = time.perf_counter() - t0
-            logger.error(f"Dispatch: send_tasks timed out after {elapsed:.2f}s (limit={self.timeout}s)")
+            logger.error(
+                f"Dispatch: send_tasks timed out after {elapsed:.2f}s (limit={self.timeout}s)"
+            )
             return {"error": f"Dispatch timed out after {self.timeout}s"}
         except Exception as e:
             elapsed = time.perf_counter() - t0
@@ -139,11 +148,15 @@ class DispatchAdapter:
             )
             elapsed = time.perf_counter() - t0
             content = self._extract_content(result)
-            logger.info(f"Dispatch: kill_tasks completed in {elapsed:.2f}s — result: {content}")
+            logger.info(
+                f"Dispatch: kill_tasks completed in {elapsed:.2f}s — result: {content}"
+            )
             return content
         except asyncio.TimeoutError:
             elapsed = time.perf_counter() - t0
-            logger.error(f"Dispatch: kill_tasks timed out after {elapsed:.2f}s (limit={self.timeout}s)")
+            logger.error(
+                f"Dispatch: kill_tasks timed out after {elapsed:.2f}s (limit={self.timeout}s)"
+            )
             return {"error": f"Kill timed out after {self.timeout}s"}
         except Exception as e:
             elapsed = time.perf_counter() - t0
@@ -168,7 +181,9 @@ class DispatchAdapter:
             logger.warning("Dispatch: set_timer called but not connected")
             return {"error": "Not connected to dispatch"}
 
-        logger.info(f"Dispatch: Setting timer label='{label}', duration={duration}s, metadata={metadata}")
+        logger.info(
+            f"Dispatch: Setting timer label='{label}', duration={duration}s, metadata={metadata}"
+        )
         params: Dict[str, Any] = {"label": label, "duration": duration}
         if metadata is not None:
             params["metadata"] = metadata
@@ -181,11 +196,15 @@ class DispatchAdapter:
             )
             elapsed = time.perf_counter() - t0
             content = self._extract_content(result)
-            logger.info(f"Dispatch: set_timer completed in {elapsed:.2f}s — result: {content}")
+            logger.info(
+                f"Dispatch: set_timer completed in {elapsed:.2f}s — result: {content}"
+            )
             return content
         except asyncio.TimeoutError:
             elapsed = time.perf_counter() - t0
-            logger.error(f"Dispatch: set_timer timed out after {elapsed:.2f}s (limit={self.timeout}s)")
+            logger.error(
+                f"Dispatch: set_timer timed out after {elapsed:.2f}s (limit={self.timeout}s)"
+            )
             return {"error": f"Timer call timed out after {self.timeout}s"}
         except Exception as e:
             elapsed = time.perf_counter() - t0
@@ -220,9 +239,13 @@ class DispatchAdapter:
                 signals = []
 
             if signals:
-                logger.debug(f"Dispatch: Signal window returned {len(signals)} signal(s)")
+                logger.debug(
+                    f"Dispatch: Signal window returned {len(signals)} signal(s)"
+                )
                 for sig in signals:
-                    logger.debug(f"Dispatch:   signal: type={sig.get('type')}, pid={sig.get('pid')}, data={sig.get('data', '')}")
+                    logger.debug(
+                        f"Dispatch:   signal: type={sig.get('type')}, pid={sig.get('pid')}, data={sig.get('data', '')}"
+                    )
             return signals
         except Exception as e:
             logger.error(f"Dispatch: Failed to get signals: {e}")
@@ -235,13 +258,16 @@ class DispatchAdapter:
         Always returns a dict. Text content that isn't valid JSON is wrapped
         as {"output": "<text>"} so callers can safely use .get().
         """
-        if hasattr(result, 'structuredContent') and result.structuredContent is not None:
+        if (
+            hasattr(result, "structuredContent")
+            and result.structuredContent is not None
+        ):
             return result.structuredContent
 
-        if hasattr(result, 'content') and result.content:
+        if hasattr(result, "content") and result.content:
             texts = []
             for block in result.content:
-                if hasattr(block, 'text') and block.text:
+                if hasattr(block, "text") and block.text:
                     texts.append(block.text)
             combined = "\n".join(texts) if texts else ""
 
@@ -263,7 +289,8 @@ class DispatchAdapter:
         """Run a dmcp command and return stdout, or None on failure."""
         try:
             proc = await asyncio.create_subprocess_exec(
-                Config.DMCP_BINARY, *args,
+                Config.DMCP_BINARY,
+                *args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -276,7 +303,9 @@ class DispatchAdapter:
             return None
 
         if proc.returncode != 0:
-            logger.warning(f"Dispatch: dmcp {' '.join(args)} failed: {stderr.decode().strip()}")
+            logger.warning(
+                f"Dispatch: dmcp {' '.join(args)} failed: {stderr.decode().strip()}"
+            )
             return None
 
         return stdout.decode()
@@ -479,9 +508,13 @@ class DispatchAdapter:
         if not self._connected:
             vector_json = json.dumps(vector)
             raw = await self._run_dmcp(
-                "browse", "--vector", vector_json,
-                "--top-k", str(top_k),
-                "--min-score", str(min_score),
+                "browse",
+                "--vector",
+                vector_json,
+                "--top-k",
+                str(top_k),
+                "--min-score",
+                str(min_score),
                 "--json",
             )
             if raw is None:
@@ -493,11 +526,14 @@ class DispatchAdapter:
 
         try:
             result = await asyncio.wait_for(
-                self.session.call_tool("browse_vector", {
-                    "vector": vector,
-                    "top_k": top_k,
-                    "min_score": min_score,
-                }),
+                self.session.call_tool(
+                    "browse_vector",
+                    {
+                        "vector": vector,
+                        "top_k": top_k,
+                        "min_score": min_score,
+                    },
+                ),
                 timeout=self.timeout,
             )
             content = self._extract_content(result)
@@ -520,9 +556,13 @@ class DispatchAdapter:
         if not self._connected:
             vectors_json = json.dumps(vectors)
             raw = await self._run_dmcp(
-                "browse", "--vectors", vectors_json,
-                "--top-k", str(top_k),
-                "--min-score", str(min_score),
+                "browse",
+                "--vectors",
+                vectors_json,
+                "--top-k",
+                str(top_k),
+                "--min-score",
+                str(min_score),
                 "--json",
             )
             if raw is None:
@@ -534,11 +574,14 @@ class DispatchAdapter:
 
         try:
             result = await asyncio.wait_for(
-                self.session.call_tool("browse_vectors", {
-                    "vectors": vectors,
-                    "top_k": top_k,
-                    "min_score": min_score,
-                }),
+                self.session.call_tool(
+                    "browse_vectors",
+                    {
+                        "vectors": vectors,
+                        "top_k": top_k,
+                        "min_score": min_score,
+                    },
+                ),
                 timeout=self.timeout,
             )
             content = self._extract_content(result)
@@ -620,7 +663,10 @@ class DispatchAdapter:
         count = await self.server_count()
         total = count.get("total", 0)
 
-        if Config.ENFORCE_EMBEDDING_SEARCH or total >= Config.EMBEDDING_SEARCH_THRESHOLD:
+        if (
+            Config.ENFORCE_EMBEDDING_SEARCH
+            or total >= Config.EMBEDDING_SEARCH_THRESHOLD
+        ):
             return "embedding"
         return "keyword"
 
@@ -642,9 +688,7 @@ class DispatchAdapter:
             embeddings: OllamaEmbeddings instance for local embedding.
         """
         mode = await self.select_discovery_mode(embeddings)
-        logger.info(
-            f"Dispatch: discover_tools — {len(tasks)} sub-task(s), mode={mode}"
-        )
+        logger.info(f"Dispatch: discover_tools — {len(tasks)} sub-task(s), mode={mode}")
 
         all_results: List[Dict[str, Any]] = []
 
@@ -725,7 +769,11 @@ class DispatchAdapter:
             if installed:
                 # Expand installed servers to per-tool rows
                 tools_result = await self.list_server_tools(server_id)
-                tools = tools_result.get("tools", []) if isinstance(tools_result, dict) else []
+                tools = (
+                    tools_result.get("tools", [])
+                    if isinstance(tools_result, dict)
+                    else []
+                )
 
                 if tools:
                     for tool in tools:
@@ -734,17 +782,21 @@ class DispatchAdapter:
                         tool_name = tool.get("name", "")
                         if not tool_name:
                             continue
-                        tool_results.append({
-                            "server_id": server_id,
-                            "server_name": server_name,
-                            "tool_name": tool_name,
-                            "description": tool.get("description", ""),
-                            "params": tool.get("inputSchema", tool.get("params", {})),
-                            "installed": True,
-                            "score": 0,  # keyword matches don't have scores
-                            "_source": "keyword",
-                            "_source_task": source_task,
-                        })
+                        tool_results.append(
+                            {
+                                "server_id": server_id,
+                                "server_name": server_name,
+                                "tool_name": tool_name,
+                                "description": tool.get("description", ""),
+                                "params": tool.get(
+                                    "inputSchema", tool.get("params", {})
+                                ),
+                                "installed": True,
+                                "score": 0,  # keyword matches don't have scores
+                                "_source": "keyword",
+                                "_source_task": source_task,
+                            }
+                        )
                     continue
 
                 # Installed but no tool info — fall through to server-level row
@@ -753,15 +805,17 @@ class DispatchAdapter:
                     "via list_server_tools; emitting server-level row"
                 )
 
-            tool_results.append({
-                "server_id": server_id,
-                "server_name": server_name,
-                "description": server_desc,
-                "installed": installed,
-                "score": 0,
-                "_source": "keyword",
-                "_source_task": source_task,
-            })
+            tool_results.append(
+                {
+                    "server_id": server_id,
+                    "server_name": server_name,
+                    "description": server_desc,
+                    "installed": installed,
+                    "score": 0,
+                    "_source": "keyword",
+                    "_source_task": source_task,
+                }
+            )
 
         return tool_results
 
@@ -852,7 +906,9 @@ class DispatchAdapter:
         Does nothing if embeddings are unavailable.
         """
         if embeddings is None:
-            logger.debug(f"Dispatch: Skipping auto-index for '{server_id}' (no embeddings)")
+            logger.debug(
+                f"Dispatch: Skipping auto-index for '{server_id}' (no embeddings)"
+            )
             return
 
         # Get tool descriptions from the installed server
@@ -887,11 +943,15 @@ class DispatchAdapter:
                 "tools": tool_vectors,
             }
             result = await self.index_server(server_id, vectors)
-            logger.info(f"Dispatch: Auto-indexed '{server_id}' ({len(tool_vectors)} tools): {result}")
+            logger.info(
+                f"Dispatch: Auto-indexed '{server_id}' ({len(tool_vectors)} tools): {result}"
+            )
 
         except Exception as e:
             # Non-fatal — server is installed, just not vector-indexed
-            logger.warning(f"Dispatch: Auto-index failed for '{server_id}' (non-fatal): {e}")
+            logger.warning(
+                f"Dispatch: Auto-index failed for '{server_id}' (non-fatal): {e}"
+            )
 
     async def ensure_embedding_model(self, embeddings: Optional[Any] = None) -> None:
         """
@@ -903,7 +963,9 @@ class DispatchAdapter:
 
         spec = await self.embedding_spec()
         if spec is None:
-            logger.info("Dispatch: No embedding spec from registry (index may not be synced)")
+            logger.info(
+                "Dispatch: No embedding spec from registry (index may not be synced)"
+            )
             return
 
         registry_model = spec.get("model", "")

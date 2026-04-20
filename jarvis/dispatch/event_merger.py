@@ -11,9 +11,10 @@ socket listeners, or CLI "jarvis send" — enabling dual input
 """
 
 import asyncio
-from enum import Enum
 from dataclasses import dataclass, field
-from typing import Any, Optional, Dict, List, Callable, Awaitable
+from enum import Enum
+from typing import Any, Awaitable, Callable, Dict, List, Optional
+
 from ..core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -32,22 +33,22 @@ class Event:
 
     type: EventType
     data: Any = None
-    timestamp: float = field(default_factory=lambda: __import__('time').time())
+    timestamp: float = field(default_factory=lambda: __import__("time").time())
 
     @staticmethod
-    def user_input(text: str) -> 'Event':
+    def user_input(text: str) -> "Event":
         return Event(type=EventType.USER_INPUT, data=text)
 
     @staticmethod
-    def dispatch_signal(signal: Dict[str, Any]) -> 'Event':
+    def dispatch_signal(signal: Dict[str, Any]) -> "Event":
         return Event(type=EventType.DISPATCH_SIGNAL, data=signal)
 
     @staticmethod
-    def confirmation_response(data: Dict[str, Any]) -> 'Event':
+    def confirmation_response(data: Dict[str, Any]) -> "Event":
         return Event(type=EventType.CONFIRMATION_RESPONSE, data=data)
 
     @staticmethod
-    def shutdown() -> 'Event':
+    def shutdown() -> "Event":
         return Event(type=EventType.SHUTDOWN)
 
 
@@ -84,7 +85,9 @@ class EventMerger:
             return
         t = str(text).strip()
         if self._loop is None:
-            logger.warning("EventMerger: inject_user_input called before start, dropping input")
+            logger.warning(
+                "EventMerger: inject_user_input called before start, dropping input"
+            )
             return
 
         def _put() -> None:
@@ -102,15 +105,21 @@ class EventMerger:
         Thread-safe.
         """
         if self._loop is None:
-            logger.warning("EventMerger: inject_confirmation_response called before start")
+            logger.warning(
+                "EventMerger: inject_confirmation_response called before start"
+            )
             return
 
         def _put() -> None:
             try:
                 self._queue.put_nowait(Event.confirmation_response(data))
-                logger.debug(f"EventMerger: Injected confirmation response id={data.get('id')}")
+                logger.debug(
+                    f"EventMerger: Injected confirmation response id={data.get('id')}"
+                )
             except asyncio.QueueFull:
-                logger.warning("EventMerger: Queue full, dropping confirmation response")
+                logger.warning(
+                    "EventMerger: Queue full, dropping confirmation response"
+                )
 
         self._loop.call_soon_threadsafe(_put)
 
@@ -175,20 +184,26 @@ class EventMerger:
             try:
                 text = await source()
                 if text and str(text).strip():
-                    logger.debug(f"EventMerger: Queued user input ({len(str(text).strip())} chars)")
+                    logger.debug(
+                        f"EventMerger: Queued user input ({len(str(text).strip())} chars)"
+                    )
                     await self._queue.put(Event.user_input(str(text).strip()))
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"EventMerger: User input error: {e}")
 
-    async def _listen_signals(self, source: Callable[[], Awaitable[Optional[Dict[str, Any]]]]):
+    async def _listen_signals(
+        self, source: Callable[[], Awaitable[Optional[Dict[str, Any]]]]
+    ):
         """Loop: await dispatch signals, push as events."""
         while self._running:
             try:
                 signal = await source()
                 if signal is not None:
-                    logger.debug(f"EventMerger: Queued dispatch signal type={signal.get('type')}, pid={signal.get('pid')}")
+                    logger.debug(
+                        f"EventMerger: Queued dispatch signal type={signal.get('type')}, pid={signal.get('pid')}"
+                    )
                     await self._queue.put(Event.dispatch_signal(signal))
             except asyncio.CancelledError:
                 break

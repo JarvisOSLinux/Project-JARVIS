@@ -5,11 +5,13 @@ Tests complete user request -> response workflows using the event-driven
 dispatch architecture, including the synchronous .ask() interface.
 """
 
-import pytest
 from unittest.mock import Mock, patch
+
+import pytest
+
 from jarvis.core.command_parser import TaskParser
 from jarvis.dispatch.goal_manager import GoalManager
-from tests.integration_utils import make_respond_action, make_dispatch_action, make_task
+from tests.integration_utils import make_dispatch_action, make_respond_action, make_task
 
 
 @pytest.mark.integration
@@ -30,21 +32,23 @@ class TestEndToEndWorkflows:
         goal_manager = GoalManager()
 
         components = {
-            'llm': mock_llm,
-            'dispatch_adapter': Mock(is_connected=False),
-            'goal_manager': goal_manager,
-            'event_merger': Mock(),
-            'task_parser': TaskParser(),
-            'output_manager': Mock(),
-            'contextor': None,
-            'embeddings': None,
-            'kernel_client': Mock(available=False),
-            'confirmation_manager': Mock(),
-            'tts': None,
-            'voice_manager': None,
+            "llm": mock_llm,
+            "dispatch_adapter": Mock(is_connected=False),
+            "goal_manager": goal_manager,
+            "event_merger": Mock(),
+            "task_parser": TaskParser(),
+            "output_manager": Mock(),
+            "contextor": None,
+            "embeddings": None,
+            "kernel_client": Mock(available=False),
+            "confirmation_manager": Mock(),
+            "tts": None,
+            "voice_manager": None,
         }
 
-        with patch('jarvis.core.component_factory.ComponentFactory.create_all_components') as m:
+        with patch(
+            "jarvis.core.component_factory.ComponentFactory.create_all_components"
+        ) as m:
             m.return_value = components
             jarvis = Jarvis(text_mode=True)
 
@@ -73,10 +77,12 @@ class TestEndToEndWorkflows:
 
     def test_multi_turn_conversation(self):
         """Test multi-turn conversation using the ask() interface."""
-        jarvis = self._make_jarvis([
-            make_respond_action("Hello! How can I help?"),
-            make_respond_action("The weather is sunny."),
-        ])
+        jarvis = self._make_jarvis(
+            [
+                make_respond_action("Hello! How can I help?"),
+                make_respond_action("The weather is sunny."),
+            ]
+        )
 
         r1 = jarvis.ask("Hello")
         r2 = jarvis.ask("What's the weather?")
@@ -91,7 +97,10 @@ class TestEndToEndWorkflows:
 
         result = jarvis.ask("Do something weird")
 
-        assert "trouble" in result["output"].lower() or "try again" in result["output"].lower()
+        assert (
+            "trouble" in result["output"].lower()
+            or "try again" in result["output"].lower()
+        )
 
     def test_respond_action_dismisses_completed_goals(self):
         """Test that a respond action with goal completion dismisses the goal."""
@@ -99,7 +108,9 @@ class TestEndToEndWorkflows:
             {
                 "action": "respond",
                 "output": "All done!",
-                "goal_updates": [{"id": "placeholder", "status": "completed", "result": "ok"}],
+                "goal_updates": [
+                    {"id": "placeholder", "status": "completed", "result": "ok"}
+                ],
             }
         )
 
@@ -112,7 +123,7 @@ class TestEndToEndWorkflows:
         """Test that chat history is reset after each response (when configured)."""
         jarvis = self._make_jarvis(make_respond_action("Done."))
 
-        with patch.object(jarvis.llm, 'reset_history') as mock_reset:
+        with patch.object(jarvis.llm, "reset_history") as mock_reset:
             jarvis.ask("Test")
             mock_reset.assert_called_once()
 

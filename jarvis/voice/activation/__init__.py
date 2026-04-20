@@ -23,10 +23,9 @@ def create_activation(provider: str = "vosk", **kwargs) -> ActivationProvider:
     """
     if provider == "vosk":
         from .vosk_activation import VoskActivation
+
         return VoskActivation(**kwargs)
-    raise ValueError(
-        f"Unknown activation provider: '{provider}'. Available: vosk"
-    )
+    raise ValueError(f"Unknown activation provider: '{provider}'. Available: vosk")
 
 
 __all__ = ["ActivationProvider", "create_activation"]

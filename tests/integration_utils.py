@@ -6,18 +6,20 @@ Updated for the event-driven dispatch architecture.
 """
 
 import json
-import tempfile
 import os
+import tempfile
 from pathlib import Path
-from typing import Dict, Any, List, Optional
-from unittest.mock import Mock, AsyncMock
-
+from typing import Any, Dict, List, Optional
+from unittest.mock import AsyncMock, Mock
 
 # ---------------------------------------------------------------------------
 # Dispatch-format response builders
 # ---------------------------------------------------------------------------
 
-def make_respond_action(output: str, goal_updates: Optional[List] = None) -> Dict[str, Any]:
+
+def make_respond_action(
+    output: str, goal_updates: Optional[List] = None
+) -> Dict[str, Any]:
     """Create a respond action (LLM tells the user something)."""
     resp = {"action": "respond", "output": output}
     if goal_updates:
@@ -25,7 +27,9 @@ def make_respond_action(output: str, goal_updates: Optional[List] = None) -> Dic
     return resp
 
 
-def make_dispatch_action(tasks: List[Dict[str, Any]], goal_updates: Optional[List] = None) -> Dict[str, Any]:
+def make_dispatch_action(
+    tasks: List[Dict[str, Any]], goal_updates: Optional[List] = None
+) -> Dict[str, Any]:
     """Create a dispatch action (LLM sends tasks to dispatch)."""
     resp = {"action": "dispatch", "tasks": tasks}
     if goal_updates:
@@ -45,11 +49,20 @@ def make_kill_action(pids: List[int]) -> Dict[str, Any]:
 
 def make_defer_action(goal_id: str, duration: int, reason: str = "") -> Dict[str, Any]:
     """Create a defer action."""
-    return {"action": "defer", "goal_id": goal_id, "duration": duration, "reason": reason}
+    return {
+        "action": "defer",
+        "goal_id": goal_id,
+        "duration": duration,
+        "reason": reason,
+    }
 
 
-def make_task(server: str, tool: str, params: Optional[Dict] = None,
-              remind_after: Optional[int] = None) -> Dict[str, Any]:
+def make_task(
+    server: str,
+    tool: str,
+    params: Optional[Dict] = None,
+    remind_after: Optional[int] = None,
+) -> Dict[str, Any]:
     """Create a single task dict for dispatch actions."""
     task = {"server": server, "tool": tool, "params": params or {}}
     if remind_after is not None:
@@ -61,8 +74,13 @@ def make_task(server: str, tool: str, params: Optional[Dict] = None,
 # Signal builders (dispatch signals coming back from dispatch binary)
 # ---------------------------------------------------------------------------
 
-def make_signal(pid: int, signal_type: str, data: Optional[Dict] = None,
-                metadata: Optional[Dict] = None) -> Dict[str, Any]:
+
+def make_signal(
+    pid: int,
+    signal_type: str,
+    data: Optional[Dict] = None,
+    metadata: Optional[Dict] = None,
+) -> Dict[str, Any]:
     """Create a dispatch signal dict."""
     sig = {"pid": pid, "type": signal_type}
     if data is not None:
@@ -91,6 +109,7 @@ def make_remind_signal(pid: int, goal_id: Optional[str] = None) -> Dict[str, Any
 # ---------------------------------------------------------------------------
 # Mock factories
 # ---------------------------------------------------------------------------
+
 
 def create_mock_llm(responses: Optional[List[Dict[str, Any]]] = None) -> Mock:
     """Create a mock LLM that returns predefined dispatch-format responses."""
@@ -122,6 +141,7 @@ def create_mock_dispatch_adapter(connected: bool = False) -> Mock:
 # File system helpers
 # ---------------------------------------------------------------------------
 
+
 def create_temp_directory_with_files(files: Dict[str, str]) -> str:
     """Create a temporary directory with test files."""
     temp_dir = tempfile.mkdtemp()
@@ -145,7 +165,7 @@ def create_test_mcp_config(servers: Optional[Dict[str, Any]] = None) -> str:
             }
         }
     config = {"mcpServers": servers}
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
         json.dump(config, f, indent=2)
         return f.name
 
@@ -153,6 +173,7 @@ def create_test_mcp_config(servers: Optional[Dict[str, Any]] = None) -> str:
 # ---------------------------------------------------------------------------
 # Environment helpers
 # ---------------------------------------------------------------------------
+
 
 def setup_test_environment(config_overrides: Optional[Dict[str, str]] = None):
     """Set up test environment with configuration overrides."""
@@ -176,9 +197,11 @@ def setup_test_environment(config_overrides: Optional[Dict[str, str]] = None):
 # Async test helpers
 # ---------------------------------------------------------------------------
 
+
 def wait_for_async(coro, timeout: float = 5.0):
     """Helper to run async coroutines in tests."""
     import asyncio
+
     import pytest
 
     async def run_with_timeout():
@@ -199,7 +222,10 @@ def wait_for_async(coro, timeout: float = 5.0):
 # Legacy LLM response helpers (for LLM-level tests that care about raw JSON)
 # ---------------------------------------------------------------------------
 
-def mock_llm_response(user_request: str = "Conversation", output: str = "Hello!") -> Dict[str, Any]:
+
+def mock_llm_response(
+    user_request: str = "Conversation", output: str = "Hello!"
+) -> Dict[str, Any]:
     """Create a mock LLM response in the old JSON format (user_request/output).
 
     The LLM actually returns free-form JSON; the *new* dispatch format uses
@@ -220,9 +246,9 @@ def assert_valid_json_response(response: Dict[str, Any]) -> None:
     assert "user_request" in response, f"Missing 'user_request' key: {response}"
     assert "output" in response, f"Missing 'output' key: {response}"
     valid_types = {"Conversation", "SuperMCP"}
-    assert response["user_request"] in valid_types, (
-        f"Invalid user_request type '{response['user_request']}'"
-    )
+    assert (
+        response["user_request"] in valid_types
+    ), f"Invalid user_request type '{response['user_request']}'"
 
 
 def create_mock_llm_provider(responses: Optional[List] = None) -> Mock:

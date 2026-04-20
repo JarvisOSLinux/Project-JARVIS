@@ -23,10 +23,9 @@ def create_tts(provider: str = "piper", **kwargs) -> TTSProvider:
     """
     if provider == "piper":
         from .piper_tts import PiperTTS
+
         return PiperTTS(**kwargs)
-    raise ValueError(
-        f"Unknown TTS provider: '{provider}'. Available: piper"
-    )
+    raise ValueError(f"Unknown TTS provider: '{provider}'. Available: piper")
 
 
 __all__ = ["TTSProvider", "create_tts"]

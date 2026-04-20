@@ -49,7 +49,7 @@ import select
 import struct
 import threading
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from .main import Jarvis
@@ -62,77 +62,79 @@ logger = get_logger(__name__)
 # UAPI constants (must match linux/include/uapi/linux/jarvis.h)
 # ---------------------------------------------------------------------------
 
-JARVIS_MAX_QUERY_LEN      = 4096
-JARVIS_MAX_RESP_LEN       = 65536
-JARVIS_MODEL_NAME_LEN     = 64
-JARVIS_KEY_ID_LEN         = 64
-JARVIS_KEY_DATA_LEN       = 512
+JARVIS_MAX_QUERY_LEN = 4096
+JARVIS_MAX_RESP_LEN = 65536
+JARVIS_MODEL_NAME_LEN = 64
+JARVIS_KEY_ID_LEN = 64
+JARVIS_KEY_DATA_LEN = 512
 JARVIS_POLICY_PATTERN_LEN = 128
 
 # jarvis_state
-STATE_OFFLINE    = 0
-STATE_IDLE       = 1
+STATE_OFFLINE = 0
+STATE_IDLE = 1
 STATE_PROCESSING = 2
-STATE_ERROR      = 3
+STATE_ERROR = 3
 
 # jarvis_provider
-PROVIDER_NONE         = 0
-PROVIDER_OLLAMA       = 1
-PROVIDER_CLAUDE       = 2
-PROVIDER_OPENAI       = 3
+PROVIDER_NONE = 0
+PROVIDER_OLLAMA = 1
+PROVIDER_CLAUDE = 2
+PROVIDER_OPENAI = 3
 PROVIDER_OPENAI_COMPAT = 4
 
 # jarvis_policy_tier
-TIER_SAFE      = 0
-TIER_ELEVATED  = 1
+TIER_SAFE = 0
+TIER_ELEVATED = 1
 TIER_DANGEROUS = 2
 TIER_FORBIDDEN = 3
 
 # Query types
-QTYPE_GENERIC    = 0
-QTYPE_SYSEVT     = 1
-QTYPE_AUDIT      = 2
-QTYPE_DIAG       = 3
-QTYPE_VOICE_CMD  = 4
-QTYPE_MCP_CALL   = 5
+QTYPE_GENERIC = 0
+QTYPE_SYSEVT = 1
+QTYPE_AUDIT = 2
+QTYPE_DIAG = 3
+QTYPE_VOICE_CMD = 4
+QTYPE_MCP_CALL = 5
 QTYPE_POLICY_REQ = 6
 
 # IOCTL numbers — computed from the kernel macro expansion:
 #   _IOC(dir, type, nr, size)  type='J'=0x4A
 #   _IOR  = dir=2, _IOW = dir=1, _IOWR = dir=3, _IO = dir=0
 # Format: (direction<<30) | (size<<16) | (type<<8) | nr
-_IOC_NONE  = 0
+_IOC_NONE = 0
 _IOC_WRITE = 1
-_IOC_READ  = 2
-_JARVIS_TYPE = ord('J')
+_IOC_READ = 2
+_JARVIS_TYPE = ord("J")
+
 
 def _ioc(direction, nr, size):
     return (direction << 30) | (size << 16) | (_JARVIS_TYPE << 8) | nr
 
+
 # struct sizes (little-endian, host byte order assumed)
 # jarvis_status:  u32 state + u32 provider + u32 pending + u32 model_loaded
 #                 + 64 model_name + 64 provider_name = 144 bytes
-_STATUS_SIZE  = 4 + 4 + 4 + 4 + JARVIS_MODEL_NAME_LEN + JARVIS_MODEL_NAME_LEN
+_STATUS_SIZE = 4 + 4 + 4 + 4 + JARVIS_MODEL_NAME_LEN + JARVIS_MODEL_NAME_LEN
 # jarvis_query: u64 id + u32 type + u32 flags + u32 len + u32 pad
 #               + u64 timestamp + JARVIS_MAX_QUERY_LEN data
-_QUERY_SIZE   = 8 + 4 + 4 + 4 + 4 + 8 + JARVIS_MAX_QUERY_LEN
+_QUERY_SIZE = 8 + 4 + 4 + 4 + 4 + 8 + JARVIS_MAX_QUERY_LEN
 # jarvis_response: u64 id + u32 status + u32 flags + u32 len + u32 pad
 #                  + JARVIS_MAX_RESP_LEN data
 _RESPONSE_SIZE = 8 + 4 + 4 + 4 + 4 + JARVIS_MAX_RESP_LEN
 # jarvis_policy_check: 128 server + 128 tool + u32 tier + u32 allowed
 _POLICY_CHECK_SIZE = JARVIS_POLICY_PATTERN_LEN * 2 + 4 + 4
 # jarvis_key_op: 64 id + 512 data + u32 len + u32 pad
-_KEY_OP_SIZE  = JARVIS_KEY_ID_LEN + JARVIS_KEY_DATA_LEN + 4 + 4
+_KEY_OP_SIZE = JARVIS_KEY_ID_LEN + JARVIS_KEY_DATA_LEN + 4 + 4
 
-IOCTL_STATUS        = _ioc(_IOC_READ,   1, _STATUS_SIZE)
-IOCTL_SET_STATE     = _ioc(_IOC_WRITE,  2, 4)
-IOCTL_SET_MODEL     = _ioc(_IOC_WRITE,  3, JARVIS_MODEL_NAME_LEN)
-IOCTL_RESPOND       = _ioc(_IOC_WRITE,  4, _RESPONSE_SIZE)
-IOCTL_FLUSH         = _ioc(_IOC_NONE,   7, 0)
-IOCTL_SET_PROVIDER  = _ioc(_IOC_WRITE,  8, 4)
-IOCTL_SYSMON        = _ioc(_IOC_READ,  10, 116)  # sizeof(jarvis_sysmon)
-IOCTL_POLICY_CHECK  = _ioc(_IOC_READ | _IOC_WRITE, 22, _POLICY_CHECK_SIZE)
-IOCTL_KEY_GET       = _ioc(_IOC_READ | _IOC_WRITE, 31, _KEY_OP_SIZE)
+IOCTL_STATUS = _ioc(_IOC_READ, 1, _STATUS_SIZE)
+IOCTL_SET_STATE = _ioc(_IOC_WRITE, 2, 4)
+IOCTL_SET_MODEL = _ioc(_IOC_WRITE, 3, JARVIS_MODEL_NAME_LEN)
+IOCTL_RESPOND = _ioc(_IOC_WRITE, 4, _RESPONSE_SIZE)
+IOCTL_FLUSH = _ioc(_IOC_NONE, 7, 0)
+IOCTL_SET_PROVIDER = _ioc(_IOC_WRITE, 8, 4)
+IOCTL_SYSMON = _ioc(_IOC_READ, 10, 116)  # sizeof(jarvis_sysmon)
+IOCTL_POLICY_CHECK = _ioc(_IOC_READ | _IOC_WRITE, 22, _POLICY_CHECK_SIZE)
+IOCTL_KEY_GET = _ioc(_IOC_READ | _IOC_WRITE, 31, _KEY_OP_SIZE)
 
 JARVIS_DEV = "/dev/jarvis"
 
@@ -140,50 +142,56 @@ JARVIS_DEV = "/dev/jarvis"
 # ctypes struct layouts
 # ---------------------------------------------------------------------------
 
+
 class JarvisQuery(ctypes.LittleEndianStructure):
     _pack_ = 1
     _fields_ = [
-        ("id",        ctypes.c_uint64),
-        ("type",      ctypes.c_uint32),
-        ("flags",     ctypes.c_uint32),
-        ("len",       ctypes.c_uint32),
-        ("_pad",      ctypes.c_uint32),
+        ("id", ctypes.c_uint64),
+        ("type", ctypes.c_uint32),
+        ("flags", ctypes.c_uint32),
+        ("len", ctypes.c_uint32),
+        ("_pad", ctypes.c_uint32),
         ("timestamp", ctypes.c_uint64),
-        ("data",      ctypes.c_uint8 * JARVIS_MAX_QUERY_LEN),
+        ("data", ctypes.c_uint8 * JARVIS_MAX_QUERY_LEN),
     ]
+
 
 class JarvisResponse(ctypes.LittleEndianStructure):
     _pack_ = 1
     _fields_ = [
-        ("id",     ctypes.c_uint64),
+        ("id", ctypes.c_uint64),
         ("status", ctypes.c_uint32),
-        ("flags",  ctypes.c_uint32),
-        ("len",    ctypes.c_uint32),
-        ("_pad",   ctypes.c_uint32),
-        ("data",   ctypes.c_uint8 * JARVIS_MAX_RESP_LEN),
+        ("flags", ctypes.c_uint32),
+        ("len", ctypes.c_uint32),
+        ("_pad", ctypes.c_uint32),
+        ("data", ctypes.c_uint8 * JARVIS_MAX_RESP_LEN),
     ]
+
 
 class JarvisPolicyCheck(ctypes.LittleEndianStructure):
     _pack_ = 1
     _fields_ = [
-        ("server",  ctypes.c_uint8 * JARVIS_POLICY_PATTERN_LEN),
-        ("tool",    ctypes.c_uint8 * JARVIS_POLICY_PATTERN_LEN),
-        ("tier",    ctypes.c_uint32),
+        ("server", ctypes.c_uint8 * JARVIS_POLICY_PATTERN_LEN),
+        ("tool", ctypes.c_uint8 * JARVIS_POLICY_PATTERN_LEN),
+        ("tier", ctypes.c_uint32),
         ("allowed", ctypes.c_uint32),
     ]
+
 
 class JarvisKeyOp(ctypes.LittleEndianStructure):
     _pack_ = 1
     _fields_ = [
-        ("id",   ctypes.c_uint8 * JARVIS_KEY_ID_LEN),
+        ("id", ctypes.c_uint8 * JARVIS_KEY_ID_LEN),
         ("data", ctypes.c_uint8 * JARVIS_KEY_DATA_LEN),
-        ("len",  ctypes.c_uint32),
+        ("len", ctypes.c_uint32),
         ("_pad", ctypes.c_uint32),
     ]
+
 
 # ---------------------------------------------------------------------------
 # Kernel client
 # ---------------------------------------------------------------------------
+
 
 class KernelClient:
     """
@@ -191,21 +199,20 @@ class KernelClient:
     """
 
     # Re-export constants for callers
-    PROVIDER_NONE         = PROVIDER_NONE
-    PROVIDER_OLLAMA       = PROVIDER_OLLAMA
-    PROVIDER_CLAUDE       = PROVIDER_CLAUDE
-    PROVIDER_OPENAI       = PROVIDER_OPENAI
+    PROVIDER_NONE = PROVIDER_NONE
+    PROVIDER_OLLAMA = PROVIDER_OLLAMA
+    PROVIDER_CLAUDE = PROVIDER_CLAUDE
+    PROVIDER_OPENAI = PROVIDER_OPENAI
     PROVIDER_OPENAI_COMPAT = PROVIDER_OPENAI_COMPAT
 
-    TIER_SAFE      = TIER_SAFE
-    TIER_ELEVATED  = TIER_ELEVATED
+    TIER_SAFE = TIER_SAFE
+    TIER_ELEVATED = TIER_ELEVATED
     TIER_DANGEROUS = TIER_DANGEROUS
     TIER_FORBIDDEN = TIER_FORBIDDEN
 
-    def __init__(self, jarvis: Optional["Jarvis"] = None,
-                 dev_path: str = JARVIS_DEV):
+    def __init__(self, jarvis: Optional["Jarvis"] = None, dev_path: str = JARVIS_DEV):
         self._dev_path = dev_path
-        self._jarvis   = jarvis   # may be set later via .set_jarvis()
+        self._jarvis = jarvis  # may be set later via .set_jarvis()
         self._fd: Optional[int] = None
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
@@ -226,15 +233,20 @@ class KernelClient:
         Returns True if the kernel module is present, False if gracefully skipped.
         """
         if not Path(self._dev_path).exists():
-            logger.info("kernel_client: %s not found — running without kernel integration",
-                        self._dev_path)
+            logger.info(
+                "kernel_client: %s not found — running without kernel integration",
+                self._dev_path,
+            )
             return False
 
         try:
             self._fd = os.open(self._dev_path, os.O_RDWR)
         except PermissionError:
-            logger.warning("kernel_client: permission denied on %s — "
-                           "run as root or add CAP_SYS_ADMIN", self._dev_path)
+            logger.warning(
+                "kernel_client: permission denied on %s — "
+                "run as root or add CAP_SYS_ADMIN",
+                self._dev_path,
+            )
             return False
         except OSError as exc:
             logger.warning("kernel_client: could not open %s: %s", self._dev_path, exc)
@@ -297,8 +309,8 @@ class KernelClient:
         self._ioctl(IOCTL_SET_PROVIDER, buf)
 
     def _set_model(self, model: str) -> None:
-        encoded = model.encode("utf-8")[:JARVIS_MODEL_NAME_LEN - 1]
-        padded  = encoded.ljust(JARVIS_MODEL_NAME_LEN, b'\x00')
+        encoded = model.encode("utf-8")[: JARVIS_MODEL_NAME_LEN - 1]
+        padded = encoded.ljust(JARVIS_MODEL_NAME_LEN, b"\x00")
         self._ioctl(IOCTL_SET_MODEL, padded)
 
     # ------------------------------------------------------------------
@@ -316,18 +328,22 @@ class KernelClient:
         """
         if self._available:
             op = JarvisKeyOp()
-            id_bytes = key_id.encode("utf-8")[:JARVIS_KEY_ID_LEN - 1]
+            id_bytes = key_id.encode("utf-8")[: JARVIS_KEY_ID_LEN - 1]
             ctypes.memmove(op.id, id_bytes, len(id_bytes))
 
             try:
                 self._ioctl(IOCTL_KEY_GET, op)
                 if op.len > 0:
-                    raw = bytes(op.data[:op.len]).rstrip(b'\x00')
+                    raw = bytes(op.data[: op.len]).rstrip(b"\x00")
                     if raw:
-                        logger.debug("kernel_client: retrieved key '%s' from keyring", key_id)
+                        logger.debug(
+                            "kernel_client: retrieved key '%s' from keyring", key_id
+                        )
                         return raw.decode("utf-8", errors="replace")
             except OSError as exc:
-                logger.debug("kernel_client: keyring lookup for '%s' failed: %s", key_id, exc)
+                logger.debug(
+                    "kernel_client: keyring lookup for '%s' failed: %s", key_id, exc
+                )
 
         # Fallback: environment variable
         env_name = key_id.upper().replace("-", "_")
@@ -351,10 +367,10 @@ class KernelClient:
             return (TIER_ELEVATED, True)
 
         chk = JarvisPolicyCheck()
-        srv_b = server.encode("utf-8")[:JARVIS_POLICY_PATTERN_LEN - 1]
-        tol_b = tool.encode("utf-8")[:JARVIS_POLICY_PATTERN_LEN - 1]
+        srv_b = server.encode("utf-8")[: JARVIS_POLICY_PATTERN_LEN - 1]
+        tol_b = tool.encode("utf-8")[: JARVIS_POLICY_PATTERN_LEN - 1]
         ctypes.memmove(chk.server, srv_b, len(srv_b))
-        ctypes.memmove(chk.tool,   tol_b, len(tol_b))
+        ctypes.memmove(chk.tool, tol_b, len(tol_b))
 
         try:
             self._ioctl(IOCTL_POLICY_CHECK, chk)
@@ -397,11 +413,16 @@ class KernelClient:
 
     def _handle_query(self, query: JarvisQuery) -> None:
         """Process one kernel query through JARVIS and post the response."""
-        payload = bytes(query.data[:query.len]).decode("utf-8", errors="replace").rstrip("\x00")
-        q_type  = query.type
+        payload = (
+            bytes(query.data[: query.len])
+            .decode("utf-8", errors="replace")
+            .rstrip("\x00")
+        )
+        q_type = query.type
 
-        logger.info("kernel_client: query #%d type=%d: %s",
-                    query.id, q_type, payload[:120])
+        logger.info(
+            "kernel_client: query #%d type=%d: %s", query.id, q_type, payload[:120]
+        )
 
         if not self._jarvis:
             self._send_response(query.id, 1, "JARVIS not initialised")
@@ -409,12 +430,12 @@ class KernelClient:
 
         # Build a prompt that gives the LLM context about the query origin
         type_labels = {
-            QTYPE_GENERIC:    "General query",
-            QTYPE_SYSEVT:     "Kernel system event",
-            QTYPE_AUDIT:      "Security audit event",
-            QTYPE_DIAG:       "Hardware diagnostic",
-            QTYPE_VOICE_CMD:  "Voice command",
-            QTYPE_MCP_CALL:   "MCP tool request",
+            QTYPE_GENERIC: "General query",
+            QTYPE_SYSEVT: "Kernel system event",
+            QTYPE_AUDIT: "Security audit event",
+            QTYPE_DIAG: "Hardware diagnostic",
+            QTYPE_VOICE_CMD: "Voice command",
+            QTYPE_MCP_CALL: "MCP tool request",
             QTYPE_POLICY_REQ: "Policy authorisation request",
         }
         label = type_labels.get(q_type, f"Kernel query type {q_type}")
@@ -423,7 +444,11 @@ class KernelClient:
         try:
             self._set_state(STATE_PROCESSING)
             response = self._jarvis.ask(prompt=prompt)
-            answer   = response.get("output", "") if isinstance(response, dict) else str(response)
+            answer = (
+                response.get("output", "")
+                if isinstance(response, dict)
+                else str(response)
+            )
             self._send_response(query.id, 0, answer)
         except Exception as exc:
             logger.exception("kernel_client: inference error for query #%d", query.id)
@@ -433,7 +458,7 @@ class KernelClient:
 
     def _send_response(self, query_id: int, status: int, text: str) -> None:
         resp = JarvisResponse()
-        resp.id     = query_id
+        resp.id = query_id
         resp.status = status
         payload = text.encode("utf-8")[:JARVIS_MAX_RESP_LEN]
         resp.len = len(payload)
@@ -442,8 +467,9 @@ class KernelClient:
         try:
             self._ioctl(IOCTL_RESPOND, resp)
         except OSError as exc:
-            logger.warning("kernel_client: failed to post response for #%d: %s",
-                           query_id, exc)
+            logger.warning(
+                "kernel_client: failed to post response for #%d: %s", query_id, exc
+            )
 
     # ------------------------------------------------------------------
     # Low-level ioctl helper
@@ -472,6 +498,7 @@ class KernelClient:
 # LLM provider → kernel provider constant mapping
 # ---------------------------------------------------------------------------
 
+
 def provider_from_config(provider_name: str) -> int:
     """
     Convert a JARVIS Config.LLM_PROVIDER string to a JARVIS_PROVIDER_* int.
@@ -480,6 +507,6 @@ def provider_from_config(provider_name: str) -> int:
         "ollama": PROVIDER_OLLAMA,
         "claude": PROVIDER_CLAUDE,
         "openai": PROVIDER_OPENAI,
-        "api":    PROVIDER_OPENAI_COMPAT,
+        "api": PROVIDER_OPENAI_COMPAT,
     }
     return mapping.get(provider_name.lower(), PROVIDER_NONE)

@@ -17,7 +17,8 @@ contextor subsystem into the ROOT context string.
 
 import json
 import re
-from typing import Optional, Any
+from typing import Any, Optional
+
 from ..core.logger import get_logger
 from .base import BaseLLMProvider
 from .context_manager import ContextManager
@@ -163,10 +164,12 @@ class LLM:
             _retries_left = self.MAX_JSON_RETRIES
         attempt = self.MAX_JSON_RETRIES - _retries_left + 1
 
-        self.chat_history.append({
-            "role": "user",
-            "content": prompt,
-        })
+        self.chat_history.append(
+            {
+                "role": "user",
+                "content": prompt,
+            }
+        )
 
         # For ROOT mode, use tiered context (augmented system prompt with
         # rolling summary). For subsystem modes, use plain history.
@@ -203,10 +206,12 @@ class LLM:
         parsed, parse_source = self._extract_json(response_text)
         if parsed is not None:
             clean = json.dumps(parsed)
-            self.chat_history.append({
-                "role": "assistant",
-                "content": clean,
-            })
+            self.chat_history.append(
+                {
+                    "role": "assistant",
+                    "content": clean,
+                }
+            )
             logger.debug(
                 f"LLM [{self._mode}] JSON parse succeeded via '{parse_source}' "
                 f"(attempt={attempt})"
@@ -257,7 +262,9 @@ class LLM:
         # 2. Strip <think>...</think> or <reasoning>...</reasoning> tags
         cleaned = re.sub(
             r"<(?:think|thinking|reasoning)>.*?</(?:think|thinking|reasoning)>",
-            "", text, flags=re.DOTALL,
+            "",
+            text,
+            flags=re.DOTALL,
         ).strip()
         if cleaned != text:
             try:
@@ -343,10 +350,12 @@ class LLM:
         if current_pair:
             pairs.append(current_pair)
 
-        keep = pairs[-self._root_window:] if len(pairs) > self._root_window else pairs
+        keep = pairs[-self._root_window :] if len(pairs) > self._root_window else pairs
 
         # Identify evicted pairs for compression
-        evicted_pairs = pairs[:-self._root_window] if len(pairs) > self._root_window else []
+        evicted_pairs = (
+            pairs[: -self._root_window] if len(pairs) > self._root_window else []
+        )
 
         if evicted_pairs:
             # Flatten evicted pairs into a message list for summarization

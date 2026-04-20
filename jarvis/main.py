@@ -23,11 +23,11 @@ import signal
 import sys
 import threading
 import time
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
+
 from .config import Config
 from .core import ComponentFactory
-from .core.logger import JarvisLogger
-from .core.logger import get_logger
+from .core.logger import JarvisLogger, get_logger
 from .dispatch.event_merger import Event, EventType
 from .sessions import SessionManager
 
@@ -55,16 +55,16 @@ class Jarvis:
             suppress_stdout_output=self.tui_mode,
         )
 
-        self.llm = self.components['llm']
-        self.dispatch = self.components['dispatch_adapter']
-        self.contextor = self.components['contextor']
-        self.goals = self.components['goal_manager']
-        self.events = self.components['event_merger']
-        self._embeddings = self.components.get('embeddings')
-        self.task_parser = self.components['task_parser']
-        self.output_manager = self.components['output_manager']
-        self.confirmation = self.components['confirmation_manager']
-        self.voice_manager = self.components.get('voice_manager')
+        self.llm = self.components["llm"]
+        self.dispatch = self.components["dispatch_adapter"]
+        self.contextor = self.components["contextor"]
+        self.goals = self.components["goal_manager"]
+        self.events = self.components["event_merger"]
+        self._embeddings = self.components.get("embeddings")
+        self.task_parser = self.components["task_parser"]
+        self.output_manager = self.components["output_manager"]
+        self.confirmation = self.components["confirmation_manager"]
+        self.voice_manager = self.components.get("voice_manager")
         self._output_clients: List[asyncio.StreamWriter] = []
 
         # Chat sessions — scopes conversation_log + memory to the active chat.
@@ -193,7 +193,8 @@ class Jarvis:
         # No LLM decision — every prompt gets persisted + embedded.
         if self.contextor:
             self.contextor.auto_store_prompt(
-                text, session_id=self.sessions.current_id,
+                text,
+                session_id=self.sessions.current_id,
             )
 
         self.llm.switch_mode("root")
@@ -208,7 +209,9 @@ class Jarvis:
         sig_pid = signal.get("pid")
         logger.info(f"JARVIS: Dispatch signal: type={sig_type}, pid={sig_pid}")
         if sig_type:
-            self._activity(f"Dispatch signal: {sig_type} (pid {sig_pid})", kind="dispatch")
+            self._activity(
+                f"Dispatch signal: {sig_type} (pid {sig_pid})", kind="dispatch"
+            )
 
         self.goals.update_from_signal(signal)
 
@@ -270,18 +273,22 @@ class Jarvis:
         """Handle a ROOT-mode LLM response."""
         if depth >= MAX_CHAIN_DEPTH:
             logger.error("JARVIS: Max chain depth reached, forcing respond")
-            self.output_manager.handle_response({
-                "output": "I got stuck in a loop. Could you try again?",
-            })
+            self.output_manager.handle_response(
+                {
+                    "output": "I got stuck in a loop. Could you try again?",
+                }
+            )
             return
 
         parsed = self.task_parser.parse(response)
 
         if "error" in parsed:
             logger.warning(f"JARVIS: Root parse error: {parsed['error']}")
-            self.output_manager.handle_response({
-                "output": "I had trouble processing that. Could you try again?",
-            })
+            self.output_manager.handle_response(
+                {
+                    "output": "I had trouble processing that. Could you try again?",
+                }
+            )
             return
 
         action = parsed["action"]
@@ -324,7 +331,9 @@ class Jarvis:
         elif action == "store":
             if not self.contextor:
                 await self._feed_root_summary(
-                    "STORE_RESULT", json.dumps({"error": "Memory is disabled"}), depth,
+                    "STORE_RESULT",
+                    json.dumps({"error": "Memory is disabled"}),
+                    depth,
                 )
                 return
             # Global scope when LLM explicitly sets scope="global";
@@ -332,30 +341,45 @@ class Jarvis:
             scope = parsed.get("scope", "session")
             sid = None if scope == "global" else self.sessions.current_id
             result = self.contextor.store(
-                parsed["theme"], parsed["content"], session_id=sid,
+                parsed["theme"],
+                parsed["content"],
+                session_id=sid,
             )
             await self._feed_root_summary(
-                "STORE_RESULT", self._compact_payload_for_llm(result), depth,
+                "STORE_RESULT",
+                self._compact_payload_for_llm(result),
+                depth,
             )
 
         elif action == "recall":
             if not self.contextor:
                 await self._feed_root_summary(
-                    "RECALL_RESULT", json.dumps({"error": "Memory is disabled"}), depth,
+                    "RECALL_RESULT",
+                    json.dumps({"error": "Memory is disabled"}),
+                    depth,
                 )
                 return
             result = self.contextor.recall(
-                parsed["theme"], session_id=self.sessions.current_id,
+                parsed["theme"],
+                session_id=self.sessions.current_id,
             )
             await self._feed_root_summary(
-                "RECALL_RESULT", self._compact_payload_for_llm(result), depth,
+                "RECALL_RESULT",
+                self._compact_payload_for_llm(result),
+                depth,
             )
 
         elif action == "search_memory":
             if not self.contextor:
                 await self._feed_root_summary(
                     "SEARCH_MEMORY_RESULT",
-                    json.dumps({"results": [], "available": False, "reason": "Memory is disabled"}),
+                    json.dumps(
+                        {
+                            "results": [],
+                            "available": False,
+                            "reason": "Memory is disabled",
+                        }
+                    ),
                     depth,
                 )
                 return
@@ -368,20 +392,26 @@ class Jarvis:
                 include_global=True,
             )
             await self._feed_root_summary(
-                "SEARCH_MEMORY_RESULT", self._compact_payload_for_llm(result), depth,
+                "SEARCH_MEMORY_RESULT",
+                self._compact_payload_for_llm(result),
+                depth,
             )
 
         elif action == "list_memory":
             if not self.contextor:
                 await self._feed_root_summary(
-                    "LIST_MEMORY_RESULT", json.dumps({"themes": []}), depth,
+                    "LIST_MEMORY_RESULT",
+                    json.dumps({"themes": []}),
+                    depth,
                 )
                 return
             result = self.contextor.list_themes(
                 session_id=self.sessions.current_id,
             )
             await self._feed_root_summary(
-                "LIST_MEMORY_RESULT", self._compact_payload_for_llm(result), depth,
+                "LIST_MEMORY_RESULT",
+                self._compact_payload_for_llm(result),
+                depth,
             )
 
     async def _feed_root_summary(self, label: str, summary: str, depth: int):
@@ -438,15 +468,21 @@ class Jarvis:
             parsed = self.task_parser.parse(response)
 
             if "error" in parsed:
-                logger.warning(f"JARVIS: Dispatch sub-chain parse error: {parsed['error']}")
+                logger.warning(
+                    f"JARVIS: Dispatch sub-chain parse error: {parsed['error']}"
+                )
                 return f"Error: {parsed['error']}"
 
             action = parsed["action"]
-            logger.info(f"JARVIS: Dispatch iteration action (step={step}, action={action})")
+            logger.info(
+                f"JARVIS: Dispatch iteration action (step={step}, action={action})"
+            )
             self._apply_goal_updates(parsed.get("goal_updates", []))
 
             if action == "done":
-                logger.info(f"JARVIS: Dispatch sub-chain completed: {parsed['summary']}")
+                logger.info(
+                    f"JARVIS: Dispatch sub-chain completed: {parsed['summary']}"
+                )
                 self._activity("Dispatch completed.", kind="dispatch")
                 return parsed["summary"]
 
@@ -454,7 +490,10 @@ class Jarvis:
                 # LLM split the intent into sub-tasks — search for tools
                 sub_tasks = parsed.get("tasks", [])
                 logger.info(f"JARVIS: Plan has {len(sub_tasks)} sub-task(s)")
-                self._activity(f"Planned {len(sub_tasks)} sub-task(s); finding tools…", kind="dispatch")
+                self._activity(
+                    f"Planned {len(sub_tasks)} sub-task(s); finding tools…",
+                    kind="dispatch",
+                )
 
                 available_tools = await self.dispatch.discover_tools(
                     tasks=sub_tasks,
@@ -477,12 +516,16 @@ class Jarvis:
                 context = f"SEARCH_RESULTS: {self._compact_payload_for_llm(result)}"
 
             elif action == "list_tools":
-                self._activity(f"Listing tools for {parsed['server_id']}…", kind="dispatch")
+                self._activity(
+                    f"Listing tools for {parsed['server_id']}…", kind="dispatch"
+                )
                 result = await self.dispatch.list_server_tools(parsed["server_id"])
                 context = f"TOOLS: {self._compact_payload_for_llm(result)}"
 
             elif action == "install":
-                self._activity(f"Installing server {parsed['server_id']}…", kind="dispatch")
+                self._activity(
+                    f"Installing server {parsed['server_id']}…", kind="dispatch"
+                )
                 result = await self.dispatch.install_server(parsed["server_id"])
                 context = f"INSTALL_RESULT: {self._compact_payload_for_llm(result)}"
 
@@ -495,7 +538,9 @@ class Jarvis:
                     )
 
             elif action == "dispatch" and "tasks" in parsed:
-                self._activity(f"Dispatching {len(parsed['tasks'])} task(s)…", kind="dispatch")
+                self._activity(
+                    f"Dispatching {len(parsed['tasks'])} task(s)…", kind="dispatch"
+                )
                 result = await self._dispatch_send(parsed["tasks"])
                 if isinstance(result, dict) and result.get("awaiting_confirmation"):
                     # Non-blocking: confirmation sent, return to event loop.
@@ -504,13 +549,18 @@ class Jarvis:
                         f"JARVIS: Dispatch sub-chain paused for confirmation "
                         f"id={result['confirmation_id']}"
                     )
-                    self._activity("Waiting for your confirmation before running tools.", kind="dispatch")
+                    self._activity(
+                        "Waiting for your confirmation before running tools.",
+                        kind="dispatch",
+                    )
                     return "Waiting for user confirmation."
                 elif isinstance(result, dict) and "error" in result:
                     context = f"DISPATCH_ERROR: {self._compact_payload_for_llm(result)}"
                 else:
                     self._activity("Tool results received.", kind="dispatch")
-                    context = f"DISPATCH_RESULT: {self._compact_payload_for_llm(result)}"
+                    context = (
+                        f"DISPATCH_RESULT: {self._compact_payload_for_llm(result)}"
+                    )
 
             elif action == "wait":
                 logger.info("JARVIS: Dispatch sub-chain waiting")
@@ -528,7 +578,9 @@ class Jarvis:
                     kind="dispatch",
                 )
                 await self._do_defer(
-                    parsed["goal_id"], parsed["duration"], parsed.get("reason", ""),
+                    parsed["goal_id"],
+                    parsed["duration"],
+                    parsed.get("reason", ""),
                 )
                 return f"Deferred goal {parsed['goal_id']} for {parsed['duration']}s."
 
@@ -570,14 +622,17 @@ class Jarvis:
 
             if self.confirmation.should_confirm(tool_meta):
                 notification_silent = tool_meta.get(
-                    "notification_silent", Config.NOTIFICATION_SILENT,
+                    "notification_silent",
+                    Config.NOTIFICATION_SILENT,
                 )
-                tools_needing_confirmation.append({
-                    "tool_name": tool_name,
-                    "task": task,
-                    "params": task.get("params", {}),
-                    "notification_silent": notification_silent,
-                })
+                tools_needing_confirmation.append(
+                    {
+                        "tool_name": tool_name,
+                        "task": task,
+                        "params": task.get("params", {}),
+                        "notification_silent": notification_silent,
+                    }
+                )
             else:
                 approved_tasks.append(task)
 
@@ -587,11 +642,13 @@ class Jarvis:
 
         # Some tools need confirmation — stash and notify, return immediately.
         import uuid
+
         request_id = str(uuid.uuid4())[:8]
 
         # Use the first tool's notification_silent preference for the batch.
         notification_silent = tools_needing_confirmation[0].get(
-            "notification_silent", Config.NOTIFICATION_SILENT,
+            "notification_silent",
+            Config.NOTIFICATION_SILENT,
         )
 
         await self.confirmation.request_confirmation(
@@ -607,7 +664,8 @@ class Jarvis:
 
         tool_names = [t["tool_name"] for t in tools_needing_confirmation]
         self._activity(
-            "Awaiting confirmation for: " + ", ".join(tool_names[:3])
+            "Awaiting confirmation for: "
+            + ", ".join(tool_names[:3])
             + ("…" if len(tool_names) > 3 else ""),
             kind="dispatch",
         )
@@ -644,9 +702,11 @@ class Jarvis:
     async def _dispatch_execute_tasks(self, tasks, depth: int):
         """Handle a dispatch action that already has concrete tasks (from root)."""
         if not self.dispatch.is_connected:
-            self.output_manager.handle_response({
-                "output": "I can't execute tools right now — dispatch is not connected.",
-            })
+            self.output_manager.handle_response(
+                {
+                    "output": "I can't execute tools right now — dispatch is not connected.",
+                }
+            )
             return
 
         result = await self._dispatch_send(tasks)
@@ -785,7 +845,8 @@ class Jarvis:
         if not sid:
             return
         self.contextor.auto_store_assistant_reply(
-            str(text).strip(), session_id=sid,
+            str(text).strip(),
+            session_id=sid,
         )
 
     def _ask_llm_sync(self, context: str, tag: str = "") -> Dict[str, Any]:
@@ -914,10 +975,14 @@ class Jarvis:
     async def _do_defer(self, goal_id: str, duration: int, reason: str = ""):
         if not self.dispatch.is_connected:
             logger.warning("JARVIS: Dispatch not connected, cannot defer goal")
-            self._activity("Cannot set reminder: dispatch not connected.", kind="dispatch")
-            self.output_manager.handle_response({
-                "output": "I can't defer goals right now — dispatch is not connected.",
-            })
+            self._activity(
+                "Cannot set reminder: dispatch not connected.", kind="dispatch"
+            )
+            self.output_manager.handle_response(
+                {
+                    "output": "I can't defer goals right now — dispatch is not connected.",
+                }
+            )
             return
 
         label = f"goal_reminder:{goal_id}"
@@ -933,7 +998,9 @@ class Jarvis:
         else:
             timer_pid = result.get("pid", 0)
             self.goals.defer_goal(goal_id, timer_pid)
-            logger.info(f"JARVIS: Deferred goal [{goal_id}] for {duration}s (timer PID {timer_pid})")
+            logger.info(
+                f"JARVIS: Deferred goal [{goal_id}] for {duration}s (timer PID {timer_pid})"
+            )
             self._activity(
                 f"Reminder set for {duration}s (goal {goal_id}, timer pid {timer_pid}).",
                 kind="dispatch",
@@ -953,7 +1020,9 @@ class Jarvis:
         vm._wake_word_detected = False
         try:
             if hasattr(vm.activation, "on_wake_word"):
-                vm.activation.on_wake_word = lambda: setattr(vm, "_wake_word_detected", True)
+                vm.activation.on_wake_word = lambda: setattr(
+                    vm, "_wake_word_detected", True
+                )
             if not self.voice_manager.activation.start_listening():
                 logger.error("JARVIS: Failed to start voice activation")
                 return
@@ -1131,7 +1200,9 @@ class Jarvis:
     ) -> None:
         """Handle output subscriber: add to list, wait for disconnect."""
         self._output_clients.append(writer)
-        logger.info(f"JARVIS: Output subscriber connected ({len(self._output_clients)} total)")
+        logger.info(
+            f"JARVIS: Output subscriber connected ({len(self._output_clients)} total)"
+        )
         try:
             await reader.read()
         except (ConnectionResetError, BrokenPipeError):
@@ -1148,7 +1219,9 @@ class Jarvis:
 
     async def _await_user_input(self) -> str:
         return await asyncio.get_event_loop().run_in_executor(
-            None, input, "",
+            None,
+            input,
+            "",
         )
 
     async def _await_dispatch_signal(self) -> Optional[Dict[str, Any]]:
@@ -1179,7 +1252,8 @@ class Jarvis:
         self.sessions.ensure_session()
         if self.contextor:
             self.contextor.auto_store_prompt(
-                prompt, session_id=self.sessions.current_id,
+                prompt,
+                session_id=self.sessions.current_id,
             )
 
         self.goals.add_goal(prompt)
@@ -1251,6 +1325,7 @@ class Jarvis:
 def main():
     """Main entry point for JARVIS - delegates to CLI handler"""
     from .cli import main as cli_main
+
     cli_main()
 
 

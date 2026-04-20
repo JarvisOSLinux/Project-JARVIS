@@ -5,11 +5,13 @@ Tests the DispatchAdapter, EventMerger, and the interaction between
 dispatch components.
 """
 
-import pytest
 import asyncio
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
+import pytest
+
 from jarvis.dispatch.adapter import DispatchAdapter
-from jarvis.dispatch.event_merger import EventMerger, Event, EventType
+from jarvis.dispatch.event_merger import Event, EventMerger, EventType
 
 
 @pytest.mark.integration
@@ -24,9 +26,12 @@ class TestDispatchAdapterInit:
 
     def test_adapter_timeout_from_config(self):
         import importlib
+
         import jarvis.config
+
         importlib.reload(jarvis.config)
         from jarvis.config import Config
+
         adapter = DispatchAdapter()
         assert adapter.timeout == Config.DISPATCH_TIMEOUT
 
@@ -156,8 +161,12 @@ class TestDispatchAdapterContextManager:
     async def test_context_manager_calls_connect_disconnect(self):
         adapter = DispatchAdapter()
 
-        with patch.object(adapter, 'connect', new_callable=AsyncMock) as mock_connect, \
-             patch.object(adapter, 'disconnect', new_callable=AsyncMock) as mock_disconnect:
+        with (
+            patch.object(adapter, "connect", new_callable=AsyncMock) as mock_connect,
+            patch.object(
+                adapter, "disconnect", new_callable=AsyncMock
+            ) as mock_disconnect,
+        ):
             async with adapter:
                 mock_connect.assert_called_once()
             mock_disconnect.assert_called_once()

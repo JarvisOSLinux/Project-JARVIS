@@ -6,7 +6,8 @@ failing, deferring, reactivating, and signal-driven updates.
 """
 
 import pytest
-from jarvis.dispatch.goal_manager import GoalManager, Goal, GoalStatus
+
+from jarvis.dispatch.goal_manager import Goal, GoalManager, GoalStatus
 from tests.integration_utils import make_exit_signal, make_remind_signal
 
 

@@ -2,8 +2,9 @@
 
 import threading
 import time
-from typing import Callable, Optional, List
-from queue import Queue, Empty
+from queue import Empty, Queue
+from typing import Callable, List, Optional
+
 from ...core.logger import get_logger
 from ..base import ActivationProvider
 
@@ -30,9 +31,11 @@ class VoskActivation(ActivationProvider):
         self.on_wake_word = on_wake_word
 
         try:
-            import vosk
-            import sounddevice as sd
             import json as _json
+
+            import sounddevice as sd
+            import vosk
+
             self.vosk = vosk
             self.sounddevice = sd
             self.json = _json
@@ -64,17 +67,19 @@ class VoskActivation(ActivationProvider):
 
         try:
             stream_params = {
-                'samplerate': self.sample_rate,
-                'channels': 1,
-                'dtype': 'int16',
-                'blocksize': self.chunk_size,
-                'callback': self._audio_callback,
+                "samplerate": self.sample_rate,
+                "channels": 1,
+                "dtype": "int16",
+                "blocksize": self.chunk_size,
+                "callback": self._audio_callback,
             }
             self._stream = self.sounddevice.InputStream(**stream_params)
             self._stream.start()
 
             self._running.set()
-            self._listening_thread = threading.Thread(target=self._listen_loop, daemon=True)
+            self._listening_thread = threading.Thread(
+                target=self._listen_loop, daemon=True
+            )
             self._listening_thread.start()
 
             logger.info("Voice activation listening started")
@@ -128,10 +133,10 @@ class VoskActivation(ActivationProvider):
 
     def get_stats(self) -> dict:
         return {
-            'detection_count': self._detection_count,
-            'last_detection_time': self._last_detection_time,
-            'is_listening': self.is_listening(),
-            'wake_words': self.wake_words.copy(),
+            "detection_count": self._detection_count,
+            "last_detection_time": self._last_detection_time,
+            "is_listening": self.is_listening(),
+            "wake_words": self.wake_words.copy(),
         }
 
     def __enter__(self):
@@ -173,12 +178,12 @@ class VoskActivation(ActivationProvider):
 
                 if self._recognizer.AcceptWaveform(data):
                     result = self.json.loads(self._recognizer.Result())
-                    text = result.get('text', '').lower().strip()
+                    text = result.get("text", "").lower().strip()
                     if text:
                         self._check_for_wake_word(text)
                 else:
                     partial = self.json.loads(self._recognizer.PartialResult())
-                    partial_text = partial.get('partial', '').lower().strip()
+                    partial_text = partial.get("partial", "").lower().strip()
                     if partial_text:
                         self._check_for_wake_word(partial_text)
         except Exception as e:
@@ -195,7 +200,9 @@ class VoskActivation(ActivationProvider):
                 self._handle_detection(wake_word, text, current_time)
                 break
 
-    def _handle_detection(self, wake_word: str, full_text: str, current_time: float) -> None:
+    def _handle_detection(
+        self, wake_word: str, full_text: str, current_time: float
+    ) -> None:
         self._detection_count += 1
         self._last_detection_time = current_time
 
@@ -205,12 +212,14 @@ class VoskActivation(ActivationProvider):
         logger.info(f"   Detection #{self._detection_count}")
         logger.info(f"   Time: {time.strftime('%H:%M:%S')}")
 
-        self._activation_queue.put({
-            'wake_word': wake_word,
-            'full_text': full_text,
-            'timestamp': current_time,
-            'count': self._detection_count,
-        })
+        self._activation_queue.put(
+            {
+                "wake_word": wake_word,
+                "full_text": full_text,
+                "timestamp": current_time,
+                "count": self._detection_count,
+            }
+        )
 
         if self.on_wake_word:
             try:

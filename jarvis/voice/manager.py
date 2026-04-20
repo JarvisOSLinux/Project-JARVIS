@@ -8,8 +8,9 @@ provider interfaces.
 
 import time
 from typing import Callable, Optional
+
 from ..core.logger import get_logger
-from .base import STTProvider, ActivationProvider
+from .base import ActivationProvider, STTProvider
 
 logger = get_logger(__name__)
 
@@ -76,7 +77,7 @@ class VoiceManager:
             logger.info("Press Ctrl+C to stop.\n")
 
             # Wire up the wake-word callback
-            if hasattr(self.activation, 'on_wake_word'):
+            if hasattr(self.activation, "on_wake_word"):
                 self.activation.on_wake_word = self._on_wake_word_detected
 
             if not self.activation.start_listening():
@@ -114,9 +115,9 @@ class VoiceManager:
 
     def cleanup(self) -> None:
         """Release all voice resources."""
-        if hasattr(self, 'activation'):
+        if hasattr(self, "activation"):
             self.activation.cleanup()
-        if hasattr(self, 'stt'):
+        if hasattr(self, "stt"):
             self.stt.stop()
 
     # -- internals ------------------------------------------------------------
@@ -138,14 +139,18 @@ class VoiceManager:
                     response = self.on_command(text)
 
                     if response and isinstance(response, dict):
-                        output = response.get('output', '')
-                        if output.rstrip().endswith('?'):
-                            logger.info("LLM asked a follow-up question, listening for response (10s timeout)...")
+                        output = response.get("output", "")
+                        if output.rstrip().endswith("?"):
+                            logger.info(
+                                "LLM asked a follow-up question, listening for response (10s timeout)..."
+                            )
                             follow_up_start = time.time()
                             got_follow_up = False
                             for follow_text, follow_final in self.stt.iter_results():
                                 if time.time() - follow_up_start > 10:
-                                    logger.info("Follow-up listen timed out after 10 seconds")
+                                    logger.info(
+                                        "Follow-up listen timed out after 10 seconds"
+                                    )
                                     break
                                 if follow_final and follow_text.strip():
                                     logger.info(f"Follow-up Input: {follow_text}")
@@ -153,14 +158,18 @@ class VoiceManager:
                                     got_follow_up = True
                                     break
                             if not got_follow_up:
-                                logger.info("No follow-up received, returning to wake word mode")
+                                logger.info(
+                                    "No follow-up received, returning to wake word mode"
+                                )
 
                     break
         except Exception as e:
             logger.error(f"Error processing voice command: {e}")
         finally:
             self.stt.stop()
-            logger.debug("Voice processing completed. Restarting wake word detection...")
+            logger.debug(
+                "Voice processing completed. Restarting wake word detection..."
+            )
 
             if not self.activation.start_listening():
                 logger.error("Failed to restart voice activation")

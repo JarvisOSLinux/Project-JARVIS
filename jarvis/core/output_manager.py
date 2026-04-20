@@ -1,4 +1,5 @@
-from typing import Dict, Any, Optional, Callable, List
+from typing import Any, Callable, Dict, List, Optional
+
 from ..config import Config
 from .logger import get_logger
 
@@ -83,13 +84,13 @@ class OutputManager:
             # Default to text if unknown mode
             logger.warning(f"Unknown output mode '{Config.OUTPUT_MODE}', using text")
             self._output_text(response["output"])
-    
+
     def _output_voice(self, text: str) -> None:
         """
         Output text via voice (TTS)
-        
+
         Falls back to text output if TTS unavailable
-        
+
         Args:
             text: Text to speak
         """
@@ -102,11 +103,11 @@ class OutputManager:
         else:
             logger.info("Voice output requested but TTS unavailable, using text output")
             self._output_text(text)
-    
+
     def _output_text(self, text: str) -> None:
         """
         Output text to stdout
-        
+
         Args:
             text: Text to print
         """
@@ -114,15 +115,15 @@ class OutputManager:
             return
         # Output text is intentionally printed to stdout for user visibility
         print(text)
-    
+
     def get_current_mode(self) -> str:
         """Get current output mode"""
         return Config.OUTPUT_MODE
-    
+
     def is_voice_mode(self) -> bool:
         """Check if voice mode is configured"""
         return Config.OUTPUT_MODE == "voice"
-    
+
     def has_tts(self) -> bool:
         """Check if TTS is available"""
         return self._has_tts

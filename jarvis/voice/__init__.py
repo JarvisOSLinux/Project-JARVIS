@@ -16,26 +16,27 @@ Quick usage::
     act = create_activation("vosk", wake_words=["jarvis"])
 """
 
-# Abstract interfaces
-from .base import STTProvider, TTSProvider, ActivationProvider
+from .activation import create_activation
 
 # Audio utilities
 from .audio import (
     AudioUnavailableError,
     check_audio_input_available,
     check_audio_output_available,
-    list_audio_devices,
     get_default_input_device,
     get_default_output_device,
+    list_audio_devices,
 )
+
+# Abstract interfaces
+from .base import ActivationProvider, STTProvider, TTSProvider
+
+# Orchestrator
+from .manager import VoiceManager
 
 # Sub-package factories
 from .stt import create_stt
 from .tts import create_tts
-from .activation import create_activation
-
-# Orchestrator
-from .manager import VoiceManager
 
 __all__ = [
     # Abstract interfaces

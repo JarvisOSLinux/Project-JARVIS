@@ -153,15 +153,21 @@ class ContextManager:
 
         prompt = _SUMMARIZE_PROMPT.format(
             exchanges=exchange_text,
-            previous_summary=self._rolling_summary or "(none — this is the first summary)",
+            previous_summary=self._rolling_summary
+            or "(none — this is the first summary)",
         )
 
         try:
             # Use the LLM to generate a compressed summary
-            summary = self._provider.chat([
-                {"role": "system", "content": "You are a concise summarizer. Output only the summary."},
-                {"role": "user", "content": prompt},
-            ])
+            summary = self._provider.chat(
+                [
+                    {
+                        "role": "system",
+                        "content": "You are a concise summarizer. Output only the summary.",
+                    },
+                    {"role": "user", "content": prompt},
+                ]
+            )
 
             # Clean up — remove any JSON wrapper the model might add
             summary = summary.strip().strip('"').strip("'")

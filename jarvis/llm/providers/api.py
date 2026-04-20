@@ -1,6 +1,7 @@
 """OpenAI-compatible API LLM provider."""
 
-from typing import List, Dict, Optional
+from typing import Dict, List, Optional
+
 from ...core.logger import get_logger
 from ..base import BaseLLMProvider
 
@@ -27,7 +28,7 @@ class APIProvider(BaseLLMProvider):
             raise ValueError("api_key is required for the API provider")
 
         super().__init__(model)
-        self.api_url = api_url.rstrip('/')
+        self.api_url = api_url.rstrip("/")
         self.api_key = api_key
 
         self.headers = {
@@ -39,6 +40,7 @@ class APIProvider(BaseLLMProvider):
 
         try:
             import httpx as _httpx
+
             self._httpx = _httpx
         except ImportError:
             raise ImportError(

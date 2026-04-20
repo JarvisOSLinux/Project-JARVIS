@@ -1,7 +1,11 @@
 """Piper-based text-to-speech provider."""
 
 from ...core.logger import get_logger
-from ..audio import check_audio_output_available, get_default_output_device, AudioUnavailableError
+from ..audio import (
+    AudioUnavailableError,
+    check_audio_output_available,
+    get_default_output_device,
+)
 from ..base import TTSProvider
 
 logger = get_logger(__name__)
@@ -22,6 +26,7 @@ class PiperTTS(TTSProvider):
         """
         try:
             import sounddevice as sd
+
             self.sd = sd
         except ImportError:
             raise AudioUnavailableError(
@@ -30,6 +35,7 @@ class PiperTTS(TTSProvider):
 
         try:
             from piper.voice import PiperVoice
+
             self.PiperVoice = PiperVoice
         except ImportError:
             raise AudioUnavailableError(
@@ -43,7 +49,9 @@ class PiperTTS(TTSProvider):
 
         try:
             logger.info(f"Loading TTS model from: {model_path}")
-            self.tts = self.PiperVoice.load(model_path=model_path, config_path=config_path)
+            self.tts = self.PiperVoice.load(
+                model_path=model_path, config_path=config_path
+            )
             logger.info("TTS model loaded successfully")
         except FileNotFoundError as e:
             raise FileNotFoundError(
@@ -65,8 +73,13 @@ class PiperTTS(TTSProvider):
 
         try:
             sr = self.tts.config.sample_rate
-            with self.sd.RawOutputStream(samplerate=sr, channels=1, dtype="int16",
-                                         device=self.device_index, blocksize=0) as stream:
+            with self.sd.RawOutputStream(
+                samplerate=sr,
+                channels=1,
+                dtype="int16",
+                device=self.device_index,
+                blocksize=0,
+            ) as stream:
                 for chunk in self.tts.synthesize(text):
                     stream.write(chunk.audio_int16_bytes)
         except Exception as e:

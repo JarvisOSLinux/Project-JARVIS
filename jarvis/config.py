@@ -1,6 +1,7 @@
-from dotenv import load_dotenv
 # import multiprocessing
 import os
+
+from dotenv import load_dotenv
 
 # Load config: JARVIS_CONFIG_DIR (system install) or jarvis/.env (dev)
 _config_dir = os.getenv("JARVIS_CONFIG_DIR")
@@ -9,21 +10,27 @@ if _config_dir:
     if os.path.isfile(_env_path):
         load_dotenv(_env_path)
     else:
-        load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
+        load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 else:
-    load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
+    load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+
 
 class Config:
     # Models base directory
     MODELS_DIR = os.getenv("MODELS_DIR", "models")
 
     # Voice Provider Configuration
-    STT_PROVIDER = os.getenv("STT_PROVIDER", "vosk")               # "vosk" (add more later)
-    TTS_PROVIDER = os.getenv("TTS_PROVIDER", "piper")              # "piper" (add more later)
-    ACTIVATION_PROVIDER = os.getenv("ACTIVATION_PROVIDER", "vosk") # "vosk" (add more later)
+    STT_PROVIDER = os.getenv("STT_PROVIDER", "vosk")  # "vosk" (add more later)
+    TTS_PROVIDER = os.getenv("TTS_PROVIDER", "piper")  # "piper" (add more later)
+    ACTIVATION_PROVIDER = os.getenv(
+        "ACTIVATION_PROVIDER", "vosk"
+    )  # "vosk" (add more later)
 
     # Vosk STT Configuration
-    VOSK_MODEL_PATH = os.getenv("VOSK_MODEL_PATH", os.path.join(MODELS_DIR, "vosk", "vosk-model-small-en-us-0.15"))
+    VOSK_MODEL_PATH = os.getenv(
+        "VOSK_MODEL_PATH",
+        os.path.join(MODELS_DIR, "vosk", "vosk-model-small-en-us-0.15"),
+    )
 
     # LLM Configuration
     LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama")  # "ollama" or "api"
@@ -54,14 +61,18 @@ class Config:
 
     # Voice Activation Configuration
     WAKE_WORDS = os.getenv("WAKE_WORDS", "jarvis,hey jarvis,okay jarvis").split(",")
-    VOICE_ACTIVATION_SENSITIVITY = float(os.getenv("VOICE_ACTIVATION_SENSITIVITY", "0.8"))
+    VOICE_ACTIVATION_SENSITIVITY = float(
+        os.getenv("VOICE_ACTIVATION_SENSITIVITY", "0.8")
+    )
 
     # CLI Output Mode Configuration
     OUTPUT_MODE = os.getenv("OUTPUT_MODE", "voice")  # voice or text
 
     # Conversation History Configuration
     # false: multi-turn chat (Claude-like); true: one-shot / stateless per reply
-    RESET_HISTORY_AFTER_RESPONSE = os.getenv("RESET_HISTORY_AFTER_RESPONSE", "false").lower() == "true"
+    RESET_HISTORY_AFTER_RESPONSE = (
+        os.getenv("RESET_HISTORY_AFTER_RESPONSE", "false").lower() == "true"
+    )
 
     # Data consent for memory (contextor)
     # - true: Proactively remember what the user shares (name, preferences, etc.)
@@ -77,7 +88,9 @@ class Config:
         "Only remember when the user explicitly says 'remember this' or 'remember that'. "
         "Otherwise respond without using memory."
     )
-    DATA_CONSENT_NOTE = _DATA_CONSENT_NOTE_TRUE if DATA_CONSENT else _DATA_CONSENT_NOTE_FALSE
+    DATA_CONSENT_NOTE = (
+        _DATA_CONSENT_NOTE_TRUE if DATA_CONSENT else _DATA_CONSENT_NOTE_FALSE
+    )
 
     # Contextor (memory) subsystem
     # - true: Enable long-term memory — ROOT can route to contextor
@@ -90,7 +103,9 @@ class Config:
     JARVIS_SUDO_ENABLED = os.getenv("JARVIS_SUDO_ENABLED", "false").lower() == "true"
 
     # Dispatch Configuration
-    DISPATCH_BINARY = os.getenv("DISPATCH_BINARY", "dispatch")  # Path to dispatch binary
+    DISPATCH_BINARY = os.getenv(
+        "DISPATCH_BINARY", "dispatch"
+    )  # Path to dispatch binary
     DMCP_BINARY = os.getenv("DMCP_BINARY", "dmcp")  # Path to dmcp binary
     DISPATCH_TIMEOUT = int(os.getenv("DISPATCH_TIMEOUT", "60"))  # seconds
 
@@ -119,16 +134,22 @@ class Config:
 
     # --- Semantic Tool Discovery ---
     # Master switch for vector-based tool search via dispatch/dmcp
-    ALLOW_EMBEDDING_SEARCH = os.getenv("ALLOW_EMBEDDING_SEARCH", "true").lower() == "true"
+    ALLOW_EMBEDDING_SEARCH = (
+        os.getenv("ALLOW_EMBEDDING_SEARCH", "true").lower() == "true"
+    )
     # Bypass threshold — use vector search regardless of server count
-    ENFORCE_EMBEDDING_SEARCH = os.getenv("ENFORCE_EMBEDDING_SEARCH", "false").lower() == "true"
+    ENFORCE_EMBEDDING_SEARCH = (
+        os.getenv("ENFORCE_EMBEDDING_SEARCH", "false").lower() == "true"
+    )
     # Minimum visible servers before vector search auto-enables
     EMBEDDING_SEARCH_THRESHOLD = int(os.getenv("EMBEDDING_SEARCH_THRESHOLD", "100"))
 
     # Data directory — when set (e.g. systemd JARVIS_DATA_DIR=/var/lib/jarvis),
     # memory, goal archive, and default socket use this base path
     _DEFAULT_DATA_DIR = os.path.join(
-        os.getenv("XDG_DATA_HOME", os.path.join(os.path.expanduser("~"), ".local", "share")),
+        os.getenv(
+            "XDG_DATA_HOME", os.path.join(os.path.expanduser("~"), ".local", "share")
+        ),
         "jarvis",
     )
     JARVIS_DATA_DIR = os.getenv("JARVIS_DATA_DIR", _DEFAULT_DATA_DIR)
@@ -163,9 +184,15 @@ class Config:
     CONFIRMATION_TIMEOUT = int(os.getenv("CONFIRMATION_TIMEOUT", "30"))
 
     # Logging Configuration
-    LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()  # DEBUG, INFO, WARNING, ERROR, CRITICAL
-    LOG_FILE = os.getenv("LOG_FILE", "")  # Optional: path to log file (empty = no file logging)
-    LOG_COLORS = os.getenv("LOG_COLORS", "true").lower() == "true"  # Enable colored console output
+    LOG_LEVEL = os.getenv(
+        "LOG_LEVEL", "INFO"
+    ).upper()  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+    LOG_FILE = os.getenv(
+        "LOG_FILE", ""
+    )  # Optional: path to log file (empty = no file logging)
+    LOG_COLORS = (
+        os.getenv("LOG_COLORS", "true").lower() == "true"
+    )  # Enable colored console output
 
     # os.environ["OLLAMA_NO_GPU"] = "1"
     # os.environ["OLLAMA_NUM_THREADS"] = str(multiprocessing.cpu_count())
@@ -479,4 +506,3 @@ Return to root with results:
 
 The very first character of your response must be {{ and the very last must be }}.
 """
-

@@ -5,8 +5,9 @@ This module tests the voice activation system components and
 graceful degradation when audio is unavailable.
 """
 
+from unittest.mock import Mock, patch
+
 import pytest
-from unittest.mock import patch, Mock
 
 
 @pytest.mark.health

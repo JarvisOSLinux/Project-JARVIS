@@ -1,12 +1,13 @@
 """Vosk-based speech-to-text provider."""
 
-import threading
 import json
-from queue import Queue, Empty
+import threading
 from datetime import datetime, timedelta
-from typing import Callable, Generator, Optional, Tuple, Any
+from queue import Empty, Queue
+from typing import Any, Callable, Generator, Optional, Tuple
+
 from ...core.logger import get_logger
-from ..audio import check_audio_input_available, AudioUnavailableError
+from ..audio import AudioUnavailableError, check_audio_input_available
 from ..base import STTProvider
 
 logger = get_logger(__name__)
@@ -37,6 +38,7 @@ class VoskSTT(STTProvider):
     ):
         try:
             import sounddevice as sd
+
             self.sd = sd
         except ImportError:
             raise AudioUnavailableError(
@@ -45,6 +47,7 @@ class VoskSTT(STTProvider):
 
         try:
             import vosk
+
             self.vosk = vosk
         except ImportError:
             raise AudioUnavailableError(
@@ -88,21 +91,23 @@ class VoskSTT(STTProvider):
             logger.info("Vosk model loaded successfully")
 
             stream_params = {
-                'samplerate': self.sample_rate,
-                'channels': 1,
-                'dtype': 'int16',
-                'blocksize': self.chunk_size,
-                'callback': self._audio_callback,
+                "samplerate": self.sample_rate,
+                "channels": 1,
+                "dtype": "int16",
+                "blocksize": self.chunk_size,
+                "callback": self._audio_callback,
             }
             if self.device_index is not None:
-                stream_params['device'] = self.device_index
+                stream_params["device"] = self.device_index
 
             self._stream = self.sd.InputStream(**stream_params)
             self._stream.start()
             logger.info("Audio stream initialized")
 
             self._running.set()
-            self._worker_thread = threading.Thread(target=self._process_loop, daemon=True)
+            self._worker_thread = threading.Thread(
+                target=self._process_loop, daemon=True
+            )
             self._worker_thread.start()
             logger.info("Speech-to-text processing started")
 
@@ -161,8 +166,10 @@ class VoskSTT(STTProvider):
         logger.info("Available audio input devices:")
         devices = sd.query_devices()
         for i, device in enumerate(devices):
-            if device['max_input_channels'] > 0:
-                logger.info(f"[{i}] {device['name']} (channels: {device['max_input_channels']})")
+            if device["max_input_channels"] > 0:
+                logger.info(
+                    f"[{i}] {device['name']} (channels: {device['max_input_channels']})"
+                )
 
     def on_update(self, cb: Callable[[str, bool], None]) -> None:
         """Register a callback called as ``cb(text, is_final)``."""
@@ -177,12 +184,12 @@ class VoskSTT(STTProvider):
 
     def get_stats(self) -> dict:
         return {
-            'is_running': self.is_running(),
-            'model_path': self.model_path,
-            'sample_rate': self.sample_rate,
-            'chunk_size': self.chunk_size,
-            'current_phrase': self._current_phrase,
-            'last_emitted_text': self._last_emitted_text,
+            "is_running": self.is_running(),
+            "model_path": self.model_path,
+            "sample_rate": self.sample_rate,
+            "chunk_size": self.chunk_size,
+            "current_phrase": self._current_phrase,
+            "last_emitted_text": self._last_emitted_text,
         }
 
     # -- internals ------------------------------------------------------------
@@ -209,7 +216,7 @@ class VoskSTT(STTProvider):
 
                 if self._recognizer.AcceptWaveform(data):
                     result = json.loads(self._recognizer.Result())
-                    text = result.get('text', '').strip()
+                    text = result.get("text", "").strip()
                     if text:
                         self._current_phrase = text
                         self._last_speech_time = datetime.utcnow()
@@ -218,7 +225,7 @@ class VoskSTT(STTProvider):
                         logger.debug(f"FINAL: {text}")
                 else:
                     partial = json.loads(self._recognizer.PartialResult())
-                    partial_text = partial.get('partial', '').strip()
+                    partial_text = partial.get("partial", "").strip()
                     if partial_text and partial_text != self._last_emitted_text:
                         self._last_speech_time = datetime.utcnow()
                         self._emit(partial_text, is_final=False)
@@ -228,7 +235,10 @@ class VoskSTT(STTProvider):
                 if self._last_speech_time:
                     silence_duration = datetime.utcnow() - self._last_speech_time
                     if silence_duration > timedelta(seconds=self.silence_timeout):
-                        if self._current_phrase and self._current_phrase != self._last_emitted_text:
+                        if (
+                            self._current_phrase
+                            and self._current_phrase != self._last_emitted_text
+                        ):
                             self._emit(self._current_phrase, is_final=True)
                             self._last_emitted_text = self._current_phrase
                             logger.debug(f"FINAL (silence): {self._current_phrase}")

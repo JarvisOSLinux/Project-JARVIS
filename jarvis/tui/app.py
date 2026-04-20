@@ -50,13 +50,21 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from rich.text import Text
-
 from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
-from textual.widgets import Footer, Header, Input, Label, ListItem, ListView, RichLog, Static
+from textual.widgets import (
+    Footer,
+    Header,
+    Input,
+    Label,
+    ListItem,
+    ListView,
+    RichLog,
+    Static,
+)
 
 from ..config import Config
 from ..core.logger import JarvisLogger, get_logger
@@ -253,7 +261,9 @@ class JarvisTUI(App):
                 if self._output_cb is not None:
                     self.jarvis.output_manager.remove_output_callback(self._output_cb)
                 if self._activity_cb is not None:
-                    self.jarvis.output_manager.remove_activity_callback(self._activity_cb)
+                    self.jarvis.output_manager.remove_activity_callback(
+                        self._activity_cb
+                    )
             except Exception:
                 pass
             try:
@@ -290,7 +300,9 @@ class JarvisTUI(App):
             return
 
         if self.jarvis is None:
-            self._append_log("[yellow]JARVIS is still starting up — try again in a second.[/yellow]")
+            self._append_log(
+                "[yellow]JARVIS is still starting up — try again in a second.[/yellow]"
+            )
             return
 
         self._append_log(f"[bold cyan]you[/bold cyan] > {self._escape(text)}")
@@ -417,14 +429,14 @@ class JarvisTUI(App):
         if self.jarvis is None:
             return
         if not self.jarvis.sessions.available:
-            self._append_log("[yellow]Memory is disabled — sessions unavailable.[/yellow]")
+            self._append_log(
+                "[yellow]Memory is disabled — sessions unavailable.[/yellow]"
+            )
             return
         session = self.jarvis.sessions.new_session()
         if session:
             self._pending_delete_session_id = None
-            self._append_log(
-                f"[dim]— started new session {session.short_id()} —[/dim]"
-            )
+            self._append_log(f"[dim]— started new session {session.short_id()} —[/dim]")
             await self._refresh_sidebar()
         else:
             self._append_log("[red]Could not create a new session.[/red]")
@@ -434,7 +446,9 @@ class JarvisTUI(App):
         if self.jarvis is None:
             return
         if not self.jarvis.sessions.available:
-            self._append_log("[yellow]Memory is disabled — sessions unavailable.[/yellow]")
+            self._append_log(
+                "[yellow]Memory is disabled — sessions unavailable.[/yellow]"
+            )
             return
         target = self._get_delete_target_session()
         if target is None:
@@ -557,7 +571,11 @@ class JarvisTUI(App):
                 "",
             ]
         )
-        body_lines = self._export_lines if self._export_lines else ["_(no transcript lines yet)_"]
+        body_lines = (
+            self._export_lines
+            if self._export_lines
+            else ["_(no transcript lines yet)_"]
+        )
         body = "\n".join(body_lines)
         text_out = header + body + "\n"
 

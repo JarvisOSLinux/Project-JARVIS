@@ -5,8 +5,10 @@ Tests error scenarios, graceful handling of LLM failures, and
 robustness of the synchronous ask() interface.
 """
 
-import pytest
 from unittest.mock import Mock, patch
+
+import pytest
+
 from jarvis.core.command_parser import TaskParser
 from jarvis.dispatch.goal_manager import GoalManager
 from tests.integration_utils import make_respond_action
@@ -29,21 +31,23 @@ def _make_jarvis(llm_responses=None, llm_side_effect=None):
     mock_llm.reset_history = Mock()
 
     components = {
-        'llm': mock_llm,
-        'dispatch_adapter': Mock(is_connected=False),
-        'goal_manager': GoalManager(),
-        'event_merger': Mock(),
-        'task_parser': TaskParser(),
-        'output_manager': Mock(),
-        'contextor': None,
-        'embeddings': None,
-        'kernel_client': Mock(available=False),
-        'confirmation_manager': Mock(),
-        'tts': None,
-        'voice_manager': None,
+        "llm": mock_llm,
+        "dispatch_adapter": Mock(is_connected=False),
+        "goal_manager": GoalManager(),
+        "event_merger": Mock(),
+        "task_parser": TaskParser(),
+        "output_manager": Mock(),
+        "contextor": None,
+        "embeddings": None,
+        "kernel_client": Mock(available=False),
+        "confirmation_manager": Mock(),
+        "tts": None,
+        "voice_manager": None,
     }
 
-    with patch('jarvis.core.component_factory.ComponentFactory.create_all_components') as m:
+    with patch(
+        "jarvis.core.component_factory.ComponentFactory.create_all_components"
+    ) as m:
         m.return_value = components
         jarvis = Jarvis(text_mode=True)
 
@@ -56,7 +60,9 @@ class TestLLMErrorHandling:
 
     def test_llm_service_unavailable(self):
         """Test handling when LLM service is completely unavailable."""
-        jarvis = _make_jarvis(llm_side_effect=ConnectionError("LLM service unavailable"))
+        jarvis = _make_jarvis(
+            llm_side_effect=ConnectionError("LLM service unavailable")
+        )
 
         # Jarvis.ask() does not catch provider exceptions; they propagate
         with pytest.raises(ConnectionError):
@@ -65,6 +71,7 @@ class TestLLMErrorHandling:
     def test_llm_timeout_handling(self):
         """Test handling of LLM request timeouts."""
         import asyncio
+
         jarvis = _make_jarvis(llm_side_effect=asyncio.TimeoutError("Request timed out"))
 
         with pytest.raises(asyncio.TimeoutError):
@@ -77,7 +84,10 @@ class TestLLMErrorHandling:
         result = jarvis.ask("Test question")
 
         assert isinstance(result, dict)
-        assert "trouble" in result["output"].lower() or "try again" in result["output"].lower()
+        assert (
+            "trouble" in result["output"].lower()
+            or "try again" in result["output"].lower()
+        )
 
     def test_llm_returns_empty_dict(self):
         """Test handling of empty LLM response dict."""
@@ -136,10 +146,12 @@ class TestMultipleRequestIsolation:
 
     def test_error_then_success(self):
         """Test that a failed request doesn't pollute the next one."""
-        jarvis = _make_jarvis(llm_responses=[
-            {"action": "nonexistent"},
-            make_respond_action("Second request worked!"),
-        ])
+        jarvis = _make_jarvis(
+            llm_responses=[
+                {"action": "nonexistent"},
+                make_respond_action("Second request worked!"),
+            ]
+        )
 
         r1 = jarvis.ask("First failing request")
         r2 = jarvis.ask("Second normal request")
@@ -151,29 +163,34 @@ class TestMultipleRequestIsolation:
     def test_exception_then_success(self):
         """Test that an exception doesn't prevent the next request."""
         mock_llm = Mock()
-        mock_llm.ask = Mock(side_effect=[
-            RuntimeError("Boom"),
-            make_respond_action("Recovery!"),
-        ])
+        mock_llm.ask = Mock(
+            side_effect=[
+                RuntimeError("Boom"),
+                make_respond_action("Recovery!"),
+            ]
+        )
         mock_llm.reset_history = Mock()
 
         from jarvis.main import Jarvis
+
         components = {
-            'llm': mock_llm,
-            'dispatch_adapter': Mock(is_connected=False),
-            'goal_manager': GoalManager(),
-            'event_merger': Mock(),
-            'task_parser': TaskParser(),
-            'output_manager': Mock(),
-            'contextor': None,
-            'embeddings': None,
-            'kernel_client': Mock(available=False),
-            'confirmation_manager': Mock(),
-            'tts': None,
-            'voice_manager': None,
+            "llm": mock_llm,
+            "dispatch_adapter": Mock(is_connected=False),
+            "goal_manager": GoalManager(),
+            "event_merger": Mock(),
+            "task_parser": TaskParser(),
+            "output_manager": Mock(),
+            "contextor": None,
+            "embeddings": None,
+            "kernel_client": Mock(available=False),
+            "confirmation_manager": Mock(),
+            "tts": None,
+            "voice_manager": None,
         }
 
-        with patch('jarvis.core.component_factory.ComponentFactory.create_all_components') as m:
+        with patch(
+            "jarvis.core.component_factory.ComponentFactory.create_all_components"
+        ) as m:
             m.return_value = components
             jarvis = Jarvis(text_mode=True)
 
@@ -192,10 +209,12 @@ class TestDispatchNotConnectedHandling:
 
     def test_dispatch_action_without_connection(self):
         """Test dispatch action when dispatch adapter is not connected."""
-        jarvis = _make_jarvis(llm_responses={
-            "action": "dispatch",
-            "tasks": [{"server": "X", "tool": "y", "params": {}}],
-        })
+        jarvis = _make_jarvis(
+            llm_responses={
+                "action": "dispatch",
+                "tasks": [{"server": "X", "tool": "y", "params": {}}],
+            }
+        )
 
         result = jarvis.ask("Run something")
 
