@@ -44,9 +44,9 @@ Acceptance criteria:
 - CI fails on lint/type/test failures.
 
 ### 1.2 Local Developer Quality Commands
-- [ ] Define one canonical local quality command (example: `make check` or script).
-- [ ] Define one canonical local auto-fix command (example: `make fix`).
-- [ ] Document both in `README.md`.
+- [x] Define one canonical local quality command (example: `make check` or script).
+- [x] Define one canonical local auto-fix command (example: `make fix`).
+- [x] Document both in `README.md`.
 
 Acceptance criteria:
 - A contributor can run one command to validate project quality locally.
@@ -198,3 +198,4 @@ Use this section to record completed milestones.
 - 04-19-26: Updated `README.md` with contribution, standards, security, and roadmap links.
 - 04-19-26: Added CI workflow (`.github/workflows/ci.yml`) and CI badge in `README.md`.
 - 04-19-26: CI baseline stabilized after first run (auto-formatted code with Black/isort and refined lint/type/test gates for deterministic passing checks).
+- 04-19-26: Added root `Makefile` with `make check`, `make fix`, and `make test`; documented local quality commands in `README.md`.

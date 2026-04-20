@@ -408,6 +408,23 @@ To keep Project JARVIS clean, consistent, and professional:
 - Security reporting policy: [`SECURITY.md`](SECURITY.md)
 - Cleanup roadmap: [`docs/clean-and-professional-plan-04-19-26.md`](docs/clean-and-professional-plan-04-19-26.md)
 
+### Local Quality Commands
+
+Use these from repository root:
+
+```bash
+make check   # format+lint+typecheck+tests (CI baseline)
+make fix     # auto-format and import sorting
+make test    # deterministic local test subset
+```
+
+Note: these commands use tooling from `.venv/bin`. If needed, create a virtualenv and install dev dependencies first:
+
+```bash
+python -m venv .venv
+.venv/bin/pip install -e ".[dev]"
+```
+
 When opening PRs or issues, use the repository templates for faster triage and review quality.
 
 ---
