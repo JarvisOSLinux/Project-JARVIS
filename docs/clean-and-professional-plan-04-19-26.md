@@ -199,3 +199,4 @@ Use this section to record completed milestones.
 - 04-19-26: Added CI workflow (`.github/workflows/ci.yml`) and CI badge in `README.md`.
 - 04-19-26: CI baseline stabilized after first run (auto-formatted code with Black/isort and refined lint/type/test gates for deterministic passing checks).
 - 04-19-26: Added root `Makefile` with `make check`, `make fix`, and `make test`; documented local quality commands in `README.md`.
+- 04-19-26: Started Phase 2.1 refactor by extracting lifecycle/startup helpers inside `jarvis/main.py` to reduce `run()` complexity without behavior changes.

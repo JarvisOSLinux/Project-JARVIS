@@ -80,73 +80,13 @@ class Jarvis:
         self._running = True
 
         loop = asyncio.get_running_loop()
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            try:
-                loop.add_signal_handler(sig, lambda: self.stop())
-            except (ValueError, OSError):
-                pass
+        self._install_signal_handlers(loop)
+        await self._connect_dispatch_nonfatal()
+        await self._bootstrap_tool_index_nonfatal()
 
-        try:
-            await self.dispatch.connect()
-        except Exception as e:
-            logger.warning(f"JARVIS: Could not connect to dispatch: {e}")
-            logger.info("JARVIS: Running in conversation-only mode")
-
-        # Startup: sync tool vector index and ensure embedding model
-        if self.dispatch.is_connected and self._embeddings:
-            try:
-                await self.dispatch.ensure_embedding_model(self._embeddings)
-                count = await self.dispatch.server_count()
-                if count.get("registry", 0) > 0:
-                    await self.dispatch.sync_index()
-                    logger.info("JARVIS: Tool vector index synced")
-                else:
-                    logger.info(
-                        "JARVIS: Skipping tool vector sync "
-                        "(no registry servers visible)"
-                    )
-            except Exception as e:
-                logger.warning(f"JARVIS: Tool index sync failed (non-fatal): {e}")
-
-        # In TUI mode, the Textual app owns stdin and injects input via
-        # events.inject_user_input(), so we never install the stdin source.
-        if self.tui_mode:
-            user_source = None
-        else:
-            user_source = self._await_user_input if self._has_stdin() else None
-        self.events.start(
-            signal_source=self._await_dispatch_signal,
-            user_source=user_source,
-        )
-
-        voice_thread: Optional[threading.Thread] = None
-        if self.voice_manager:
-            voice_thread = threading.Thread(
-                target=self._run_voice_activation,
-                daemon=True,
-                name="jarvis-voice",
-            )
-            voice_thread.start()
-            logger.info("JARVIS: Voice activation started (dual input)")
-
-        socket_task: Optional[asyncio.Task] = None
-        if Config.JARVIS_INPUT_SOCKET:
-            socket_task = asyncio.create_task(self._run_socket_listener())
-            logger.info(f"JARVIS: Socket listener at {Config.JARVIS_INPUT_SOCKET}")
-
-        # Wire confirmation manager's event injector so responses flow
-        # through the event loop instead of blocking.
-        self.confirmation.set_event_injector(self.events.inject_confirmation_response)
-
-        output_task: Optional[asyncio.Task] = None
-        if Config.JARVIS_OUTPUT_SOCKET:
-            self.output_manager.add_output_callback(self._on_output_for_broadcast)
-            self.confirmation.set_output_callback(
-                self._on_output_for_broadcast,
-                has_clients=lambda: len(self._output_clients) > 0,
-            )
-            output_task = asyncio.create_task(self._run_output_socket_listener())
-            logger.info(f"JARVIS: Output socket at {Config.JARVIS_OUTPUT_SOCKET}")
+        runtime_tasks = await self._start_runtime_services()
+        socket_task = runtime_tasks["input_socket"]
+        output_task = runtime_tasks["output_socket"]
 
         logger.info("JARVIS: Event loop started")
 
@@ -156,11 +96,92 @@ class Jarvis:
         except KeyboardInterrupt:
             logger.info("JARVIS: Interrupted")
         finally:
-            if socket_task and not socket_task.done():
-                socket_task.cancel()
-            if output_task and not output_task.done():
-                output_task.cancel()
+            self._cancel_task_if_running(socket_task)
+            self._cancel_task_if_running(output_task)
             await self._shutdown()
+
+    def _install_signal_handlers(self, loop: asyncio.AbstractEventLoop) -> None:
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            try:
+                loop.add_signal_handler(sig, lambda: self.stop())
+            except (ValueError, OSError):
+                pass
+
+    async def _connect_dispatch_nonfatal(self) -> None:
+        try:
+            await self.dispatch.connect()
+        except Exception as e:
+            logger.warning(f"JARVIS: Could not connect to dispatch: {e}")
+            logger.info("JARVIS: Running in conversation-only mode")
+
+    async def _bootstrap_tool_index_nonfatal(self) -> None:
+        # Startup: sync tool vector index and ensure embedding model.
+        if not (self.dispatch.is_connected and self._embeddings):
+            return
+
+        try:
+            await self.dispatch.ensure_embedding_model(self._embeddings)
+            count = await self.dispatch.server_count()
+            if count.get("registry", 0) > 0:
+                await self.dispatch.sync_index()
+                logger.info("JARVIS: Tool vector index synced")
+            else:
+                logger.info(
+                    "JARVIS: Skipping tool vector sync " "(no registry servers visible)"
+                )
+        except Exception as e:
+            logger.warning(f"JARVIS: Tool index sync failed (non-fatal): {e}")
+
+    def _resolve_user_source(self):
+        # In TUI mode, the Textual app owns stdin and injects input via
+        # events.inject_user_input(), so we never install the stdin source.
+        if self.tui_mode:
+            return None
+        return self._await_user_input if self._has_stdin() else None
+
+    async def _start_runtime_services(self) -> Dict[str, Optional[asyncio.Task]]:
+        user_source = self._resolve_user_source()
+        self.events.start(
+            signal_source=self._await_dispatch_signal,
+            user_source=user_source,
+        )
+
+        if self.voice_manager:
+            voice_thread = threading.Thread(
+                target=self._run_voice_activation,
+                daemon=True,
+                name="jarvis-voice",
+            )
+            voice_thread.start()
+            logger.info("JARVIS: Voice activation started (dual input)")
+
+        input_socket_task: Optional[asyncio.Task] = None
+        if Config.JARVIS_INPUT_SOCKET:
+            input_socket_task = asyncio.create_task(self._run_socket_listener())
+            logger.info(f"JARVIS: Socket listener at {Config.JARVIS_INPUT_SOCKET}")
+
+        # Wire confirmation manager's event injector so responses flow
+        # through the event loop instead of blocking.
+        self.confirmation.set_event_injector(self.events.inject_confirmation_response)
+
+        output_socket_task: Optional[asyncio.Task] = None
+        if Config.JARVIS_OUTPUT_SOCKET:
+            self.output_manager.add_output_callback(self._on_output_for_broadcast)
+            self.confirmation.set_output_callback(
+                self._on_output_for_broadcast,
+                has_clients=lambda: len(self._output_clients) > 0,
+            )
+            output_socket_task = asyncio.create_task(self._run_output_socket_listener())
+            logger.info(f"JARVIS: Output socket at {Config.JARVIS_OUTPUT_SOCKET}")
+
+        return {
+            "input_socket": input_socket_task,
+            "output_socket": output_socket_task,
+        }
+
+    def _cancel_task_if_running(self, task: Optional[asyncio.Task]) -> None:
+        if task and not task.done():
+            task.cancel()
 
     async def _handle_event(self, event: Event):
         if event.type == EventType.USER_INPUT:
