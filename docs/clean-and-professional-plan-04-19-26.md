@@ -202,3 +202,4 @@ Use this section to record completed milestones.
 - 04-19-26: Started Phase 2.1 refactor by extracting lifecycle/startup helpers inside `jarvis/main.py` to reduce `run()` complexity without behavior changes.
 - 04-19-26: Created `jarvis/runtime/lifecycle.py` and moved startup/lifecycle orchestration helpers out of `jarvis/main.py`; behavior preserved and checks passing.
 - 04-19-26: Created `jarvis/runtime/io.py` and extracted socket/broadcast runtime I/O handlers from `jarvis/main.py` into the runtime module.
+- 04-19-26: Created `jarvis/runtime/events.py` and extracted event-routing/input-source helpers (`_handle_event`, `_await_user_input`, `_await_dispatch_signal`) into runtime module helpers.

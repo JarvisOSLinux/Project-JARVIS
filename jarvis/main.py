@@ -25,7 +25,8 @@ from typing import Any, Dict, List, Optional
 from .config import Config
 from .core import ComponentFactory
 from .core.logger import JarvisLogger, get_logger
-from .dispatch.event_merger import Event, EventType
+from .dispatch.event_merger import Event
+from .runtime import events as runtime_events
 from .runtime import io as runtime_io
 from .runtime.lifecycle import (
     bootstrap_tool_index_nonfatal,
@@ -106,12 +107,7 @@ class Jarvis:
             await self._shutdown()
 
     async def _handle_event(self, event: Event):
-        if event.type == EventType.USER_INPUT:
-            await self._on_user_input(event.data)
-        elif event.type == EventType.DISPATCH_SIGNAL:
-            await self._on_dispatch_signal(event.data)
-        elif event.type == EventType.CONFIRMATION_RESPONSE:
-            await self._on_confirmation_response(event.data)
+        await runtime_events.handle_event(self, event)
 
     # ------------------------------------------------------------------
     # ROOT-level handlers
@@ -1026,28 +1022,10 @@ class Jarvis:
         await runtime_io.handle_output_connection(self, logger, reader, writer)
 
     async def _await_user_input(self) -> str:
-        return await asyncio.get_event_loop().run_in_executor(
-            None,
-            input,
-            "",
-        )
+        return await runtime_events.await_user_input()
 
     async def _await_dispatch_signal(self) -> Optional[Dict[str, Any]]:
-        if not self.dispatch.is_connected:
-            await asyncio.sleep(1)
-            return None
-
-        signals = await self.dispatch.get_signal_window()
-        if signals:
-            latest = signals[-1]
-            logger.debug(
-                f"JARVIS: Received {len(signals)} signal(s), forwarding latest: "
-                f"type={latest.get('type')}, pid={latest.get('pid')}",
-            )
-            return latest
-
-        await asyncio.sleep(0.5)
-        return None
+        return await runtime_events.await_dispatch_signal(self, logger)
 
     # ------------------------------------------------------------------
     # Synchronous / legacy interface
