@@ -46,6 +46,13 @@ def _is_stdio_stream(stream: object) -> bool:
     return stream in (sys.stdout, sys.stderr)
 
 
+def _is_console_stream_handler(handler: logging.Handler) -> bool:
+    """True for console-like stream handlers (but not file handlers)."""
+    return isinstance(handler, logging.StreamHandler) and not isinstance(
+        handler, logging.FileHandler
+    )
+
+
 def _ensure_no_last_resort(logger: logging.Logger) -> None:
     """If a logger has propagate=False and no handlers, logging emits via lastResort (stderr).
 
@@ -186,9 +193,7 @@ class JarvisLogger:
         for logger in cls._loggers.values():
             logger.setLevel(numeric_level)
             for handler in logger.handlers:
-                if isinstance(handler, logging.StreamHandler) and _is_stdio_stream(
-                    getattr(handler, "stream", None)
-                ):
+                if _is_console_stream_handler(handler):
                     handler.setLevel(numeric_level)
 
     @classmethod
@@ -197,9 +202,7 @@ class JarvisLogger:
         cls._console_enabled = enabled
         for logger in cls._loggers.values():
             for handler in list(logger.handlers):
-                if isinstance(handler, logging.StreamHandler) and _is_stdio_stream(
-                    getattr(handler, "stream", None)
-                ):
+                if _is_console_stream_handler(handler):
                     logger.removeHandler(handler)
 
             if enabled:
@@ -235,9 +238,7 @@ class JarvisLogger:
         """
         root = logging.getLogger()
         for handler in list(root.handlers):
-            if isinstance(handler, logging.StreamHandler) and _is_stdio_stream(
-                getattr(handler, "stream", None)
-            ):
+            if _is_console_stream_handler(handler):
                 root.removeHandler(handler)
         if not root.handlers:
             root.addHandler(logging.NullHandler())
