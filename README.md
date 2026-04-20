@@ -396,3 +396,16 @@ JARVIS represents a **paradigm shift** in AI assistant technology:
 This is the future of human-computer interaction - **AI that truly understands and adapts**.
 
 ---
+
+## 🤝 Project Quality and Contribution
+
+To keep Project JARVIS clean, consistent, and professional:
+
+- Contribution guide: [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- Engineering standards: [`docs/engineering-standards.md`](docs/engineering-standards.md)
+- Security reporting policy: [`SECURITY.md`](SECURITY.md)
+- Cleanup roadmap: [`docs/clean-and-professional-plan-04-19-26.md`](docs/clean-and-professional-plan-04-19-26.md)
+
+When opening PRs or issues, use the repository templates for faster triage and review quality.
+
+---
