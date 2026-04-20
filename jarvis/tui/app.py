@@ -59,7 +59,7 @@ from textual.reactive import reactive
 from textual.widgets import Footer, Header, Input, Label, ListItem, ListView, RichLog, Static
 
 from ..config import Config
-from ..core.logger import get_logger
+from ..core.logger import JarvisLogger, get_logger
 from ..sessions.model import Session
 from .help_screen import HelpScreen
 from .slash_commands_doc import build_help_markdown
@@ -294,10 +294,6 @@ class JarvisTUI(App):
         # commands still work — main.py's handler catches them.
         self.jarvis.events.inject_user_input(text)
 
-        # Refresh sidebar shortly after — covers /new, /rename, /delete,
-        # /switch and auto-created sessions.
-        self.set_timer(0.3, self._refresh_sidebar_sync)
-
     def _on_jarvis_output(self, response: Dict[str, Any]) -> None:
         """Output callback — called from the main asyncio loop by OutputManager."""
         text = response.get("output", "")
@@ -305,7 +301,7 @@ class JarvisTUI(App):
             return
         self._append_log(f"[bold magenta]jarvis[/bold magenta] > {self._escape(text)}")
         # Session might have been auto-created on first message; refresh.
-        self.set_timer(0.05, self._refresh_sidebar_sync)
+        self.schedule_sidebar_refresh()
 
     def _append_log(self, markup: str) -> None:
         try:
@@ -324,9 +320,21 @@ class JarvisTUI(App):
     # Session sidebar
     # ------------------------------------------------------------------
 
-    def _refresh_sidebar_sync(self) -> None:
-        """set_timer can't await — schedule the async refresh."""
-        asyncio.create_task(self._refresh_sidebar())
+    def schedule_sidebar_refresh(self) -> None:
+        """Rebuild the session list on Textual's message pump.
+
+        ``Jarvis.run()`` runs in a separate asyncio task; scheduling DOM work
+        with a bare ``asyncio.create_task`` from that stack can leave the
+        ListView stale until the next UI event (e.g. focusing the sidebar).
+        """
+
+        def kick() -> None:
+            asyncio.create_task(self._refresh_sidebar())
+
+        try:
+            self.call_next(kick)
+        except Exception:
+            asyncio.create_task(self._refresh_sidebar())
 
     async def _refresh_sidebar(self) -> None:
         async with self._sidebar_refresh_lock:
@@ -583,5 +591,8 @@ class JarvisTUI(App):
 
 def run_tui() -> None:
     """Entry point invoked by ``jarvis tui`` in the CLI."""
+    # Before Textual paints, detach stdio handlers from the root logger so
+    # third-party INFO lines cannot corrupt the alternate screen.
+    JarvisLogger.apply_tui_root_mitigation()
     app = JarvisTUI()
     app.run()

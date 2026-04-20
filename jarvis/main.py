@@ -26,6 +26,7 @@ import time
 from typing import Dict, Any, Optional, List
 from .config import Config
 from .core import ComponentFactory
+from .core.logger import JarvisLogger
 from .core.logger import get_logger
 from .dispatch.event_merger import Event, EventType
 from .sessions import SessionManager
@@ -42,9 +43,16 @@ class Jarvis:
         self.tui_mode = tui_mode
         self._running = False
 
+        # Textual owns the terminal surface; suppress plain stdout logging
+        # and stdout response printing while the TUI is active.
+        JarvisLogger.set_console_enabled(not self.tui_mode)
+        if self.tui_mode:
+            JarvisLogger.apply_tui_root_mitigation()
+
         self.components = ComponentFactory.create_all_components(
             text_mode=self.text_mode,
             on_voice_command=self._handle_voice_command,
+            suppress_stdout_output=self.tui_mode,
         )
 
         self.llm = self.components['llm']

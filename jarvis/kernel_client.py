@@ -44,7 +44,6 @@ Key/provider reporting is called directly:
 
 import ctypes
 import fcntl
-import logging
 import os
 import select
 import struct
@@ -55,7 +54,9 @@ from typing import Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from .main import Jarvis
 
-logger = logging.getLogger(__name__)
+from .core.logger import get_logger
+
+logger = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # UAPI constants (must match linux/include/uapi/linux/jarvis.h)

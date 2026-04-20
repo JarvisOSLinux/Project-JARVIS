@@ -12,7 +12,7 @@ class OutputManager:
     via add_output_callback() to receive responses (e.g. for streaming to UI).
     """
 
-    def __init__(self, tts: Optional[Any] = None):
+    def __init__(self, tts: Optional[Any] = None, suppress_stdout: bool = False):
         """
         Initialize OutputManager
 
@@ -22,6 +22,7 @@ class OutputManager:
         self.tts = tts
         self._has_tts = tts is not None
         self._output_callbacks: List[Callable[[Dict[str, Any]], None]] = []
+        self._suppress_stdout = suppress_stdout
 
     def add_output_callback(self, cb: Callable[[Dict[str, Any]], None]) -> None:
         """Register a callback to receive every response (for app/stream integration)."""
@@ -79,6 +80,8 @@ class OutputManager:
         Args:
             text: Text to print
         """
+        if self._suppress_stdout:
+            return
         # Output text is intentionally printed to stdout for user visibility
         print(text)
     

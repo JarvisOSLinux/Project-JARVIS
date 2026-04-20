@@ -42,6 +42,20 @@ class ColoredFormatter(logging.Formatter):
         return result
 
 
+def _is_stdio_stream(stream: object) -> bool:
+    return stream in (sys.stdout, sys.stderr)
+
+
+def _ensure_no_last_resort(logger: logging.Logger) -> None:
+    """If a logger has propagate=False and no handlers, logging emits via lastResort (stderr).
+
+    That corrupts Textual TUIs.  Attach a NullHandler whenever the logger would
+    otherwise have no handlers.
+    """
+    if not logger.handlers:
+        logger.addHandler(logging.NullHandler())
+
+
 class JarvisLogger:
     """
     Centralized logger for JARVIS
@@ -57,6 +71,7 @@ class JarvisLogger:
     _log_level = logging.INFO
     _log_file: Optional[Path] = None
     _file_handler: Optional[logging.FileHandler] = None
+    _console_enabled: bool = True
     
     @classmethod
     def setup(cls, log_level: str = "INFO", log_file: Optional[str] = None, 
@@ -123,26 +138,30 @@ class JarvisLogger:
         logger.setLevel(cls._log_level)
         logger.handlers.clear()  # Remove any existing handlers
         
-        # Console handler
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(cls._log_level)
-        
-        # Choose formatter based on color preference
-        if cls._enable_colors and sys.stdout.isatty():
-            console_formatter = ColoredFormatter(
-                '%(levelname)s - %(name)s - %(message)s'
-            )
-        else:
-            console_formatter = logging.Formatter(
-                '%(levelname)s - %(name)s - %(message)s'
-            )
-        
-        console_handler.setFormatter(console_formatter)
-        logger.addHandler(console_handler)
+        if cls._console_enabled:
+            # Console handler
+            console_handler = logging.StreamHandler(sys.stdout)
+            console_handler.setLevel(cls._log_level)
+
+            # Choose formatter based on color preference
+            if cls._enable_colors and sys.stdout.isatty():
+                console_formatter = ColoredFormatter(
+                    '%(levelname)s - %(name)s - %(message)s'
+                )
+            else:
+                console_formatter = logging.Formatter(
+                    '%(levelname)s - %(name)s - %(message)s'
+                )
+
+            console_handler.setFormatter(console_formatter)
+            logger.addHandler(console_handler)
         
         # Add file handler if configured
         if cls._file_handler:
             logger.addHandler(cls._file_handler)
+
+        if not cls._console_enabled and not cls._file_handler:
+            _ensure_no_last_resort(logger)
         
         # Prevent propagation to root logger
         logger.propagate = False
@@ -167,8 +186,61 @@ class JarvisLogger:
         for logger in cls._loggers.values():
             logger.setLevel(numeric_level)
             for handler in logger.handlers:
-                if isinstance(handler, logging.StreamHandler) and handler.stream == sys.stdout:
+                if isinstance(handler, logging.StreamHandler) and _is_stdio_stream(
+                    getattr(handler, "stream", None)
+                ):
                     handler.setLevel(numeric_level)
+
+    @classmethod
+    def set_console_enabled(cls, enabled: bool) -> None:
+        """Enable/disable console log output across current and future loggers."""
+        cls._console_enabled = enabled
+        for logger in cls._loggers.values():
+            for handler in list(logger.handlers):
+                if isinstance(handler, logging.StreamHandler) and _is_stdio_stream(
+                    getattr(handler, "stream", None)
+                ):
+                    logger.removeHandler(handler)
+
+            if enabled:
+                for handler in list(logger.handlers):
+                    if isinstance(handler, logging.NullHandler):
+                        logger.removeHandler(handler)
+                console_handler = logging.StreamHandler(sys.stdout)
+                console_handler.setLevel(cls._log_level)
+                if cls._enable_colors and sys.stdout.isatty():
+                    console_formatter = ColoredFormatter(
+                        '%(levelname)s - %(name)s - %(message)s'
+                    )
+                else:
+                    console_formatter = logging.Formatter(
+                        '%(levelname)s - %(name)s - %(message)s'
+                    )
+                console_handler.setFormatter(console_formatter)
+                logger.addHandler(console_handler)
+            else:
+                # Drop stray NullHandlers from prior toggles, then re-attach if needed.
+                for handler in list(logger.handlers):
+                    if isinstance(handler, logging.NullHandler):
+                        logger.removeHandler(handler)
+                if not logger.handlers:
+                    _ensure_no_last_resort(logger)
+
+    @classmethod
+    def apply_tui_root_mitigation(cls) -> None:
+        """Detach stdio StreamHandlers from the root logger (third-party libs).
+
+        Called when starting the Textual TUI so httpx/mcp/etc. do not paint over
+        the alternate screen.
+        """
+        root = logging.getLogger()
+        for handler in list(root.handlers):
+            if isinstance(handler, logging.StreamHandler) and _is_stdio_stream(
+                getattr(handler, "stream", None)
+            ):
+                root.removeHandler(handler)
+        if not root.handlers:
+            root.addHandler(logging.NullHandler())
     
     @classmethod
     def get_log_file(cls) -> Optional[Path]:

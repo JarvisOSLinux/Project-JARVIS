@@ -187,14 +187,17 @@ class ComponentFactory:
             return None
 
     @staticmethod
-    def create_output_manager(tts: Optional[any] = None) -> OutputManager:
+    def create_output_manager(
+        tts: Optional[any] = None,
+        suppress_stdout: bool = False,
+    ) -> OutputManager:
         """
         Create OutputManager with optional TTS
 
         Args:
             tts: Optional TTS instance
         """
-        return OutputManager(tts)
+        return OutputManager(tts, suppress_stdout=suppress_stdout)
 
     @staticmethod
     def create_voice_manager_optional(on_command) -> Optional[any]:
@@ -273,7 +276,11 @@ class ComponentFactory:
         return client
 
     @staticmethod
-    def create_all_components(text_mode: bool = False, on_voice_command=None):
+    def create_all_components(
+        text_mode: bool = False,
+        on_voice_command=None,
+        suppress_stdout_output: bool = False,
+    ):
         """
         Create all JARVIS components
 
@@ -343,7 +350,8 @@ class ComponentFactory:
 
         # Dependent components
         components['output_manager'] = ComponentFactory.create_output_manager(
-            components['tts']
+            components['tts'],
+            suppress_stdout=suppress_stdout_output,
         )
 
         # Voice input components (only if not in text mode and available)
