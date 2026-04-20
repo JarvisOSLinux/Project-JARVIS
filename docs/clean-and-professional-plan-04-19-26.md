@@ -32,12 +32,12 @@ Use it as the single source of truth for cleanup tasks, sequencing, and completi
 Target: stabilize day-to-day quality and prevent regressions.
 
 ### 1.1 CI Pipeline
-- [ ] Add GitHub Actions workflow for:
-  - [ ] Lint/format checks
-  - [ ] Type checks
-  - [ ] Test run (`pytest`)
-- [ ] Ensure workflow runs on PR + push to main branch.
-- [ ] Add status badges to `README.md` (optional but recommended).
+- [x] Add GitHub Actions workflow for:
+  - [x] Lint/format checks
+  - [x] Type checks
+  - [x] Test run (`pytest`)
+- [x] Ensure workflow runs on PR + push to main branch.
+- [x] Add status badges to `README.md` (optional but recommended).
 
 Acceptance criteria:
 - Every PR gets automatic pass/fail quality feedback.
@@ -196,3 +196,4 @@ Use this section to record completed milestones.
 - 04-19-26: Added engineering standards document (`docs/engineering-standards.md`).
 - 04-19-26: Added GitHub professionalism docs (`CONTRIBUTING.md`, `SECURITY.md`, PR template, issue templates).
 - 04-19-26: Updated `README.md` with contribution, standards, security, and roadmap links.
+- 04-19-26: Added CI workflow (`.github/workflows/ci.yml`) and CI badge in `README.md`.

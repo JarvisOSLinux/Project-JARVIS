@@ -2,6 +2,8 @@
 
 **AI-Native Voice Assistant with Dynamic Capability Discovery**
 
+[![CI](https://github.com/YakupAtahanov/Project-JARVIS/actions/workflows/ci.yml/badge.svg)](https://github.com/YakupAtahanov/Project-JARVIS/actions/workflows/ci.yml)
+
 Project JARVIS is an innovative AI-powered voice assistant that combines natural language processing with dynamic tool discovery through SuperMCP (Super Model Context Protocol) orchestration. Featuring always-listening wake word detection, it can understand spoken commands, discover available tools dynamically, and execute them through specialized MCP servers - all while maintaining complete privacy through local processing.
 
 ---
