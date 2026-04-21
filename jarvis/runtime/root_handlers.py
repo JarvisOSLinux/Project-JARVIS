@@ -5,6 +5,7 @@ from __future__ import annotations
 from logging import Logger
 from typing import Any
 
+from .llm_bridge import ask_llm
 from .root_context import build_root_context, compact_payload_for_llm
 from .session_commands import handle_slash_command
 
@@ -36,7 +37,7 @@ async def on_user_input(app: Any, logger: Logger, text: str) -> None:
     context = build_root_context(app, logger, new_input=text)
     app._activity("Thinking about your request…", kind="llm")
 
-    response = await app._ask_llm(context, tag="root")
+    response = await ask_llm(app, logger, context, tag="root")
     await app._act_on_root_response(response)
 
 
@@ -52,7 +53,7 @@ async def on_dispatch_signal(app: Any, logger: Logger, signal: dict[str, Any]) -
     app.llm.switch_mode("root")
     context = build_root_context(app, logger, signal=signal)
 
-    response = await app._ask_llm(context, tag="root")
+    response = await ask_llm(app, logger, context, tag="root")
     await app._act_on_root_response(response)
 
 
@@ -82,7 +83,7 @@ async def on_confirmation_response(
         app.llm.switch_mode("root")
         context = build_root_context(app, logger)
         context += f"\nUSER_DENIAL: Action {denied_list} was denied by the user"
-        response = await app._ask_llm(context, tag="root-confirmation-denied")
+        response = await ask_llm(app, logger, context, tag="root-confirmation-denied")
         await app._act_on_root_response(response)
         return
 
@@ -103,5 +104,5 @@ async def on_confirmation_response(
             denied_list = ", ".join(pending.denied_tools)
             context += f"\nUSER_DENIAL: Action {denied_list} was denied by the user"
 
-        response = await app._ask_llm(context, tag="root-confirmation-result")
+        response = await ask_llm(app, logger, context, tag="root-confirmation-result")
         await app._act_on_root_response(response)

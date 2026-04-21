@@ -9,6 +9,7 @@ from typing import Any
 
 from ..config import Config
 from .goal_updates import apply_goal_updates
+from .llm_bridge import ask_llm
 from .root_context import build_root_context, compact_payload_for_llm
 
 
@@ -54,7 +55,7 @@ async def run_dispatch_subchain(
             f"(step={step}, context_chars={len(context)})"
         )
         app._activity(f"Dispatch step {step + 1}: reasoning…", kind="dispatch")
-        response = await app._ask_llm(context, tag=f"dispatch-step-{step}")
+        response = await ask_llm(app, logger, context, tag=f"dispatch-step-{step}")
         parsed = app.task_parser.parse(response)
 
         if "error" in parsed:
@@ -305,7 +306,7 @@ async def dispatch_execute_tasks(
     else:
         context += f"\nDISPATCH_RESULT: {compact_payload_for_llm(result)}"
 
-    response = await app._ask_llm(context, tag="root-dispatch-result")
+    response = await ask_llm(app, logger, context, tag="root-dispatch-result")
     await app._act_on_root_response(response, depth + 1)
 
 

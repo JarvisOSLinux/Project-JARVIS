@@ -118,3 +118,25 @@ def cancel_task_if_running(task: Optional[asyncio.Task]) -> None:
     """Cancel task if it exists and has not completed."""
     if task and not task.done():
         task.cancel()
+
+
+def request_stop(app: Any) -> None:
+    """Request graceful shutdown (e.g. from signal handler)."""
+    app._running = False
+    if app.voice_manager and hasattr(app.voice_manager, "activation"):
+        try:
+            app.voice_manager.activation.stop_listening()
+        except Exception:
+            pass
+    app.events.request_shutdown()
+
+
+async def shutdown(app: Any, logger: Logger) -> None:
+    """Tear down event sources, sockets, dispatch, and contextor."""
+    app._running = False
+    app.output_manager.remove_output_callback(app._on_output_for_broadcast)
+    await app.events.stop()
+    await app.dispatch.disconnect()
+    if app.contextor:
+        app.contextor.disconnect()
+    logger.info("JARVIS: Shutdown complete")

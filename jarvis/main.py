@@ -17,7 +17,7 @@ event queue. Both can be active simultaneously.
 """
 
 import asyncio
-import time
+from functools import partial
 from typing import Any, Dict, List, Optional
 
 from .core import ComponentFactory
@@ -42,9 +42,13 @@ from .runtime.lifecycle import (
     cancel_task_if_running,
     connect_dispatch_nonfatal,
     install_signal_handlers,
+    request_stop,
+    shutdown,
     start_runtime_services,
     stdin_is_tty,
 )
+from .runtime.llm_bridge import ask_llm as runtime_ask_llm
+from .runtime.llm_bridge import ask_llm_sync as runtime_ask_llm_sync
 from .runtime.root_actions import act_on_root_response as runtime_act_on_root_response
 from .runtime.root_actions import feed_root_summary as runtime_feed_root_summary
 from .runtime.root_context import build_root_context as runtime_build_root_context
@@ -114,7 +118,7 @@ class Jarvis:
         self._running = True
 
         loop = asyncio.get_running_loop()
-        install_signal_handlers(loop, self.stop)
+        install_signal_handlers(loop, partial(request_stop, self))
         await connect_dispatch_nonfatal(self.dispatch, logger)
         await bootstrap_tool_index_nonfatal(self.dispatch, self._embeddings, logger)
 
@@ -132,7 +136,7 @@ class Jarvis:
         finally:
             cancel_task_if_running(socket_task)
             cancel_task_if_running(output_task)
-            await self._shutdown()
+            await shutdown(self, logger)
 
     async def _handle_event(self, event: Event):
         await runtime_events.handle_event(self, event)
@@ -241,25 +245,11 @@ class Jarvis:
 
     def _ask_llm_sync(self, context: str, tag: str = "") -> Dict[str, Any]:
         """Single LLM call with timing logs (synchronous)."""
-        logger.info(f"JARVIS [{tag}]: Calling LLM (mode={self.llm.mode})...")
-        logger.debug(f"JARVIS [{tag}]: LLM context:\n{context}")
-
-        t0 = time.perf_counter()
-        response = self.llm.ask(context)
-        elapsed = time.perf_counter() - t0
-
-        logger.info(f"JARVIS [{tag}]: LLM responded in {elapsed:.2f}s")
-        logger.debug(f"JARVIS [{tag}]: LLM raw response: {response}")
-        return response
+        return runtime_ask_llm_sync(self, logger, context, tag)
 
     async def _ask_llm(self, context: str, tag: str = "") -> Dict[str, Any]:
         """Single LLM call with timing logs (non-blocking for UI)."""
-        self._activity(f"LLM ({self.llm.mode}) is thinking…", kind="llm")
-        t0 = time.perf_counter()
-        response = await asyncio.to_thread(self._ask_llm_sync, context, tag)
-        elapsed = time.perf_counter() - t0
-        self._activity(f"LLM responded in {elapsed:.1f}s.", kind="llm")
-        return response
+        return await runtime_ask_llm(self, logger, context, tag)
 
     def _compact_payload_for_llm(
         self,
@@ -358,22 +348,10 @@ class Jarvis:
 
     def stop(self) -> None:
         """Request graceful shutdown (e.g. from signal handler)."""
-        self._running = False
-        if self.voice_manager and hasattr(self.voice_manager, "activation"):
-            try:
-                self.voice_manager.activation.stop_listening()
-            except Exception:
-                pass
-        self.events.request_shutdown()
+        request_stop(self)
 
     async def _shutdown(self):
-        self._running = False
-        self.output_manager.remove_output_callback(self._on_output_for_broadcast)
-        await self.events.stop()
-        await self.dispatch.disconnect()
-        if self.contextor:
-            self.contextor.disconnect()
-        logger.info("JARVIS: Shutdown complete")
+        await shutdown(self, logger)
 
     def listen_with_activation(self):
         if not self.voice_manager:

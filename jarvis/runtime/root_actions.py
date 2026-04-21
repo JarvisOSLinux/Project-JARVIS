@@ -8,6 +8,7 @@ from typing import Any
 
 from ..config import Config
 from .goal_updates import apply_goal_updates
+from .llm_bridge import ask_llm
 from .root_context import build_root_context, compact_payload_for_llm
 
 
@@ -23,7 +24,7 @@ async def feed_root_summary(
     context = build_root_context(app, logger)
     context += f"\n{label}: {summary}"
 
-    response = await app._ask_llm(context, tag="root-chain")
+    response = await ask_llm(app, logger, context, tag="root-chain")
     await app._act_on_root_response(response, depth + 1)
 
 
@@ -72,7 +73,7 @@ async def act_on_root_response(
             logger.warning("JARVIS: LLM returned empty respond — retrying")
             context = build_root_context(app, logger)
             context += "\nYour previous response had an empty output. Please respond to the user."
-            retry_response = await app._ask_llm(context, tag="root-retry-empty")
+            retry_response = await ask_llm(app, logger, context, tag="root-retry-empty")
             await app._act_on_root_response(retry_response, depth + 1)
             return
         app.output_manager.handle_response({"output": output})

@@ -6,6 +6,7 @@ from logging import Logger
 from typing import Any, Dict
 
 from ..config import Config
+from .llm_bridge import ask_llm_sync
 
 
 def sync_ask(app: Any, logger: Logger, prompt: str) -> Dict[str, Any]:
@@ -23,7 +24,7 @@ def sync_ask(app: Any, logger: Logger, prompt: str) -> Dict[str, Any]:
     app.llm.switch_mode("root")
     context = app._build_root_context(new_input=prompt)
 
-    response = app._ask_llm_sync(context, tag="ask")
+    response = ask_llm_sync(app, logger, context, tag="ask")
     parsed = app.task_parser.parse(response)
 
     if "error" in parsed:
