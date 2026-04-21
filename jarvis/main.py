@@ -17,7 +17,6 @@ event queue. Both can be active simultaneously.
 """
 
 import asyncio
-import json
 import sys
 import time
 from typing import Any, Dict, List, Optional
@@ -39,6 +38,7 @@ from .runtime.dispatch_flow import get_tool_metadata as runtime_get_tool_metadat
 from .runtime.dispatch_flow import (
     run_dispatch_subchain as runtime_run_dispatch_subchain,
 )
+from .runtime.goal_updates import apply_goal_updates as runtime_apply_goal_updates
 from .runtime.lifecycle import (
     bootstrap_tool_index_nonfatal,
     cancel_task_if_running,
@@ -48,6 +48,10 @@ from .runtime.lifecycle import (
 )
 from .runtime.root_actions import act_on_root_response as runtime_act_on_root_response
 from .runtime.root_actions import feed_root_summary as runtime_feed_root_summary
+from .runtime.root_context import build_root_context as runtime_build_root_context
+from .runtime.root_context import (
+    compact_payload_for_llm as runtime_compact_payload_for_llm,
+)
 from .sessions import SessionManager
 
 logger = get_logger(__name__)
@@ -151,7 +155,7 @@ class Jarvis:
         )
 
     async def _feed_root_summary(self, label: str, summary: str, depth: int):
-        await runtime_feed_root_summary(self, label, summary, depth)
+        await runtime_feed_root_summary(self, logger, label, summary, depth)
 
     # ------------------------------------------------------------------
     # DISPATCH sub-chain
@@ -336,86 +340,19 @@ class Jarvis:
         Keeps logs verbose but prevents giant vectors / stack traces from
         bloating the active chat context.
         """
-        try:
-            if isinstance(payload, (dict, list)):
-                text = json.dumps(payload, ensure_ascii=False)
-            else:
-                text = str(payload)
-        except Exception:
-            text = str(payload)
-
-        # Trim huge vector dumps while preserving diagnostic intent.
-        text = text.replace("vector", "vec")
-        text = text.replace("vectors", "vecs")
-
-        if len(text) <= max_chars:
-            return text
-        omitted = len(text) - max_chars
-        return f"{text[:max_chars]} ... [truncated {omitted} chars]"
+        return runtime_compact_payload_for_llm(payload, max_chars=max_chars)
 
     def _build_root_context(
         self,
         new_input: Optional[str] = None,
         signal: Optional[Dict[str, Any]] = None,
     ) -> str:
-        parts = []
-
-        active_goals = self.goals.get_context()
-        if active_goals:
-            parts.append(f"GOALS: {json.dumps(active_goals)}")
-
-        if signal:
-            parts.append(f"SIGNAL: {json.dumps(signal)}")
-
-        # RAG retrieval — inject relevant memories from the contextor
-        # based on the current user input.  Scoped to the active session
-        # (plus global entries) so sibling chats don't bleed through.
-        if new_input and self.contextor:
-            rag_context = self.contextor.retrieve_context(
-                query=new_input,
-                top_k=getattr(Config, "RAG_TOP_K", 5),
-                min_score=getattr(Config, "RAG_MIN_SCORE", 0.3),
-                session_id=self.sessions.current_id,
-                include_global=True,
-            )
-            if rag_context:
-                logger.info(
-                    "JARVIS: RAG context injected for root "
-                    f"(chars={len(rag_context)}, session_id={self.sessions.current_id})"
-                )
-                parts.append(rag_context)
-            else:
-                logger.debug("JARVIS: No RAG context injected for root")
-
-        # Tier-2 rolling summary — gives the LLM a compressed view of
-        # older turns without blowing the context window.
-        summary = self.sessions.load_summary()
-        if summary:
-            parts.append(f"CONVERSATION_SUMMARY: {summary}")
-
-        if new_input:
-            parts.append(f"NEW INPUT: {new_input}")
-
-        logger.debug(
-            "JARVIS: Built root context "
-            f"(parts={len(parts)}, chars={sum(len(p) for p in parts)})"
+        return runtime_build_root_context(
+            self, logger, new_input=new_input, signal=signal
         )
 
-        return "\n".join(parts) if parts else "No active context."
-
     def _apply_goal_updates(self, updates):
-        for update in updates:
-            goal_id = update.get("id")
-            status = update.get("status")
-            if not goal_id or not status:
-                continue
-
-            if status == "completed":
-                self.goals.complete_goal(goal_id, update.get("result"))
-            elif status == "failed":
-                self.goals.fail_goal(goal_id, update.get("result"))
-            elif status == "active":
-                self.goals.link_tasks(goal_id, update.get("pids", []))
+        runtime_apply_goal_updates(self, updates)
 
     async def _do_kill(self, pids):
         await runtime_do_kill(self, logger, pids)

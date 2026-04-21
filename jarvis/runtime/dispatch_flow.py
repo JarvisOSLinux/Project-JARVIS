@@ -8,6 +8,8 @@ from logging import Logger
 from typing import Any
 
 from ..config import Config
+from .goal_updates import apply_goal_updates
+from .root_context import build_root_context, compact_payload_for_llm
 
 
 async def run_dispatch_subchain(
@@ -61,7 +63,7 @@ async def run_dispatch_subchain(
 
         action = parsed["action"]
         logger.info(f"JARVIS: Dispatch iteration action (step={step}, action={action})")
-        app._apply_goal_updates(parsed.get("goal_updates", []))
+        apply_goal_updates(app, parsed.get("goal_updates", []))
 
         if action == "done":
             logger.info(f"JARVIS: Dispatch sub-chain completed: {parsed['summary']}")
@@ -95,17 +97,17 @@ async def run_dispatch_subchain(
         elif action == "search":
             app._activity("Searching MCP servers…", kind="dispatch")
             result = await app.dispatch.search_servers(parsed["keywords"])
-            context = f"SEARCH_RESULTS: {app._compact_payload_for_llm(result)}"
+            context = f"SEARCH_RESULTS: {compact_payload_for_llm(result)}"
 
         elif action == "list_tools":
             app._activity(f"Listing tools for {parsed['server_id']}…", kind="dispatch")
             result = await app.dispatch.list_server_tools(parsed["server_id"])
-            context = f"TOOLS: {app._compact_payload_for_llm(result)}"
+            context = f"TOOLS: {compact_payload_for_llm(result)}"
 
         elif action == "install":
             app._activity(f"Installing server {parsed['server_id']}…", kind="dispatch")
             result = await app.dispatch.install_server(parsed["server_id"])
-            context = f"INSTALL_RESULT: {app._compact_payload_for_llm(result)}"
+            context = f"INSTALL_RESULT: {compact_payload_for_llm(result)}"
 
             # Auto-index non-approved servers after successful install
             server_id = parsed.get("server_id", "")
@@ -133,10 +135,10 @@ async def run_dispatch_subchain(
                 )
                 return "Waiting for user confirmation."
             if isinstance(result, dict) and "error" in result:
-                context = f"DISPATCH_ERROR: {app._compact_payload_for_llm(result)}"
+                context = f"DISPATCH_ERROR: {compact_payload_for_llm(result)}"
             else:
                 app._activity("Tool results received.", kind="dispatch")
-                context = f"DISPATCH_RESULT: {app._compact_payload_for_llm(result)}"
+                context = f"DISPATCH_RESULT: {compact_payload_for_llm(result)}"
 
         elif action == "wait":
             logger.info("JARVIS: Dispatch sub-chain waiting")
@@ -297,11 +299,11 @@ async def dispatch_execute_tasks(
         return
 
     app.llm.switch_mode("root")
-    context = app._build_root_context()
+    context = build_root_context(app, logger)
     if isinstance(result, dict) and "error" in result:
-        context += f"\nDISPATCH_ERROR: {app._compact_payload_for_llm(result)}"
+        context += f"\nDISPATCH_ERROR: {compact_payload_for_llm(result)}"
     else:
-        context += f"\nDISPATCH_RESULT: {app._compact_payload_for_llm(result)}"
+        context += f"\nDISPATCH_RESULT: {compact_payload_for_llm(result)}"
 
     response = await app._ask_llm(context, tag="root-dispatch-result")
     await app._act_on_root_response(response, depth + 1)

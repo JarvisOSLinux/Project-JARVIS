@@ -7,17 +7,20 @@ from logging import Logger
 from typing import Any
 
 from ..config import Config
+from .goal_updates import apply_goal_updates
+from .root_context import build_root_context, compact_payload_for_llm
 
 
 async def feed_root_summary(
     app: Any,
+    logger: Logger,
     label: str,
     summary: str,
     depth: int,
 ) -> None:
     """Feed a subsystem summary back into ROOT for the next decision."""
     app.llm.switch_mode("root")
-    context = app._build_root_context()
+    context = build_root_context(app, logger)
     context += f"\n{label}: {summary}"
 
     response = await app._ask_llm(context, tag="root-chain")
@@ -61,13 +64,13 @@ async def act_on_root_response(
     elif action in ("store", "recall", "search_memory", "list_memory"):
         app._activity(f"Running memory action: {action}", kind="memory")
 
-    app._apply_goal_updates(parsed.get("goal_updates", []))
+    apply_goal_updates(app, parsed.get("goal_updates", []))
 
     if action == "respond":
         output = parsed["output"]
         if not output.strip():
             logger.warning("JARVIS: LLM returned empty respond — retrying")
-            context = app._build_root_context()
+            context = build_root_context(app, logger)
             context += "\nYour previous response had an empty output. Please respond to the user."
             retry_response = await app._ask_llm(context, tag="root-retry-empty")
             await app._act_on_root_response(retry_response, depth + 1)
@@ -85,13 +88,14 @@ async def act_on_root_response(
             await app._dispatch_execute_tasks(parsed["tasks"], depth)
         else:
             summary = await app._run_dispatch_subchain(parsed["intent"])
-            await feed_root_summary(app, "DISPATCH_SUMMARY", summary, depth)
+            await feed_root_summary(app, logger, "DISPATCH_SUMMARY", summary, depth)
 
     # -- Memory actions (direct, no sub-chain) --
     elif action == "store":
         if not app.contextor:
             await feed_root_summary(
                 app,
+                logger,
                 "STORE_RESULT",
                 json.dumps({"error": "Memory is disabled"}),
                 depth,
@@ -108,8 +112,9 @@ async def act_on_root_response(
         )
         await feed_root_summary(
             app,
+            logger,
             "STORE_RESULT",
-            app._compact_payload_for_llm(result),
+            compact_payload_for_llm(result),
             depth,
         )
 
@@ -117,6 +122,7 @@ async def act_on_root_response(
         if not app.contextor:
             await feed_root_summary(
                 app,
+                logger,
                 "RECALL_RESULT",
                 json.dumps({"error": "Memory is disabled"}),
                 depth,
@@ -128,8 +134,9 @@ async def act_on_root_response(
         )
         await feed_root_summary(
             app,
+            logger,
             "RECALL_RESULT",
-            app._compact_payload_for_llm(result),
+            compact_payload_for_llm(result),
             depth,
         )
 
@@ -137,6 +144,7 @@ async def act_on_root_response(
         if not app.contextor:
             await feed_root_summary(
                 app,
+                logger,
                 "SEARCH_MEMORY_RESULT",
                 json.dumps(
                     {
@@ -158,8 +166,9 @@ async def act_on_root_response(
         )
         await feed_root_summary(
             app,
+            logger,
             "SEARCH_MEMORY_RESULT",
-            app._compact_payload_for_llm(result),
+            compact_payload_for_llm(result),
             depth,
         )
 
@@ -167,6 +176,7 @@ async def act_on_root_response(
         if not app.contextor:
             await feed_root_summary(
                 app,
+                logger,
                 "LIST_MEMORY_RESULT",
                 json.dumps({"themes": []}),
                 depth,
@@ -177,7 +187,8 @@ async def act_on_root_response(
         )
         await feed_root_summary(
             app,
+            logger,
             "LIST_MEMORY_RESULT",
-            app._compact_payload_for_llm(result),
+            compact_payload_for_llm(result),
             depth,
         )

@@ -210,3 +210,4 @@ Use this section to record completed milestones.
 - 04-21-26: Moved `_feed_root_summary` into `jarvis/runtime/root_actions.py` as `feed_root_summary`; `root_actions` now calls it directly (no `app._feed_root_summary` indirection).
 - 04-21-26: Moved dispatch kill/defer helpers (`_do_kill`, `_do_defer`) into `jarvis/runtime/dispatch_flow.py` as `do_kill` / `do_defer`; `run_dispatch_subchain` calls them directly.
 - 04-21-26: Created `jarvis/runtime/root_handlers.py` and moved `_on_user_input`, `_on_dispatch_signal`, and `_on_confirmation_response` out of `jarvis/main.py`; `events.handle_event` routes to these functions; `Jarvis` keeps thin delegate methods.
+- 04-21-26: Added `jarvis/runtime/root_context.py` (`build_root_context`, `compact_payload_for_llm`) and `jarvis/runtime/goal_updates.py` (`apply_goal_updates`); runtime modules call them directly; `Jarvis` methods remain thin delegates. `feed_root_summary` now takes `logger` for consistent context logging.

@@ -5,6 +5,8 @@ from __future__ import annotations
 from logging import Logger
 from typing import Any
 
+from .root_context import build_root_context, compact_payload_for_llm
+
 
 async def on_user_input(app: Any, logger: Logger, text: str) -> None:
     logger.info(f"JARVIS: User input: '{text}'")
@@ -30,7 +32,7 @@ async def on_user_input(app: Any, logger: Logger, text: str) -> None:
         )
 
     app.llm.switch_mode("root")
-    context = app._build_root_context(new_input=text)
+    context = build_root_context(app, logger, new_input=text)
     app._activity("Thinking about your request…", kind="llm")
 
     response = await app._ask_llm(context, tag="root")
@@ -47,7 +49,7 @@ async def on_dispatch_signal(app: Any, logger: Logger, signal: dict[str, Any]) -
     app.goals.update_from_signal(signal)
 
     app.llm.switch_mode("root")
-    context = app._build_root_context(signal=signal)
+    context = build_root_context(app, logger, signal=signal)
 
     response = await app._ask_llm(context, tag="root")
     await app._act_on_root_response(response)
@@ -77,7 +79,7 @@ async def on_confirmation_response(
     if pending.denied_tools and not pending.approved_tasks:
         denied_list = ", ".join(pending.denied_tools)
         app.llm.switch_mode("root")
-        context = app._build_root_context()
+        context = build_root_context(app, logger)
         context += f"\nUSER_DENIAL: Action {denied_list} was denied by the user"
         response = await app._ask_llm(context, tag="root-confirmation-denied")
         await app._act_on_root_response(response)
@@ -88,12 +90,12 @@ async def on_confirmation_response(
         result = await app.dispatch.send_tasks(pending.approved_tasks)
 
         app.llm.switch_mode("root")
-        context = app._build_root_context()
+        context = build_root_context(app, logger)
 
         if isinstance(result, dict) and "error" in result:
-            context += f"\nDISPATCH_ERROR: {app._compact_payload_for_llm(result)}"
+            context += f"\nDISPATCH_ERROR: {compact_payload_for_llm(result)}"
         else:
-            context += f"\nDISPATCH_RESULT: {app._compact_payload_for_llm(result)}"
+            context += f"\nDISPATCH_RESULT: {compact_payload_for_llm(result)}"
 
         # Include partial denial if some tools were denied.
         if pending.denied_tools:
