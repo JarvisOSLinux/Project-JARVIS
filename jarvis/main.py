@@ -52,6 +52,10 @@ from .runtime.root_context import build_root_context as runtime_build_root_conte
 from .runtime.root_context import (
     compact_payload_for_llm as runtime_compact_payload_for_llm,
 )
+from .runtime.session_commands import (
+    handle_slash_command as runtime_handle_slash_command,
+)
+from .runtime.session_commands import session_reply as runtime_session_reply
 from .sessions import SessionManager
 
 logger = get_logger(__name__)
@@ -198,90 +202,11 @@ class Jarvis:
         Returns True if the input was a slash-command (handled), else
         False so it falls through to normal LLM routing.
         """
-        parts = text.strip().split(maxsplit=1)
-        cmd = parts[0].lower()
-        arg = parts[1].strip() if len(parts) > 1 else ""
-
-        if cmd == "/new":
-            if not self.sessions.available:
-                self._session_reply("Memory is disabled — sessions unavailable.")
-                return True
-            session = self.sessions.new_session(title=arg or None)
-            if session:
-                self._session_reply(
-                    f"Started new session {session.short_id()}"
-                    + (f" ('{session.title}')" if session.title else ""),
-                )
-            else:
-                self._session_reply("Could not create a new session.")
-            return True
-
-        if cmd == "/sessions":
-            if not self.sessions.available:
-                self._session_reply("Memory is disabled — sessions unavailable.")
-                return True
-            sessions = self.sessions.list(limit=50)
-            if not sessions:
-                self._session_reply("No sessions yet.")
-                return True
-            current_id = self.sessions.current_id
-            lines = ["Sessions (most recent first):"]
-            for s in sessions:
-                marker = "* " if s.id == current_id else "  "
-                lines.append(f"{marker}{s.short_id()}  {s.display_label()}")
-            self._session_reply("\n".join(lines))
-            return True
-
-        if cmd == "/switch":
-            if not arg:
-                self._session_reply("Usage: /switch <session_id_prefix>")
-                return True
-            session = self.sessions.switch(arg)
-            if session:
-                self._session_reply(
-                    f"Switched to {session.short_id()} ('{session.title}')"
-                )
-            else:
-                self._session_reply(f"No session matches '{arg}'.")
-            return True
-
-        if cmd == "/rename":
-            if not arg:
-                self._session_reply("Usage: /rename <new title>")
-                return True
-            if not self.sessions.current:
-                self._session_reply("No active session to rename.")
-                return True
-            if self.sessions.rename(arg):
-                self._session_reply(f"Renamed to '{arg}'.")
-            else:
-                self._session_reply("Rename failed.")
-            return True
-
-        if cmd == "/delete":
-            if not arg:
-                self._session_reply("Usage: /delete <session_id_prefix>")
-                return True
-            sessions = self.sessions.list(limit=500)
-            matches = [s for s in sessions if s.id.startswith(arg)]
-            if len(matches) != 1:
-                self._session_reply(
-                    f"Need a unique id prefix; got {len(matches)} match(es)."
-                )
-                return True
-            if self.sessions.delete(matches[0].id):
-                self._session_reply(f"Deleted session {matches[0].short_id()}.")
-            else:
-                self._session_reply("Delete failed.")
-            return True
-
-        # Unknown slash-command — let it through to the LLM so the user
-        # can still type "/foo" as literal input if they insist.
-        return False
+        return runtime_handle_slash_command(self, text)
 
     def _session_reply(self, message: str) -> None:
         """Emit a local reply for slash-commands (no LLM roundtrip)."""
-        self.output_manager.handle_response({"output": message})
+        runtime_session_reply(self, message)
 
     # ------------------------------------------------------------------
     # Shared helpers

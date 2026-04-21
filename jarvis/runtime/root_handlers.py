@@ -6,6 +6,7 @@ from logging import Logger
 from typing import Any
 
 from .root_context import build_root_context, compact_payload_for_llm
+from .session_commands import handle_slash_command
 
 
 async def on_user_input(app: Any, logger: Logger, text: str) -> None:
@@ -13,7 +14,7 @@ async def on_user_input(app: Any, logger: Logger, text: str) -> None:
 
     # Slash-commands are session-control shortcuts, not LLM input.
     if text.startswith("/"):
-        handled = app._handle_slash_command(text)
+        handled = handle_slash_command(app, text)
         if handled:
             return
 
