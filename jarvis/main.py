@@ -35,6 +35,7 @@ from .runtime.lifecycle import (
     install_signal_handlers,
     start_runtime_services,
 )
+from .runtime.root_actions import act_on_root_response as runtime_act_on_root_response
 from .sessions import SessionManager
 
 logger = get_logger(__name__)
@@ -209,149 +210,13 @@ class Jarvis:
             await self._act_on_root_response(response)
 
     async def _act_on_root_response(self, response: Dict[str, Any], depth: int = 0):
-        """Handle a ROOT-mode LLM response."""
-        if depth >= MAX_CHAIN_DEPTH:
-            logger.error("JARVIS: Max chain depth reached, forcing respond")
-            self.output_manager.handle_response(
-                {
-                    "output": "I got stuck in a loop. Could you try again?",
-                }
-            )
-            return
-
-        parsed = self.task_parser.parse(response)
-
-        if "error" in parsed:
-            logger.warning(f"JARVIS: Root parse error: {parsed['error']}")
-            self.output_manager.handle_response(
-                {
-                    "output": "I had trouble processing that. Could you try again?",
-                }
-            )
-            return
-
-        action = parsed["action"]
-        logger.info(f"JARVIS: Root action='{action}'")
-        if action == "respond":
-            self._activity("Composing response…", kind="llm")
-        elif action == "dispatch":
-            self._activity("Planning tool execution…", kind="dispatch")
-        elif action in ("store", "recall", "search_memory", "list_memory"):
-            self._activity(f"Running memory action: {action}", kind="memory")
-
-        self._apply_goal_updates(parsed.get("goal_updates", []))
-
-        if action == "respond":
-            output = parsed["output"]
-            if not output.strip():
-                logger.warning("JARVIS: LLM returned empty respond — retrying")
-                context = self._build_root_context()
-                context += "\nYour previous response had an empty output. Please respond to the user."
-                response = await self._ask_llm(context, tag="root-retry-empty")
-                await self._act_on_root_response(response, depth + 1)
-                return
-            self.output_manager.handle_response({"output": output})
-            self._persist_assistant_turn(output)
-            dismissed = self.goals.dismiss_completed()
-            if dismissed:
-                logger.info(f"JARVIS: Dismissed {len(dismissed)} completed goal(s)")
-            if Config.RESET_HISTORY_AFTER_RESPONSE:
-                self.llm.reset_history()
-
-        elif action == "dispatch":
-            if "tasks" in parsed:
-                await self._dispatch_execute_tasks(parsed["tasks"], depth)
-            else:
-                summary = await self._run_dispatch_subchain(parsed["intent"])
-                await self._feed_root_summary("DISPATCH_SUMMARY", summary, depth)
-
-        # -- Memory actions (direct, no sub-chain) --
-
-        elif action == "store":
-            if not self.contextor:
-                await self._feed_root_summary(
-                    "STORE_RESULT",
-                    json.dumps({"error": "Memory is disabled"}),
-                    depth,
-                )
-                return
-            # Global scope when LLM explicitly sets scope="global";
-            # otherwise file under the active session.
-            scope = parsed.get("scope", "session")
-            sid = None if scope == "global" else self.sessions.current_id
-            result = self.contextor.store(
-                parsed["theme"],
-                parsed["content"],
-                session_id=sid,
-            )
-            await self._feed_root_summary(
-                "STORE_RESULT",
-                self._compact_payload_for_llm(result),
-                depth,
-            )
-
-        elif action == "recall":
-            if not self.contextor:
-                await self._feed_root_summary(
-                    "RECALL_RESULT",
-                    json.dumps({"error": "Memory is disabled"}),
-                    depth,
-                )
-                return
-            result = self.contextor.recall(
-                parsed["theme"],
-                session_id=self.sessions.current_id,
-            )
-            await self._feed_root_summary(
-                "RECALL_RESULT",
-                self._compact_payload_for_llm(result),
-                depth,
-            )
-
-        elif action == "search_memory":
-            if not self.contextor:
-                await self._feed_root_summary(
-                    "SEARCH_MEMORY_RESULT",
-                    json.dumps(
-                        {
-                            "results": [],
-                            "available": False,
-                            "reason": "Memory is disabled",
-                        }
-                    ),
-                    depth,
-                )
-                return
-            result = self.contextor.semantic_search(
-                query=parsed["query"],
-                top_k=parsed.get("top_k", 5),
-                offset=parsed.get("offset", 0),
-                min_score=parsed.get("min_score", 0.3),
-                session_id=self.sessions.current_id,
-                include_global=True,
-            )
-            await self._feed_root_summary(
-                "SEARCH_MEMORY_RESULT",
-                self._compact_payload_for_llm(result),
-                depth,
-            )
-
-        elif action == "list_memory":
-            if not self.contextor:
-                await self._feed_root_summary(
-                    "LIST_MEMORY_RESULT",
-                    json.dumps({"themes": []}),
-                    depth,
-                )
-                return
-            result = self.contextor.list_themes(
-                session_id=self.sessions.current_id,
-            )
-            await self._feed_root_summary(
-                "LIST_MEMORY_RESULT",
-                self._compact_payload_for_llm(result),
-                depth,
-            )
+        await runtime_act_on_root_response(
+            app=self,
+            logger=logger,
+            response=response,
+            depth=depth,
+            max_chain_depth=MAX_CHAIN_DEPTH,
+        )
 
     async def _feed_root_summary(self, label: str, summary: str, depth: int):
         """Feed a subsystem summary back into ROOT for the next decision."""
