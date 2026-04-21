@@ -208,3 +208,4 @@ Use this section to record completed milestones.
 - 04-21-26: Continued `dispatch_flow` extraction by moving dispatch confirmation send/metadata helpers (`_dispatch_send`, `_get_tool_metadata`) out of `jarvis/main.py`.
 - 04-21-26: Moved root-path task execution (`_dispatch_execute_tasks`) into `jarvis/runtime/dispatch_flow.py`.
 - 04-21-26: Moved `_feed_root_summary` into `jarvis/runtime/root_actions.py` as `feed_root_summary`; `root_actions` now calls it directly (no `app._feed_root_summary` indirection).
+- 04-21-26: Moved dispatch kill/defer helpers (`_do_kill`, `_do_defer`) into `jarvis/runtime/dispatch_flow.py` as `do_kill` / `do_defer`; `run_dispatch_subchain` calls them directly.

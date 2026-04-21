@@ -32,6 +32,8 @@ from .runtime.dispatch_flow import (
     dispatch_execute_tasks as runtime_dispatch_execute_tasks,
 )
 from .runtime.dispatch_flow import dispatch_send as runtime_dispatch_send
+from .runtime.dispatch_flow import do_defer as runtime_do_defer
+from .runtime.dispatch_flow import do_kill as runtime_do_kill
 from .runtime.dispatch_flow import get_tool_metadata as runtime_get_tool_metadata
 from .runtime.dispatch_flow import (
     run_dispatch_subchain as runtime_run_dispatch_subchain,
@@ -495,47 +497,10 @@ class Jarvis:
                 self.goals.link_tasks(goal_id, update.get("pids", []))
 
     async def _do_kill(self, pids):
-        if not self.dispatch.is_connected:
-            return
-        result = await self.dispatch.kill_tasks(pids)
-        if "error" in result:
-            logger.error(f"JARVIS: Kill error: {result['error']}")
-        else:
-            logger.info(f"JARVIS: Killed PID(s): {pids}")
+        await runtime_do_kill(self, logger, pids)
 
     async def _do_defer(self, goal_id: str, duration: int, reason: str = ""):
-        if not self.dispatch.is_connected:
-            logger.warning("JARVIS: Dispatch not connected, cannot defer goal")
-            self._activity(
-                "Cannot set reminder: dispatch not connected.", kind="dispatch"
-            )
-            self.output_manager.handle_response(
-                {
-                    "output": "I can't defer goals right now — dispatch is not connected.",
-                }
-            )
-            return
-
-        label = f"goal_reminder:{goal_id}"
-        metadata = {"goal_id": goal_id, "type": "goal_defer"}
-        if reason:
-            metadata["reason"] = reason
-
-        result = await self.dispatch.set_timer(label, duration, metadata)
-
-        if "error" in result:
-            logger.error(f"JARVIS: Timer error: {result['error']}")
-            self._activity("Failed to set reminder timer.", kind="dispatch")
-        else:
-            timer_pid = result.get("pid", 0)
-            self.goals.defer_goal(goal_id, timer_pid)
-            logger.info(
-                f"JARVIS: Deferred goal [{goal_id}] for {duration}s (timer PID {timer_pid})"
-            )
-            self._activity(
-                f"Reminder set for {duration}s (goal {goal_id}, timer pid {timer_pid}).",
-                kind="dispatch",
-            )
+        await runtime_do_defer(self, logger, goal_id, duration, reason)
 
     # ------------------------------------------------------------------
     # Input sources (fed to EventMerger)

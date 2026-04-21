@@ -145,7 +145,7 @@ async def run_dispatch_subchain(
 
         elif action == "kill":
             app._activity("Stopping selected task(s)…", kind="dispatch")
-            await app._do_kill(parsed["pids"])
+            await do_kill(app, logger, parsed["pids"])
             context = f"KILL_RESULT: Killed PID(s) {parsed['pids']}"
 
         elif action == "defer":
@@ -153,7 +153,9 @@ async def run_dispatch_subchain(
                 f"Setting reminder for {parsed['duration']}s (goal {parsed['goal_id']})…",
                 kind="dispatch",
             )
-            await app._do_defer(
+            await do_defer(
+                app,
+                logger,
                 parsed["goal_id"],
                 parsed["duration"],
                 parsed.get("reason", ""),
@@ -303,3 +305,52 @@ async def dispatch_execute_tasks(
 
     response = await app._ask_llm(context, tag="root-dispatch-result")
     await app._act_on_root_response(response, depth + 1)
+
+
+async def do_kill(app: Any, logger: Logger, pids: Any) -> None:
+    if not app.dispatch.is_connected:
+        return
+    result = await app.dispatch.kill_tasks(pids)
+    if "error" in result:
+        logger.error(f"JARVIS: Kill error: {result['error']}")
+    else:
+        logger.info(f"JARVIS: Killed PID(s): {pids}")
+
+
+async def do_defer(
+    app: Any,
+    logger: Logger,
+    goal_id: str,
+    duration: int,
+    reason: str = "",
+) -> None:
+    if not app.dispatch.is_connected:
+        logger.warning("JARVIS: Dispatch not connected, cannot defer goal")
+        app._activity("Cannot set reminder: dispatch not connected.", kind="dispatch")
+        app.output_manager.handle_response(
+            {
+                "output": "I can't defer goals right now — dispatch is not connected.",
+            }
+        )
+        return
+
+    label = f"goal_reminder:{goal_id}"
+    metadata: dict[str, Any] = {"goal_id": goal_id, "type": "goal_defer"}
+    if reason:
+        metadata["reason"] = reason
+
+    result = await app.dispatch.set_timer(label, duration, metadata)
+
+    if "error" in result:
+        logger.error(f"JARVIS: Timer error: {result['error']}")
+        app._activity("Failed to set reminder timer.", kind="dispatch")
+    else:
+        timer_pid = result.get("pid", 0)
+        app.goals.defer_goal(goal_id, timer_pid)
+        logger.info(
+            f"JARVIS: Deferred goal [{goal_id}] for {duration}s (timer PID {timer_pid})"
+        )
+        app._activity(
+            f"Reminder set for {duration}s (goal {goal_id}, timer pid {timer_pid}).",
+            kind="dispatch",
+        )
