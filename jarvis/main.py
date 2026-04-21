@@ -20,7 +20,6 @@ import asyncio
 import time
 from typing import Any, Dict, List, Optional
 
-from .config import Config
 from .core import ComponentFactory
 from .core.logger import JarvisLogger, get_logger
 from .dispatch.event_merger import Event
@@ -56,6 +55,8 @@ from .runtime.session_commands import (
     handle_slash_command as runtime_handle_slash_command,
 )
 from .runtime.session_commands import session_reply as runtime_session_reply
+from .runtime.sync_ask import handle_voice_command as runtime_handle_voice_command
+from .runtime.sync_ask import sync_ask as runtime_sync_ask
 from .runtime.voice_activation_thread import (
     process_voice_command_inject as runtime_process_voice_command_inject,
 )
@@ -345,44 +346,11 @@ class Jarvis:
 
     def ask(self, prompt: str) -> Dict[str, Any]:
         """Synchronous single-prompt interface for one-shot CLI usage."""
-        logger.info(f"JARVIS: Processing: '{prompt}'")
-
-        self.sessions.ensure_session()
-        if self.contextor:
-            self.contextor.auto_store_prompt(
-                prompt,
-                session_id=self.sessions.current_id,
-            )
-
-        self.goals.add_goal(prompt)
-        self.llm.switch_mode("root")
-        context = self._build_root_context(new_input=prompt)
-
-        response = self._ask_llm_sync(context, tag="ask")
-        parsed = self.task_parser.parse(response)
-
-        if "error" in parsed:
-            result = {"output": "I had trouble processing that. Could you try again?"}
-        elif parsed["action"] == "respond":
-            result = {"output": parsed["output"]}
-        else:
-            result = {"output": f"Action: {parsed.get('action', 'unknown')}"}
-
-        self.output_manager.handle_response(result)
-        if "error" not in parsed and parsed.get("action") == "respond":
-            self._persist_assistant_turn(result.get("output", ""))
-
-        if Config.RESET_HISTORY_AFTER_RESPONSE:
-            self.llm.reset_history()
-
-        return result
+        return runtime_sync_ask(self, logger, prompt)
 
     def _handle_voice_command(self, text: str) -> dict:
         """Voice callback: inject into event loop when running, else call ask() directly."""
-        if self._running and self.events._running:
-            self.events.inject_user_input(text)
-            return {}
-        return self.ask(prompt=text)
+        return runtime_handle_voice_command(self, logger, text)
 
     # ------------------------------------------------------------------
     # Lifecycle
