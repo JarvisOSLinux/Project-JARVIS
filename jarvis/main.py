@@ -28,6 +28,8 @@ from .core.logger import JarvisLogger, get_logger
 from .dispatch.event_merger import Event
 from .runtime import events as runtime_events
 from .runtime import io as runtime_io
+from .runtime.dispatch_flow import dispatch_send as runtime_dispatch_send
+from .runtime.dispatch_flow import get_tool_metadata as runtime_get_tool_metadata
 from .runtime.dispatch_flow import (
     run_dispatch_subchain as runtime_run_dispatch_subchain,
 )
@@ -243,105 +245,15 @@ class Jarvis:
         )
 
     async def _dispatch_send(self, tasks, dispatch_context=None) -> Dict[str, Any]:
-        """Low-level send to dispatch adapter, gated by TLA confirmation.
-
-        **Non-blocking**: if any tool requires confirmation, the tasks are
-        stashed and a notification is sent.  The method returns immediately
-        with ``{"awaiting_confirmation": True, ...}``.  When the user
-        responds, the ``CONFIRMATION_RESPONSE`` event triggers
-        ``_on_confirmation_response()`` which resumes the dispatch.
-
-        If no tools need confirmation, tasks are dispatched immediately.
-        """
-        if not self.dispatch.is_connected:
-            self._activity("Dispatch is unavailable right now.", kind="dispatch")
-            return {"error": "Dispatch not connected"}
-
-        approved_tasks = []
-        tools_needing_confirmation = []
-
-        for task in tasks:
-            tool_name = f"{task.get('server', '?')}.{task.get('tool', '?')}"
-            tool_meta = await self._get_tool_metadata(task)
-
-            if self.confirmation.should_confirm(tool_meta):
-                notification_silent = tool_meta.get(
-                    "notification_silent",
-                    Config.NOTIFICATION_SILENT,
-                )
-                tools_needing_confirmation.append(
-                    {
-                        "tool_name": tool_name,
-                        "task": task,
-                        "params": task.get("params", {}),
-                        "notification_silent": notification_silent,
-                    }
-                )
-            else:
-                approved_tasks.append(task)
-
-        # No confirmation needed — dispatch everything now.
-        if not tools_needing_confirmation:
-            return await self.dispatch.send_tasks(approved_tasks)
-
-        # Some tools need confirmation — stash and notify, return immediately.
-        import uuid
-
-        request_id = str(uuid.uuid4())[:8]
-
-        # Use the first tool's notification_silent preference for the batch.
-        notification_silent = tools_needing_confirmation[0].get(
-            "notification_silent",
-            Config.NOTIFICATION_SILENT,
-        )
-
-        await self.confirmation.request_confirmation(
-            request_id=request_id,
+        return await runtime_dispatch_send(
+            app=self,
+            logger=logger,
             tasks=tasks,
-            tools_needing_confirmation=tools_needing_confirmation,
-            approved_tasks=approved_tasks,
-            denied_tools=[],
             dispatch_context=dispatch_context,
-            notification_silent=notification_silent,
-            timeout=Config.CONFIRMATION_TIMEOUT,
         )
-
-        tool_names = [t["tool_name"] for t in tools_needing_confirmation]
-        self._activity(
-            "Awaiting confirmation for: "
-            + ", ".join(tool_names[:3])
-            + ("…" if len(tool_names) > 3 else ""),
-            kind="dispatch",
-        )
-        return {
-            "awaiting_confirmation": True,
-            "confirmation_id": request_id,
-            "tools_pending": tool_names,
-        }
 
     async def _get_tool_metadata(self, task: Dict[str, Any]) -> Dict[str, Any]:
-        """Retrieve tool metadata (including confirmation_required) from the
-        MCP server registry.
-
-        Falls back to an empty dict if metadata is unavailable so that
-        unconfigured tools default to no confirmation (safe for the
-        ``smart`` mode).
-        """
-        server_id = task.get("server")
-        tool_name = task.get("tool")
-        if not server_id or not tool_name:
-            return {}
-
-        try:
-            tools = await self.dispatch.list_server_tools(server_id)
-            if isinstance(tools, dict) and "tools" in tools:
-                for t in tools["tools"]:
-                    if t.get("name") == tool_name:
-                        return t
-        except Exception as e:
-            logger.debug(f"Could not fetch metadata for {server_id}.{tool_name}: {e}")
-
-        return {}
+        return await runtime_get_tool_metadata(self, logger, task)
 
     async def _dispatch_execute_tasks(self, tasks, depth: int):
         """Handle a dispatch action that already has concrete tasks (from root)."""

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from logging import Logger
 from typing import Any
 
@@ -172,3 +173,96 @@ async def run_dispatch_subchain(
 
     logger.error("JARVIS: Dispatch sub-chain hit max steps")
     return "Tool execution timed out (too many steps)."
+
+
+async def dispatch_send(
+    app: Any,
+    logger: Logger,
+    tasks: list[dict[str, Any]],
+    dispatch_context: Any = None,
+) -> dict[str, Any]:
+    """Low-level send to dispatch adapter, gated by TLA confirmation."""
+    if not app.dispatch.is_connected:
+        app._activity("Dispatch is unavailable right now.", kind="dispatch")
+        return {"error": "Dispatch not connected"}
+
+    approved_tasks: list[dict[str, Any]] = []
+    tools_needing_confirmation: list[dict[str, Any]] = []
+
+    for task in tasks:
+        tool_name = f"{task.get('server', '?')}.{task.get('tool', '?')}"
+        tool_meta = await get_tool_metadata(app, logger, task)
+
+        if app.confirmation.should_confirm(tool_meta):
+            notification_silent = tool_meta.get(
+                "notification_silent",
+                Config.NOTIFICATION_SILENT,
+            )
+            tools_needing_confirmation.append(
+                {
+                    "tool_name": tool_name,
+                    "task": task,
+                    "params": task.get("params", {}),
+                    "notification_silent": notification_silent,
+                }
+            )
+        else:
+            approved_tasks.append(task)
+
+    # No confirmation needed — dispatch everything now.
+    if not tools_needing_confirmation:
+        return await app.dispatch.send_tasks(approved_tasks)
+
+    # Some tools need confirmation — stash and notify, return immediately.
+    request_id = str(uuid.uuid4())[:8]
+
+    # Use the first tool's notification_silent preference for the batch.
+    notification_silent = tools_needing_confirmation[0].get(
+        "notification_silent",
+        Config.NOTIFICATION_SILENT,
+    )
+
+    await app.confirmation.request_confirmation(
+        request_id=request_id,
+        tasks=tasks,
+        tools_needing_confirmation=tools_needing_confirmation,
+        approved_tasks=approved_tasks,
+        denied_tools=[],
+        dispatch_context=dispatch_context,
+        notification_silent=notification_silent,
+        timeout=Config.CONFIRMATION_TIMEOUT,
+    )
+
+    tool_names = [t["tool_name"] for t in tools_needing_confirmation]
+    app._activity(
+        "Awaiting confirmation for: "
+        + ", ".join(tool_names[:3])
+        + ("…" if len(tool_names) > 3 else ""),
+        kind="dispatch",
+    )
+    return {
+        "awaiting_confirmation": True,
+        "confirmation_id": request_id,
+        "tools_pending": tool_names,
+    }
+
+
+async def get_tool_metadata(
+    app: Any, logger: Logger, task: dict[str, Any]
+) -> dict[str, Any]:
+    """Retrieve metadata for a task's tool from the dispatch registry."""
+    server_id = task.get("server")
+    tool_name = task.get("tool")
+    if not server_id or not tool_name:
+        return {}
+
+    try:
+        tools = await app.dispatch.list_server_tools(server_id)
+        if isinstance(tools, dict) and "tools" in tools:
+            for tool in tools["tools"]:
+                if tool.get("name") == tool_name:
+                    return tool
+    except Exception as e:
+        logger.debug(f"Could not fetch metadata for {server_id}.{tool_name}: {e}")
+
+    return {}

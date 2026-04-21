@@ -203,5 +203,6 @@ Use this section to record completed milestones.
 - 04-19-26: Created `jarvis/runtime/lifecycle.py` and moved startup/lifecycle orchestration helpers out of `jarvis/main.py`; behavior preserved and checks passing.
 - 04-19-26: Created `jarvis/runtime/io.py` and extracted socket/broadcast runtime I/O handlers from `jarvis/main.py` into the runtime module.
 - 04-19-26: Created `jarvis/runtime/events.py` and extracted event-routing/input-source helpers (`_handle_event`, `_await_user_input`, `_await_dispatch_signal`) into runtime module helpers.
-- 04-19-26: Created `jarvis/runtime/root_actions.py` and extracted ROOT-mode action handling (`_act_on_root_response`) from `jarvis/main.py`.
-- 04-19-26: Created `jarvis/runtime/dispatch_flow.py` and extracted DISPATCH subchain orchestration (`_run_dispatch_subchain`) from `jarvis/main.py`.
+- 04-21-26: Created `jarvis/runtime/root_actions.py` and extracted ROOT-mode action handling (`_act_on_root_response`) from `jarvis/main.py`.
+- 04-21-26: Created `jarvis/runtime/dispatch_flow.py` and extracted DISPATCH subchain orchestration (`_run_dispatch_subchain`) from `jarvis/main.py`.
+- 04-21-26: Continued `dispatch_flow` extraction by moving dispatch confirmation send/metadata helpers (`_dispatch_send`, `_get_tool_metadata`) out of `jarvis/main.py`.
