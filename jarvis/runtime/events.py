@@ -6,17 +6,25 @@ import asyncio
 from logging import Logger
 from typing import Any, Optional
 
+from ..core.logger import get_logger
 from ..dispatch.event_merger import Event, EventType
+from .root_handlers import (
+    on_confirmation_response,
+    on_dispatch_signal,
+    on_user_input,
+)
+
+logger = get_logger(__name__)
 
 
 async def handle_event(app: Any, event: Event) -> None:
     """Route merged events to the appropriate app handler."""
     if event.type == EventType.USER_INPUT:
-        await app._on_user_input(event.data)
+        await on_user_input(app, logger, event.data)
     elif event.type == EventType.DISPATCH_SIGNAL:
-        await app._on_dispatch_signal(event.data)
+        await on_dispatch_signal(app, logger, event.data)
     elif event.type == EventType.CONFIRMATION_RESPONSE:
-        await app._on_confirmation_response(event.data)
+        await on_confirmation_response(app, logger, event.data)
 
 
 async def await_user_input() -> str:

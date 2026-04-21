@@ -28,6 +28,7 @@ from .core.logger import JarvisLogger, get_logger
 from .dispatch.event_merger import Event
 from .runtime import events as runtime_events
 from .runtime import io as runtime_io
+from .runtime import root_handlers
 from .runtime.dispatch_flow import (
     dispatch_execute_tasks as runtime_dispatch_execute_tasks,
 )
@@ -126,51 +127,10 @@ class Jarvis:
     # ------------------------------------------------------------------
 
     async def _on_user_input(self, text: str):
-        logger.info(f"JARVIS: User input: '{text}'")
-
-        # Slash-commands are session-control shortcuts, not LLM input.
-        if text.startswith("/"):
-            handled = self._handle_slash_command(text)
-            if handled:
-                return
-
-        # Ensure we have a session to log against.  First-ever input
-        # lazily creates one so history is always session-scoped.
-        self.sessions.ensure_session()
-
-        self.goals.add_goal(text)
-
-        # Auto-store every user prompt for long-term recall.
-        # No LLM decision — every prompt gets persisted + embedded.
-        if self.contextor:
-            self.contextor.auto_store_prompt(
-                text,
-                session_id=self.sessions.current_id,
-            )
-
-        self.llm.switch_mode("root")
-        context = self._build_root_context(new_input=text)
-        self._activity("Thinking about your request…", kind="llm")
-
-        response = await self._ask_llm(context, tag="root")
-        await self._act_on_root_response(response)
+        await root_handlers.on_user_input(self, logger, text)
 
     async def _on_dispatch_signal(self, signal: Dict[str, Any]):
-        sig_type = signal.get("type")
-        sig_pid = signal.get("pid")
-        logger.info(f"JARVIS: Dispatch signal: type={sig_type}, pid={sig_pid}")
-        if sig_type:
-            self._activity(
-                f"Dispatch signal: {sig_type} (pid {sig_pid})", kind="dispatch"
-            )
-
-        self.goals.update_from_signal(signal)
-
-        self.llm.switch_mode("root")
-        context = self._build_root_context(signal=signal)
-
-        response = await self._ask_llm(context, tag="root")
-        await self._act_on_root_response(response)
+        await root_handlers.on_dispatch_signal(self, logger, signal)
 
     async def _on_confirmation_response(self, data: Dict[str, Any]):
         """Handle a CONFIRMATION_RESPONSE event from the event loop.
@@ -179,46 +139,7 @@ class Jarvis:
         approved tasks or feeds USER_DENIAL back to ROOT so the LLM
         keeps communicating with the user.
         """
-        pending = self.confirmation.resolve(data)
-        if pending is None:
-            # Already expired / resolved — ignore.
-            return
-
-        logger.info(
-            f"JARVIS: Confirmation resolved: id={pending.request_id}, "
-            f"approved={len(pending.approved_tasks)}, "
-            f"denied={len(pending.denied_tools)}"
-        )
-
-        # All denied — feed USER_DENIAL to ROOT.
-        if pending.denied_tools and not pending.approved_tasks:
-            denied_list = ", ".join(pending.denied_tools)
-            self.llm.switch_mode("root")
-            context = self._build_root_context()
-            context += f"\nUSER_DENIAL: Action {denied_list} was denied by the user"
-            response = await self._ask_llm(context, tag="root-confirmation-denied")
-            await self._act_on_root_response(response)
-            return
-
-        # Some or all approved — dispatch the approved tasks.
-        if pending.approved_tasks:
-            result = await self.dispatch.send_tasks(pending.approved_tasks)
-
-            self.llm.switch_mode("root")
-            context = self._build_root_context()
-
-            if isinstance(result, dict) and "error" in result:
-                context += f"\nDISPATCH_ERROR: {self._compact_payload_for_llm(result)}"
-            else:
-                context += f"\nDISPATCH_RESULT: {self._compact_payload_for_llm(result)}"
-
-            # Include partial denial if some tools were denied.
-            if pending.denied_tools:
-                denied_list = ", ".join(pending.denied_tools)
-                context += f"\nUSER_DENIAL: Action {denied_list} was denied by the user"
-
-            response = await self._ask_llm(context, tag="root-confirmation-result")
-            await self._act_on_root_response(response)
+        await root_handlers.on_confirmation_response(self, logger, data)
 
     async def _act_on_root_response(self, response: Dict[str, Any], depth: int = 0):
         await runtime_act_on_root_response(
