@@ -1,0 +1,174 @@
+"""Dispatch-mode orchestration helpers."""
+
+from __future__ import annotations
+
+import json
+from logging import Logger
+from typing import Any
+
+from ..config import Config
+
+
+async def run_dispatch_subchain(
+    app: Any,
+    logger: Logger,
+    intent: str,
+    max_chain_depth: int,
+) -> str:
+    """
+    Enter dispatch mode, give it the intent, and loop until it
+    returns "done" with a summary.
+
+    Before entering dispatch, JARVIS picks the active discovery
+    backend (embedding or keyword) and installs the matching
+    system prompt — the LLM never sees which backend is active.
+
+    The LLM starts with a "plan" action to split the intent into
+    sub-tasks. JARVIS runs the selected discovery backend and
+    injects MATCHED_TOOLS / CANDIDATE_SERVERS into the next prompt.
+    """
+    # Pick the discovery backend before switching modes so the
+    # dispatch system prompt matches the runtime behavior.
+    mode = await app.dispatch.select_discovery_mode(app._get_embeddings())
+    dispatch_prompt = (
+        Config.LLM_DISPATCH_PROMPT_EMBEDDING
+        if mode == "embedding"
+        else Config.LLM_DISPATCH_PROMPT_KEYWORD
+    )
+    app.llm.set_prompt("dispatch", dispatch_prompt)
+
+    app.llm.switch_mode("dispatch")
+
+    context_parts = [f"INTENT: {intent}"]
+    goals = app.goals.get_context()
+    if goals:
+        context_parts.append(f"GOALS: {json.dumps(goals)}")
+    context = "\n".join(context_parts)
+
+    for step in range(max_chain_depth):
+        logger.info(
+            "JARVIS: Dispatch iteration start "
+            f"(step={step}, context_chars={len(context)})"
+        )
+        app._activity(f"Dispatch step {step + 1}: reasoning…", kind="dispatch")
+        response = await app._ask_llm(context, tag=f"dispatch-step-{step}")
+        parsed = app.task_parser.parse(response)
+
+        if "error" in parsed:
+            logger.warning(f"JARVIS: Dispatch sub-chain parse error: {parsed['error']}")
+            return f"Error: {parsed['error']}"
+
+        action = parsed["action"]
+        logger.info(f"JARVIS: Dispatch iteration action (step={step}, action={action})")
+        app._apply_goal_updates(parsed.get("goal_updates", []))
+
+        if action == "done":
+            logger.info(f"JARVIS: Dispatch sub-chain completed: {parsed['summary']}")
+            app._activity("Dispatch completed.", kind="dispatch")
+            return parsed["summary"]
+
+        if action == "plan":
+            # LLM split the intent into sub-tasks — search for tools
+            sub_tasks = parsed.get("tasks", [])
+            logger.info(f"JARVIS: Plan has {len(sub_tasks)} sub-task(s)")
+            app._activity(
+                f"Planned {len(sub_tasks)} sub-task(s); finding tools…",
+                kind="dispatch",
+            )
+
+            available_tools = await app.dispatch.discover_tools(
+                tasks=sub_tasks,
+                embeddings=app._get_embeddings(),
+            )
+
+            if available_tools:
+                context = f"{available_tools}\n\nINTENT: {intent}"
+            else:
+                context = (
+                    "NO_TOOLS_FOUND: No matching tools were found. "
+                    "Re-plan with different sub-task intents, or use 'done' "
+                    "if the request cannot be fulfilled.\n"
+                    f"INTENT: {intent}"
+                )
+
+        elif action == "search":
+            app._activity("Searching MCP servers…", kind="dispatch")
+            result = await app.dispatch.search_servers(parsed["keywords"])
+            context = f"SEARCH_RESULTS: {app._compact_payload_for_llm(result)}"
+
+        elif action == "list_tools":
+            app._activity(f"Listing tools for {parsed['server_id']}…", kind="dispatch")
+            result = await app.dispatch.list_server_tools(parsed["server_id"])
+            context = f"TOOLS: {app._compact_payload_for_llm(result)}"
+
+        elif action == "install":
+            app._activity(f"Installing server {parsed['server_id']}…", kind="dispatch")
+            result = await app.dispatch.install_server(parsed["server_id"])
+            context = f"INSTALL_RESULT: {app._compact_payload_for_llm(result)}"
+
+            # Auto-index non-approved servers after successful install
+            server_id = parsed.get("server_id", "")
+            if "error" not in result and server_id:
+                await app.dispatch.auto_index_server(
+                    server_id=server_id,
+                    embeddings=app._get_embeddings(),
+                )
+
+        elif action == "dispatch" and "tasks" in parsed:
+            app._activity(
+                f"Dispatching {len(parsed['tasks'])} task(s)…", kind="dispatch"
+            )
+            result = await app._dispatch_send(parsed["tasks"])
+            if isinstance(result, dict) and result.get("awaiting_confirmation"):
+                # Non-blocking: confirmation sent, return to event loop.
+                # Dispatch will resume when CONFIRMATION_RESPONSE arrives.
+                logger.info(
+                    f"JARVIS: Dispatch sub-chain paused for confirmation "
+                    f"id={result['confirmation_id']}"
+                )
+                app._activity(
+                    "Waiting for your confirmation before running tools.",
+                    kind="dispatch",
+                )
+                return "Waiting for user confirmation."
+            if isinstance(result, dict) and "error" in result:
+                context = f"DISPATCH_ERROR: {app._compact_payload_for_llm(result)}"
+            else:
+                app._activity("Tool results received.", kind="dispatch")
+                context = f"DISPATCH_RESULT: {app._compact_payload_for_llm(result)}"
+
+        elif action == "wait":
+            logger.info("JARVIS: Dispatch sub-chain waiting")
+            app._activity("Waiting for tasks to complete…", kind="dispatch")
+            return "Waiting for tasks to complete."
+
+        elif action == "kill":
+            app._activity("Stopping selected task(s)…", kind="dispatch")
+            await app._do_kill(parsed["pids"])
+            context = f"KILL_RESULT: Killed PID(s) {parsed['pids']}"
+
+        elif action == "defer":
+            app._activity(
+                f"Setting reminder for {parsed['duration']}s (goal {parsed['goal_id']})…",
+                kind="dispatch",
+            )
+            await app._do_defer(
+                parsed["goal_id"],
+                parsed["duration"],
+                parsed.get("reason", ""),
+            )
+            return f"Deferred goal {parsed['goal_id']} for {parsed['duration']}s."
+
+        elif action == "respond":
+            app._activity("Composing response…", kind="llm")
+            out = parsed["output"]
+            app.output_manager.handle_response({"output": out})
+            app._persist_assistant_turn(out)
+            return out
+
+        else:
+            logger.warning(f"JARVIS: Unexpected dispatch action '{action}'")
+            return f"Unexpected action: {action}"
+
+    logger.error("JARVIS: Dispatch sub-chain hit max steps")
+    return "Tool execution timed out (too many steps)."
