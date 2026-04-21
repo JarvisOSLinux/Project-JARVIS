@@ -10,6 +10,7 @@ from typing import Any
 from ..config import Config
 from .goal_updates import apply_goal_updates
 from .llm_bridge import ask_llm
+from .output_hooks import emit_activity, get_embeddings, persist_assistant_turn
 from .root_context import build_root_context, compact_payload_for_llm
 
 
@@ -33,7 +34,7 @@ async def run_dispatch_subchain(
     """
     # Pick the discovery backend before switching modes so the
     # dispatch system prompt matches the runtime behavior.
-    mode = await app.dispatch.select_discovery_mode(app._get_embeddings())
+    mode = await app.dispatch.select_discovery_mode(get_embeddings(app))
     dispatch_prompt = (
         Config.LLM_DISPATCH_PROMPT_EMBEDDING
         if mode == "embedding"
@@ -54,7 +55,7 @@ async def run_dispatch_subchain(
             "JARVIS: Dispatch iteration start "
             f"(step={step}, context_chars={len(context)})"
         )
-        app._activity(f"Dispatch step {step + 1}: reasoning…", kind="dispatch")
+        emit_activity(app, f"Dispatch step {step + 1}: reasoning…", kind="dispatch")
         response = await ask_llm(app, logger, context, tag=f"dispatch-step-{step}")
         parsed = app.task_parser.parse(response)
 
@@ -68,21 +69,22 @@ async def run_dispatch_subchain(
 
         if action == "done":
             logger.info(f"JARVIS: Dispatch sub-chain completed: {parsed['summary']}")
-            app._activity("Dispatch completed.", kind="dispatch")
+            emit_activity(app, "Dispatch completed.", kind="dispatch")
             return parsed["summary"]
 
         if action == "plan":
             # LLM split the intent into sub-tasks — search for tools
             sub_tasks = parsed.get("tasks", [])
             logger.info(f"JARVIS: Plan has {len(sub_tasks)} sub-task(s)")
-            app._activity(
+            emit_activity(
+                app,
                 f"Planned {len(sub_tasks)} sub-task(s); finding tools…",
                 kind="dispatch",
             )
 
             available_tools = await app.dispatch.discover_tools(
                 tasks=sub_tasks,
-                embeddings=app._get_embeddings(),
+                embeddings=get_embeddings(app),
             )
 
             if available_tools:
@@ -96,17 +98,21 @@ async def run_dispatch_subchain(
                 )
 
         elif action == "search":
-            app._activity("Searching MCP servers…", kind="dispatch")
+            emit_activity(app, "Searching MCP servers…", kind="dispatch")
             result = await app.dispatch.search_servers(parsed["keywords"])
             context = f"SEARCH_RESULTS: {compact_payload_for_llm(result)}"
 
         elif action == "list_tools":
-            app._activity(f"Listing tools for {parsed['server_id']}…", kind="dispatch")
+            emit_activity(
+                app, f"Listing tools for {parsed['server_id']}…", kind="dispatch"
+            )
             result = await app.dispatch.list_server_tools(parsed["server_id"])
             context = f"TOOLS: {compact_payload_for_llm(result)}"
 
         elif action == "install":
-            app._activity(f"Installing server {parsed['server_id']}…", kind="dispatch")
+            emit_activity(
+                app, f"Installing server {parsed['server_id']}…", kind="dispatch"
+            )
             result = await app.dispatch.install_server(parsed["server_id"])
             context = f"INSTALL_RESULT: {compact_payload_for_llm(result)}"
 
@@ -115,12 +121,12 @@ async def run_dispatch_subchain(
             if "error" not in result and server_id:
                 await app.dispatch.auto_index_server(
                     server_id=server_id,
-                    embeddings=app._get_embeddings(),
+                    embeddings=get_embeddings(app),
                 )
 
         elif action == "dispatch" and "tasks" in parsed:
-            app._activity(
-                f"Dispatching {len(parsed['tasks'])} task(s)…", kind="dispatch"
+            emit_activity(
+                app, f"Dispatching {len(parsed['tasks'])} task(s)…", kind="dispatch"
             )
             result = await app._dispatch_send(parsed["tasks"])
             if isinstance(result, dict) and result.get("awaiting_confirmation"):
@@ -130,7 +136,8 @@ async def run_dispatch_subchain(
                     f"JARVIS: Dispatch sub-chain paused for confirmation "
                     f"id={result['confirmation_id']}"
                 )
-                app._activity(
+                emit_activity(
+                    app,
                     "Waiting for your confirmation before running tools.",
                     kind="dispatch",
                 )
@@ -138,21 +145,22 @@ async def run_dispatch_subchain(
             if isinstance(result, dict) and "error" in result:
                 context = f"DISPATCH_ERROR: {compact_payload_for_llm(result)}"
             else:
-                app._activity("Tool results received.", kind="dispatch")
+                emit_activity(app, "Tool results received.", kind="dispatch")
                 context = f"DISPATCH_RESULT: {compact_payload_for_llm(result)}"
 
         elif action == "wait":
             logger.info("JARVIS: Dispatch sub-chain waiting")
-            app._activity("Waiting for tasks to complete…", kind="dispatch")
+            emit_activity(app, "Waiting for tasks to complete…", kind="dispatch")
             return "Waiting for tasks to complete."
 
         elif action == "kill":
-            app._activity("Stopping selected task(s)…", kind="dispatch")
+            emit_activity(app, "Stopping selected task(s)…", kind="dispatch")
             await do_kill(app, logger, parsed["pids"])
             context = f"KILL_RESULT: Killed PID(s) {parsed['pids']}"
 
         elif action == "defer":
-            app._activity(
+            emit_activity(
+                app,
                 f"Setting reminder for {parsed['duration']}s (goal {parsed['goal_id']})…",
                 kind="dispatch",
             )
@@ -166,10 +174,10 @@ async def run_dispatch_subchain(
             return f"Deferred goal {parsed['goal_id']} for {parsed['duration']}s."
 
         elif action == "respond":
-            app._activity("Composing response…", kind="llm")
+            emit_activity(app, "Composing response…", kind="llm")
             out = parsed["output"]
             app.output_manager.handle_response({"output": out})
-            app._persist_assistant_turn(out)
+            persist_assistant_turn(app, out)
             return out
 
         else:
@@ -188,7 +196,7 @@ async def dispatch_send(
 ) -> dict[str, Any]:
     """Low-level send to dispatch adapter, gated by TLA confirmation."""
     if not app.dispatch.is_connected:
-        app._activity("Dispatch is unavailable right now.", kind="dispatch")
+        emit_activity(app, "Dispatch is unavailable right now.", kind="dispatch")
         return {"error": "Dispatch not connected"}
 
     approved_tasks: list[dict[str, Any]] = []
@@ -239,7 +247,8 @@ async def dispatch_send(
     )
 
     tool_names = [t["tool_name"] for t in tools_needing_confirmation]
-    app._activity(
+    emit_activity(
+        app,
         "Awaiting confirmation for: "
         + ", ".join(tool_names[:3])
         + ("…" if len(tool_names) > 3 else ""),
@@ -329,7 +338,9 @@ async def do_defer(
 ) -> None:
     if not app.dispatch.is_connected:
         logger.warning("JARVIS: Dispatch not connected, cannot defer goal")
-        app._activity("Cannot set reminder: dispatch not connected.", kind="dispatch")
+        emit_activity(
+            app, "Cannot set reminder: dispatch not connected.", kind="dispatch"
+        )
         app.output_manager.handle_response(
             {
                 "output": "I can't defer goals right now — dispatch is not connected.",
@@ -346,14 +357,15 @@ async def do_defer(
 
     if "error" in result:
         logger.error(f"JARVIS: Timer error: {result['error']}")
-        app._activity("Failed to set reminder timer.", kind="dispatch")
+        emit_activity(app, "Failed to set reminder timer.", kind="dispatch")
     else:
         timer_pid = result.get("pid", 0)
         app.goals.defer_goal(goal_id, timer_pid)
         logger.info(
             f"JARVIS: Deferred goal [{goal_id}] for {duration}s (timer PID {timer_pid})"
         )
-        app._activity(
+        emit_activity(
+            app,
             f"Reminder set for {duration}s (goal {goal_id}, timer pid {timer_pid}).",
             kind="dispatch",
         )

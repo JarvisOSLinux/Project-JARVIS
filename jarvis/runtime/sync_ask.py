@@ -7,6 +7,7 @@ from typing import Any, Dict
 
 from ..config import Config
 from .llm_bridge import ask_llm_sync
+from .output_hooks import persist_assistant_turn
 
 
 def sync_ask(app: Any, logger: Logger, prompt: str) -> Dict[str, Any]:
@@ -36,7 +37,7 @@ def sync_ask(app: Any, logger: Logger, prompt: str) -> Dict[str, Any]:
 
     app.output_manager.handle_response(result)
     if "error" not in parsed and parsed.get("action") == "respond":
-        app._persist_assistant_turn(result.get("output", ""))
+        persist_assistant_turn(app, result.get("output", ""))
 
     if Config.RESET_HISTORY_AFTER_RESPONSE:
         app.llm.reset_history()

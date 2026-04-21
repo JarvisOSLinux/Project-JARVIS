@@ -6,6 +6,7 @@ from logging import Logger
 from typing import Any
 
 from .llm_bridge import ask_llm
+from .output_hooks import emit_activity
 from .root_context import build_root_context, compact_payload_for_llm
 from .session_commands import handle_slash_command
 
@@ -35,7 +36,7 @@ async def on_user_input(app: Any, logger: Logger, text: str) -> None:
 
     app.llm.switch_mode("root")
     context = build_root_context(app, logger, new_input=text)
-    app._activity("Thinking about your request…", kind="llm")
+    emit_activity(app, "Thinking about your request…", kind="llm")
 
     response = await ask_llm(app, logger, context, tag="root")
     await app._act_on_root_response(response)
@@ -46,7 +47,9 @@ async def on_dispatch_signal(app: Any, logger: Logger, signal: dict[str, Any]) -
     sig_pid = signal.get("pid")
     logger.info(f"JARVIS: Dispatch signal: type={sig_type}, pid={sig_pid}")
     if sig_type:
-        app._activity(f"Dispatch signal: {sig_type} (pid {sig_pid})", kind="dispatch")
+        emit_activity(
+            app, f"Dispatch signal: {sig_type} (pid {sig_pid})", kind="dispatch"
+        )
 
     app.goals.update_from_signal(signal)
 

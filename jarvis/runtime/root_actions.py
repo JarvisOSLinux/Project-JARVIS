@@ -9,6 +9,7 @@ from typing import Any
 from ..config import Config
 from .goal_updates import apply_goal_updates
 from .llm_bridge import ask_llm
+from .output_hooks import emit_activity, persist_assistant_turn
 from .root_context import build_root_context, compact_payload_for_llm
 
 
@@ -59,11 +60,11 @@ async def act_on_root_response(
     action = parsed["action"]
     logger.info(f"JARVIS: Root action='{action}'")
     if action == "respond":
-        app._activity("Composing response…", kind="llm")
+        emit_activity(app, "Composing response…", kind="llm")
     elif action == "dispatch":
-        app._activity("Planning tool execution…", kind="dispatch")
+        emit_activity(app, "Planning tool execution…", kind="dispatch")
     elif action in ("store", "recall", "search_memory", "list_memory"):
-        app._activity(f"Running memory action: {action}", kind="memory")
+        emit_activity(app, f"Running memory action: {action}", kind="memory")
 
     apply_goal_updates(app, parsed.get("goal_updates", []))
 
@@ -77,7 +78,7 @@ async def act_on_root_response(
             await app._act_on_root_response(retry_response, depth + 1)
             return
         app.output_manager.handle_response({"output": output})
-        app._persist_assistant_turn(output)
+        persist_assistant_turn(app, output)
         dismissed = app.goals.dismiss_completed()
         if dismissed:
             logger.info(f"JARVIS: Dismissed {len(dismissed)} completed goal(s)")

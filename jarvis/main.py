@@ -49,6 +49,11 @@ from .runtime.lifecycle import (
 )
 from .runtime.llm_bridge import ask_llm as runtime_ask_llm
 from .runtime.llm_bridge import ask_llm_sync as runtime_ask_llm_sync
+from .runtime.output_hooks import emit_activity as runtime_emit_activity
+from .runtime.output_hooks import get_embeddings as runtime_get_embeddings
+from .runtime.output_hooks import (
+    persist_assistant_turn as runtime_persist_assistant_turn,
+)
 from .runtime.root_actions import act_on_root_response as runtime_act_on_root_response
 from .runtime.root_actions import feed_root_summary as runtime_feed_root_summary
 from .runtime.root_context import build_root_context as runtime_build_root_context
@@ -225,23 +230,15 @@ class Jarvis:
 
     def _get_embeddings(self):
         """Return the OllamaEmbeddings instance, or None if unavailable."""
-        return self._embeddings
+        return runtime_get_embeddings(self)
 
     def _activity(self, text: str, kind: str = "activity") -> None:
         """Emit a concise, user-facing runtime status line."""
-        self.output_manager.emit_activity(text=text, kind=kind)
+        runtime_emit_activity(self, text, kind)
 
     def _persist_assistant_turn(self, text: str) -> None:
         """Append assistant-visible text to the session transcript in contextor."""
-        if not self.contextor or not text or not str(text).strip():
-            return
-        sid = self.sessions.current_id
-        if not sid:
-            return
-        self.contextor.auto_store_assistant_reply(
-            str(text).strip(),
-            session_id=sid,
-        )
+        runtime_persist_assistant_turn(self, text)
 
     def _ask_llm_sync(self, context: str, tag: str = "") -> Dict[str, Any]:
         """Single LLM call with timing logs (synchronous)."""

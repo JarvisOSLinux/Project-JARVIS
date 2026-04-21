@@ -69,14 +69,17 @@ Acceptance criteria:
 Target: reduce complexity in core runtime paths.
 
 ### 2.1 Main Runtime Decomposition
-- [ ] Audit `jarvis/main.py` responsibilities.
-- [ ] Split into focused modules/services (example targets):
-  - [ ] Runtime lifecycle/startup
-  - [ ] Input routing
-  - [ ] Dispatch interaction
-  - [ ] Confirmation flow
-  - [ ] Socket/event handling
-- [ ] Keep behavior unchanged while refactoring (no feature coupling).
+
+**Note (04-21-26):** This checklist tracks *where code lives* (maintainability), not an inventory of bugs. Large `main.py` was a single file doing many jobs; splitting it does not imply the project had “that many issues.”
+
+- [x] Audit `jarvis/main.py` responsibilities.
+- [x] Split into focused modules/services (example targets):
+  - [x] Runtime lifecycle/startup (`jarvis/runtime/lifecycle.py`, voice thread, stop/shutdown)
+  - [x] Input routing (`events.py`, `session_commands.py`, `stdin_is_tty`, `sync_ask` / voice callback)
+  - [x] Dispatch interaction (`dispatch_flow.py`)
+  - [x] Confirmation flow (`root_handlers.py` + existing confirmation wiring)
+  - [x] Socket/event handling (`io.py`, `events.py`)
+- [x] Keep behavior unchanged while refactoring (no feature coupling).
 
 Acceptance criteria:
 - Main orchestration logic is easier to navigate and test.
@@ -216,3 +219,4 @@ Use this section to record completed milestones.
 - 04-21-26: Added `jarvis/runtime/sync_ask.py` with `sync_ask` (synchronous one-shot CLI path) and `handle_voice_command` (inject vs `sync_ask`); `Jarvis.ask` / `_handle_voice_command` are thin delegates; dropped unused `Config` import from `main.py`.
 - 04-21-26: Added `jarvis/runtime/llm_bridge.py` (`ask_llm_sync`, `ask_llm`); `root_handlers`, `root_actions`, `dispatch_flow`, and `sync_ask` call them directly; `Jarvis._ask_llm` / `_ask_llm_sync` remain thin delegates.
 - 04-21-26: Added `lifecycle.request_stop` and `lifecycle.shutdown`; `run()` uses `partial(request_stop, self)` for signal handlers and `await shutdown(self, logger)` in `finally`; `Jarvis.stop` / `_shutdown` delegate.
+- 04-21-26: Added `jarvis/runtime/output_hooks.py` (`emit_activity`, `persist_assistant_turn`, `get_embeddings`); `dispatch_flow`, `root_actions`, `root_handlers`, `llm_bridge`, and `sync_ask` call them directly; `Jarvis` keeps thin `_activity` / `_persist_assistant_turn` / `_get_embeddings` delegates. Marked Phase **2.1** checklist complete in this doc (main orchestration slice done; optional follow-up: constructor-only `Jarvis` or Phase **2.2** TUI).
