@@ -9,6 +9,21 @@ from typing import Any
 from ..config import Config
 
 
+async def feed_root_summary(
+    app: Any,
+    label: str,
+    summary: str,
+    depth: int,
+) -> None:
+    """Feed a subsystem summary back into ROOT for the next decision."""
+    app.llm.switch_mode("root")
+    context = app._build_root_context()
+    context += f"\n{label}: {summary}"
+
+    response = await app._ask_llm(context, tag="root-chain")
+    await app._act_on_root_response(response, depth + 1)
+
+
 async def act_on_root_response(
     app: Any,
     logger: Logger,
@@ -70,12 +85,13 @@ async def act_on_root_response(
             await app._dispatch_execute_tasks(parsed["tasks"], depth)
         else:
             summary = await app._run_dispatch_subchain(parsed["intent"])
-            await app._feed_root_summary("DISPATCH_SUMMARY", summary, depth)
+            await feed_root_summary(app, "DISPATCH_SUMMARY", summary, depth)
 
     # -- Memory actions (direct, no sub-chain) --
     elif action == "store":
         if not app.contextor:
-            await app._feed_root_summary(
+            await feed_root_summary(
+                app,
                 "STORE_RESULT",
                 json.dumps({"error": "Memory is disabled"}),
                 depth,
@@ -90,7 +106,8 @@ async def act_on_root_response(
             parsed["content"],
             session_id=sid,
         )
-        await app._feed_root_summary(
+        await feed_root_summary(
+            app,
             "STORE_RESULT",
             app._compact_payload_for_llm(result),
             depth,
@@ -98,7 +115,8 @@ async def act_on_root_response(
 
     elif action == "recall":
         if not app.contextor:
-            await app._feed_root_summary(
+            await feed_root_summary(
+                app,
                 "RECALL_RESULT",
                 json.dumps({"error": "Memory is disabled"}),
                 depth,
@@ -108,7 +126,8 @@ async def act_on_root_response(
             parsed["theme"],
             session_id=app.sessions.current_id,
         )
-        await app._feed_root_summary(
+        await feed_root_summary(
+            app,
             "RECALL_RESULT",
             app._compact_payload_for_llm(result),
             depth,
@@ -116,7 +135,8 @@ async def act_on_root_response(
 
     elif action == "search_memory":
         if not app.contextor:
-            await app._feed_root_summary(
+            await feed_root_summary(
+                app,
                 "SEARCH_MEMORY_RESULT",
                 json.dumps(
                     {
@@ -136,7 +156,8 @@ async def act_on_root_response(
             session_id=app.sessions.current_id,
             include_global=True,
         )
-        await app._feed_root_summary(
+        await feed_root_summary(
+            app,
             "SEARCH_MEMORY_RESULT",
             app._compact_payload_for_llm(result),
             depth,
@@ -144,7 +165,8 @@ async def act_on_root_response(
 
     elif action == "list_memory":
         if not app.contextor:
-            await app._feed_root_summary(
+            await feed_root_summary(
+                app,
                 "LIST_MEMORY_RESULT",
                 json.dumps({"themes": []}),
                 depth,
@@ -153,7 +175,8 @@ async def act_on_root_response(
         result = app.contextor.list_themes(
             session_id=app.sessions.current_id,
         )
-        await app._feed_root_summary(
+        await feed_root_summary(
+            app,
             "LIST_MEMORY_RESULT",
             app._compact_payload_for_llm(result),
             depth,

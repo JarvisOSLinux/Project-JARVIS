@@ -44,6 +44,7 @@ from .runtime.lifecycle import (
     start_runtime_services,
 )
 from .runtime.root_actions import act_on_root_response as runtime_act_on_root_response
+from .runtime.root_actions import feed_root_summary as runtime_feed_root_summary
 from .sessions import SessionManager
 
 logger = get_logger(__name__)
@@ -227,13 +228,7 @@ class Jarvis:
         )
 
     async def _feed_root_summary(self, label: str, summary: str, depth: int):
-        """Feed a subsystem summary back into ROOT for the next decision."""
-        self.llm.switch_mode("root")
-        context = self._build_root_context()
-        context += f"\n{label}: {summary}"
-
-        response = await self._ask_llm(context, tag="root-chain")
-        await self._act_on_root_response(response, depth + 1)
+        await runtime_feed_root_summary(self, label, summary, depth)
 
     # ------------------------------------------------------------------
     # DISPATCH sub-chain
