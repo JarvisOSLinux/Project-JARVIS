@@ -266,3 +266,40 @@ async def get_tool_metadata(
         logger.debug(f"Could not fetch metadata for {server_id}.{tool_name}: {e}")
 
     return {}
+
+
+async def dispatch_execute_tasks(
+    app: Any,
+    logger: Logger,
+    tasks: list[dict[str, Any]],
+    depth: int,
+) -> None:
+    """Handle a dispatch action that already has concrete tasks (from root)."""
+    if not app.dispatch.is_connected:
+        app.output_manager.handle_response(
+            {
+                "output": "I can't execute tools right now — dispatch is not connected.",
+            }
+        )
+        return
+
+    result = await dispatch_send(app, logger, tasks)
+
+    # If awaiting confirmation, return to event loop — the
+    # CONFIRMATION_RESPONSE event will resume this flow.
+    if isinstance(result, dict) and result.get("awaiting_confirmation"):
+        logger.info(
+            f"JARVIS: Root dispatch paused for confirmation "
+            f"id={result['confirmation_id']}"
+        )
+        return
+
+    app.llm.switch_mode("root")
+    context = app._build_root_context()
+    if isinstance(result, dict) and "error" in result:
+        context += f"\nDISPATCH_ERROR: {app._compact_payload_for_llm(result)}"
+    else:
+        context += f"\nDISPATCH_RESULT: {app._compact_payload_for_llm(result)}"
+
+    response = await app._ask_llm(context, tag="root-dispatch-result")
+    await app._act_on_root_response(response, depth + 1)

@@ -206,3 +206,4 @@ Use this section to record completed milestones.
 - 04-21-26: Created `jarvis/runtime/root_actions.py` and extracted ROOT-mode action handling (`_act_on_root_response`) from `jarvis/main.py`.
 - 04-21-26: Created `jarvis/runtime/dispatch_flow.py` and extracted DISPATCH subchain orchestration (`_run_dispatch_subchain`) from `jarvis/main.py`.
 - 04-21-26: Continued `dispatch_flow` extraction by moving dispatch confirmation send/metadata helpers (`_dispatch_send`, `_get_tool_metadata`) out of `jarvis/main.py`.
+- 04-21-26: Moved root-path task execution (`_dispatch_execute_tasks`) into `jarvis/runtime/dispatch_flow.py`.

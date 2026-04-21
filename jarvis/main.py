@@ -28,6 +28,9 @@ from .core.logger import JarvisLogger, get_logger
 from .dispatch.event_merger import Event
 from .runtime import events as runtime_events
 from .runtime import io as runtime_io
+from .runtime.dispatch_flow import (
+    dispatch_execute_tasks as runtime_dispatch_execute_tasks,
+)
 from .runtime.dispatch_flow import dispatch_send as runtime_dispatch_send
 from .runtime.dispatch_flow import get_tool_metadata as runtime_get_tool_metadata
 from .runtime.dispatch_flow import (
@@ -256,35 +259,12 @@ class Jarvis:
         return await runtime_get_tool_metadata(self, logger, task)
 
     async def _dispatch_execute_tasks(self, tasks, depth: int):
-        """Handle a dispatch action that already has concrete tasks (from root)."""
-        if not self.dispatch.is_connected:
-            self.output_manager.handle_response(
-                {
-                    "output": "I can't execute tools right now — dispatch is not connected.",
-                }
-            )
-            return
-
-        result = await self._dispatch_send(tasks)
-
-        # If awaiting confirmation, return to event loop — the
-        # CONFIRMATION_RESPONSE event will resume this flow.
-        if isinstance(result, dict) and result.get("awaiting_confirmation"):
-            logger.info(
-                f"JARVIS: Root dispatch paused for confirmation "
-                f"id={result['confirmation_id']}"
-            )
-            return
-
-        self.llm.switch_mode("root")
-        context = self._build_root_context()
-        if isinstance(result, dict) and "error" in result:
-            context += f"\nDISPATCH_ERROR: {self._compact_payload_for_llm(result)}"
-        else:
-            context += f"\nDISPATCH_RESULT: {self._compact_payload_for_llm(result)}"
-
-        response = await self._ask_llm(context, tag="root-dispatch-result")
-        await self._act_on_root_response(response, depth + 1)
+        await runtime_dispatch_execute_tasks(
+            app=self,
+            logger=logger,
+            tasks=tasks,
+            depth=depth,
+        )
 
     # ------------------------------------------------------------------
     # Session slash-commands
