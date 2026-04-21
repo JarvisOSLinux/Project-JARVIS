@@ -17,7 +17,6 @@ event queue. Both can be active simultaneously.
 """
 
 import asyncio
-import sys
 import time
 from typing import Any, Dict, List, Optional
 
@@ -45,6 +44,7 @@ from .runtime.lifecycle import (
     connect_dispatch_nonfatal,
     install_signal_handlers,
     start_runtime_services,
+    stdin_is_tty,
 )
 from .runtime.root_actions import act_on_root_response as runtime_act_on_root_response
 from .runtime.root_actions import feed_root_summary as runtime_feed_root_summary
@@ -56,6 +56,12 @@ from .runtime.session_commands import (
     handle_slash_command as runtime_handle_slash_command,
 )
 from .runtime.session_commands import session_reply as runtime_session_reply
+from .runtime.voice_activation_thread import (
+    process_voice_command_inject as runtime_process_voice_command_inject,
+)
+from .runtime.voice_activation_thread import (
+    run_voice_activation as runtime_run_voice_activation,
+)
 from .sessions import SessionManager
 
 logger = get_logger(__name__)
@@ -291,49 +297,15 @@ class Jarvis:
 
     def _has_stdin(self) -> bool:
         """True if stdin is a TTY (interactive chat mode)."""
-        return hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
+        return stdin_is_tty()
 
     def _run_voice_activation(self) -> None:
         """Run voice activation in a thread; commands are injected into the event loop."""
-        vm = self.voice_manager
-        vm._wake_word_detected = False
-        try:
-            if hasattr(vm.activation, "on_wake_word"):
-                vm.activation.on_wake_word = lambda: setattr(
-                    vm, "_wake_word_detected", True
-                )
-            if not self.voice_manager.activation.start_listening():
-                logger.error("JARVIS: Failed to start voice activation")
-                return
-            while self._running:
-                if getattr(self.voice_manager, "_wake_word_detected", False):
-                    self.voice_manager._wake_word_detected = False
-                    self._process_voice_command_inject()
-                time.sleep(0.3)
-        except Exception as e:
-            logger.error(f"JARVIS: Voice thread error: {e}", exc_info=True)
-        finally:
-            if hasattr(self.voice_manager, "activation"):
-                self.voice_manager.activation.cleanup()
+        runtime_run_voice_activation(self, logger)
 
     def _process_voice_command_inject(self) -> None:
         """Process voice command and inject into event loop (no direct ask)."""
-        try:
-            self.voice_manager.activation.stop_listening()
-            self.voice_manager.stt.start()
-            try:
-                for text, is_final in self.voice_manager.stt.iter_results():
-                    if is_final and text.strip():
-                        logger.info(f"Voice input: {text}")
-                        self.events.inject_user_input(text.strip())
-                        break
-            finally:
-                self.voice_manager.stt.stop()
-        except Exception as e:
-            logger.error(f"JARVIS: Voice processing error: {e}")
-        finally:
-            if self._running and hasattr(self.voice_manager, "activation"):
-                self.voice_manager.activation.start_listening()
+        runtime_process_voice_command_inject(self, logger)
 
     async def _run_socket_listener(self) -> None:
         await runtime_io.run_socket_listener(self, logger)

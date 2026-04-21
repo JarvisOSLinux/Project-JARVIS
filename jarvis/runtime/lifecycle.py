@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import signal
+import sys
 import threading
 from collections.abc import Callable
 from logging import Logger
 from typing import Any, Optional
 
 from ..config import Config
+from .voice_activation_thread import run_voice_activation
 
 
 def install_signal_handlers(
@@ -55,11 +57,16 @@ async def bootstrap_tool_index_nonfatal(
         logger.warning(f"JARVIS: Tool index sync failed (non-fatal): {e}")
 
 
+def stdin_is_tty() -> bool:
+    """True if stdin is a TTY (interactive chat mode)."""
+    return hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
+
+
 def resolve_user_source(app: Any) -> Optional[Callable[[], Any]]:
     """Resolve stdin user source unless TUI owns the terminal input."""
     if app.tui_mode:
         return None
-    return app._await_user_input if app._has_stdin() else None
+    return app._await_user_input if stdin_is_tty() else None
 
 
 async def start_runtime_services(
@@ -74,7 +81,8 @@ async def start_runtime_services(
 
     if app.voice_manager:
         voice_thread = threading.Thread(
-            target=app._run_voice_activation,
+            target=run_voice_activation,
+            args=(app, logger),
             daemon=True,
             name="jarvis-voice",
         )
