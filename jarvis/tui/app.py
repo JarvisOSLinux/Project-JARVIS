@@ -67,6 +67,10 @@ from ..core.logger import JarvisLogger, get_logger
 from ..sessions.model import Session
 from .help_screen import HelpScreen
 from .local_input import export_transcript_to_disk, handle_local_input
+from .session_sidebar import get_delete_target_session
+from .session_sidebar import on_session_selected as handle_session_selected
+from .session_sidebar import refresh_sidebar
+from .session_sidebar import schedule_sidebar_refresh as queue_sidebar_refresh
 from .slash_commands_doc import build_help_markdown
 
 logger = get_logger(__name__)
@@ -341,74 +345,14 @@ class JarvisTUI(App):
         ListView stale until the next UI event (e.g. focusing the sidebar).
         """
 
-        def kick() -> None:
-            asyncio.create_task(self._refresh_sidebar())
-
-        try:
-            self.call_next(kick)
-        except Exception:
-            asyncio.create_task(self._refresh_sidebar())
+        queue_sidebar_refresh(self)
 
     async def _refresh_sidebar(self) -> None:
-        async with self._sidebar_refresh_lock:
-            if self.jarvis is None:
-                return
-            try:
-                sessions: List[Session] = self.jarvis.sessions.list(limit=50)
-            except Exception as e:
-                logger.debug(f"TUI: session list failed: {e}")
-                sessions = []
-
-            # Guard against duplicates in fast concurrent refresh bursts and
-            # any backend-level duplicate rows.
-            seen_ids: set[str] = set()
-            unique_sessions: List[Session] = []
-            for s in sessions:
-                if s.id in seen_ids:
-                    continue
-                seen_ids.add(s.id)
-                unique_sessions.append(s)
-            sessions = unique_sessions
-
-            current_id = self.jarvis.sessions.current_id
-            if (
-                self._pending_delete_session_id is not None
-                and self._pending_delete_session_id not in seen_ids
-            ):
-                self._pending_delete_session_id = None
-            try:
-                list_view = self.query_one("#session-list", ListView)
-            except Exception:
-                return
-
-            await list_view.clear()
-            if not sessions:
-                await list_view.append(ListItem(Label("[dim](no sessions yet)[/dim]")))
-            else:
-                for s in sessions:
-                    item = SessionItem(s, is_current=(s.id == current_id))
-                    if item.is_current:
-                        item.add_class("-current")
-                    await list_view.append(item)
-            self._update_status()
+        await refresh_sidebar(self, SessionItem, logger)
 
     @on(ListView.Selected, "#session-list")
     async def on_session_selected(self, event: ListView.Selected) -> None:
-        item = event.item
-        if not isinstance(item, SessionItem) or self.jarvis is None:
-            return
-        if item.session_id == self.jarvis.sessions.current_id:
-            return
-        self._pending_delete_session_id = None
-        session = self.jarvis.sessions.switch(item.session_id)
-        if session is None:
-            self._append_log(f"[red]Could not switch to {item.session_id[:8]}[/red]")
-            return
-        self._append_log(
-            f"[dim]— switched to {session.short_id()} "
-            f"('{session.title or 'untitled'}') —[/dim]"
-        )
-        await self._refresh_sidebar()
+        await handle_session_selected(self, event)
 
     # ------------------------------------------------------------------
     # Actions (keybindings)
@@ -462,21 +406,7 @@ class JarvisTUI(App):
 
     def _get_delete_target_session(self) -> Optional[Session]:
         """Prefer highlighted sidebar session; fall back to current session."""
-        try:
-            list_view = self.query_one("#session-list", ListView)
-            highlighted = list_view.highlighted_child
-        except Exception:
-            highlighted = None
-
-        if isinstance(highlighted, SessionItem) and self.jarvis is not None:
-            sessions = self.jarvis.sessions.list(limit=500)
-            for s in sessions:
-                if s.id == highlighted.session_id:
-                    return s
-            return None
-        if self.jarvis is not None:
-            return self.jarvis.sessions.current
-        return None
+        return get_delete_target_session(self)
 
     def action_focus_chat(self) -> None:
         """Move focus to the transcript for keyboard scrolling (arrows / PgUp)."""
