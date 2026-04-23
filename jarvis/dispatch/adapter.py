@@ -23,6 +23,10 @@ from typing import Any, Dict, List, Optional
 
 from ..config import Config
 from ..core.logger import get_logger
+from .dmcp_registry import install_server as registry_install_server
+from .dmcp_registry import list_server_tools as registry_list_server_tools
+from .dmcp_registry import run_dmcp as registry_run_dmcp
+from .dmcp_registry import search_servers as registry_search_servers
 from .transport import call_tool as transport_call_tool
 from .transport import connect as transport_connect
 from .transport import disconnect as transport_disconnect
@@ -198,28 +202,7 @@ class DispatchAdapter:
 
     async def _run_dmcp(self, *args: str) -> Optional[str]:
         """Run a dmcp command and return stdout, or None on failure."""
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                Config.DMCP_BINARY,
-                *args,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
-        except FileNotFoundError:
-            logger.warning("Dispatch: dmcp binary not found")
-            return None
-        except asyncio.TimeoutError:
-            logger.warning(f"Dispatch: dmcp {args[0]} timed out")
-            return None
-
-        if proc.returncode != 0:
-            logger.warning(
-                f"Dispatch: dmcp {' '.join(args)} failed: {stderr.decode().strip()}"
-            )
-            return None
-
-        return stdout.decode()
+        return await registry_run_dmcp(logger, *args)
 
     async def search_servers(self, keywords: List[str]) -> Dict[str, Any]:
         """
@@ -227,62 +210,15 @@ class DispatchAdapter:
 
         Returns installed matches first, then not-installed ones from registries.
         """
-        logger.info(f"Dispatch: Searching MCP servers with keywords: {keywords}")
-
-        cmd_args = ["browse", "--json"]
-        for kw in keywords:
-            cmd_args.extend(["-k", kw])
-
-        raw = await self._run_dmcp(*cmd_args)
-        if raw is None:
-            return {"error": "dmcp browse failed", "servers": []}
-
-        try:
-            servers = json.loads(raw)
-        except json.JSONDecodeError:
-            return {"error": "dmcp returned invalid JSON", "servers": []}
-
-        if not isinstance(servers, list):
-            servers = servers.get("servers", []) if isinstance(servers, dict) else []
-
-        installed = [s for s in servers if s.get("installed")]
-        available = [s for s in servers if not s.get("installed")]
-        sorted_servers = installed + available
-
-        logger.info(
-            f"Dispatch: Found {len(installed)} installed, "
-            f"{len(available)} available server(s) for keywords {keywords}"
-        )
-
-        return {"servers": sorted_servers}
+        return await registry_search_servers(logger, keywords)
 
     async def install_server(self, server_id: str) -> Dict[str, Any]:
         """Install an MCP server from registry via `dmcp install`."""
-        logger.info(f"Dispatch: Installing MCP server '{server_id}'")
-        raw = await self._run_dmcp("install", server_id)
-        if raw is None:
-            return {"error": f"Failed to install server '{server_id}'"}
-        return {"installed": server_id, "output": raw.strip()}
+        return await registry_install_server(logger, server_id)
 
     async def list_server_tools(self, server_id: str) -> Dict[str, Any]:
         """List tools available on an installed MCP server."""
-        logger.info(f"Dispatch: Listing tools for server '{server_id}'")
-        raw = await self._run_dmcp("tools", server_id, "--json")
-        if raw is None:
-            return {"error": f"Failed to list tools for '{server_id}'", "tools": []}
-
-        try:
-            tools = json.loads(raw)
-        except json.JSONDecodeError:
-            return {"error": "dmcp returned invalid JSON", "tools": []}
-
-        if isinstance(tools, dict) and "tools" in tools:
-            tools = tools["tools"]
-        if not isinstance(tools, list):
-            tools = []
-
-        logger.info(f"Dispatch: Server '{server_id}' has {len(tools)} tool(s)")
-        return {"server": server_id, "tools": tools}
+        return await registry_list_server_tools(logger, server_id)
 
     # ------------------------------------------------------------------
     # Semantic tool discovery (vector-based via dispatch → dmcp)
