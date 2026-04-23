@@ -72,6 +72,10 @@ Target: reduce complexity in core runtime paths.
 
 **Note (04-21-26):** This checklist tracks *where code lives* (maintainability), not an inventory of bugs. Large `main.py` was a single file doing many jobs; splitting it does not imply the project had “that many issues.”
 
+**Status (04-21-26):** Core runtime + dispatch decomposition is complete for this phase. `jarvis/main.py` and `jarvis/dispatch/adapter.py` now act primarily as facades over focused modules, with behavior preserved by `make check`.
+
+**Next planned objective:** move to **Phase 2.2** (`jarvis/tui/app.py` structure review), unless a higher-priority bug/feature interrupts.
+
 - [x] Audit `jarvis/main.py` responsibilities.
 - [x] Split into focused modules/services (example targets):
   - [x] Runtime lifecycle/startup (`jarvis/runtime/lifecycle.py`, voice thread, stop/shutdown)
@@ -224,3 +228,4 @@ Use this section to record completed milestones.
 - 04-21-26: Continued dispatch adapter decomposition with `jarvis/dispatch/dmcp_registry.py` (`run_dmcp`, `search_servers`, `install_server`, `list_server_tools`); `DispatchAdapter` now delegates dmcp browse/install/tools methods and keeps `_run_dmcp` as a thin wrapper for remaining discovery paths.
 - 04-21-26: Continued dispatch adapter decomposition with `jarvis/dispatch/discovery.py` (`server_count`, `normalize_count`, `embedding_spec`, `sync_index`, `browse_vector`, `browse_vectors_batch`, `index_server`, `auto_index_server`, `ensure_embedding_model`); `DispatchAdapter` now delegates vector/index lifecycle methods while preserving existing method signatures.
 - 04-21-26: Added `jarvis/dispatch/tool_discovery.py` (`discover_tools`, `keyword_fallback`, `format_available_tools`); `DispatchAdapter` now delegates high-level task-to-tool discovery/formatting while retaining `select_discovery_mode` and the same public API.
+- 04-21-26: Started Phase 2.2 TUI decomposition by adding `jarvis/tui/local_input.py` (`handle_local_input`, `export_transcript_to_disk`); `JarvisTUI` now delegates TUI-only `/help` and `/export` handling plus transcript file export, keeping behavior and keybindings unchanged.
