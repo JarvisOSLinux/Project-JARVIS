@@ -65,13 +65,11 @@ from textual.widgets import (
 from ..config import Config
 from ..core.logger import JarvisLogger, get_logger
 from ..sessions.model import Session
-from .help_screen import HelpScreen
+from . import actions as tui_actions
 from .local_input import export_transcript_to_disk, handle_local_input
-from .session_sidebar import get_delete_target_session
 from .session_sidebar import on_session_selected as handle_session_selected
 from .session_sidebar import refresh_sidebar
 from .session_sidebar import schedule_sidebar_refresh as queue_sidebar_refresh
-from .slash_commands_doc import build_help_markdown
 
 logger = get_logger(__name__)
 
@@ -355,92 +353,35 @@ class JarvisTUI(App):
         await handle_session_selected(self, event)
 
     # ------------------------------------------------------------------
-    # Actions (keybindings)
+    # Actions (keybindings) — see ``tui_actions``
     # ------------------------------------------------------------------
 
     async def action_new_session(self) -> None:
-        if self.jarvis is None:
-            return
-        if not self.jarvis.sessions.available:
-            self._append_log(
-                "[yellow]Memory is disabled — sessions unavailable.[/yellow]"
-            )
-            return
-        session = self.jarvis.sessions.new_session()
-        if session:
-            self._pending_delete_session_id = None
-            self._append_log(f"[dim]— started new session {session.short_id()} —[/dim]")
-            await self._refresh_sidebar()
-        else:
-            self._append_log("[red]Could not create a new session.[/red]")
+        await tui_actions.new_session(self)
 
     async def action_delete_selected_session(self) -> None:
         """Delete the highlighted (or current) session with two-step confirm."""
-        if self.jarvis is None:
-            return
-        if not self.jarvis.sessions.available:
-            self._append_log(
-                "[yellow]Memory is disabled — sessions unavailable.[/yellow]"
-            )
-            return
-        target = self._get_delete_target_session()
-        if target is None:
-            self._append_log("[yellow]No session selected to delete.[/yellow]")
-            return
-
-        sid = target.id
-        if self._pending_delete_session_id != sid:
-            self._pending_delete_session_id = sid
-            self._append_log(
-                f"[yellow]Press Ctrl+D again to delete {target.short_id()} "
-                f"('{target.title or 'untitled'}').[/yellow]"
-            )
-            return
-
-        self._pending_delete_session_id = None
-        if self.jarvis.sessions.delete(sid):
-            self._append_log(f"[dim]— deleted session {target.short_id()} —[/dim]")
-            await self._refresh_sidebar()
-        else:
-            self._append_log(f"[red]Delete failed for {target.short_id()}.[/red]")
-
-    def _get_delete_target_session(self) -> Optional[Session]:
-        """Prefer highlighted sidebar session; fall back to current session."""
-        return get_delete_target_session(self)
+        await tui_actions.delete_selected_session(self)
 
     def action_focus_chat(self) -> None:
         """Move focus to the transcript for keyboard scrolling (arrows / PgUp)."""
-        try:
-            self.query_one("#chat-log", RichLog).focus()
-        except Exception:
-            pass
+        tui_actions.focus_chat(self)
 
     def action_focus_input(self) -> None:
         """Move focus back to the message line."""
-        try:
-            self.query_one("#input", Input).focus()
-        except Exception:
-            pass
+        tui_actions.focus_input(self)
 
     def action_help(self) -> None:
         """Open the help modal (Esc / F1 closes while help is focused)."""
-        self.push_screen(HelpScreen(build_help_markdown(JarvisTUI.BINDINGS)))
+        tui_actions.open_help(self, JarvisTUI.BINDINGS)
 
     def action_clear_transcript(self) -> None:
         """Clear the RichLog and export buffer only (does not touch contextor)."""
-        try:
-            log = self.query_one("#chat-log", RichLog)
-            log.clear()
-        except Exception:
-            return
-        self._export_lines.clear()
-        self._append_log(
-            "[dim]Transcript cleared (on-screen only; session memory unchanged.)[/dim]"
-        )
+        tui_actions.clear_transcript(self)
 
     def action_export_transcript(self) -> None:
         """Write ``_export_lines`` to ``JARVIS_DATA_DIR/transcripts/``."""
-        export_transcript_to_disk(self, None)
+        tui_actions.export_transcript(self)
 
     def _export_transcript_to_disk(self, filename: Optional[str]) -> None:
         """Save plain transcript as Markdown under ``JARVIS_DATA_DIR/transcripts``."""
