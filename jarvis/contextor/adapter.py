@@ -553,8 +553,7 @@ class ContextorAdapter:
             }
             logger.info(
                 f"Contextor: Created session id={session.get('id', '?')[:8]} "
-                f"title='{session.get('title', '')}'"
-            )
+                f"title='{session.get('title', '')}'")
             return {"session": session}
 
         logger.warning(f"Contextor: create_session failed: {result.get('error')}")
