@@ -90,11 +90,11 @@ Acceptance criteria:
 - Core file size and cognitive load are materially reduced.
 
 ### 2.2 TUI Structure Review
-- [ ] Audit `jarvis/tui/app.py` for separable concerns:
-  - [ ] UI state model
-  - [ ] Rendering/layout
-  - [ ] command/event handlers
-- [ ] Extract repeated logic into helper modules/classes.
+- [x] Audit `jarvis/tui/app.py` for separable concerns:
+  - [x] UI state model
+  - [x] Rendering/layout
+  - [x] command/event handlers
+- [x] Extract repeated logic into helper modules/classes.
 
 Acceptance criteria:
 - TUI behavior remains the same.
@@ -233,3 +233,5 @@ Use this section to record completed milestones.
 - 04-23-26: Continued Phase 2.2 by adding `jarvis/tui/actions.py` (`new_session`, `delete_selected_session`, `focus_chat`, `focus_input`, `open_help`, `clear_transcript`, `export_transcript`); `JarvisTUI` `action_*` methods are thin delegates; `_export_transcript_to_disk` still uses `export_transcript_to_disk` from `local_input.py`.
 - 04-23-26: Continued Phase 2.2 by adding `jarvis/tui/lifecycle.py` (`on_mount`, `start_jarvis`, `run_engine`, `on_unmount`); `JarvisTUI` lifecycle methods now delegate engine boot/task wiring/shutdown cleanup while preserving behavior.
 - 04-23-26: Continued Phase 2.2 by adding `jarvis/tui/output.py` (`markup_to_plain`, `escape`, `append_log`, `on_jarvis_output`, `on_jarvis_activity`); `JarvisTUI` now delegates transcript rendering/export-buffer conversion and output/activity callbacks.
+- 04-23-26: Continued Phase 2.2 by adding `jarvis/tui/status_bar.py` (`update_status`, `watch_status_text`, `set_status`); `JarvisTUI` now delegates status text composition/render updates, reducing `app.py` responsibility scope.
+- 04-23-26: Marked Phase **2.2** checklist complete after extracting TUI-local input, sidebar/session handling, keybinding actions, lifecycle wiring, output/transcript helpers, and status-bar logic from `jarvis/tui/app.py` with behavior preserved (`make check` passing).

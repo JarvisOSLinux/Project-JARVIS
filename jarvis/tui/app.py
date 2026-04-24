@@ -61,12 +61,12 @@ from textual.widgets import (
     Static,
 )
 
-from ..config import Config
 from ..core.logger import JarvisLogger, get_logger
 from ..sessions.model import Session
 from . import actions as tui_actions
 from . import lifecycle as tui_lifecycle
 from . import output as tui_output
+from . import status_bar as tui_status_bar
 from .local_input import export_transcript_to_disk, handle_local_input
 from .session_sidebar import on_session_selected as handle_session_selected
 from .session_sidebar import refresh_sidebar
@@ -311,31 +311,13 @@ class JarvisTUI(App):
     # ------------------------------------------------------------------
 
     def _update_status(self) -> None:
-        parts = []
-        if self.jarvis is not None and self.jarvis.sessions.current:
-            parts.append(f"session: {self.jarvis.sessions.current.short_id()}")
-        else:
-            parts.append("session: (none)")
-
-        model = getattr(Config, "LLM_MODEL", None) or "(unset)"
-        provider = getattr(Config, "LLM_PROVIDER", "?")
-        parts.append(f"model: {model}")
-        parts.append(f"provider: {provider}")
-        parts.append(
-            "Ctrl+N new · Ctrl+D delete · Ctrl+Q quit · Ctrl+L log · Ctrl+I input · F1 help · "
-            "Ctrl+Shift+C clear · Ctrl+Shift+E export"
-        )
-
-        self.status_text = "  |  ".join(parts)
+        tui_status_bar.update_status(self)
 
     def watch_status_text(self, value: str) -> None:
-        try:
-            self.query_one("#status-bar", Static).update(value)
-        except Exception:
-            pass
+        tui_status_bar.watch_status_text(self, value)
 
     def _set_status(self, text: str) -> None:
-        self.status_text = text
+        tui_status_bar.set_status(self, text)
 
 
 def run_tui() -> None:
