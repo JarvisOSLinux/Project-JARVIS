@@ -69,25 +69,32 @@ Acceptance criteria:
 Target: reduce complexity in core runtime paths.
 
 ### 2.1 Main Runtime Decomposition
-- [ ] Audit `jarvis/main.py` responsibilities.
-- [ ] Split into focused modules/services (example targets):
-  - [ ] Runtime lifecycle/startup
-  - [ ] Input routing
-  - [ ] Dispatch interaction
-  - [ ] Confirmation flow
-  - [ ] Socket/event handling
-- [ ] Keep behavior unchanged while refactoring (no feature coupling).
+
+**Note (04-21-26):** This checklist tracks *where code lives* (maintainability), not an inventory of bugs. Large `main.py` was a single file doing many jobs; splitting it does not imply the project had “that many issues.”
+
+**Status (04-21-26):** Core runtime + dispatch decomposition is complete for this phase. `jarvis/main.py` and `jarvis/dispatch/adapter.py` now act primarily as facades over focused modules, with behavior preserved by `make check`.
+
+**Next planned objective:** move to **Phase 2.2** (`jarvis/tui/app.py` structure review), unless a higher-priority bug/feature interrupts.
+
+- [x] Audit `jarvis/main.py` responsibilities.
+- [x] Split into focused modules/services (example targets):
+  - [x] Runtime lifecycle/startup (`jarvis/runtime/lifecycle.py`, voice thread, stop/shutdown)
+  - [x] Input routing (`events.py`, `session_commands.py`, `stdin_is_tty`, `sync_ask` / voice callback)
+  - [x] Dispatch interaction (`dispatch_flow.py`)
+  - [x] Confirmation flow (`root_handlers.py` + existing confirmation wiring)
+  - [x] Socket/event handling (`io.py`, `events.py`)
+- [x] Keep behavior unchanged while refactoring (no feature coupling).
 
 Acceptance criteria:
 - Main orchestration logic is easier to navigate and test.
 - Core file size and cognitive load are materially reduced.
 
 ### 2.2 TUI Structure Review
-- [ ] Audit `jarvis/tui/app.py` for separable concerns:
-  - [ ] UI state model
-  - [ ] Rendering/layout
-  - [ ] command/event handlers
-- [ ] Extract repeated logic into helper modules/classes.
+- [x] Audit `jarvis/tui/app.py` for separable concerns:
+  - [x] UI state model
+  - [x] Rendering/layout
+  - [x] command/event handlers
+- [x] Extract repeated logic into helper modules/classes.
 
 Acceptance criteria:
 - TUI behavior remains the same.
@@ -201,3 +208,30 @@ Use this section to record completed milestones.
 - 04-19-26: Added root `Makefile` with `make check`, `make fix`, and `make test`; documented local quality commands in `README.md`.
 - 04-19-26: Started Phase 2.1 refactor by extracting lifecycle/startup helpers inside `jarvis/main.py` to reduce `run()` complexity without behavior changes.
 - 04-19-26: Created `jarvis/runtime/lifecycle.py` and moved startup/lifecycle orchestration helpers out of `jarvis/main.py`; behavior preserved and checks passing.
+- 04-19-26: Created `jarvis/runtime/io.py` and extracted socket/broadcast runtime I/O handlers from `jarvis/main.py` into the runtime module.
+- 04-19-26: Created `jarvis/runtime/events.py` and extracted event-routing/input-source helpers (`_handle_event`, `_await_user_input`, `_await_dispatch_signal`) into runtime module helpers.
+- 04-21-26: Created `jarvis/runtime/root_actions.py` and extracted ROOT-mode action handling (`_act_on_root_response`) from `jarvis/main.py`.
+- 04-21-26: Created `jarvis/runtime/dispatch_flow.py` and extracted DISPATCH subchain orchestration (`_run_dispatch_subchain`) from `jarvis/main.py`.
+- 04-21-26: Continued `dispatch_flow` extraction by moving dispatch confirmation send/metadata helpers (`_dispatch_send`, `_get_tool_metadata`) out of `jarvis/main.py`.
+- 04-21-26: Moved root-path task execution (`_dispatch_execute_tasks`) into `jarvis/runtime/dispatch_flow.py`.
+- 04-21-26: Moved `_feed_root_summary` into `jarvis/runtime/root_actions.py` as `feed_root_summary`; `root_actions` now calls it directly (no `app._feed_root_summary` indirection).
+- 04-21-26: Moved dispatch kill/defer helpers (`_do_kill`, `_do_defer`) into `jarvis/runtime/dispatch_flow.py` as `do_kill` / `do_defer`; `run_dispatch_subchain` calls them directly.
+- 04-21-26: Created `jarvis/runtime/root_handlers.py` and moved `_on_user_input`, `_on_dispatch_signal`, and `_on_confirmation_response` out of `jarvis/main.py`; `events.handle_event` routes to these functions; `Jarvis` keeps thin delegate methods.
+- 04-21-26: Added `jarvis/runtime/root_context.py` (`build_root_context`, `compact_payload_for_llm`) and `jarvis/runtime/goal_updates.py` (`apply_goal_updates`); runtime modules call them directly; `Jarvis` methods remain thin delegates. `feed_root_summary` now takes `logger` for consistent context logging.
+- 04-21-26: Added `jarvis/runtime/session_commands.py` (`handle_slash_command`, `session_reply`); `root_handlers` calls it directly; `Jarvis` keeps thin `_handle_slash_command` / `_session_reply` delegates. Updated TUI slash-command doc pointers.
+- 04-21-26: Added `jarvis/runtime/voice_activation_thread.py` (`run_voice_activation`, `process_voice_command_inject`); `lifecycle.start_runtime_services` starts the daemon thread with `target=run_voice_activation, args=(app, logger)`. Moved TTY stdin check to `lifecycle.stdin_is_tty()`; `Jarvis._has_stdin` delegates there; voice methods delegate to the voice module.
+- 04-21-26: Added `jarvis/runtime/sync_ask.py` with `sync_ask` (synchronous one-shot CLI path) and `handle_voice_command` (inject vs `sync_ask`); `Jarvis.ask` / `_handle_voice_command` are thin delegates; dropped unused `Config` import from `main.py`.
+- 04-21-26: Added `jarvis/runtime/llm_bridge.py` (`ask_llm_sync`, `ask_llm`); `root_handlers`, `root_actions`, `dispatch_flow`, and `sync_ask` call them directly; `Jarvis._ask_llm` / `_ask_llm_sync` remain thin delegates.
+- 04-21-26: Added `lifecycle.request_stop` and `lifecycle.shutdown`; `run()` uses `partial(request_stop, self)` for signal handlers and `await shutdown(self, logger)` in `finally`; `Jarvis.stop` / `_shutdown` delegate.
+- 04-21-26: Added `jarvis/runtime/output_hooks.py` (`emit_activity`, `persist_assistant_turn`, `get_embeddings`); `dispatch_flow`, `root_actions`, `root_handlers`, `llm_bridge`, and `sync_ask` call them directly; `Jarvis` keeps thin `_activity` / `_persist_assistant_turn` / `_get_embeddings` delegates. Marked Phase **2.1** checklist complete in this doc (main orchestration slice done; optional follow-up: constructor-only `Jarvis` or Phase **2.2** TUI).
+- 04-21-26: Started dispatch adapter decomposition by adding `jarvis/dispatch/transport.py` (connect/disconnect, connection guard, timed MCP tool call helper, signal-window fetch); `DispatchAdapter` now delegates connection lifecycle + core transport calls (`send_tasks`, `kill_tasks`, `set_timer`, `get_signal_window`) while preserving behavior.
+- 04-21-26: Continued dispatch adapter decomposition with `jarvis/dispatch/dmcp_registry.py` (`run_dmcp`, `search_servers`, `install_server`, `list_server_tools`); `DispatchAdapter` now delegates dmcp browse/install/tools methods and keeps `_run_dmcp` as a thin wrapper for remaining discovery paths.
+- 04-21-26: Continued dispatch adapter decomposition with `jarvis/dispatch/discovery.py` (`server_count`, `normalize_count`, `embedding_spec`, `sync_index`, `browse_vector`, `browse_vectors_batch`, `index_server`, `auto_index_server`, `ensure_embedding_model`); `DispatchAdapter` now delegates vector/index lifecycle methods while preserving existing method signatures.
+- 04-21-26: Added `jarvis/dispatch/tool_discovery.py` (`discover_tools`, `keyword_fallback`, `format_available_tools`); `DispatchAdapter` now delegates high-level task-to-tool discovery/formatting while retaining `select_discovery_mode` and the same public API.
+- 04-21-26: Started Phase 2.2 TUI decomposition by adding `jarvis/tui/local_input.py` (`handle_local_input`, `export_transcript_to_disk`); `JarvisTUI` now delegates TUI-only `/help` and `/export` handling plus transcript file export, keeping behavior and keybindings unchanged.
+- 04-21-26: Continued Phase 2.2 by adding `jarvis/tui/session_sidebar.py` (`schedule_sidebar_refresh`, `refresh_sidebar`, `on_session_selected`, `get_delete_target_session`); `JarvisTUI` now delegates sidebar refresh/selection/delete-target logic while preserving UI behavior.
+- 04-23-26: Continued Phase 2.2 by adding `jarvis/tui/actions.py` (`new_session`, `delete_selected_session`, `focus_chat`, `focus_input`, `open_help`, `clear_transcript`, `export_transcript`); `JarvisTUI` `action_*` methods are thin delegates; `_export_transcript_to_disk` still uses `export_transcript_to_disk` from `local_input.py`.
+- 04-23-26: Continued Phase 2.2 by adding `jarvis/tui/lifecycle.py` (`on_mount`, `start_jarvis`, `run_engine`, `on_unmount`); `JarvisTUI` lifecycle methods now delegate engine boot/task wiring/shutdown cleanup while preserving behavior.
+- 04-23-26: Continued Phase 2.2 by adding `jarvis/tui/output.py` (`markup_to_plain`, `escape`, `append_log`, `on_jarvis_output`, `on_jarvis_activity`); `JarvisTUI` now delegates transcript rendering/export-buffer conversion and output/activity callbacks.
+- 04-23-26: Continued Phase 2.2 by adding `jarvis/tui/status_bar.py` (`update_status`, `watch_status_text`, `set_status`); `JarvisTUI` now delegates status text composition/render updates, reducing `app.py` responsibility scope.
+- 04-23-26: Marked Phase **2.2** checklist complete after extracting TUI-local input, sidebar/session handling, keybinding actions, lifecycle wiring, output/transcript helpers, and status-bar logic from `jarvis/tui/app.py` with behavior preserved (`make check` passing).

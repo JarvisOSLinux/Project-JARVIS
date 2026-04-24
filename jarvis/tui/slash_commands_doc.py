@@ -1,9 +1,9 @@
 """
 Session slash-command descriptions for the TUI help modal.
 
-The **session** rows below must stay aligned with ``Jarvis._handle_slash_command``
-in ``jarvis/main.py`` (behavior lives there; this module is the doc source for the
-help table only).
+The **session** rows below must stay aligned with
+``jarvis/runtime/session_commands.py::handle_slash_command`` (behavior lives there;
+this module is the doc source for the help table only).
 
 The **keyboard** section is built from ``JarvisTUI.BINDINGS`` plus a few lines that
 are not real Textual bindings (Enter, mouse, help-modal Esc).
@@ -15,7 +15,7 @@ from collections.abc import Sequence
 
 from textual.binding import Binding
 
-# (command column, meaning) — sync with jarvis/main.py::_handle_slash_command
+# (command column, meaning) — sync with jarvis/runtime/session_commands.py
 SESSION_SLASH_HELP: tuple[tuple[str, str], ...] = (
     ("/new [title]", "Start a new session; optional title."),
     (

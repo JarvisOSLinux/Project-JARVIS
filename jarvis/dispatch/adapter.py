@@ -17,13 +17,34 @@ All decision-making lives in JARVIS — dispatch and dmcp are tools that
 do what they're told.
 """
 
-import asyncio
 import json
-import time
 from typing import Any, Dict, List, Optional
 
 from ..config import Config
 from ..core.logger import get_logger
+from .discovery import auto_index_server as discovery_auto_index_server
+from .discovery import browse_vector as discovery_browse_vector
+from .discovery import browse_vectors_batch as discovery_browse_vectors_batch
+from .discovery import embedding_spec as discovery_embedding_spec
+from .discovery import ensure_embedding_model as discovery_ensure_embedding_model
+from .discovery import index_server as discovery_index_server
+from .discovery import normalize_count as discovery_normalize_count
+from .discovery import server_count as discovery_server_count
+from .discovery import sync_index as discovery_sync_index
+from .dmcp_registry import install_server as registry_install_server
+from .dmcp_registry import list_server_tools as registry_list_server_tools
+from .dmcp_registry import run_dmcp as registry_run_dmcp
+from .dmcp_registry import search_servers as registry_search_servers
+from .tool_discovery import discover_tools as run_tool_discovery
+from .tool_discovery import format_available_tools as render_available_tools
+from .tool_discovery import keyword_fallback as run_keyword_fallback
+from .transport import call_tool as transport_call_tool
+from .transport import connect as transport_connect
+from .transport import disconnect as transport_disconnect
+from .transport import get_signal_window as transport_get_signal_window
+from .transport import (
+    require_connection,
+)
 
 logger = get_logger(__name__)
 
@@ -39,40 +60,11 @@ class DispatchAdapter:
 
     async def connect(self):
         """Connect to the dispatch binary via stdio MCP."""
-        try:
-            from mcp import ClientSession, StdioServerParameters
-            from mcp.client.stdio import stdio_client
-
-            logger.info(f"Dispatch: Spawning '{Config.DISPATCH_BINARY} serve'")
-            params = StdioServerParameters(
-                command=Config.DISPATCH_BINARY,
-                args=["serve"],
-                env={"RUST_LOG": "dispatch=warn"},
-            )
-            self._client = stdio_client(params)
-            read, write = await self._client.__aenter__()
-            self.session = ClientSession(read, write)
-            await self.session.__aenter__()
-            await self.session.initialize()
-            self._connected = True
-            logger.info("Dispatch: Connected successfully")
-        except Exception as e:
-            logger.error(
-                f"Dispatch: Connection failed (binary='{Config.DISPATCH_BINARY}'): {e}"
-            )
-            raise
+        await transport_connect(self, logger)
 
     async def disconnect(self):
         """Disconnect from dispatch."""
-        try:
-            if self.session:
-                await self.session.__aexit__(None, None, None)
-            if self._client:
-                await self._client.__aexit__(None, None, None)
-            self._connected = False
-            logger.info("Dispatch: Disconnected")
-        except Exception as e:
-            logger.error(f"Dispatch: Disconnect error: {e}")
+        await transport_disconnect(self, logger)
 
     @property
     def is_connected(self) -> bool:
@@ -92,8 +84,7 @@ class DispatchAdapter:
         Returns:
             Dict with assigned PIDs and status.
         """
-        if not self._connected:
-            logger.warning("Dispatch: send_tasks called but not connected")
+        if not require_connection(self, logger, "send_tasks"):
             return {"error": "Not connected to dispatch"}
 
         logger.info(f"Dispatch: Sending {len(tasks)} task(s)")
@@ -102,28 +93,16 @@ class DispatchAdapter:
                 f"Dispatch:   task[{i}]: server={task.get('server')}, tool={task.get('tool')}, params={task.get('params')}"
             )
 
-        t0 = time.perf_counter()
-        try:
-            result = await asyncio.wait_for(
-                self.session.call_tool("dispatch", {"tasks": tasks}),
-                timeout=self.timeout,
-            )
-            elapsed = time.perf_counter() - t0
-            content = self._extract_content(result)
-            logger.info(
-                f"Dispatch: send_tasks completed in {elapsed:.2f}s — result: {content}"
-            )
-            return content
-        except asyncio.TimeoutError:
-            elapsed = time.perf_counter() - t0
-            logger.error(
-                f"Dispatch: send_tasks timed out after {elapsed:.2f}s (limit={self.timeout}s)"
-            )
-            return {"error": f"Dispatch timed out after {self.timeout}s"}
-        except Exception as e:
-            elapsed = time.perf_counter() - t0
-            logger.error(f"Dispatch: send_tasks failed after {elapsed:.2f}s — {e}")
-            return {"error": f"Failed to dispatch tasks: {e}"}
+        return await transport_call_tool(
+            self,
+            logger,
+            tool_name="dispatch",
+            params={"tasks": tasks},
+            op_name="send_tasks",
+            timeout_error="Dispatch timed out after {timeout}s",
+            failure_prefix="Failed to dispatch tasks",
+            extractor=self._extract_content,
+        )
 
     async def kill_tasks(self, pids: List[int]) -> Dict[str, Any]:
         """
@@ -135,33 +114,20 @@ class DispatchAdapter:
         Returns:
             Dict with kill confirmation.
         """
-        if not self._connected:
-            logger.warning("Dispatch: kill_tasks called but not connected")
+        if not require_connection(self, logger, "kill_tasks"):
             return {"error": "Not connected to dispatch"}
 
         logger.info(f"Dispatch: Killing PIDs {pids}")
-        t0 = time.perf_counter()
-        try:
-            result = await asyncio.wait_for(
-                self.session.call_tool("kill", {"pids": pids}),
-                timeout=self.timeout,
-            )
-            elapsed = time.perf_counter() - t0
-            content = self._extract_content(result)
-            logger.info(
-                f"Dispatch: kill_tasks completed in {elapsed:.2f}s — result: {content}"
-            )
-            return content
-        except asyncio.TimeoutError:
-            elapsed = time.perf_counter() - t0
-            logger.error(
-                f"Dispatch: kill_tasks timed out after {elapsed:.2f}s (limit={self.timeout}s)"
-            )
-            return {"error": f"Kill timed out after {self.timeout}s"}
-        except Exception as e:
-            elapsed = time.perf_counter() - t0
-            logger.error(f"Dispatch: kill_tasks failed after {elapsed:.2f}s — {e}")
-            return {"error": f"Failed to kill tasks: {e}"}
+        return await transport_call_tool(
+            self,
+            logger,
+            tool_name="kill",
+            params={"pids": pids},
+            op_name="kill_tasks",
+            timeout_error="Kill timed out after {timeout}s",
+            failure_prefix="Failed to kill tasks",
+            extractor=self._extract_content,
+        )
 
     async def set_timer(
         self, label: str, duration: int, metadata: Optional[Dict[str, Any]] = None
@@ -177,8 +143,7 @@ class DispatchAdapter:
         Returns:
             Dict with assigned PID and status, or error.
         """
-        if not self._connected:
-            logger.warning("Dispatch: set_timer called but not connected")
+        if not require_connection(self, logger, "set_timer"):
             return {"error": "Not connected to dispatch"}
 
         logger.info(
@@ -188,28 +153,16 @@ class DispatchAdapter:
         if metadata is not None:
             params["metadata"] = metadata
 
-        t0 = time.perf_counter()
-        try:
-            result = await asyncio.wait_for(
-                self.session.call_tool("timer", params),
-                timeout=self.timeout,
-            )
-            elapsed = time.perf_counter() - t0
-            content = self._extract_content(result)
-            logger.info(
-                f"Dispatch: set_timer completed in {elapsed:.2f}s — result: {content}"
-            )
-            return content
-        except asyncio.TimeoutError:
-            elapsed = time.perf_counter() - t0
-            logger.error(
-                f"Dispatch: set_timer timed out after {elapsed:.2f}s (limit={self.timeout}s)"
-            )
-            return {"error": f"Timer call timed out after {self.timeout}s"}
-        except Exception as e:
-            elapsed = time.perf_counter() - t0
-            logger.error(f"Dispatch: set_timer failed after {elapsed:.2f}s — {e}")
-            return {"error": f"Failed to set timer: {e}"}
+        return await transport_call_tool(
+            self,
+            logger,
+            tool_name="timer",
+            params=params,
+            op_name="set_timer",
+            timeout_error="Timer call timed out after {timeout}s",
+            failure_prefix="Failed to set timer",
+            extractor=self._extract_content,
+        )
 
     async def get_signal_window(self) -> List[Dict[str, Any]]:
         """
@@ -222,34 +175,7 @@ class DispatchAdapter:
                 - timestamp: ISO string
                 - data: (optional) output or error payload
         """
-        if not self._connected:
-            return []
-
-        try:
-            result = await asyncio.wait_for(
-                self.session.call_tool("log", {}),
-                timeout=self.timeout,
-            )
-            content = self._extract_content(result)
-            if isinstance(content, list):
-                signals = content
-            elif isinstance(content, dict):
-                signals = content.get("signals", [])
-            else:
-                signals = []
-
-            if signals:
-                logger.debug(
-                    f"Dispatch: Signal window returned {len(signals)} signal(s)"
-                )
-                for sig in signals:
-                    logger.debug(
-                        f"Dispatch:   signal: type={sig.get('type')}, pid={sig.get('pid')}, data={sig.get('data', '')}"
-                    )
-            return signals
-        except Exception as e:
-            logger.error(f"Dispatch: Failed to get signals: {e}")
-            return []
+        return await transport_get_signal_window(self, logger)
 
     def _extract_content(self, result) -> Dict[str, Any]:
         """
@@ -287,28 +213,7 @@ class DispatchAdapter:
 
     async def _run_dmcp(self, *args: str) -> Optional[str]:
         """Run a dmcp command and return stdout, or None on failure."""
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                Config.DMCP_BINARY,
-                *args,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
-        except FileNotFoundError:
-            logger.warning("Dispatch: dmcp binary not found")
-            return None
-        except asyncio.TimeoutError:
-            logger.warning(f"Dispatch: dmcp {args[0]} timed out")
-            return None
-
-        if proc.returncode != 0:
-            logger.warning(
-                f"Dispatch: dmcp {' '.join(args)} failed: {stderr.decode().strip()}"
-            )
-            return None
-
-        return stdout.decode()
+        return await registry_run_dmcp(logger, *args)
 
     async def search_servers(self, keywords: List[str]) -> Dict[str, Any]:
         """
@@ -316,62 +221,15 @@ class DispatchAdapter:
 
         Returns installed matches first, then not-installed ones from registries.
         """
-        logger.info(f"Dispatch: Searching MCP servers with keywords: {keywords}")
-
-        cmd_args = ["browse", "--json"]
-        for kw in keywords:
-            cmd_args.extend(["-k", kw])
-
-        raw = await self._run_dmcp(*cmd_args)
-        if raw is None:
-            return {"error": "dmcp browse failed", "servers": []}
-
-        try:
-            servers = json.loads(raw)
-        except json.JSONDecodeError:
-            return {"error": "dmcp returned invalid JSON", "servers": []}
-
-        if not isinstance(servers, list):
-            servers = servers.get("servers", []) if isinstance(servers, dict) else []
-
-        installed = [s for s in servers if s.get("installed")]
-        available = [s for s in servers if not s.get("installed")]
-        sorted_servers = installed + available
-
-        logger.info(
-            f"Dispatch: Found {len(installed)} installed, "
-            f"{len(available)} available server(s) for keywords {keywords}"
-        )
-
-        return {"servers": sorted_servers}
+        return await registry_search_servers(logger, keywords)
 
     async def install_server(self, server_id: str) -> Dict[str, Any]:
         """Install an MCP server from registry via `dmcp install`."""
-        logger.info(f"Dispatch: Installing MCP server '{server_id}'")
-        raw = await self._run_dmcp("install", server_id)
-        if raw is None:
-            return {"error": f"Failed to install server '{server_id}'"}
-        return {"installed": server_id, "output": raw.strip()}
+        return await registry_install_server(logger, server_id)
 
     async def list_server_tools(self, server_id: str) -> Dict[str, Any]:
         """List tools available on an installed MCP server."""
-        logger.info(f"Dispatch: Listing tools for server '{server_id}'")
-        raw = await self._run_dmcp("tools", server_id, "--json")
-        if raw is None:
-            return {"error": f"Failed to list tools for '{server_id}'", "tools": []}
-
-        try:
-            tools = json.loads(raw)
-        except json.JSONDecodeError:
-            return {"error": "dmcp returned invalid JSON", "tools": []}
-
-        if isinstance(tools, dict) and "tools" in tools:
-            tools = tools["tools"]
-        if not isinstance(tools, list):
-            tools = []
-
-        logger.info(f"Dispatch: Server '{server_id}' has {len(tools)} tool(s)")
-        return {"server": server_id, "tools": tools}
+        return await registry_list_server_tools(logger, server_id)
 
     # ------------------------------------------------------------------
     # Semantic tool discovery (vector-based via dispatch → dmcp)
@@ -387,60 +245,12 @@ class DispatchAdapter:
             - bare number     : wrapped as {"output": N}
             - plain text "N"  : fallback from --json parse failure
         """
-        if not self._connected:
-            # Fall back to direct dmcp call if dispatch isn't connected
-            raw = await self._run_dmcp("count", "--json")
-            if raw is None:
-                return {"total": 0, "local": 0, "registry": 0}
-            try:
-                parsed = json.loads(raw)
-                return self._normalize_count(parsed)
-            except json.JSONDecodeError:
-                # Plain number output
-                try:
-                    return {"total": int(raw.strip()), "local": 0, "registry": 0}
-                except ValueError:
-                    return {"total": 0, "local": 0, "registry": 0}
-
-        try:
-            result = await asyncio.wait_for(
-                self.session.call_tool("server_count", {}),
-                timeout=self.timeout,
-            )
-            content = self._extract_content(result)
-            normalized = self._normalize_count(content)
-            logger.info(f"Dispatch: Server count: {normalized}")
-            return normalized
-        except Exception as e:
-            logger.warning(f"Dispatch: server_count failed: {e}")
-            return {"total": 0, "local": 0, "registry": 0}
+        return await discovery_server_count(self, logger)
 
     @staticmethod
     def _normalize_count(content: Any) -> Dict[str, int]:
         """Coerce a server-count response into {total, local, registry}."""
-        default = {"total": 0, "local": 0, "registry": 0}
-        if isinstance(content, int):
-            return {"total": content, "local": 0, "registry": 0}
-        if not isinstance(content, dict):
-            return default
-
-        if "total" in content:
-            return {
-                "total": int(content.get("total", 0) or 0),
-                "local": int(content.get("local", 0) or 0),
-                "registry": int(content.get("registry", 0) or 0),
-            }
-
-        # Bare number wrapped by _extract_content as {"output": N}
-        val = content.get("output")
-        if isinstance(val, int):
-            return {"total": val, "local": 0, "registry": 0}
-        if isinstance(val, str):
-            try:
-                return {"total": int(val.strip()), "local": 0, "registry": 0}
-            except ValueError:
-                return default
-        return default
+        return discovery_normalize_count(content)
 
     async def embedding_spec(self) -> Optional[Dict[str, Any]]:
         """
@@ -449,49 +259,11 @@ class DispatchAdapter:
         Returns: {"model": "nomic-embed-text", "version": "v1.5", "dimensions": 768}
         or None if not available.
         """
-        if not self._connected:
-            raw = await self._run_dmcp("embedding-spec")
-            if raw is None:
-                return None
-            try:
-                return json.loads(raw)
-            except json.JSONDecodeError:
-                return None
-
-        try:
-            result = await asyncio.wait_for(
-                self.session.call_tool("embedding_spec", {}),
-                timeout=self.timeout,
-            )
-            content = self._extract_content(result)
-            if "error" in content:
-                logger.warning(f"Dispatch: embedding_spec: {content['error']}")
-                return None
-            logger.info(f"Dispatch: Embedding spec: {content}")
-            return content
-        except Exception as e:
-            logger.warning(f"Dispatch: embedding_spec failed: {e}")
-            return None
+        return await discovery_embedding_spec(self, logger)
 
     async def sync_index(self) -> Dict[str, Any]:
         """Trigger dmcp sync-index to refresh the vector index from registries."""
-        if not self._connected:
-            raw = await self._run_dmcp("sync-index")
-            if raw is None:
-                return {"error": "dmcp sync-index failed"}
-            return {"output": raw.strip()}
-
-        try:
-            result = await asyncio.wait_for(
-                self.session.call_tool("sync_index", {}),
-                timeout=self.timeout,
-            )
-            content = self._extract_content(result)
-            logger.info(f"Dispatch: sync_index result: {content}")
-            return content
-        except Exception as e:
-            logger.warning(f"Dispatch: sync_index failed: {e}")
-            return {"error": f"sync_index failed: {e}"}
+        return await discovery_sync_index(self, logger)
 
     async def browse_vector(
         self,
@@ -505,42 +277,7 @@ class DispatchAdapter:
         Passes the vector to dispatch → dmcp browse --vector for cosine
         similarity search against the local vector index.
         """
-        if not self._connected:
-            vector_json = json.dumps(vector)
-            raw = await self._run_dmcp(
-                "browse",
-                "--vector",
-                vector_json,
-                "--top-k",
-                str(top_k),
-                "--min-score",
-                str(min_score),
-                "--json",
-            )
-            if raw is None:
-                return {"results": []}
-            try:
-                return json.loads(raw)
-            except json.JSONDecodeError:
-                return {"results": []}
-
-        try:
-            result = await asyncio.wait_for(
-                self.session.call_tool(
-                    "browse_vector",
-                    {
-                        "vector": vector,
-                        "top_k": top_k,
-                        "min_score": min_score,
-                    },
-                ),
-                timeout=self.timeout,
-            )
-            content = self._extract_content(result)
-            return content
-        except Exception as e:
-            logger.warning(f"Dispatch: browse_vector failed: {e}")
-            return {"results": []}
+        return await discovery_browse_vector(self, logger, vector, top_k, min_score)
 
     async def browse_vectors_batch(
         self,
@@ -553,42 +290,9 @@ class DispatchAdapter:
 
         Returns grouped results — one result set per input vector.
         """
-        if not self._connected:
-            vectors_json = json.dumps(vectors)
-            raw = await self._run_dmcp(
-                "browse",
-                "--vectors",
-                vectors_json,
-                "--top-k",
-                str(top_k),
-                "--min-score",
-                str(min_score),
-                "--json",
-            )
-            if raw is None:
-                return {"results": [[] for _ in vectors]}
-            try:
-                return json.loads(raw)
-            except json.JSONDecodeError:
-                return {"results": [[] for _ in vectors]}
-
-        try:
-            result = await asyncio.wait_for(
-                self.session.call_tool(
-                    "browse_vectors",
-                    {
-                        "vectors": vectors,
-                        "top_k": top_k,
-                        "min_score": min_score,
-                    },
-                ),
-                timeout=self.timeout,
-            )
-            content = self._extract_content(result)
-            return content
-        except Exception as e:
-            logger.warning(f"Dispatch: browse_vectors_batch failed: {e}")
-            return {"results": [[] for _ in vectors]}
+        return await discovery_browse_vectors_batch(
+            self, logger, vectors, top_k, min_score
+        )
 
     async def index_server(
         self,
@@ -610,37 +314,14 @@ class DispatchAdapter:
             name: Optional server name.
             description: Optional server description.
         """
-        if not self._connected:
-            args = ["index-server", server_id, "--vectors", json.dumps(vectors)]
-            if name:
-                args.extend(["--name", name])
-            if description:
-                args.extend(["--description", description])
-            raw = await self._run_dmcp(*args)
-            if raw is None:
-                return {"error": f"Failed to index server '{server_id}'"}
-            return {"indexed": server_id, "output": raw.strip()}
-
-        try:
-            params: Dict[str, Any] = {
-                "server_id": server_id,
-                "vectors": json.dumps(vectors),
-            }
-            if name:
-                params["name"] = name
-            if description:
-                params["description"] = description
-
-            result = await asyncio.wait_for(
-                self.session.call_tool("index_server", params),
-                timeout=self.timeout,
-            )
-            content = self._extract_content(result)
-            logger.info(f"Dispatch: Indexed server '{server_id}': {content}")
-            return content
-        except Exception as e:
-            logger.warning(f"Dispatch: index_server failed: {e}")
-            return {"error": f"Failed to index server: {e}"}
+        return await discovery_index_server(
+            self,
+            logger,
+            server_id,
+            vectors,
+            name,
+            description,
+        )
 
     async def select_discovery_mode(
         self,
@@ -687,51 +368,7 @@ class DispatchAdapter:
                    "keywords", "top_k", "min_score".
             embeddings: OllamaEmbeddings instance for local embedding.
         """
-        mode = await self.select_discovery_mode(embeddings)
-        logger.info(f"Dispatch: discover_tools — {len(tasks)} sub-task(s), mode={mode}")
-
-        all_results: List[Dict[str, Any]] = []
-
-        if mode == "embedding":
-            intents = [t.get("intent", "") for t in tasks]
-            try:
-                vectors = embeddings.embed_batch(intents)
-                top_k = max(t.get("top_k", 5) for t in tasks)
-                min_score = min(t.get("min_score", 0.3) for t in tasks)
-
-                batch_result = await self.browse_vectors_batch(
-                    vectors=vectors,
-                    top_k=top_k,
-                    min_score=min_score,
-                )
-
-                result_sets = batch_result.get("results", [])
-                if isinstance(result_sets, list):
-                    for i, result_set in enumerate(result_sets):
-                        if isinstance(result_set, list) and result_set:
-                            for r in result_set:
-                                r["_source_task"] = intents[i]
-                            all_results.extend(result_set)
-                        else:
-                            # No vector match for this task — fall back to
-                            # keyword search so the user still gets candidates.
-                            all_results.extend(await self._keyword_fallback(tasks[i]))
-
-            except Exception as e:
-                logger.warning(
-                    f"Dispatch: Embedding discovery failed, falling back to keywords: {e}"
-                )
-                for task in tasks:
-                    all_results.extend(await self._keyword_fallback(task))
-        else:
-            for task in tasks:
-                all_results.extend(await self._keyword_fallback(task))
-
-        if not all_results:
-            logger.info("Dispatch: discover_tools found no matching tools")
-            return ""
-
-        return self._format_available_tools(all_results)
+        return await run_tool_discovery(self, logger, tasks, embeddings)
 
     async def _keyword_fallback(self, task: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Keyword search fallback for a single sub-task.
@@ -742,82 +379,7 @@ class DispatchAdapter:
         server-level — the LLM must install them before they become
         dispatchable.
         """
-        keywords = task.get("keywords", [])
-        if not keywords:
-            # Extract basic keywords from intent
-            intent = task.get("intent", "")
-            keywords = [w for w in intent.lower().split() if len(w) > 3]
-
-        if not keywords:
-            return []
-
-        result = await self.search_servers(keywords)
-        servers = result.get("servers", [])
-
-        source_task = task.get("intent", "")
-        tool_results: List[Dict[str, Any]] = []
-
-        for server in servers:
-            server_id = server.get("id", server.get("server_id", ""))
-            if not server_id:
-                continue
-
-            installed = bool(server.get("installed", False))
-            server_name = server.get("name", server_id)
-            server_desc = server.get("description", "")
-
-            if installed:
-                # Expand installed servers to per-tool rows
-                tools_result = await self.list_server_tools(server_id)
-                tools = (
-                    tools_result.get("tools", [])
-                    if isinstance(tools_result, dict)
-                    else []
-                )
-
-                if tools:
-                    for tool in tools:
-                        if not isinstance(tool, dict):
-                            continue
-                        tool_name = tool.get("name", "")
-                        if not tool_name:
-                            continue
-                        tool_results.append(
-                            {
-                                "server_id": server_id,
-                                "server_name": server_name,
-                                "tool_name": tool_name,
-                                "description": tool.get("description", ""),
-                                "params": tool.get(
-                                    "inputSchema", tool.get("params", {})
-                                ),
-                                "installed": True,
-                                "score": 0,  # keyword matches don't have scores
-                                "_source": "keyword",
-                                "_source_task": source_task,
-                            }
-                        )
-                    continue
-
-                # Installed but no tool info — fall through to server-level row
-                logger.debug(
-                    f"Dispatch: installed server '{server_id}' exposed no tools "
-                    "via list_server_tools; emitting server-level row"
-                )
-
-            tool_results.append(
-                {
-                    "server_id": server_id,
-                    "server_name": server_name,
-                    "description": server_desc,
-                    "installed": installed,
-                    "score": 0,
-                    "_source": "keyword",
-                    "_source_task": source_task,
-                }
-            )
-
-        return tool_results
+        return await run_keyword_fallback(self, logger, task)
 
     @staticmethod
     def _format_available_tools(results: List[Dict[str, Any]]) -> str:
@@ -831,67 +393,7 @@ class DispatchAdapter:
         Deduplicated by (server_id, tool_name) for tool rows and by
         server_id for server rows.
         """
-        matched: List[Dict[str, Any]] = []
-        candidates: List[Dict[str, Any]] = []
-
-        seen_tools: set = set()
-        seen_servers: set = set()
-
-        for r in results:
-            server_id = r.get("server_id", "")
-            if not server_id:
-                continue
-            tool_name = r.get("tool_name", "")
-            installed = bool(r.get("installed", True))
-
-            is_dispatchable = bool(tool_name) and installed
-            if is_dispatchable:
-                key = (server_id, tool_name)
-                if key in seen_tools:
-                    continue
-                seen_tools.add(key)
-                matched.append(r)
-            else:
-                if server_id in seen_servers:
-                    continue
-                seen_servers.add(server_id)
-                candidates.append(r)
-
-        sections: List[str] = []
-
-        if matched:
-            lines = ["MATCHED_TOOLS:"]
-            for r in matched:
-                server_id = r.get("server_id", "unknown")
-                tool_name = r.get("tool_name", "")
-                line = f"  {server_id}/{tool_name}"
-                score = r.get("score", 0)
-                if score:
-                    line += f" (relevance: {score:.0%})"
-                description = r.get("description", "")
-                if description:
-                    line += f"\n    {description}"
-                params = r.get("params", r.get("parameter_schema", ""))
-                if params:
-                    params_str = (
-                        json.dumps(params) if isinstance(params, dict) else str(params)
-                    )
-                    line += f"\n    params: {params_str}"
-                lines.append(line)
-            sections.append("\n".join(lines))
-
-        if candidates:
-            lines = ["CANDIDATE_SERVERS (not installed — use install + list_tools):"]
-            for r in candidates:
-                server_id = r.get("server_id", "unknown")
-                line = f"  {server_id}"
-                description = r.get("description", "")
-                if description:
-                    line += f"\n    {description}"
-                lines.append(line)
-            sections.append("\n".join(lines))
-
-        return "\n\n".join(sections)
+        return render_available_tools(results)
 
     async def auto_index_server(
         self,
@@ -905,77 +407,14 @@ class DispatchAdapter:
         Ollama, and stores the vectors in dmcp's local index.
         Does nothing if embeddings are unavailable.
         """
-        if embeddings is None:
-            logger.debug(
-                f"Dispatch: Skipping auto-index for '{server_id}' (no embeddings)"
-            )
-            return
-
-        # Get tool descriptions from the installed server
-        tools_result = await self.list_server_tools(server_id)
-        tools = tools_result.get("tools", [])
-        if not tools:
-            logger.debug(f"Dispatch: No tools found for '{server_id}', skipping index")
-            return
-
-        try:
-            # Build texts to embed
-            server_desc = f"{server_id}"
-            tool_texts = {}
-            for tool in tools:
-                name = tool.get("name", "")
-                desc = tool.get("description", "")
-                params = tool.get("params", tool.get("inputSchema", {}))
-                text = f"{server_id} | {name} | {desc} | params: {json.dumps(params)}"
-                tool_texts[name] = text
-
-            # Embed server description
-            server_vector = embeddings.embed_single(server_desc)
-
-            # Embed each tool
-            tool_vectors = {}
-            for name, text in tool_texts.items():
-                tool_vectors[name] = embeddings.embed_single(text)
-
-            # Store in dmcp's index
-            vectors = {
-                "server": server_vector,
-                "tools": tool_vectors,
-            }
-            result = await self.index_server(server_id, vectors)
-            logger.info(
-                f"Dispatch: Auto-indexed '{server_id}' ({len(tool_vectors)} tools): {result}"
-            )
-
-        except Exception as e:
-            # Non-fatal — server is installed, just not vector-indexed
-            logger.warning(
-                f"Dispatch: Auto-index failed for '{server_id}' (non-fatal): {e}"
-            )
+        await discovery_auto_index_server(self, logger, server_id, embeddings)
 
     async def ensure_embedding_model(self, embeddings: Optional[Any] = None) -> None:
         """
         On startup, check the registry's embedding spec and ensure
         the correct model is available locally.
         """
-        if embeddings is None:
-            return
-
-        spec = await self.embedding_spec()
-        if spec is None:
-            logger.info(
-                "Dispatch: No embedding spec from registry (index may not be synced)"
-            )
-            return
-
-        registry_model = spec.get("model", "")
-        if registry_model and registry_model != embeddings.model:
-            logger.warning(
-                f"Dispatch: Registry embedding model '{registry_model}' differs from "
-                f"local model '{embeddings.model}'. Updating local model."
-            )
-            embeddings.model = registry_model
-            embeddings.ensure_model()
+        await discovery_ensure_embedding_model(self, logger, embeddings)
 
     async def __aenter__(self):
         await self.connect()

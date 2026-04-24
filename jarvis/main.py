@@ -17,22 +17,60 @@ event queue. Both can be active simultaneously.
 """
 
 import asyncio
-import json
-import os
-import sys
-import time
+from functools import partial
 from typing import Any, Dict, List, Optional
 
-from .config import Config
 from .core import ComponentFactory
 from .core.logger import JarvisLogger, get_logger
-from .dispatch.event_merger import Event, EventType
+from .dispatch.event_merger import Event
+from .runtime import events as runtime_events
+from .runtime import io as runtime_io
+from .runtime import root_handlers
+from .runtime.dispatch_flow import (
+    dispatch_execute_tasks as runtime_dispatch_execute_tasks,
+)
+from .runtime.dispatch_flow import dispatch_send as runtime_dispatch_send
+from .runtime.dispatch_flow import do_defer as runtime_do_defer
+from .runtime.dispatch_flow import do_kill as runtime_do_kill
+from .runtime.dispatch_flow import get_tool_metadata as runtime_get_tool_metadata
+from .runtime.dispatch_flow import (
+    run_dispatch_subchain as runtime_run_dispatch_subchain,
+)
+from .runtime.goal_updates import apply_goal_updates as runtime_apply_goal_updates
 from .runtime.lifecycle import (
     bootstrap_tool_index_nonfatal,
     cancel_task_if_running,
     connect_dispatch_nonfatal,
     install_signal_handlers,
+    request_stop,
+    shutdown,
     start_runtime_services,
+    stdin_is_tty,
+)
+from .runtime.llm_bridge import ask_llm as runtime_ask_llm
+from .runtime.llm_bridge import ask_llm_sync as runtime_ask_llm_sync
+from .runtime.output_hooks import emit_activity as runtime_emit_activity
+from .runtime.output_hooks import get_embeddings as runtime_get_embeddings
+from .runtime.output_hooks import (
+    persist_assistant_turn as runtime_persist_assistant_turn,
+)
+from .runtime.root_actions import act_on_root_response as runtime_act_on_root_response
+from .runtime.root_actions import feed_root_summary as runtime_feed_root_summary
+from .runtime.root_context import build_root_context as runtime_build_root_context
+from .runtime.root_context import (
+    compact_payload_for_llm as runtime_compact_payload_for_llm,
+)
+from .runtime.session_commands import (
+    handle_slash_command as runtime_handle_slash_command,
+)
+from .runtime.session_commands import session_reply as runtime_session_reply
+from .runtime.sync_ask import handle_voice_command as runtime_handle_voice_command
+from .runtime.sync_ask import sync_ask as runtime_sync_ask
+from .runtime.voice_activation_thread import (
+    process_voice_command_inject as runtime_process_voice_command_inject,
+)
+from .runtime.voice_activation_thread import (
+    run_voice_activation as runtime_run_voice_activation,
 )
 from .sessions import SessionManager
 
@@ -85,7 +123,7 @@ class Jarvis:
         self._running = True
 
         loop = asyncio.get_running_loop()
-        install_signal_handlers(loop, self.stop)
+        install_signal_handlers(loop, partial(request_stop, self))
         await connect_dispatch_nonfatal(self.dispatch, logger)
         await bootstrap_tool_index_nonfatal(self.dispatch, self._embeddings, logger)
 
@@ -103,66 +141,20 @@ class Jarvis:
         finally:
             cancel_task_if_running(socket_task)
             cancel_task_if_running(output_task)
-            await self._shutdown()
+            await shutdown(self, logger)
 
     async def _handle_event(self, event: Event):
-        if event.type == EventType.USER_INPUT:
-            await self._on_user_input(event.data)
-        elif event.type == EventType.DISPATCH_SIGNAL:
-            await self._on_dispatch_signal(event.data)
-        elif event.type == EventType.CONFIRMATION_RESPONSE:
-            await self._on_confirmation_response(event.data)
+        await runtime_events.handle_event(self, event)
 
     # ------------------------------------------------------------------
     # ROOT-level handlers
     # ------------------------------------------------------------------
 
     async def _on_user_input(self, text: str):
-        logger.info(f"JARVIS: User input: '{text}'")
-
-        # Slash-commands are session-control shortcuts, not LLM input.
-        if text.startswith("/"):
-            handled = self._handle_slash_command(text)
-            if handled:
-                return
-
-        # Ensure we have a session to log against.  First-ever input
-        # lazily creates one so history is always session-scoped.
-        self.sessions.ensure_session()
-
-        self.goals.add_goal(text)
-
-        # Auto-store every user prompt for long-term recall.
-        # No LLM decision — every prompt gets persisted + embedded.
-        if self.contextor:
-            self.contextor.auto_store_prompt(
-                text,
-                session_id=self.sessions.current_id,
-            )
-
-        self.llm.switch_mode("root")
-        context = self._build_root_context(new_input=text)
-        self._activity("Thinking about your request…", kind="llm")
-
-        response = await self._ask_llm(context, tag="root")
-        await self._act_on_root_response(response)
+        await root_handlers.on_user_input(self, logger, text)
 
     async def _on_dispatch_signal(self, signal: Dict[str, Any]):
-        sig_type = signal.get("type")
-        sig_pid = signal.get("pid")
-        logger.info(f"JARVIS: Dispatch signal: type={sig_type}, pid={sig_pid}")
-        if sig_type:
-            self._activity(
-                f"Dispatch signal: {sig_type} (pid {sig_pid})", kind="dispatch"
-            )
-
-        self.goals.update_from_signal(signal)
-
-        self.llm.switch_mode("root")
-        context = self._build_root_context(signal=signal)
-
-        response = await self._ask_llm(context, tag="root")
-        await self._act_on_root_response(response)
+        await root_handlers.on_dispatch_signal(self, logger, signal)
 
     async def _on_confirmation_response(self, data: Dict[str, Any]):
         """Handle a CONFIRMATION_RESPONSE event from the event loop.
@@ -171,507 +163,50 @@ class Jarvis:
         approved tasks or feeds USER_DENIAL back to ROOT so the LLM
         keeps communicating with the user.
         """
-        pending = self.confirmation.resolve(data)
-        if pending is None:
-            # Already expired / resolved — ignore.
-            return
-
-        logger.info(
-            f"JARVIS: Confirmation resolved: id={pending.request_id}, "
-            f"approved={len(pending.approved_tasks)}, "
-            f"denied={len(pending.denied_tools)}"
-        )
-
-        # All denied — feed USER_DENIAL to ROOT.
-        if pending.denied_tools and not pending.approved_tasks:
-            denied_list = ", ".join(pending.denied_tools)
-            self.llm.switch_mode("root")
-            context = self._build_root_context()
-            context += f"\nUSER_DENIAL: Action {denied_list} was denied by the user"
-            response = await self._ask_llm(context, tag="root-confirmation-denied")
-            await self._act_on_root_response(response)
-            return
-
-        # Some or all approved — dispatch the approved tasks.
-        if pending.approved_tasks:
-            result = await self.dispatch.send_tasks(pending.approved_tasks)
-
-            self.llm.switch_mode("root")
-            context = self._build_root_context()
-
-            if isinstance(result, dict) and "error" in result:
-                context += f"\nDISPATCH_ERROR: {self._compact_payload_for_llm(result)}"
-            else:
-                context += f"\nDISPATCH_RESULT: {self._compact_payload_for_llm(result)}"
-
-            # Include partial denial if some tools were denied.
-            if pending.denied_tools:
-                denied_list = ", ".join(pending.denied_tools)
-                context += f"\nUSER_DENIAL: Action {denied_list} was denied by the user"
-
-            response = await self._ask_llm(context, tag="root-confirmation-result")
-            await self._act_on_root_response(response)
+        await root_handlers.on_confirmation_response(self, logger, data)
 
     async def _act_on_root_response(self, response: Dict[str, Any], depth: int = 0):
-        """Handle a ROOT-mode LLM response."""
-        if depth >= MAX_CHAIN_DEPTH:
-            logger.error("JARVIS: Max chain depth reached, forcing respond")
-            self.output_manager.handle_response(
-                {
-                    "output": "I got stuck in a loop. Could you try again?",
-                }
-            )
-            return
-
-        parsed = self.task_parser.parse(response)
-
-        if "error" in parsed:
-            logger.warning(f"JARVIS: Root parse error: {parsed['error']}")
-            self.output_manager.handle_response(
-                {
-                    "output": "I had trouble processing that. Could you try again?",
-                }
-            )
-            return
-
-        action = parsed["action"]
-        logger.info(f"JARVIS: Root action='{action}'")
-        if action == "respond":
-            self._activity("Composing response…", kind="llm")
-        elif action == "dispatch":
-            self._activity("Planning tool execution…", kind="dispatch")
-        elif action in ("store", "recall", "search_memory", "list_memory"):
-            self._activity(f"Running memory action: {action}", kind="memory")
-
-        self._apply_goal_updates(parsed.get("goal_updates", []))
-
-        if action == "respond":
-            output = parsed["output"]
-            if not output.strip():
-                logger.warning("JARVIS: LLM returned empty respond — retrying")
-                context = self._build_root_context()
-                context += "\nYour previous response had an empty output. Please respond to the user."
-                response = await self._ask_llm(context, tag="root-retry-empty")
-                await self._act_on_root_response(response, depth + 1)
-                return
-            self.output_manager.handle_response({"output": output})
-            self._persist_assistant_turn(output)
-            dismissed = self.goals.dismiss_completed()
-            if dismissed:
-                logger.info(f"JARVIS: Dismissed {len(dismissed)} completed goal(s)")
-            if Config.RESET_HISTORY_AFTER_RESPONSE:
-                self.llm.reset_history()
-
-        elif action == "dispatch":
-            if "tasks" in parsed:
-                await self._dispatch_execute_tasks(parsed["tasks"], depth)
-            else:
-                summary = await self._run_dispatch_subchain(parsed["intent"])
-                await self._feed_root_summary("DISPATCH_SUMMARY", summary, depth)
-
-        # -- Memory actions (direct, no sub-chain) --
-
-        elif action == "store":
-            if not self.contextor:
-                await self._feed_root_summary(
-                    "STORE_RESULT",
-                    json.dumps({"error": "Memory is disabled"}),
-                    depth,
-                )
-                return
-            # Global scope when LLM explicitly sets scope="global";
-            # otherwise file under the active session.
-            scope = parsed.get("scope", "session")
-            sid = None if scope == "global" else self.sessions.current_id
-            result = self.contextor.store(
-                parsed["theme"],
-                parsed["content"],
-                session_id=sid,
-            )
-            await self._feed_root_summary(
-                "STORE_RESULT",
-                self._compact_payload_for_llm(result),
-                depth,
-            )
-
-        elif action == "recall":
-            if not self.contextor:
-                await self._feed_root_summary(
-                    "RECALL_RESULT",
-                    json.dumps({"error": "Memory is disabled"}),
-                    depth,
-                )
-                return
-            result = self.contextor.recall(
-                parsed["theme"],
-                session_id=self.sessions.current_id,
-            )
-            await self._feed_root_summary(
-                "RECALL_RESULT",
-                self._compact_payload_for_llm(result),
-                depth,
-            )
-
-        elif action == "search_memory":
-            if not self.contextor:
-                await self._feed_root_summary(
-                    "SEARCH_MEMORY_RESULT",
-                    json.dumps(
-                        {
-                            "results": [],
-                            "available": False,
-                            "reason": "Memory is disabled",
-                        }
-                    ),
-                    depth,
-                )
-                return
-            result = self.contextor.semantic_search(
-                query=parsed["query"],
-                top_k=parsed.get("top_k", 5),
-                offset=parsed.get("offset", 0),
-                min_score=parsed.get("min_score", 0.3),
-                session_id=self.sessions.current_id,
-                include_global=True,
-            )
-            await self._feed_root_summary(
-                "SEARCH_MEMORY_RESULT",
-                self._compact_payload_for_llm(result),
-                depth,
-            )
-
-        elif action == "list_memory":
-            if not self.contextor:
-                await self._feed_root_summary(
-                    "LIST_MEMORY_RESULT",
-                    json.dumps({"themes": []}),
-                    depth,
-                )
-                return
-            result = self.contextor.list_themes(
-                session_id=self.sessions.current_id,
-            )
-            await self._feed_root_summary(
-                "LIST_MEMORY_RESULT",
-                self._compact_payload_for_llm(result),
-                depth,
-            )
+        await runtime_act_on_root_response(
+            app=self,
+            logger=logger,
+            response=response,
+            depth=depth,
+            max_chain_depth=MAX_CHAIN_DEPTH,
+        )
 
     async def _feed_root_summary(self, label: str, summary: str, depth: int):
-        """Feed a subsystem summary back into ROOT for the next decision."""
-        self.llm.switch_mode("root")
-        context = self._build_root_context()
-        context += f"\n{label}: {summary}"
-
-        response = await self._ask_llm(context, tag="root-chain")
-        await self._act_on_root_response(response, depth + 1)
+        await runtime_feed_root_summary(self, logger, label, summary, depth)
 
     # ------------------------------------------------------------------
     # DISPATCH sub-chain
     # ------------------------------------------------------------------
 
     async def _run_dispatch_subchain(self, intent: str) -> str:
-        """
-        Enter dispatch mode, give it the intent, and loop until it
-        returns "done" with a summary.
-
-        Before entering dispatch, JARVIS picks the active discovery
-        backend (embedding or keyword) and installs the matching
-        system prompt — the LLM never sees which backend is active.
-
-        The LLM starts with a "plan" action to split the intent into
-        sub-tasks. JARVIS runs the selected discovery backend and
-        injects MATCHED_TOOLS / CANDIDATE_SERVERS into the next prompt.
-        """
-        # Pick the discovery backend before switching modes so the
-        # dispatch system prompt matches the runtime behavior.
-        mode = await self.dispatch.select_discovery_mode(self._get_embeddings())
-        dispatch_prompt = (
-            Config.LLM_DISPATCH_PROMPT_EMBEDDING
-            if mode == "embedding"
-            else Config.LLM_DISPATCH_PROMPT_KEYWORD
+        return await runtime_run_dispatch_subchain(
+            app=self,
+            logger=logger,
+            intent=intent,
+            max_chain_depth=MAX_CHAIN_DEPTH,
         )
-        self.llm.set_prompt("dispatch", dispatch_prompt)
-
-        self.llm.switch_mode("dispatch")
-
-        context_parts = [f"INTENT: {intent}"]
-        goals = self.goals.get_context()
-        if goals:
-            context_parts.append(f"GOALS: {json.dumps(goals)}")
-        context = "\n".join(context_parts)
-
-        for step in range(MAX_CHAIN_DEPTH):
-            logger.info(
-                "JARVIS: Dispatch iteration start "
-                f"(step={step}, context_chars={len(context)})"
-            )
-            self._activity(f"Dispatch step {step + 1}: reasoning…", kind="dispatch")
-            response = await self._ask_llm(context, tag=f"dispatch-step-{step}")
-            parsed = self.task_parser.parse(response)
-
-            if "error" in parsed:
-                logger.warning(
-                    f"JARVIS: Dispatch sub-chain parse error: {parsed['error']}"
-                )
-                return f"Error: {parsed['error']}"
-
-            action = parsed["action"]
-            logger.info(
-                f"JARVIS: Dispatch iteration action (step={step}, action={action})"
-            )
-            self._apply_goal_updates(parsed.get("goal_updates", []))
-
-            if action == "done":
-                logger.info(
-                    f"JARVIS: Dispatch sub-chain completed: {parsed['summary']}"
-                )
-                self._activity("Dispatch completed.", kind="dispatch")
-                return parsed["summary"]
-
-            if action == "plan":
-                # LLM split the intent into sub-tasks — search for tools
-                sub_tasks = parsed.get("tasks", [])
-                logger.info(f"JARVIS: Plan has {len(sub_tasks)} sub-task(s)")
-                self._activity(
-                    f"Planned {len(sub_tasks)} sub-task(s); finding tools…",
-                    kind="dispatch",
-                )
-
-                available_tools = await self.dispatch.discover_tools(
-                    tasks=sub_tasks,
-                    embeddings=self._get_embeddings(),
-                )
-
-                if available_tools:
-                    context = f"{available_tools}\n\nINTENT: {intent}"
-                else:
-                    context = (
-                        "NO_TOOLS_FOUND: No matching tools were found. "
-                        "Re-plan with different sub-task intents, or use 'done' "
-                        "if the request cannot be fulfilled.\n"
-                        f"INTENT: {intent}"
-                    )
-
-            elif action == "search":
-                self._activity("Searching MCP servers…", kind="dispatch")
-                result = await self.dispatch.search_servers(parsed["keywords"])
-                context = f"SEARCH_RESULTS: {self._compact_payload_for_llm(result)}"
-
-            elif action == "list_tools":
-                self._activity(
-                    f"Listing tools for {parsed['server_id']}…", kind="dispatch"
-                )
-                result = await self.dispatch.list_server_tools(parsed["server_id"])
-                context = f"TOOLS: {self._compact_payload_for_llm(result)}"
-
-            elif action == "install":
-                self._activity(
-                    f"Installing server {parsed['server_id']}…", kind="dispatch"
-                )
-                result = await self.dispatch.install_server(parsed["server_id"])
-                context = f"INSTALL_RESULT: {self._compact_payload_for_llm(result)}"
-
-                # Auto-index non-approved servers after successful install
-                server_id = parsed.get("server_id", "")
-                if "error" not in result and server_id:
-                    await self.dispatch.auto_index_server(
-                        server_id=server_id,
-                        embeddings=self._get_embeddings(),
-                    )
-
-            elif action == "dispatch" and "tasks" in parsed:
-                self._activity(
-                    f"Dispatching {len(parsed['tasks'])} task(s)…", kind="dispatch"
-                )
-                result = await self._dispatch_send(parsed["tasks"])
-                if isinstance(result, dict) and result.get("awaiting_confirmation"):
-                    # Non-blocking: confirmation sent, return to event loop.
-                    # Dispatch will resume when CONFIRMATION_RESPONSE arrives.
-                    logger.info(
-                        f"JARVIS: Dispatch sub-chain paused for confirmation "
-                        f"id={result['confirmation_id']}"
-                    )
-                    self._activity(
-                        "Waiting for your confirmation before running tools.",
-                        kind="dispatch",
-                    )
-                    return "Waiting for user confirmation."
-                elif isinstance(result, dict) and "error" in result:
-                    context = f"DISPATCH_ERROR: {self._compact_payload_for_llm(result)}"
-                else:
-                    self._activity("Tool results received.", kind="dispatch")
-                    context = (
-                        f"DISPATCH_RESULT: {self._compact_payload_for_llm(result)}"
-                    )
-
-            elif action == "wait":
-                logger.info("JARVIS: Dispatch sub-chain waiting")
-                self._activity("Waiting for tasks to complete…", kind="dispatch")
-                return "Waiting for tasks to complete."
-
-            elif action == "kill":
-                self._activity("Stopping selected task(s)…", kind="dispatch")
-                await self._do_kill(parsed["pids"])
-                context = f"KILL_RESULT: Killed PID(s) {parsed['pids']}"
-
-            elif action == "defer":
-                self._activity(
-                    f"Setting reminder for {parsed['duration']}s (goal {parsed['goal_id']})…",
-                    kind="dispatch",
-                )
-                await self._do_defer(
-                    parsed["goal_id"],
-                    parsed["duration"],
-                    parsed.get("reason", ""),
-                )
-                return f"Deferred goal {parsed['goal_id']} for {parsed['duration']}s."
-
-            elif action == "respond":
-                self._activity("Composing response…", kind="llm")
-                out = parsed["output"]
-                self.output_manager.handle_response({"output": out})
-                self._persist_assistant_turn(out)
-                return out
-
-            else:
-                logger.warning(f"JARVIS: Unexpected dispatch action '{action}'")
-                return f"Unexpected action: {action}"
-
-        logger.error("JARVIS: Dispatch sub-chain hit max steps")
-        return "Tool execution timed out (too many steps)."
 
     async def _dispatch_send(self, tasks, dispatch_context=None) -> Dict[str, Any]:
-        """Low-level send to dispatch adapter, gated by TLA confirmation.
-
-        **Non-blocking**: if any tool requires confirmation, the tasks are
-        stashed and a notification is sent.  The method returns immediately
-        with ``{"awaiting_confirmation": True, ...}``.  When the user
-        responds, the ``CONFIRMATION_RESPONSE`` event triggers
-        ``_on_confirmation_response()`` which resumes the dispatch.
-
-        If no tools need confirmation, tasks are dispatched immediately.
-        """
-        if not self.dispatch.is_connected:
-            self._activity("Dispatch is unavailable right now.", kind="dispatch")
-            return {"error": "Dispatch not connected"}
-
-        approved_tasks = []
-        tools_needing_confirmation = []
-
-        for task in tasks:
-            tool_name = f"{task.get('server', '?')}.{task.get('tool', '?')}"
-            tool_meta = await self._get_tool_metadata(task)
-
-            if self.confirmation.should_confirm(tool_meta):
-                notification_silent = tool_meta.get(
-                    "notification_silent",
-                    Config.NOTIFICATION_SILENT,
-                )
-                tools_needing_confirmation.append(
-                    {
-                        "tool_name": tool_name,
-                        "task": task,
-                        "params": task.get("params", {}),
-                        "notification_silent": notification_silent,
-                    }
-                )
-            else:
-                approved_tasks.append(task)
-
-        # No confirmation needed — dispatch everything now.
-        if not tools_needing_confirmation:
-            return await self.dispatch.send_tasks(approved_tasks)
-
-        # Some tools need confirmation — stash and notify, return immediately.
-        import uuid
-
-        request_id = str(uuid.uuid4())[:8]
-
-        # Use the first tool's notification_silent preference for the batch.
-        notification_silent = tools_needing_confirmation[0].get(
-            "notification_silent",
-            Config.NOTIFICATION_SILENT,
-        )
-
-        await self.confirmation.request_confirmation(
-            request_id=request_id,
+        return await runtime_dispatch_send(
+            app=self,
+            logger=logger,
             tasks=tasks,
-            tools_needing_confirmation=tools_needing_confirmation,
-            approved_tasks=approved_tasks,
-            denied_tools=[],
             dispatch_context=dispatch_context,
-            notification_silent=notification_silent,
-            timeout=Config.CONFIRMATION_TIMEOUT,
         )
-
-        tool_names = [t["tool_name"] for t in tools_needing_confirmation]
-        self._activity(
-            "Awaiting confirmation for: "
-            + ", ".join(tool_names[:3])
-            + ("…" if len(tool_names) > 3 else ""),
-            kind="dispatch",
-        )
-        return {
-            "awaiting_confirmation": True,
-            "confirmation_id": request_id,
-            "tools_pending": tool_names,
-        }
 
     async def _get_tool_metadata(self, task: Dict[str, Any]) -> Dict[str, Any]:
-        """Retrieve tool metadata (including confirmation_required) from the
-        MCP server registry.
-
-        Falls back to an empty dict if metadata is unavailable so that
-        unconfigured tools default to no confirmation (safe for the
-        ``smart`` mode).
-        """
-        server_id = task.get("server")
-        tool_name = task.get("tool")
-        if not server_id or not tool_name:
-            return {}
-
-        try:
-            tools = await self.dispatch.list_server_tools(server_id)
-            if isinstance(tools, dict) and "tools" in tools:
-                for t in tools["tools"]:
-                    if t.get("name") == tool_name:
-                        return t
-        except Exception as e:
-            logger.debug(f"Could not fetch metadata for {server_id}.{tool_name}: {e}")
-
-        return {}
+        return await runtime_get_tool_metadata(self, logger, task)
 
     async def _dispatch_execute_tasks(self, tasks, depth: int):
-        """Handle a dispatch action that already has concrete tasks (from root)."""
-        if not self.dispatch.is_connected:
-            self.output_manager.handle_response(
-                {
-                    "output": "I can't execute tools right now — dispatch is not connected.",
-                }
-            )
-            return
-
-        result = await self._dispatch_send(tasks)
-
-        # If awaiting confirmation, return to event loop — the
-        # CONFIRMATION_RESPONSE event will resume this flow.
-        if isinstance(result, dict) and result.get("awaiting_confirmation"):
-            logger.info(
-                f"JARVIS: Root dispatch paused for confirmation "
-                f"id={result['confirmation_id']}"
-            )
-            return
-
-        self.llm.switch_mode("root")
-        context = self._build_root_context()
-        if isinstance(result, dict) and "error" in result:
-            context += f"\nDISPATCH_ERROR: {self._compact_payload_for_llm(result)}"
-        else:
-            context += f"\nDISPATCH_RESULT: {self._compact_payload_for_llm(result)}"
-
-        response = await self._ask_llm(context, tag="root-dispatch-result")
-        await self._act_on_root_response(response, depth + 1)
+        await runtime_dispatch_execute_tasks(
+            app=self,
+            logger=logger,
+            tasks=tasks,
+            depth=depth,
+        )
 
     # ------------------------------------------------------------------
     # Session slash-commands
@@ -683,90 +218,11 @@ class Jarvis:
         Returns True if the input was a slash-command (handled), else
         False so it falls through to normal LLM routing.
         """
-        parts = text.strip().split(maxsplit=1)
-        cmd = parts[0].lower()
-        arg = parts[1].strip() if len(parts) > 1 else ""
-
-        if cmd == "/new":
-            if not self.sessions.available:
-                self._session_reply("Memory is disabled — sessions unavailable.")
-                return True
-            session = self.sessions.new_session(title=arg or None)
-            if session:
-                self._session_reply(
-                    f"Started new session {session.short_id()}"
-                    + (f" ('{session.title}')" if session.title else ""),
-                )
-            else:
-                self._session_reply("Could not create a new session.")
-            return True
-
-        if cmd == "/sessions":
-            if not self.sessions.available:
-                self._session_reply("Memory is disabled — sessions unavailable.")
-                return True
-            sessions = self.sessions.list(limit=50)
-            if not sessions:
-                self._session_reply("No sessions yet.")
-                return True
-            current_id = self.sessions.current_id
-            lines = ["Sessions (most recent first):"]
-            for s in sessions:
-                marker = "* " if s.id == current_id else "  "
-                lines.append(f"{marker}{s.short_id()}  {s.display_label()}")
-            self._session_reply("\n".join(lines))
-            return True
-
-        if cmd == "/switch":
-            if not arg:
-                self._session_reply("Usage: /switch <session_id_prefix>")
-                return True
-            session = self.sessions.switch(arg)
-            if session:
-                self._session_reply(
-                    f"Switched to {session.short_id()} ('{session.title}')"
-                )
-            else:
-                self._session_reply(f"No session matches '{arg}'.")
-            return True
-
-        if cmd == "/rename":
-            if not arg:
-                self._session_reply("Usage: /rename <new title>")
-                return True
-            if not self.sessions.current:
-                self._session_reply("No active session to rename.")
-                return True
-            if self.sessions.rename(arg):
-                self._session_reply(f"Renamed to '{arg}'.")
-            else:
-                self._session_reply("Rename failed.")
-            return True
-
-        if cmd == "/delete":
-            if not arg:
-                self._session_reply("Usage: /delete <session_id_prefix>")
-                return True
-            sessions = self.sessions.list(limit=500)
-            matches = [s for s in sessions if s.id.startswith(arg)]
-            if len(matches) != 1:
-                self._session_reply(
-                    f"Need a unique id prefix; got {len(matches)} match(es)."
-                )
-                return True
-            if self.sessions.delete(matches[0].id):
-                self._session_reply(f"Deleted session {matches[0].short_id()}.")
-            else:
-                self._session_reply("Delete failed.")
-            return True
-
-        # Unknown slash-command — let it through to the LLM so the user
-        # can still type "/foo" as literal input if they insist.
-        return False
+        return runtime_handle_slash_command(self, text)
 
     def _session_reply(self, message: str) -> None:
         """Emit a local reply for slash-commands (no LLM roundtrip)."""
-        self.output_manager.handle_response({"output": message})
+        runtime_session_reply(self, message)
 
     # ------------------------------------------------------------------
     # Shared helpers
@@ -774,45 +230,23 @@ class Jarvis:
 
     def _get_embeddings(self):
         """Return the OllamaEmbeddings instance, or None if unavailable."""
-        return self._embeddings
+        return runtime_get_embeddings(self)
 
     def _activity(self, text: str, kind: str = "activity") -> None:
         """Emit a concise, user-facing runtime status line."""
-        self.output_manager.emit_activity(text=text, kind=kind)
+        runtime_emit_activity(self, text, kind)
 
     def _persist_assistant_turn(self, text: str) -> None:
         """Append assistant-visible text to the session transcript in contextor."""
-        if not self.contextor or not text or not str(text).strip():
-            return
-        sid = self.sessions.current_id
-        if not sid:
-            return
-        self.contextor.auto_store_assistant_reply(
-            str(text).strip(),
-            session_id=sid,
-        )
+        runtime_persist_assistant_turn(self, text)
 
     def _ask_llm_sync(self, context: str, tag: str = "") -> Dict[str, Any]:
         """Single LLM call with timing logs (synchronous)."""
-        logger.info(f"JARVIS [{tag}]: Calling LLM (mode={self.llm.mode})...")
-        logger.debug(f"JARVIS [{tag}]: LLM context:\n{context}")
-
-        t0 = time.perf_counter()
-        response = self.llm.ask(context)
-        elapsed = time.perf_counter() - t0
-
-        logger.info(f"JARVIS [{tag}]: LLM responded in {elapsed:.2f}s")
-        logger.debug(f"JARVIS [{tag}]: LLM raw response: {response}")
-        return response
+        return runtime_ask_llm_sync(self, logger, context, tag)
 
     async def _ask_llm(self, context: str, tag: str = "") -> Dict[str, Any]:
         """Single LLM call with timing logs (non-blocking for UI)."""
-        self._activity(f"LLM ({self.llm.mode}) is thinking…", kind="llm")
-        t0 = time.perf_counter()
-        response = await asyncio.to_thread(self._ask_llm_sync, context, tag)
-        elapsed = time.perf_counter() - t0
-        self._activity(f"LLM responded in {elapsed:.1f}s.", kind="llm")
-        return response
+        return await runtime_ask_llm(self, logger, context, tag)
 
     def _compact_payload_for_llm(
         self,
@@ -825,129 +259,25 @@ class Jarvis:
         Keeps logs verbose but prevents giant vectors / stack traces from
         bloating the active chat context.
         """
-        try:
-            if isinstance(payload, (dict, list)):
-                text = json.dumps(payload, ensure_ascii=False)
-            else:
-                text = str(payload)
-        except Exception:
-            text = str(payload)
-
-        # Trim huge vector dumps while preserving diagnostic intent.
-        text = text.replace("vector", "vec")
-        text = text.replace("vectors", "vecs")
-
-        if len(text) <= max_chars:
-            return text
-        omitted = len(text) - max_chars
-        return f"{text[:max_chars]} ... [truncated {omitted} chars]"
+        return runtime_compact_payload_for_llm(payload, max_chars=max_chars)
 
     def _build_root_context(
         self,
         new_input: Optional[str] = None,
         signal: Optional[Dict[str, Any]] = None,
     ) -> str:
-        parts = []
-
-        active_goals = self.goals.get_context()
-        if active_goals:
-            parts.append(f"GOALS: {json.dumps(active_goals)}")
-
-        if signal:
-            parts.append(f"SIGNAL: {json.dumps(signal)}")
-
-        # RAG retrieval — inject relevant memories from the contextor
-        # based on the current user input.  Scoped to the active session
-        # (plus global entries) so sibling chats don't bleed through.
-        if new_input and self.contextor:
-            rag_context = self.contextor.retrieve_context(
-                query=new_input,
-                top_k=getattr(Config, "RAG_TOP_K", 5),
-                min_score=getattr(Config, "RAG_MIN_SCORE", 0.3),
-                session_id=self.sessions.current_id,
-                include_global=True,
-            )
-            if rag_context:
-                logger.info(
-                    "JARVIS: RAG context injected for root "
-                    f"(chars={len(rag_context)}, session_id={self.sessions.current_id})"
-                )
-                parts.append(rag_context)
-            else:
-                logger.debug("JARVIS: No RAG context injected for root")
-
-        # Tier-2 rolling summary — gives the LLM a compressed view of
-        # older turns without blowing the context window.
-        summary = self.sessions.load_summary()
-        if summary:
-            parts.append(f"CONVERSATION_SUMMARY: {summary}")
-
-        if new_input:
-            parts.append(f"NEW INPUT: {new_input}")
-
-        logger.debug(
-            "JARVIS: Built root context "
-            f"(parts={len(parts)}, chars={sum(len(p) for p in parts)})"
+        return runtime_build_root_context(
+            self, logger, new_input=new_input, signal=signal
         )
 
-        return "\n".join(parts) if parts else "No active context."
-
     def _apply_goal_updates(self, updates):
-        for update in updates:
-            goal_id = update.get("id")
-            status = update.get("status")
-            if not goal_id or not status:
-                continue
-
-            if status == "completed":
-                self.goals.complete_goal(goal_id, update.get("result"))
-            elif status == "failed":
-                self.goals.fail_goal(goal_id, update.get("result"))
-            elif status == "active":
-                self.goals.link_tasks(goal_id, update.get("pids", []))
+        runtime_apply_goal_updates(self, updates)
 
     async def _do_kill(self, pids):
-        if not self.dispatch.is_connected:
-            return
-        result = await self.dispatch.kill_tasks(pids)
-        if "error" in result:
-            logger.error(f"JARVIS: Kill error: {result['error']}")
-        else:
-            logger.info(f"JARVIS: Killed PID(s): {pids}")
+        await runtime_do_kill(self, logger, pids)
 
     async def _do_defer(self, goal_id: str, duration: int, reason: str = ""):
-        if not self.dispatch.is_connected:
-            logger.warning("JARVIS: Dispatch not connected, cannot defer goal")
-            self._activity(
-                "Cannot set reminder: dispatch not connected.", kind="dispatch"
-            )
-            self.output_manager.handle_response(
-                {
-                    "output": "I can't defer goals right now — dispatch is not connected.",
-                }
-            )
-            return
-
-        label = f"goal_reminder:{goal_id}"
-        metadata = {"goal_id": goal_id, "type": "goal_defer"}
-        if reason:
-            metadata["reason"] = reason
-
-        result = await self.dispatch.set_timer(label, duration, metadata)
-
-        if "error" in result:
-            logger.error(f"JARVIS: Timer error: {result['error']}")
-            self._activity("Failed to set reminder timer.", kind="dispatch")
-        else:
-            timer_pid = result.get("pid", 0)
-            self.goals.defer_goal(goal_id, timer_pid)
-            logger.info(
-                f"JARVIS: Deferred goal [{goal_id}] for {duration}s (timer PID {timer_pid})"
-            )
-            self._activity(
-                f"Reminder set for {duration}s (goal {goal_id}, timer pid {timer_pid}).",
-                kind="dispatch",
-            )
+        await runtime_do_defer(self, logger, goal_id, duration, reason)
 
     # ------------------------------------------------------------------
     # Input sources (fed to EventMerger)
@@ -955,234 +285,47 @@ class Jarvis:
 
     def _has_stdin(self) -> bool:
         """True if stdin is a TTY (interactive chat mode)."""
-        return hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
+        return stdin_is_tty()
 
     def _run_voice_activation(self) -> None:
         """Run voice activation in a thread; commands are injected into the event loop."""
-        vm = self.voice_manager
-        vm._wake_word_detected = False
-        try:
-            if hasattr(vm.activation, "on_wake_word"):
-                vm.activation.on_wake_word = lambda: setattr(
-                    vm, "_wake_word_detected", True
-                )
-            if not self.voice_manager.activation.start_listening():
-                logger.error("JARVIS: Failed to start voice activation")
-                return
-            while self._running:
-                if getattr(self.voice_manager, "_wake_word_detected", False):
-                    self.voice_manager._wake_word_detected = False
-                    self._process_voice_command_inject()
-                time.sleep(0.3)
-        except Exception as e:
-            logger.error(f"JARVIS: Voice thread error: {e}", exc_info=True)
-        finally:
-            if hasattr(self.voice_manager, "activation"):
-                self.voice_manager.activation.cleanup()
+        runtime_run_voice_activation(self, logger)
 
     def _process_voice_command_inject(self) -> None:
         """Process voice command and inject into event loop (no direct ask)."""
-        try:
-            self.voice_manager.activation.stop_listening()
-            self.voice_manager.stt.start()
-            try:
-                for text, is_final in self.voice_manager.stt.iter_results():
-                    if is_final and text.strip():
-                        logger.info(f"Voice input: {text}")
-                        self.events.inject_user_input(text.strip())
-                        break
-            finally:
-                self.voice_manager.stt.stop()
-        except Exception as e:
-            logger.error(f"JARVIS: Voice processing error: {e}")
-        finally:
-            if self._running and hasattr(self.voice_manager, "activation"):
-                self.voice_manager.activation.start_listening()
+        runtime_process_voice_command_inject(self, logger)
 
     async def _run_socket_listener(self) -> None:
-        """Listen on Unix socket for text input (jarvis send, apps)."""
-        path = Config.JARVIS_INPUT_SOCKET
-        if not path:
-            return
-        sock_dir = os.path.dirname(path)
-        os.makedirs(sock_dir, exist_ok=True)
-        if os.path.exists(path):
-            try:
-                os.unlink(path)
-            except OSError:
-                pass
-        server = await asyncio.start_unix_server(
-            self._handle_socket_connection,
-            path=path,
-        )
-        try:
-            if os.path.exists(path):
-                try:
-                    os.chmod(path, 0o660)
-                except OSError:
-                    pass
-            await asyncio.Future()
-        except asyncio.CancelledError:
-            pass
-        finally:
-            server.close()
-            await server.wait_closed()
-            if os.path.exists(path):
-                try:
-                    os.unlink(path)
-                except OSError:
-                    pass
+        await runtime_io.run_socket_listener(self, logger)
 
     async def _handle_socket_connection(
         self,
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
     ) -> None:
-        """Handle one socket connection; read lines and inject.
-
-        Lines that parse as JSON with ``"type": "confirmation_response"``
-        are routed to the ConfirmationManager instead of the event queue.
-        """
-        try:
-            while self._running:
-                line = await reader.readline()
-                if not line:
-                    break
-                text = line.decode("utf-8", errors="replace").strip()
-                if not text:
-                    continue
-
-                # Check for confirmation responses — inject into event loop.
-                if text.startswith("{"):
-                    try:
-                        msg = json.loads(text)
-                        if msg.get("type") == "confirmation_response":
-                            self.events.inject_confirmation_response(msg)
-                            continue
-                    except json.JSONDecodeError:
-                        pass
-
-                self.events.inject_user_input(text)
-                logger.info(f"JARVIS: Socket input: {text[:80]}...")
-        except (ConnectionResetError, BrokenPipeError):
-            pass
-        finally:
-            writer.close()
-            try:
-                await writer.wait_closed()
-            except Exception:
-                pass
+        await runtime_io.handle_socket_connection(self, logger, reader, writer)
 
     def _on_output_for_broadcast(self, response: Dict[str, Any]) -> None:
-        """Callback: schedule broadcast to output socket clients."""
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(self._broadcast_to_output_clients(response))
-        except RuntimeError:
-            pass
+        runtime_io.on_output_for_broadcast(self, response)
 
     async def _broadcast_to_output_clients(self, response: Dict[str, Any]) -> None:
-        """Send response as JSON line to all connected output clients."""
-        line = json.dumps(response, ensure_ascii=False) + "\n"
-        data = line.encode("utf-8")
-        dead: List[asyncio.StreamWriter] = []
-        for w in self._output_clients:
-            try:
-                w.write(data)
-                await w.drain()
-            except (ConnectionResetError, BrokenPipeError, OSError):
-                dead.append(w)
-        for w in dead:
-            if w in self._output_clients:
-                self._output_clients.remove(w)
-            try:
-                w.close()
-                await w.wait_closed()
-            except Exception:
-                pass
+        await runtime_io.broadcast_to_output_clients(self, response)
 
     async def _run_output_socket_listener(self) -> None:
-        """Listen on Unix socket for output subscribers (apps, widgets)."""
-        path = Config.JARVIS_OUTPUT_SOCKET
-        if not path:
-            return
-        sock_dir = os.path.dirname(path)
-        os.makedirs(sock_dir, exist_ok=True)
-        if os.path.exists(path):
-            try:
-                os.unlink(path)
-            except OSError:
-                pass
-        server = await asyncio.start_unix_server(
-            self._handle_output_connection,
-            path=path,
-        )
-        try:
-            if os.path.exists(path):
-                try:
-                    os.chmod(path, 0o660)
-                except OSError:
-                    pass
-            await asyncio.Future()
-        except asyncio.CancelledError:
-            pass
-        finally:
-            self._output_clients.clear()
-            server.close()
-            await server.wait_closed()
-            if os.path.exists(path):
-                try:
-                    os.unlink(path)
-                except OSError:
-                    pass
+        await runtime_io.run_output_socket_listener(self, logger)
 
     async def _handle_output_connection(
         self,
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
     ) -> None:
-        """Handle output subscriber: add to list, wait for disconnect."""
-        self._output_clients.append(writer)
-        logger.info(
-            f"JARVIS: Output subscriber connected ({len(self._output_clients)} total)"
-        )
-        try:
-            await reader.read()
-        except (ConnectionResetError, BrokenPipeError):
-            pass
-        finally:
-            if writer in self._output_clients:
-                self._output_clients.remove(writer)
-            writer.close()
-            try:
-                await writer.wait_closed()
-            except Exception:
-                pass
-            logger.debug("JARVIS: Output subscriber disconnected")
+        await runtime_io.handle_output_connection(self, logger, reader, writer)
 
     async def _await_user_input(self) -> str:
-        return await asyncio.get_event_loop().run_in_executor(
-            None,
-            input,
-            "",
-        )
+        return await runtime_events.await_user_input()
 
     async def _await_dispatch_signal(self) -> Optional[Dict[str, Any]]:
-        if not self.dispatch.is_connected:
-            await asyncio.sleep(1)
-            return None
-
-        signals = await self.dispatch.get_signal_window()
-        if signals:
-            latest = signals[-1]
-            logger.debug(
-                f"JARVIS: Received {len(signals)} signal(s), forwarding latest: "
-                f"type={latest.get('type')}, pid={latest.get('pid')}",
-            )
-            return latest
-
-        await asyncio.sleep(0.5)
-        return None
+        return await runtime_events.await_dispatch_signal(self, logger)
 
     # ------------------------------------------------------------------
     # Synchronous / legacy interface
@@ -1190,44 +333,11 @@ class Jarvis:
 
     def ask(self, prompt: str) -> Dict[str, Any]:
         """Synchronous single-prompt interface for one-shot CLI usage."""
-        logger.info(f"JARVIS: Processing: '{prompt}'")
-
-        self.sessions.ensure_session()
-        if self.contextor:
-            self.contextor.auto_store_prompt(
-                prompt,
-                session_id=self.sessions.current_id,
-            )
-
-        self.goals.add_goal(prompt)
-        self.llm.switch_mode("root")
-        context = self._build_root_context(new_input=prompt)
-
-        response = self._ask_llm_sync(context, tag="ask")
-        parsed = self.task_parser.parse(response)
-
-        if "error" in parsed:
-            result = {"output": "I had trouble processing that. Could you try again?"}
-        elif parsed["action"] == "respond":
-            result = {"output": parsed["output"]}
-        else:
-            result = {"output": f"Action: {parsed.get('action', 'unknown')}"}
-
-        self.output_manager.handle_response(result)
-        if "error" not in parsed and parsed.get("action") == "respond":
-            self._persist_assistant_turn(result.get("output", ""))
-
-        if Config.RESET_HISTORY_AFTER_RESPONSE:
-            self.llm.reset_history()
-
-        return result
+        return runtime_sync_ask(self, logger, prompt)
 
     def _handle_voice_command(self, text: str) -> dict:
         """Voice callback: inject into event loop when running, else call ask() directly."""
-        if self._running and self.events._running:
-            self.events.inject_user_input(text)
-            return {}
-        return self.ask(prompt=text)
+        return runtime_handle_voice_command(self, logger, text)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -1235,22 +345,10 @@ class Jarvis:
 
     def stop(self) -> None:
         """Request graceful shutdown (e.g. from signal handler)."""
-        self._running = False
-        if self.voice_manager and hasattr(self.voice_manager, "activation"):
-            try:
-                self.voice_manager.activation.stop_listening()
-            except Exception:
-                pass
-        self.events.request_shutdown()
+        request_stop(self)
 
     async def _shutdown(self):
-        self._running = False
-        self.output_manager.remove_output_callback(self._on_output_for_broadcast)
-        await self.events.stop()
-        await self.dispatch.disconnect()
-        if self.contextor:
-            self.contextor.disconnect()
-        logger.info("JARVIS: Shutdown complete")
+        await shutdown(self, logger)
 
     def listen_with_activation(self):
         if not self.voice_manager:
