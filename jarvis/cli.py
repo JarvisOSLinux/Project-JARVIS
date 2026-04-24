@@ -49,6 +49,10 @@ def _cmd_send() -> None:
         print("  Tried:", ", ".join(p for p in candidates if p))
         print("  Is JARVIS running? Start with 'jarvis' or 'jarvis run'.")
         sys.exit(1)
+    from .core.socket_security import verify_socket_ownership
+    if not verify_socket_ownership(path):
+        print("Error: Socket ownership check failed. Unexpected owner on socket file.")
+        sys.exit(1)
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
             sock.settimeout(5)
