@@ -92,6 +92,7 @@ async def start_runtime_services(
     input_socket_task: Optional[asyncio.Task] = None
     if Config.JARVIS_INPUT_SOCKET:
         from ..core.socket_security import harden_socket_path, warn_if_allow_all
+
         harden_socket_path(Config.JARVIS_INPUT_SOCKET)
         warn_if_allow_all()
         input_socket_task = asyncio.create_task(app._run_socket_listener())

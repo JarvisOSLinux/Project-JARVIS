@@ -50,6 +50,7 @@ def _cmd_send() -> None:
         print("  Is JARVIS running? Start with 'jarvis' or 'jarvis run'.")
         sys.exit(1)
     from .core.socket_security import verify_socket_ownership
+
     if not verify_socket_ownership(path):
         print("Error: Socket ownership check failed. Unexpected owner on socket file.")
         sys.exit(1)
