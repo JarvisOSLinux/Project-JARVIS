@@ -45,7 +45,6 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Dict, List, Optional
 
-from rich.text import Text
 from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -67,20 +66,13 @@ from ..core.logger import JarvisLogger, get_logger
 from ..sessions.model import Session
 from . import actions as tui_actions
 from . import lifecycle as tui_lifecycle
+from . import output as tui_output
 from .local_input import export_transcript_to_disk, handle_local_input
 from .session_sidebar import on_session_selected as handle_session_selected
 from .session_sidebar import refresh_sidebar
 from .session_sidebar import schedule_sidebar_refresh as queue_sidebar_refresh
 
 logger = get_logger(__name__)
-
-
-def _markup_to_plain(markup: str) -> str:
-    """Strip Rich markup for export / plain transcript buffer."""
-    try:
-        return Text.from_markup(markup, emoji=False).plain
-    except Exception:
-        return markup
 
 
 class SessionItem(ListItem):
@@ -236,7 +228,7 @@ class JarvisTUI(App):
             )
             return
 
-        self._append_log(f"[bold cyan]you[/bold cyan] > {self._escape(text)}")
+        self._append_log(f"[bold cyan]you[/bold cyan] > {tui_output.escape(text)}")
 
         # Inject via the same path voice and sockets use.  Slash
         # commands still work — main.py's handler catches them.
@@ -244,32 +236,19 @@ class JarvisTUI(App):
 
     def _on_jarvis_output(self, response: Dict[str, Any]) -> None:
         """Output callback — called from the main asyncio loop by OutputManager."""
-        text = response.get("output", "")
-        if not text:
-            return
-        self._append_log(f"[bold magenta]jarvis[/bold magenta] > {self._escape(text)}")
-        # Session might have been auto-created on first message; refresh.
-        self.schedule_sidebar_refresh()
+        tui_output.on_jarvis_output(self, response)
 
     def _on_jarvis_activity(self, event: Dict[str, Any]) -> None:
         """Internal runtime narrative (LLM/dispatch status), not chat content."""
-        text = str(event.get("text", "")).strip()
-        if not text:
-            return
-        self._append_log(f"[dim]… {self._escape(text)}[/dim]")
+        tui_output.on_jarvis_activity(self, event)
 
     def _append_log(self, markup: str) -> None:
-        try:
-            chat_log = self.query_one("#chat-log", RichLog)
-        except Exception:
-            return
-        chat_log.write(markup)
-        self._export_lines.append(_markup_to_plain(markup))
+        tui_output.append_log(self, markup)
 
     @staticmethod
     def _escape(text: str) -> str:
         """Escape Rich markup meta-characters in user/LLM text."""
-        return text.replace("[", r"\[")
+        return tui_output.escape(text)
 
     # ------------------------------------------------------------------
     # Session sidebar
