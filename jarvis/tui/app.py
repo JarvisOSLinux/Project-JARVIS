@@ -66,6 +66,7 @@ from ..config import Config
 from ..core.logger import JarvisLogger, get_logger
 from ..sessions.model import Session
 from . import actions as tui_actions
+from . import lifecycle as tui_lifecycle
 from .local_input import export_transcript_to_disk, handle_local_input
 from .session_sidebar import on_session_selected as handle_session_selected
 from .session_sidebar import refresh_sidebar
@@ -203,78 +204,17 @@ class JarvisTUI(App):
     # ------------------------------------------------------------------
 
     async def on_mount(self) -> None:
-        self.title = "JARVIS"
-        self.sub_title = "interactive chat"
-
-        self._append_log("[dim]Booting JARVIS engine…[/dim]")
-
-        # Defer engine start off the Textual mount path so an Ollama
-        # connect or contextor spawn doesn't block the first paint.
-        self.run_worker(self._start_jarvis(), exclusive=True, name="jarvis-boot")
+        tui_lifecycle.on_mount(self)
 
     async def _start_jarvis(self) -> None:
         """Create the Jarvis engine and start its event loop."""
-        # Lazy import — avoids pulling engine deps when someone only
-        # introspects the tui module.
-        from ..main import Jarvis
-
-        try:
-            jarvis = Jarvis(tui_mode=True)
-        except Exception as e:  # pragma: no cover - surfaced to the user
-            logger.error(f"TUI: Failed to construct Jarvis: {e}", exc_info=True)
-            self._append_log(f"[red]Failed to start JARVIS: {e}[/red]")
-            self._set_status(f"startup error: {e}")
-            return
-
-        self.jarvis = jarvis
-        self._output_cb = self._on_jarvis_output
-        self._activity_cb = self._on_jarvis_activity
-        jarvis.output_manager.add_output_callback(self._output_cb)
-        jarvis.output_manager.add_activity_callback(self._activity_cb)
-
-        # Kick off the engine's event loop as an async task.
-        self._jarvis_task = asyncio.create_task(self._run_engine(), name="jarvis-run")
-
-        # Wait a beat for dispatch/contextor to come up, then seed the UI.
-        await asyncio.sleep(0.1)
-        await self._refresh_sidebar()
-        self._update_status()
-        self._append_log(
-            "[green]Ready.[/green] Type below or use Ctrl+N for a new chat."
-        )
-        self.query_one("#input", Input).focus()
+        await tui_lifecycle.start_jarvis(self, logger)
 
     async def _run_engine(self) -> None:
-        try:
-            await self.jarvis.run()
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:  # pragma: no cover
-            logger.error(f"TUI: Engine crashed: {e}", exc_info=True)
-            chat_log = self.query_one("#chat-log", RichLog)
-            chat_log.write(f"[red]Engine crashed: {e}[/red]")
+        await tui_lifecycle.run_engine(self, logger)
 
     async def on_unmount(self) -> None:
-        if self.jarvis is not None:
-            try:
-                if self._output_cb is not None:
-                    self.jarvis.output_manager.remove_output_callback(self._output_cb)
-                if self._activity_cb is not None:
-                    self.jarvis.output_manager.remove_activity_callback(
-                        self._activity_cb
-                    )
-            except Exception:
-                pass
-            try:
-                self.jarvis.stop()
-            except Exception:
-                pass
-        if self._jarvis_task is not None and not self._jarvis_task.done():
-            self._jarvis_task.cancel()
-            try:
-                await self._jarvis_task
-            except (asyncio.CancelledError, Exception):
-                pass
+        await tui_lifecycle.on_unmount(self)
 
     # ------------------------------------------------------------------
     # Input / output wiring
