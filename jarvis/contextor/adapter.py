@@ -18,10 +18,6 @@ Sessions (chat conversations):
   one are *global* and visible to every session (facts the user wants
   to carry across conversations).  Entries with a ``session_id`` are
   scoped to that conversation.
-
-  Session commands:
-    create_session, list_sessions, get_session,
-    update_session, delete_session
 """
 
 import json
@@ -80,7 +76,6 @@ class ContextorAdapter:
             logger.error(f"Contextor: Failed to start binary: {e}")
             self._connected = False
 
-        # Run initial prune on startup
         if self._connected:
             self._send(
                 {
@@ -244,52 +239,23 @@ class ContextorAdapter:
         logger.warning(f"Contextor: Store failed: {result.get('error')}")
         return {"error": result.get("error", "Store failed")}
 
-    def auto_store_prompt(
+    def _auto_store_message(
         self,
         text: str,
+        role: str,
         session_id: Optional[str] = None,
     ) -> None:
-        """
-        Automatically store every user prompt for long-term recall.
-
-        No LLM decision — fires on every input.  Creates a complete
-        searchable history under the ``conversation_log`` theme.
+        """Store a conversation turn under ``conversation_log``.
 
         Args:
-            text: The user's utterance.
-            session_id: If given, log under this session so the
-                conversation history is session-scoped.
+            text: The utterance to store.
+            role: ``"user_prompt"`` or ``"assistant_reply"``.
+            session_id: Chat session scope.  None = global.
         """
-        if not self._connected:
+        if not self._connected or not (text or "").strip():
             return
 
-        vector = self._embed(text) or []
-        self._send(
-            {
-                "cmd": "store",
-                "theme": "conversation_log",
-                "content": text,
-                "vector": vector,
-                "metadata": {"type": "user_prompt"},
-                "session_id": session_id,
-            }
-        )
-        scope = f"session={session_id[:8]}" if session_id else "global"
-        logger.debug(f"Contextor: Auto-stored prompt ({len(text)} chars, {scope})")
-
-    def auto_store_assistant_reply(
-        self,
-        text: str,
-        session_id: Optional[str] = None,
-    ) -> None:
-        """
-        Store assistant-visible replies under ``conversation_log`` so each
-        session has a searchable transcript (user prompts + assistant text),
-        similar to a multi-turn chat product.
-        """
-        if not self._connected or not session_id or not (text or "").strip():
-            return
-        # Avoid pathological embedding / DB size on huge tool dumps.
+        # Cap huge assistant dumps to avoid pathological DB / embedding size.
         max_chars = 100_000
         if len(text) > max_chars:
             text = text[:max_chars] + "\n… [truncated]"
@@ -301,14 +267,38 @@ class ContextorAdapter:
                 "theme": "conversation_log",
                 "content": text,
                 "vector": vector,
-                "metadata": {"type": "assistant_reply"},
+                "metadata": {"type": role},
                 "session_id": session_id,
             }
         )
-        logger.debug(
-            f"Contextor: Auto-stored assistant reply ({len(text)} chars, "
-            f"session={session_id[:8]})"
-        )
+        scope = f"session={session_id[:8]}" if session_id else "global"
+        logger.debug(f"Contextor: Auto-stored {role} ({len(text)} chars, {scope})")
+
+    def auto_store_prompt(
+        self,
+        text: str,
+        session_id: Optional[str] = None,
+    ) -> None:
+        """Store every user prompt for long-term recall.
+
+        No LLM decision — fires on every input.  Creates a searchable
+        history under the ``conversation_log`` theme.
+        """
+        self._auto_store_message(text, "user_prompt", session_id)
+
+    def auto_store_assistant_reply(
+        self,
+        text: str,
+        session_id: Optional[str] = None,
+    ) -> None:
+        """Store assistant replies under ``conversation_log``.
+
+        Produces a searchable per-session transcript (user + assistant turns).
+        Skips empty replies and replies without a session scope.
+        """
+        if not session_id:
+            return
+        self._auto_store_message(text, "assistant_reply", session_id)
 
     def recall(
         self,
@@ -362,14 +352,12 @@ class ContextorAdapter:
         Args:
             query: Natural language search query.
             top_k: Max results.
-            offset: Skip this many top results (for pagination / dig-deeper).
+            offset: Skip this many top results (for pagination).
             theme: Restrict to one theme.  None = all themes.
-            min_score: Cosine similarity floor (0.0–1.0).
+            min_score: Cosine similarity floor (0.0-1.0).
             session_id: If given, restrict to entries in this session.
-                Combine with ``include_global=True`` to also include
-                session-less (global) entries.
-            include_global: When ``session_id`` is set, whether to also
-                match global entries.  Ignored if ``session_id`` is None.
+            include_global: When ``session_id`` is set, also match global
+                entries.  Ignored if ``session_id`` is None.
         """
         if not self._connected or not self._embeddings:
             return {
@@ -423,17 +411,9 @@ class ContextorAdapter:
         include_global: bool = True,
     ) -> str:
         """
-        RAG entry point — retrieve relevant memories and format them
-        for injection into the LLM context.
+        RAG entry point — retrieve relevant memories formatted for LLM injection.
 
         Returns a formatted string, or empty string if nothing relevant.
-
-        Args:
-            query: The user's utterance.
-            top_k, offset, min_score: Standard search knobs.
-            session_id: Scope to this session (falls back to global
-                entries as well when ``include_global=True``).
-            include_global: See ``semantic_search``.
         """
         result = self.semantic_search(
             query,
@@ -505,7 +485,7 @@ class ContextorAdapter:
             cmd["session_id"] = session_id
         result = self._send(cmd)
 
-        # Compatibility fallback for older binaries that reject `session_id`.
+        # Compatibility fallback: older binaries reject `session_id` on delete.
         if (
             not result.get("ok")
             and session_id
@@ -514,6 +494,7 @@ class ContextorAdapter:
         ):
             self._supports_delete_scope = False
             result = self._send({"cmd": "delete", "theme": theme})
+
         if result.get("ok"):
             logger.info(f"Contextor: Deleted theme '{theme}'")
             return {"deleted": True, "theme": theme}
@@ -544,14 +525,11 @@ class ContextorAdapter:
         """Create a new chat session.
 
         Args:
-            title: Human-readable label.  If None, the binary picks a
-                default (e.g. ``"Chat 2026-04-12 14:30"``).
-            metadata: Arbitrary JSON metadata (e.g. which client started
-                the session).
+            title: Human-readable label.  If None the binary picks a default.
+            metadata: Arbitrary JSON metadata stored with the session.
 
         Returns:
-            ``{"session": {...}}`` on success with the full session
-            object (id, title, created_at, updated_at, summary, metadata).
+            ``{"session": {"id", "title", "created_at", ...}}`` on success.
             ``{"error": "..."}`` on failure.
         """
         if not self._connected:
@@ -559,7 +537,6 @@ class ContextorAdapter:
         if self._supports_sessions is False:
             return {"error": "Session commands unsupported by contextor binary"}
 
-        # Rust expects `title` as a string; JSON null is rejected.
         cmd: Dict[str, Any] = {
             "cmd": "create_session",
             "title": title if title is not None else "",
@@ -569,22 +546,14 @@ class ContextorAdapter:
 
         result = self._send(cmd)
         if result.get("ok"):
-            # Binary returns session_id + created_at, not a full session row.
-            sid = result.get("session_id") or ""
-            if sid:
-                fetched = self.get_session(sid)
-                if "session" in fetched:
-                    session = fetched["session"]
-                    logger.info(
-                        f"Contextor: Created session id={session.get('id', '?')[:8]} "
-                        f"title='{session.get('title', '')}'"
-                    )
-                    return {"session": session}
-            session = result.get("session") or {}
+            session = result.get("session") or {
+                "id": result.get("session_id", ""),
+                "title": title or "",
+                "created_at": result.get("created_at", ""),
+            }
             logger.info(
                 f"Contextor: Created session id={session.get('id', '?')[:8]} "
-                f"title='{session.get('title', '')}'"
-            )
+                f"title='{session.get('title', '')}'")
             return {"session": session}
 
         logger.warning(f"Contextor: create_session failed: {result.get('error')}")
@@ -641,9 +610,8 @@ class ContextorAdapter:
         session_id: str,
         title: Optional[str] = None,
         summary: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Update a session's title, rolling summary, or metadata.
+        """Update a session's title or rolling summary.
 
         Only provided fields are updated; omitted fields are left alone.
         """
@@ -656,13 +624,7 @@ class ContextorAdapter:
         if title is not None:
             cmd["title"] = title
         if summary is not None:
-            # Rust protocol uses `rolling_summary`.
             cmd["rolling_summary"] = summary
-        if metadata is not None:
-            logger.debug(
-                "Contextor: update_session metadata is not supported by current "
-                "binary protocol; ignoring metadata update."
-            )
 
         result = self._send(cmd)
         if result.get("ok"):
@@ -682,7 +644,7 @@ class ContextorAdapter:
             session_id: Which session to delete.
             delete_entries: If True, also delete every memory entry
                 belonging to this session.  If False, entries are
-                orphaned (session_id set to null → they become global).
+                orphaned (session_id set to null, becoming global).
         """
         if not self._connected:
             return {"error": "Contextor not connected"}
@@ -693,6 +655,7 @@ class ContextorAdapter:
             {
                 "cmd": "delete_session",
                 "session_id": session_id,
+                "delete_entries": delete_entries,
             }
         )
         if result.get("ok"):
