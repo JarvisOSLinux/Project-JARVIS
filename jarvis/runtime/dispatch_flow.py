@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import time
 import uuid
 from logging import Logger
 from typing import Any
@@ -12,6 +14,35 @@ from .goal_updates import apply_goal_updates
 from .llm_bridge import ask_llm
 from .output_hooks import emit_activity, get_embeddings, persist_assistant_turn
 from .root_context import build_root_context, compact_payload_for_llm
+
+
+async def _poll_for_completion(
+    app: Any,
+    logger: Logger,
+    timeout: float = 60.0,
+    poll_interval: float = 0.5,
+) -> dict[str, Any] | None:
+    """Poll the dispatch signal window for an EXIT or TIMEOUT signal.
+
+    Called from the 'wait' branch so the sub-chain stays alive instead
+    of returning and racing against the rolling signal-window expiry.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        await asyncio.sleep(poll_interval)
+        try:
+            signals = await app.dispatch.get_signal_window()
+        except Exception:
+            continue
+        for sig in signals:
+            if sig.get("type") in ("EXIT", "TIMEOUT"):
+                logger.info(
+                    "JARVIS: Completion signal received during wait: "
+                    f"type={sig.get('type')}, pid={sig.get('pid')}"
+                )
+                return sig
+    logger.warning("JARVIS: _poll_for_completion timed out after %ss", timeout)
+    return None
 
 
 async def run_dispatch_subchain(
@@ -149,9 +180,16 @@ async def run_dispatch_subchain(
                 context = f"DISPATCH_RESULT: {compact_payload_for_llm(result)}"
 
         elif action == "wait":
-            logger.info("JARVIS: Dispatch sub-chain waiting")
+            # Stay inside the sub-chain and poll for the completion signal.
+            # Returning here would race against the rolling signal-window
+            # expiry: by the time ROOT's REMIND flow finishes and the event
+            # loop polls again, the EXIT signal may have already scrolled out.
+            logger.info("JARVIS: Dispatch sub-chain waiting — polling for completion")
             emit_activity(app, "Waiting for tasks to complete…", kind="dispatch")
-            return "Waiting for tasks to complete."
+            completion = await _poll_for_completion(app, logger, timeout=60)
+            if completion is None:
+                return "Task wait timed out — no completion signal received within 60s."
+            context = f"TASK_COMPLETED: {compact_payload_for_llm(completion)}"
 
         elif action == "kill":
             emit_activity(app, "Stopping selected task(s)…", kind="dispatch")
