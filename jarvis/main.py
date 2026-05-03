@@ -180,12 +180,18 @@ class Jarvis:
             goal_id=goal_id,
         )
 
-    async def _dispatch_send(self, tasks, dispatch_context=None) -> Dict[str, Any]:
+    async def _dispatch_send(
+        self,
+        tasks,
+        dispatch_context=None,
+        session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         return await runtime_dispatch_send(
             app=self,
             logger=logger,
             tasks=tasks,
             dispatch_context=dispatch_context,
+            session_id=session_id,
         )
 
     async def _get_tool_metadata(self, task: Dict[str, Any]) -> Dict[str, Any]:

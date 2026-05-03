@@ -75,7 +75,11 @@ class DispatchAdapter:
     def is_connected(self) -> bool:
         return self._connected
 
-    async def send_tasks(self, tasks: List[Dict[str, Any]]) -> Dict[str, Any]:
+    async def send_tasks(
+        self,
+        tasks: List[Dict[str, Any]],
+        session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         Send a batch of tasks to dispatch for concurrent execution.
 
@@ -85,6 +89,9 @@ class DispatchAdapter:
                 - tool: tool name on that server
                 - params: dict of arguments
                 - remind_after: (optional) seconds before a REMIND signal
+            session_id: Optional opaque session identifier (e.g. goal ID).
+                When provided, the dispatch binary scopes its signal window
+                to PIDs belonging to this session.
 
         Returns:
             Dict with assigned PIDs and status.
@@ -98,11 +105,15 @@ class DispatchAdapter:
                 f"Dispatch:   task[{i}]: server={task.get('server')}, tool={task.get('tool')}, params={task.get('params')}"
             )
 
+        params: Dict[str, Any] = {"tasks": tasks}
+        if session_id is not None:
+            params["session_id"] = session_id
+
         return await transport_call_tool(
             self,
             logger,
             tool_name="dispatch",
-            params={"tasks": tasks},
+            params=params,
             op_name="send_tasks",
             timeout_error="Dispatch timed out after {timeout}s",
             failure_prefix="Failed to dispatch tasks",
