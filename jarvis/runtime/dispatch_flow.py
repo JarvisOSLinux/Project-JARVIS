@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import uuid
 from logging import Logger
-from typing import Any
+from typing import Any, Optional
 
 from ..config import Config
+from ..dispatch.goal_manager import Goal
 from .goal_updates import apply_goal_updates
 from .llm_bridge import ask_llm
 from .output_hooks import emit_activity, get_embeddings, persist_assistant_turn
@@ -15,17 +16,12 @@ from .root_context import build_root_context, compact_payload_for_llm
 
 
 def _extract_pids_from_result(result: Any) -> list[int]:
-    """Pull task PIDs out of a send_tasks / wait_task result.
-
-    The dispatch binary returns INIT signals for each newly-started task;
-    their 'pid' field is the canonical identifier to pass to wait_task.
-    """
+    """Pull task PIDs out of a send_tasks / wait_task result via INIT signals."""
     signals: list[dict] = []
     if isinstance(result, list):
         signals = result
     elif isinstance(result, dict):
         signals = result.get("signals", [])
-        # Some response shapes embed the list directly at the top level.
         if not signals and any(isinstance(v, list) for v in result.values()):
             for v in result.values():
                 if isinstance(v, list):
@@ -49,9 +45,7 @@ def _signals_from_result(result: Any) -> list[dict]:
     return []
 
 
-def _find_exits_for_pids(
-    window: list[dict], pids: list[int]
-) -> list[dict]:
+def _find_exits_for_pids(window: list[dict], pids: list[int]) -> list[dict]:
     """Return EXIT/TIMEOUT signals from the window that match any of the given PIDs."""
     pid_set = set(pids)
     return [
@@ -65,19 +59,18 @@ async def run_dispatch_subchain(
     logger: Logger,
     intent: str,
     max_chain_depth: int,
+    goal_id: Optional[str] = None,
 ) -> str:
     """
-    Enter dispatch mode, give it the intent, and loop until it
-    returns "done" with a summary.
+    Enter dispatch mode, give it the intent, and loop until the LLM
+    calls 'done' with a summary.
 
-    Before entering dispatch, JARVIS picks the active discovery
-    backend (embedding or keyword) and installs the matching
-    system prompt — the LLM never sees which backend is active.
-
-    The LLM starts with a "plan" action to split the intent into
-    sub-tasks. JARVIS runs the selected discovery backend and
-    injects MATCHED_TOOLS / CANDIDATE_SERVERS into the next prompt.
+    goal_id: if provided, the sub-chain operates on behalf of this Goal
+    node — linking PIDs, creating subgoals, writing output on completion,
+    and always including the goal's scoped context in every LLM turn.
     """
+    goal: Optional[Goal] = app.goals.get_goal(goal_id) if goal_id else None
+
     mode = await app.dispatch.select_discovery_mode(get_embeddings(app))
     dispatch_prompt = (
         Config.LLM_DISPATCH_PROMPT_EMBEDDING
@@ -85,17 +78,36 @@ async def run_dispatch_subchain(
         else Config.LLM_DISPATCH_PROMPT_KEYWORD
     )
     app.llm.set_prompt("dispatch", dispatch_prompt)
-
     app.llm.switch_mode("dispatch")
 
+    # ------------------------------------------------------------------
+    # Context builder — always leads with INTENT + current goal state.
+    # The LLM never loses its bearings after the first dispatch wakeup.
+    # ------------------------------------------------------------------
+    def _ctx(result_key: str, payload: Any) -> str:
+        parts = [f"INTENT: {intent}"]
+        if goal:
+            gctx = app.goals.get_goal_context(goal.id)
+            if gctx:
+                parts.append(f"GOAL_STATE: {compact_payload_for_llm(gctx)}")
+        elif app.goals.get_context():
+            parts.append(f"GOALS: {json.dumps(app.goals.get_context())}")
+        parts.append(f"{result_key}: {compact_payload_for_llm(payload)}")
+        return "\n".join(parts)
+
+    # Initial context (before any dispatch)
     context_parts = [f"INTENT: {intent}"]
-    goals = app.goals.get_context()
-    if goals:
-        context_parts.append(f"GOALS: {json.dumps(goals)}")
+    if goal:
+        gctx = app.goals.get_goal_context(goal.id)
+        if gctx:
+            context_parts.append(f"GOAL_STATE: {compact_payload_for_llm(gctx)}")
+    else:
+        goals_ctx = app.goals.get_context()
+        if goals_ctx:
+            context_parts.append(f"GOALS: {json.dumps(goals_ctx)}")
     context = "\n".join(context_parts)
 
-    # PIDs of the most recently dispatched task batch. Updated whenever the
-    # LLM issues a 'dispatch' action; used to call wait_task on 'wait'.
+    # PIDs of the most recently dispatched task batch.
     pending_pids: list[int] = []
 
     for step in range(max_chain_depth):
@@ -115,10 +127,17 @@ async def run_dispatch_subchain(
         logger.info(f"JARVIS: Dispatch iteration action (step={step}, action={action})")
         apply_goal_updates(app, parsed.get("goal_updates", []))
 
+        # Persist strategy update if the LLM provided one
+        if goal and parsed.get("strategy"):
+            app.goals.update_strategy(goal.id, parsed["strategy"])
+
         if action == "done":
-            logger.info(f"JARVIS: Dispatch sub-chain completed: {parsed['summary']}")
+            summary = parsed["summary"]
+            logger.info(f"JARVIS: Dispatch sub-chain completed: {summary}")
             emit_activity(app, "Dispatch completed.", kind="dispatch")
-            return parsed["summary"]
+            if goal:
+                app.goals.complete_goal(goal.id, output=summary)
+            return summary
 
         if action == "plan":
             sub_tasks = parsed.get("tasks", [])
@@ -129,39 +148,49 @@ async def run_dispatch_subchain(
                 kind="dispatch",
             )
 
+            # Create child goal nodes for each sub-task intent so the tree
+            # grows as planning recurses.
+            if goal:
+                for sub_task in sub_tasks:
+                    sub_intent = (
+                        sub_task.get("intent")
+                        or sub_task.get("description")
+                        or str(sub_task)
+                    )
+                    app.goals.add_subgoal(goal.id, sub_intent)
+
             available_tools = await app.dispatch.discover_tools(
                 tasks=sub_tasks,
                 embeddings=get_embeddings(app),
             )
 
             if available_tools:
-                context = f"{available_tools}\n\nINTENT: {intent}"
+                context = _ctx("MATCHED_TOOLS", available_tools)
             else:
-                context = (
-                    "NO_TOOLS_FOUND: No matching tools were found. "
-                    "Re-plan with different sub-task intents, or use 'done' "
-                    "if the request cannot be fulfilled.\n"
-                    f"INTENT: {intent}"
+                context = _ctx(
+                    "NO_TOOLS_FOUND",
+                    "No matching tools were found. Re-plan with different sub-task "
+                    "intents, or use 'done' if the request cannot be fulfilled.",
                 )
 
         elif action == "search":
             emit_activity(app, "Searching MCP servers…", kind="dispatch")
             result = await app.dispatch.search_servers(parsed["keywords"])
-            context = f"SEARCH_RESULTS: {compact_payload_for_llm(result)}"
+            context = _ctx("SEARCH_RESULTS", result)
 
         elif action == "list_tools":
             emit_activity(
                 app, f"Listing tools for {parsed['server_id']}…", kind="dispatch"
             )
             result = await app.dispatch.list_server_tools(parsed["server_id"])
-            context = f"TOOLS: {compact_payload_for_llm(result)}"
+            context = _ctx("TOOLS", result)
 
         elif action == "install":
             emit_activity(
                 app, f"Installing server {parsed['server_id']}…", kind="dispatch"
             )
             result = await app.dispatch.install_server(parsed["server_id"])
-            context = f"INSTALL_RESULT: {compact_payload_for_llm(result)}"
+            context = _ctx("INSTALL_RESULT", result)
 
             server_id = parsed.get("server_id", "")
             if "error" not in result and server_id:
@@ -187,30 +216,25 @@ async def run_dispatch_subchain(
                 )
                 return "Waiting for user confirmation."
             if isinstance(result, dict) and "error" in result:
-                context = f"DISPATCH_ERROR: {compact_payload_for_llm(result)}"
+                context = _ctx("DISPATCH_ERROR", result)
             else:
-                # Track the PIDs so the 'wait' branch can call wait_task.
                 pending_pids = _extract_pids_from_result(result)
                 if pending_pids:
                     logger.info(
-                        f"JARVIS: Tracking {len(pending_pids)} dispatched PID(s): {pending_pids}"
+                        f"JARVIS: Tracking {len(pending_pids)} dispatched PID(s): "
+                        f"{pending_pids}"
                     )
+                    if goal:
+                        app.goals.link_tasks(goal.id, pending_pids)
                 emit_activity(app, "Tool results received.", kind="dispatch")
-                context = f"DISPATCH_RESULT: {compact_payload_for_llm(result)}"
+                context = _ctx("DISPATCH_RESULT", result)
 
         elif action == "wait":
-            # Use PIDs from the parsed action if provided; fall back to the
-            # ones we tracked from the last 'dispatch' result.
             pids = parsed.get("pids") or pending_pids
 
             if pids and app.dispatch.is_connected:
                 emit_activity(app, "Waiting for tasks to complete…", kind="dispatch")
 
-                # Peek at the signal window before blocking. The task may have
-                # already exited while the LLM was processing the previous
-                # REMIND (LLM iteration takes 1-2 s). If we called wait_task
-                # in that case, the Rust orchestrator's wait_for_event() would
-                # have no active task to wake it and would block indefinitely.
                 current_window = await app.dispatch.get_signal_window()
                 already_done = _find_exits_for_pids(current_window, pids)
 
@@ -221,11 +245,9 @@ async def run_dispatch_subchain(
                     )
                     if hasattr(app, "events"):
                         app.events.mark_signals_seen(already_done)
-                    context = f"WAIT_RESULT: {compact_payload_for_llm({'signals': already_done})}"
+                    context = _ctx("WAIT_RESULT", {"signals": already_done})
                 else:
-                    logger.info(
-                        f"JARVIS: Blocking via wait_task for PIDs {pids}"
-                    )
+                    logger.info(f"JARVIS: Blocking via wait_task for PIDs {pids}")
                     wait_result = await app.dispatch.wait_task(pids)
 
                     returned_signals = _signals_from_result(wait_result)
@@ -236,16 +258,14 @@ async def run_dispatch_subchain(
                         logger.warning(
                             f"JARVIS: wait_task returned error: {wait_result['error']}"
                         )
-                        context = f"WAIT_ERROR: {compact_payload_for_llm(wait_result)}"
+                        context = _ctx("WAIT_ERROR", wait_result)
                     else:
                         logger.info(
                             f"JARVIS: wait_task completed — "
                             f"{len(returned_signals)} signal(s) returned"
                         )
-                        context = f"WAIT_RESULT: {compact_payload_for_llm(wait_result)}"
+                        context = _ctx("WAIT_RESULT", wait_result)
             else:
-                # No PIDs tracked and none in parsed action — fall back to
-                # returning so EventMerger can deliver EXIT asynchronously.
                 logger.info(
                     "JARVIS: Dispatch sub-chain wait — no pids, returning to event loop"
                 )
@@ -255,12 +275,13 @@ async def run_dispatch_subchain(
         elif action == "kill":
             emit_activity(app, "Stopping selected task(s)…", kind="dispatch")
             await do_kill(app, logger, parsed["pids"])
-            context = f"KILL_RESULT: Killed PID(s) {parsed['pids']}"
+            context = _ctx("KILL_RESULT", f"Killed PID(s) {parsed['pids']}")
 
         elif action == "defer":
             emit_activity(
                 app,
-                f"Setting reminder for {parsed['duration']}s (goal {parsed['goal_id']})…",
+                f"Setting reminder for {parsed['duration']}s "
+                f"(goal {parsed['goal_id']})…",
                 kind="dispatch",
             )
             await do_defer(
@@ -325,12 +346,10 @@ async def dispatch_send(
         return await app.dispatch.send_tasks(approved_tasks)
 
     request_id = str(uuid.uuid4())[:8]
-
     notification_silent = tools_needing_confirmation[0].get(
         "notification_silent",
         Config.NOTIFICATION_SILENT,
     )
-
     await app.confirmation.request_confirmation(
         request_id=request_id,
         tasks=tasks,
@@ -365,7 +384,6 @@ async def get_tool_metadata(
     tool_name = task.get("tool")
     if not server_id or not tool_name:
         return {}
-
     try:
         tools = await app.dispatch.list_server_tools(server_id)
         if isinstance(tools, dict) and "tools" in tools:
@@ -374,7 +392,6 @@ async def get_tool_metadata(
                     return tool
     except Exception as e:
         logger.debug(f"Could not fetch metadata for {server_id}.{tool_name}: {e}")
-
     return {}
 
 
@@ -387,9 +404,7 @@ async def dispatch_execute_tasks(
     """Handle a dispatch action that already has concrete tasks (from root)."""
     if not app.dispatch.is_connected:
         app.output_manager.handle_response(
-            {
-                "output": "I can't execute tools right now — dispatch is not connected.",
-            }
+            {"output": "I can't execute tools right now — dispatch is not connected."}
         )
         return
 
@@ -436,9 +451,7 @@ async def do_defer(
             app, "Cannot set reminder: dispatch not connected.", kind="dispatch"
         )
         app.output_manager.handle_response(
-            {
-                "output": "I can't defer goals right now — dispatch is not connected.",
-            }
+            {"output": "I can't defer goals right now — dispatch is not connected."}
         )
         return
 
