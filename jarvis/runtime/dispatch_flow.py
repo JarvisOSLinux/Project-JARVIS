@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from logging import Logger
 from typing import Any, Optional
@@ -14,24 +15,47 @@ from .llm_bridge import ask_llm
 from .output_hooks import emit_activity, get_embeddings, persist_assistant_turn
 from .root_context import build_root_context, compact_payload_for_llm
 
+# Signal window text line: "[14:11:04] PID 2 INIT server tool {...}"
+_PID_INIT_RE = re.compile(r"PID (\d+) INIT")
+
 
 def _extract_pids_from_result(result: Any) -> list[int]:
-    """Pull task PIDs out of a send_tasks / wait_task result via INIT signals."""
+    """
+    Pull task PIDs from a send_tasks / wait_task result.
+
+    Tries structured signal dicts first (future-proof); falls back to parsing
+    the signal-window text format that the dispatch binary currently returns:
+      "Signal window (last N):\n[time] PID N INIT server tool {...}\n..."
+    """
+    # --- structured path ---
     signals: list[dict] = []
     if isinstance(result, list):
         signals = result
     elif isinstance(result, dict):
         signals = result.get("signals", [])
-        if not signals and any(isinstance(v, list) for v in result.values()):
+        if not signals:
             for v in result.values():
                 if isinstance(v, list):
                     signals = v
                     break
-    return [
+    structured = [
         s["pid"]
         for s in signals
         if isinstance(s, dict) and s.get("type") == "INIT" and s.get("pid") is not None
     ]
+    if structured:
+        return structured
+
+    # --- text fallback: parse "PID N INIT" lines from signal window string ---
+    text = ""
+    if isinstance(result, str):
+        text = result
+    elif isinstance(result, dict):
+        text = result.get("output", "") or ""
+    if text:
+        return [int(m) for m in _PID_INIT_RE.findall(text)]
+
+    return []
 
 
 def _signals_from_result(result: Any) -> list[dict]:
