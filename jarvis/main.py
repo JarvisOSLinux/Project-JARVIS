@@ -169,12 +169,15 @@ class Jarvis:
     # DISPATCH sub-chain
     # ------------------------------------------------------------------
 
-    async def _run_dispatch_subchain(self, intent: str) -> str:
+    async def _run_dispatch_subchain(
+        self, intent: str, goal_id: Optional[str] = None
+    ) -> str:
         return await runtime_run_dispatch_subchain(
             app=self,
             logger=logger,
             intent=intent,
             max_chain_depth=MAX_CHAIN_DEPTH,
+            goal_id=goal_id,
         )
 
     async def _dispatch_send(self, tasks, dispatch_context=None) -> Dict[str, Any]:
