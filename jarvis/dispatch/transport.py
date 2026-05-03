@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from logging import Logger
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 from ..config import Config
 
@@ -67,13 +67,20 @@ async def call_tool(
     timeout_error: str,
     failure_prefix: str,
     extractor: Callable[[Any], Dict[str, Any]],
+    timeout: Optional[float] = None,
 ) -> Dict[str, Any]:
-    """Call a dispatch MCP tool with timeout and normalized logging."""
+    """Call a dispatch MCP tool with timeout and normalized logging.
+
+    ``timeout`` overrides ``adapter.timeout`` for this call only.
+    Pass a large value (e.g. 600.0) for tools that intentionally block
+    until an event fires (e.g. 'wait').
+    """
+    effective_timeout = adapter.timeout if timeout is None else timeout
     t0 = time.perf_counter()
     try:
         result = await asyncio.wait_for(
             adapter.session.call_tool(tool_name, params),
-            timeout=adapter.timeout,
+            timeout=effective_timeout,
         )
         elapsed = time.perf_counter() - t0
         content = extractor(result)
@@ -84,9 +91,9 @@ async def call_tool(
     except asyncio.TimeoutError:
         elapsed = time.perf_counter() - t0
         logger.error(
-            f"Dispatch: {op_name} timed out after {elapsed:.2f}s (limit={adapter.timeout}s)"
+            f"Dispatch: {op_name} timed out after {elapsed:.2f}s (limit={effective_timeout}s)"
         )
-        return {"error": timeout_error.format(timeout=adapter.timeout)}
+        return {"error": timeout_error.format(timeout=effective_timeout)}
     except Exception as e:
         elapsed = time.perf_counter() - t0
         logger.error(f"Dispatch: {op_name} failed after {elapsed:.2f}s — {e}")
