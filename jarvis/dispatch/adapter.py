@@ -48,6 +48,11 @@ from .transport import (
 
 logger = get_logger(__name__)
 
+# How long to wait for a blocking 'wait' call before giving up (seconds).
+# Tasks can run for a long time; this is intentionally much larger than
+# the regular DISPATCH_TIMEOUT.
+_WAIT_TIMEOUT = getattr(Config, "DISPATCH_WAIT_TIMEOUT", 600.0)
+
 
 class DispatchAdapter:
     """Async MCP client for the dispatch binary."""
@@ -102,6 +107,44 @@ class DispatchAdapter:
             timeout_error="Dispatch timed out after {timeout}s",
             failure_prefix="Failed to dispatch tasks",
             extractor=self._extract_content,
+        )
+
+    async def wait_task(self, pids: List[int]) -> Dict[str, Any]:
+        """
+        Acknowledge a REMIND signal and block until the given PIDs complete.
+
+        Calls the dispatch binary's 'wait' MCP tool, which records WAIT
+        signals for each PID and then calls wait_for_event() again —
+        blocking until EXIT or TIMEOUT fires, then returning the updated
+        signal window.
+
+        This is the correct mechanism to use after the LLM issues a
+        {"action": "wait"} response: it keeps the sub-chain alive and
+        delivers EXIT data directly, bypassing any EventMerger polling
+        race condition.
+
+        Args:
+            pids: List of task PIDs to wait for.
+
+        Returns:
+            Dict / list containing the signal window with EXIT signal(s).
+        """
+        if not require_connection(self, logger, "wait_task"):
+            return {"error": "Not connected to dispatch"}
+
+        logger.info(
+            f"Dispatch: Acknowledging REMIND — blocking until PIDs {pids} complete"
+        )
+        return await transport_call_tool(
+            self,
+            logger,
+            tool_name="wait",
+            params={"pids": pids},
+            op_name="wait_task",
+            timeout_error="wait_task timed out after {timeout}s",
+            failure_prefix="Failed to wait for task completion",
+            extractor=self._extract_content,
+            timeout=_WAIT_TIMEOUT,
         )
 
     async def kill_tasks(self, pids: List[int]) -> Dict[str, Any]:
