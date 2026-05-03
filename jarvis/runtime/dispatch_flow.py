@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
-import time
 import uuid
 from logging import Logger
 from typing import Any
@@ -14,35 +12,6 @@ from .goal_updates import apply_goal_updates
 from .llm_bridge import ask_llm
 from .output_hooks import emit_activity, get_embeddings, persist_assistant_turn
 from .root_context import build_root_context, compact_payload_for_llm
-
-
-async def _poll_for_completion(
-    app: Any,
-    logger: Logger,
-    timeout: float = 60.0,
-    poll_interval: float = 0.5,
-) -> dict[str, Any] | None:
-    """Poll the dispatch signal window for an EXIT or TIMEOUT signal.
-
-    Called from the 'wait' branch so the sub-chain stays alive instead
-    of returning and racing against the rolling signal-window expiry.
-    """
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        await asyncio.sleep(poll_interval)
-        try:
-            signals = await app.dispatch.get_signal_window()
-        except Exception:
-            continue
-        for sig in signals:
-            if sig.get("type") in ("EXIT", "TIMEOUT"):
-                logger.info(
-                    "JARVIS: Completion signal received during wait: "
-                    f"type={sig.get('type')}, pid={sig.get('pid')}"
-                )
-                return sig
-    logger.warning("JARVIS: _poll_for_completion timed out after %ss", timeout)
-    return None
 
 
 async def run_dispatch_subchain(
@@ -63,8 +32,6 @@ async def run_dispatch_subchain(
     sub-tasks. JARVIS runs the selected discovery backend and
     injects MATCHED_TOOLS / CANDIDATE_SERVERS into the next prompt.
     """
-    # Pick the discovery backend before switching modes so the
-    # dispatch system prompt matches the runtime behavior.
     mode = await app.dispatch.select_discovery_mode(get_embeddings(app))
     dispatch_prompt = (
         Config.LLM_DISPATCH_PROMPT_EMBEDDING
@@ -104,7 +71,6 @@ async def run_dispatch_subchain(
             return parsed["summary"]
 
         if action == "plan":
-            # LLM split the intent into sub-tasks — search for tools
             sub_tasks = parsed.get("tasks", [])
             logger.info(f"JARVIS: Plan has {len(sub_tasks)} sub-task(s)")
             emit_activity(
@@ -147,7 +113,6 @@ async def run_dispatch_subchain(
             result = await app.dispatch.install_server(parsed["server_id"])
             context = f"INSTALL_RESULT: {compact_payload_for_llm(result)}"
 
-            # Auto-index non-approved servers after successful install
             server_id = parsed.get("server_id", "")
             if "error" not in result and server_id:
                 await app.dispatch.auto_index_server(
@@ -161,8 +126,6 @@ async def run_dispatch_subchain(
             )
             result = await app._dispatch_send(parsed["tasks"])
             if isinstance(result, dict) and result.get("awaiting_confirmation"):
-                # Non-blocking: confirmation sent, return to event loop.
-                # Dispatch will resume when CONFIRMATION_RESPONSE arrives.
                 logger.info(
                     f"JARVIS: Dispatch sub-chain paused for confirmation "
                     f"id={result['confirmation_id']}"
@@ -180,16 +143,12 @@ async def run_dispatch_subchain(
                 context = f"DISPATCH_RESULT: {compact_payload_for_llm(result)}"
 
         elif action == "wait":
-            # Stay inside the sub-chain and poll for the completion signal.
-            # Returning here would race against the rolling signal-window
-            # expiry: by the time ROOT's REMIND flow finishes and the event
-            # loop polls again, the EXIT signal may have already scrolled out.
-            logger.info("JARVIS: Dispatch sub-chain waiting — polling for completion")
+            # Return to the event loop. The signal queue (EventMerger) will
+            # deliver the EXIT signal as a new event when it arrives, and
+            # on_dispatch_signal will bring ROOT back to handle it.
+            logger.info("JARVIS: Dispatch sub-chain waiting")
             emit_activity(app, "Waiting for tasks to complete…", kind="dispatch")
-            completion = await _poll_for_completion(app, logger, timeout=60)
-            if completion is None:
-                return "Task wait timed out — no completion signal received within 60s."
-            context = f"TASK_COMPLETED: {compact_payload_for_llm(completion)}"
+            return "Waiting for tasks to complete."
 
         elif action == "kill":
             emit_activity(app, "Stopping selected task(s)…", kind="dispatch")
@@ -260,14 +219,11 @@ async def dispatch_send(
         else:
             approved_tasks.append(task)
 
-    # No confirmation needed — dispatch everything now.
     if not tools_needing_confirmation:
         return await app.dispatch.send_tasks(approved_tasks)
 
-    # Some tools need confirmation — stash and notify, return immediately.
     request_id = str(uuid.uuid4())[:8]
 
-    # Use the first tool's notification_silent preference for the batch.
     notification_silent = tools_needing_confirmation[0].get(
         "notification_silent",
         Config.NOTIFICATION_SILENT,
@@ -337,8 +293,6 @@ async def dispatch_execute_tasks(
 
     result = await dispatch_send(app, logger, tasks)
 
-    # If awaiting confirmation, return to event loop — the
-    # CONFIRMATION_RESPONSE event will resume this flow.
     if isinstance(result, dict) and result.get("awaiting_confirmation"):
         logger.info(
             f"JARVIS: Root dispatch paused for confirmation "
