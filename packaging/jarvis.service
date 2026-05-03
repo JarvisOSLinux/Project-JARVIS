@@ -61,7 +61,7 @@ Environment=JARVIS_INPUT_SOCKET=/run/jarvis/input.sock
 Environment=JARVIS_OUTPUT_SOCKET=/run/jarvis/output.sock
 Environment=JARVIS_LOG_DIR=/var/log/jarvis
 Environment=JARVIS_MODELS_DIR=/var/lib/jarvis/models
-Environment=PYTHONPATH=/usr/lib/jarvis
+Environment=PYTHONPATH=/usr/lib
 Environment=OLLAMA_HOST=127.0.0.1:11434
 
 # Standard output/error

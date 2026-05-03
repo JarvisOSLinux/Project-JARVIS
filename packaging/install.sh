@@ -80,8 +80,16 @@ install_files() {
     # Copy application files
     cp -r jarvis/* "$INSTALL_DIR/"
     
-    # Install daemon script
-    cp packaging/jarvis-daemon "$BIN_DIR/"
+    # Install daemon wrapper (bash wrapper activating venv then running jarvis.cli run)
+    cat > "$BIN_DIR/jarvis-daemon" << 'JDEOF'
+#!/bin/bash
+VENV_PATH="/var/lib/jarvis/venv"
+JARVIS_PATH="/usr/lib/jarvis"
+[ -f "${VENV_PATH}/bin/activate" ] && source "${VENV_PATH}/bin/activate"
+export PYTHONPATH="/usr/lib:${PYTHONPATH:-}"
+cd "${JARVIS_PATH}"
+exec python -m jarvis.cli run "$@"
+JDEOF
     chmod +x "$BIN_DIR/jarvis-daemon"
     
     # Install systemd service
