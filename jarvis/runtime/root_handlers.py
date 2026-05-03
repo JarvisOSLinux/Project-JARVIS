@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from logging import Logger
 from typing import Any
 
@@ -20,7 +21,6 @@ async def on_user_input(app: Any, logger: Logger, text: str) -> None:
             return
 
     app.sessions.ensure_session()
-
     app.goals.add_goal(text)
 
     if app.contextor:
@@ -54,14 +54,32 @@ async def on_dispatch_signal(app: Any, logger: Logger, signal: dict[str, Any]) -
         )
 
     app.goals.update_from_signal(signal)
-
     app.llm.switch_mode("root")
-    context = build_root_context(app, logger, signal=signal)
+
+    # Build a context scoped to the goal that owns this PID.
+    # If no goal owns the PID (e.g. a timer from defer), fall back to
+    # the full root context so the LLM still has useful information.
+    owning_goal = app.goals.find_goal_by_task_pid(sig_pid) if sig_pid else None
+
+    if owning_goal:
+        goal_ctx = app.goals.get_goal_context(owning_goal.id)
+        parts = []
+        if goal_ctx:
+            parts.append(f"INTENT: {owning_goal.description}")
+            parts.append(f"GOAL_STATE: {compact_payload_for_llm(goal_ctx)}")
+        parts.append(f"SIGNAL: {json.dumps(signal)}")
+        summary = app.sessions.load_summary()
+        if summary:
+            parts.append(f"CONVERSATION_SUMMARY: {summary}")
+        context = "\n".join(parts)
+        logger.debug(
+            f"JARVIS: Signal context scoped to goal [{owning_goal.id}] "
+            f"({owning_goal.description[:60]})"
+        )
+    else:
+        context = build_root_context(app, logger, signal=signal)
 
     if remind_completed and exit_data:
-        # The reminder fired, but the task finished before ROOT could act on
-        # the REMIND. Give the LLM both facts so it can respond with the
-        # actual output in this single turn.
         context += (
             f"\nREMIND_COMPLETED: Reminder fired for pid={sig_pid}, but the task "
             f"finished before the LLM was reached.\n"
@@ -75,12 +93,6 @@ async def on_dispatch_signal(app: Any, logger: Logger, signal: dict[str, Any]) -
 async def on_confirmation_response(
     app: Any, logger: Logger, data: dict[str, Any]
 ) -> None:
-    """Handle a CONFIRMATION_RESPONSE event from the event loop.
-
-    Resolves the pending confirmation, then either dispatches the
-    approved tasks or feeds USER_DENIAL back to ROOT so the LLM
-    keeps communicating with the user.
-    """
     pending = app.confirmation.resolve(data)
     if pending is None:
         return
