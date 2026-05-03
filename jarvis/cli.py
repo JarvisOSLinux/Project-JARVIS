@@ -20,7 +20,18 @@ import sys
 from pathlib import Path
 
 from .config import Config
-from .core.logger import get_logger
+from .core.logger import JarvisLogger, get_logger
+
+# Initialise logging from config before any get_logger() call so that the
+# file handler (LOG_FILE) and level (LOG_LEVEL) are applied from the start.
+# Without this, the first get_logger() call would call setup() with defaults
+# (no log_file), set _initialized = True, and all subsequent setup() calls
+# would return early — leaving LOG_FILE silently ignored.
+JarvisLogger.setup(
+    log_level=Config.LOG_LEVEL,
+    log_file=Config.LOG_FILE or None,
+    enable_colors=Config.LOG_COLORS,
+)
 
 logger = get_logger(__name__)
 
