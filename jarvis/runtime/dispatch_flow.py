@@ -49,6 +49,17 @@ def _signals_from_result(result: Any) -> list[dict]:
     return []
 
 
+def _find_exits_for_pids(
+    window: list[dict], pids: list[int]
+) -> list[dict]:
+    """Return EXIT/TIMEOUT signals from the window that match any of the given PIDs."""
+    pid_set = set(pids)
+    return [
+        s for s in window
+        if s.get("type") in ("EXIT", "TIMEOUT") and s.get("pid") in pid_set
+    ]
+
+
 async def run_dispatch_subchain(
     app: Any,
     logger: Logger,
@@ -193,30 +204,45 @@ async def run_dispatch_subchain(
             pids = parsed.get("pids") or pending_pids
 
             if pids and app.dispatch.is_connected:
-                logger.info(
-                    f"JARVIS: Dispatch sub-chain calling wait_task for PIDs {pids}"
-                )
                 emit_activity(app, "Waiting for tasks to complete…", kind="dispatch")
 
-                wait_result = await app.dispatch.wait_task(pids)
+                # Peek at the signal window before blocking. The task may have
+                # already exited while the LLM was processing the previous
+                # REMIND (LLM iteration takes 1-2 s). If we called wait_task
+                # in that case, the Rust orchestrator's wait_for_event() would
+                # have no active task to wake it and would block indefinitely.
+                current_window = await app.dispatch.get_signal_window()
+                already_done = _find_exits_for_pids(current_window, pids)
 
-                # Prevent EventMerger from re-delivering the same EXIT signals
-                # it will eventually see in the background poll.
-                returned_signals = _signals_from_result(wait_result)
-                if returned_signals and hasattr(app, "events"):
-                    app.events.mark_signals_seen(returned_signals)
-
-                if isinstance(wait_result, dict) and "error" in wait_result:
-                    logger.warning(
-                        f"JARVIS: wait_task returned error: {wait_result['error']}"
+                if already_done:
+                    logger.info(
+                        f"JARVIS: PIDs {[s['pid'] for s in already_done]} already "
+                        "completed — using EXIT from window directly"
                     )
-                    context = f"WAIT_ERROR: {compact_payload_for_llm(wait_result)}"
+                    if hasattr(app, "events"):
+                        app.events.mark_signals_seen(already_done)
+                    context = f"WAIT_RESULT: {compact_payload_for_llm({'signals': already_done})}"
                 else:
                     logger.info(
-                        f"JARVIS: wait_task completed — "
-                        f"{len(returned_signals)} signal(s) returned"
+                        f"JARVIS: Blocking via wait_task for PIDs {pids}"
                     )
-                    context = f"WAIT_RESULT: {compact_payload_for_llm(wait_result)}"
+                    wait_result = await app.dispatch.wait_task(pids)
+
+                    returned_signals = _signals_from_result(wait_result)
+                    if returned_signals and hasattr(app, "events"):
+                        app.events.mark_signals_seen(returned_signals)
+
+                    if isinstance(wait_result, dict) and "error" in wait_result:
+                        logger.warning(
+                            f"JARVIS: wait_task returned error: {wait_result['error']}"
+                        )
+                        context = f"WAIT_ERROR: {compact_payload_for_llm(wait_result)}"
+                    else:
+                        logger.info(
+                            f"JARVIS: wait_task completed — "
+                            f"{len(returned_signals)} signal(s) returned"
+                        )
+                        context = f"WAIT_RESULT: {compact_payload_for_llm(wait_result)}"
             else:
                 # No PIDs tracked and none in parsed action — fall back to
                 # returning so EventMerger can deliver EXIT asynchronously.
