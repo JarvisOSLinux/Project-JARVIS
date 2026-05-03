@@ -14,6 +14,41 @@ from .output_hooks import emit_activity, get_embeddings, persist_assistant_turn
 from .root_context import build_root_context, compact_payload_for_llm
 
 
+def _extract_pids_from_result(result: Any) -> list[int]:
+    """Pull task PIDs out of a send_tasks / wait_task result.
+
+    The dispatch binary returns INIT signals for each newly-started task;
+    their 'pid' field is the canonical identifier to pass to wait_task.
+    """
+    signals: list[dict] = []
+    if isinstance(result, list):
+        signals = result
+    elif isinstance(result, dict):
+        signals = result.get("signals", [])
+        # Some response shapes embed the list directly at the top level.
+        if not signals and any(isinstance(v, list) for v in result.values()):
+            for v in result.values():
+                if isinstance(v, list):
+                    signals = v
+                    break
+    return [
+        s["pid"]
+        for s in signals
+        if isinstance(s, dict) and s.get("type") == "INIT" and s.get("pid") is not None
+    ]
+
+
+def _signals_from_result(result: Any) -> list[dict]:
+    """Return all signal dicts embedded in a tool result."""
+    if isinstance(result, list):
+        return [s for s in result if isinstance(s, dict)]
+    if isinstance(result, dict):
+        sigs = result.get("signals", [])
+        if isinstance(sigs, list):
+            return [s for s in sigs if isinstance(s, dict)]
+    return []
+
+
 async def run_dispatch_subchain(
     app: Any,
     logger: Logger,
@@ -47,6 +82,10 @@ async def run_dispatch_subchain(
     if goals:
         context_parts.append(f"GOALS: {json.dumps(goals)}")
     context = "\n".join(context_parts)
+
+    # PIDs of the most recently dispatched task batch. Updated whenever the
+    # LLM issues a 'dispatch' action; used to call wait_task on 'wait'.
+    pending_pids: list[int] = []
 
     for step in range(max_chain_depth):
         logger.info(
@@ -139,16 +178,53 @@ async def run_dispatch_subchain(
             if isinstance(result, dict) and "error" in result:
                 context = f"DISPATCH_ERROR: {compact_payload_for_llm(result)}"
             else:
+                # Track the PIDs so the 'wait' branch can call wait_task.
+                pending_pids = _extract_pids_from_result(result)
+                if pending_pids:
+                    logger.info(
+                        f"JARVIS: Tracking {len(pending_pids)} dispatched PID(s): {pending_pids}"
+                    )
                 emit_activity(app, "Tool results received.", kind="dispatch")
                 context = f"DISPATCH_RESULT: {compact_payload_for_llm(result)}"
 
         elif action == "wait":
-            # Return to the event loop. The signal queue (EventMerger) will
-            # deliver the EXIT signal as a new event when it arrives, and
-            # on_dispatch_signal will bring ROOT back to handle it.
-            logger.info("JARVIS: Dispatch sub-chain waiting")
-            emit_activity(app, "Waiting for tasks to complete…", kind="dispatch")
-            return "Waiting for tasks to complete."
+            # Use PIDs from the parsed action if provided; fall back to the
+            # ones we tracked from the last 'dispatch' result.
+            pids = parsed.get("pids") or pending_pids
+
+            if pids and app.dispatch.is_connected:
+                logger.info(
+                    f"JARVIS: Dispatch sub-chain calling wait_task for PIDs {pids}"
+                )
+                emit_activity(app, "Waiting for tasks to complete…", kind="dispatch")
+
+                wait_result = await app.dispatch.wait_task(pids)
+
+                # Prevent EventMerger from re-delivering the same EXIT signals
+                # it will eventually see in the background poll.
+                returned_signals = _signals_from_result(wait_result)
+                if returned_signals and hasattr(app, "events"):
+                    app.events.mark_signals_seen(returned_signals)
+
+                if isinstance(wait_result, dict) and "error" in wait_result:
+                    logger.warning(
+                        f"JARVIS: wait_task returned error: {wait_result['error']}"
+                    )
+                    context = f"WAIT_ERROR: {compact_payload_for_llm(wait_result)}"
+                else:
+                    logger.info(
+                        f"JARVIS: wait_task completed — "
+                        f"{len(returned_signals)} signal(s) returned"
+                    )
+                    context = f"WAIT_RESULT: {compact_payload_for_llm(wait_result)}"
+            else:
+                # No PIDs tracked and none in parsed action — fall back to
+                # returning so EventMerger can deliver EXIT asynchronously.
+                logger.info(
+                    "JARVIS: Dispatch sub-chain wait — no pids, returning to event loop"
+                )
+                emit_activity(app, "Waiting for tasks to complete…", kind="dispatch")
+                return "Waiting for tasks to complete."
 
         elif action == "kill":
             emit_activity(app, "Stopping selected task(s)…", kind="dispatch")

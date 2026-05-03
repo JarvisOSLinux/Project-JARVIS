@@ -15,10 +15,19 @@ On the first poll, all already-present signals are marked seen without being
 enqueued — this prevents stale signals from a previous JARVIS session being
 replayed on startup.
 
+Signal type filtering: INIT and WAIT are never delivered via the async queue.
+INIT is always captured inline by the send_tasks result; delivering it again
+via EventMerger would cause redundant ROOT processing. WAIT is an internal
+acknowledgement signal emitted by the dispatch 'wait' tool.
+
 REMIND+EXIT merging: if a REMIND for PID X is first-seen and an EXIT for the
 same PID is already present in the same window snapshot, the REMIND is
 enriched with _remind_completed=True / _exit=<exit signal> so ROOT gets the
 full output in a single LLM turn instead of two.
+
+Double-delivery prevention: when the dispatch sub-chain calls wait_task()
+and receives EXIT signals inline, it marks those signals via
+mark_signals_seen() so the background poller does not re-enqueue them.
 """
 
 import asyncio
@@ -29,6 +38,9 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 from ..core.logger import get_logger
 
 logger = get_logger(__name__)
+
+# Signal types that the sub-chain always handles inline; never enqueue these.
+_INLINE_SIGNAL_TYPES = frozenset({"INIT", "WAIT"})
 
 
 class EventType(Enum):
@@ -154,6 +166,21 @@ class EventMerger:
         """Push SHUTDOWN event to end the async iteration."""
         await self._queue.put(Event.shutdown())
 
+    def mark_signals_seen(self, signals: List[Dict[str, Any]]) -> None:
+        """
+        Mark a list of signals as already-processed.
+
+        Call this after receiving EXIT/TIMEOUT signals inline (e.g. from
+        wait_task) to prevent the background polling loop from re-enqueueing
+        the same signals as new events.
+        """
+        for sig in signals:
+            self._seen.add(self._signal_key(sig))
+        if signals:
+            logger.debug(
+                f"EventMerger: Marked {len(signals)} signal(s) as seen (inline handling)"
+            )
+
     # ------------------------------------------------------------------
     # Startup / teardown
     # ------------------------------------------------------------------
@@ -229,6 +256,9 @@ class EventMerger:
         """
         Poll the dispatch signal window, deduplicate, and enqueue new signals.
 
+        INIT and WAIT signals are never delivered — INIT is always captured
+        inline by the send_tasks result; WAIT is an internal acknowledgement.
+
         On the first poll, all present signals are marked seen without enqueueing
         to avoid replaying stale signals from a previous JARVIS session.
 
@@ -265,6 +295,10 @@ class EventMerger:
                         if key in self._seen:
                             continue
                         self._seen.add(key)
+
+                        # INIT and WAIT are always handled inline; skip delivery.
+                        if sig.get("type") in _INLINE_SIGNAL_TYPES:
+                            continue
 
                         if sig.get("type") == "REMIND":
                             pid = sig.get("pid")
