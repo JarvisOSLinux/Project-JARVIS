@@ -73,7 +73,8 @@ def _find_exits_for_pids(window: list[dict], pids: list[int]) -> list[dict]:
     """Return EXIT/TIMEOUT signals from the window that match any of the given PIDs."""
     pid_set = set(pids)
     return [
-        s for s in window
+        s
+        for s in window
         if s.get("type") in ("EXIT", "TIMEOUT") and s.get("pid") in pid_set
     ]
 

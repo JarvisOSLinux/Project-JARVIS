@@ -4,13 +4,24 @@ from __future__ import annotations
 
 import json
 from logging import Logger
-from typing import Any
+from typing import Any, Optional
 
 from ..config import Config
 from .goal_updates import apply_goal_updates
 from .llm_bridge import ask_llm
 from .output_hooks import emit_activity, persist_assistant_turn
 from .root_context import build_root_context, compact_payload_for_llm
+
+# Emitted by the LLM retry fallback when all attempts return empty.
+_DISPATCH_FAILURE_SENTINEL = "I had trouble formatting my response."
+
+# Words that indicate a non-sentinel failure summary.
+_FAILURE_WORDS = ("error", "fail", "couldn't", "unable", "timed out", "exception")
+
+
+def _is_failure_summary(summary: str) -> bool:
+    lower = summary.lower()
+    return any(w in lower for w in _FAILURE_WORDS)
 
 
 async def feed_root_summary(
@@ -19,11 +30,44 @@ async def feed_root_summary(
     label: str,
     summary: str,
     depth: int,
+    intent: Optional[str] = None,
 ) -> None:
     """Feed a subsystem summary back into ROOT for the next decision."""
     app.llm.switch_mode("root")
     context = build_root_context(app, logger)
-    context += f"\n{label}: {summary}"
+
+    if label == "DISPATCH_SUMMARY" and _DISPATCH_FAILURE_SENTINEL in summary:
+        # Sub-chain exhausted LLM retries. Bypass root to prevent hallucination;
+        # emit a direct reply that names the original intent.
+        intent_clause = f' while trying to: "{intent}"' if intent else ""
+        msg = (
+            f"I ran into a problem{intent_clause} and couldn't complete the task. "
+            "Please try again."
+        )
+        logger.warning("JARVIS: Dispatch failure sentinel — short-circuiting root LLM")
+        app.output_manager.handle_response({"output": msg})
+        persist_assistant_turn(app, msg)
+        dismissed = app.goals.dismiss_completed()
+        if dismissed:
+            logger.info(f"JARVIS: Dismissed {len(dismissed)} completed goal(s)")
+        return
+
+    # For non-sentinel failures: use DISPATCH_FAILED label and inject
+    # ATTEMPTED_INTENT so root can name what was being attempted.
+    actual_label = label
+    if label == "DISPATCH_SUMMARY" and intent:
+        context += f"\nATTEMPTED_INTENT: {intent}"
+        if _is_failure_summary(summary):
+            actual_label = "DISPATCH_FAILED"
+
+    context += f"\n{actual_label}: {summary}"
+
+    if actual_label == "DISPATCH_FAILED":
+        context += (
+            "\nSYSTEM: The task above failed. Tell the user what was attempted "
+            "(see ATTEMPTED_INTENT) and that it did not succeed. "
+            "Do not fabricate a success."
+        )
 
     response = await ask_llm(app, logger, context, tag="root-chain")
     await app._act_on_root_response(response, depth + 1)
@@ -74,7 +118,9 @@ async def act_on_root_response(
             logger.warning("JARVIS: LLM returned empty respond — retrying")
             context = build_root_context(app, logger)
             context += "\nYour previous response had an empty output. Please respond to the user."
-            retry_response = await ask_llm(app, logger, context, tag="root-retry-empty")
+            retry_response = await ask_llm(
+                app, logger, context, tag="root-retry-empty"
+            )
             await app._act_on_root_response(retry_response, depth + 1)
             return
         app.output_manager.handle_response({"output": output})
@@ -95,7 +141,14 @@ async def act_on_root_response(
             summary = await app._run_dispatch_subchain(
                 parsed["intent"], goal_id=goal.id
             )
-            await feed_root_summary(app, logger, "DISPATCH_SUMMARY", summary, depth)
+            await feed_root_summary(
+                app,
+                logger,
+                "DISPATCH_SUMMARY",
+                summary,
+                depth,
+                intent=parsed["intent"],
+            )
 
     # -- Memory actions (direct, no sub-chain) --
     elif action == "store":
