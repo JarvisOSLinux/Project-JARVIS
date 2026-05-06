@@ -227,7 +227,10 @@ async def run_dispatch_subchain(
             emit_activity(
                 app, f"Dispatching {len(parsed['tasks'])} task(s)…", kind="dispatch"
             )
-            result = await app._dispatch_send(parsed["tasks"])
+            result = await app._dispatch_send(
+                parsed["tasks"],
+                session_id=goal.id if goal else None,
+            )
             if isinstance(result, dict) and result.get("awaiting_confirmation"):
                 logger.info(
                     f"JARVIS: Dispatch sub-chain paused for confirmation "
@@ -337,6 +340,7 @@ async def dispatch_send(
     logger: Logger,
     tasks: list[dict[str, Any]],
     dispatch_context: Any = None,
+    session_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """Low-level send to dispatch adapter, gated by TLA confirmation."""
     if not app.dispatch.is_connected:
@@ -367,7 +371,7 @@ async def dispatch_send(
             approved_tasks.append(task)
 
     if not tools_needing_confirmation:
-        return await app.dispatch.send_tasks(approved_tasks)
+        return await app.dispatch.send_tasks(approved_tasks, session_id=session_id)
 
     request_id = str(uuid.uuid4())[:8]
     notification_silent = tools_needing_confirmation[0].get(
