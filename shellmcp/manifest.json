@@ -12,7 +12,7 @@
             "description": "Shell command execution"
         }
     ],
-    "tools": ["run_command", "open_app"],
-    "categories": ["system", "shell", "desktop"],
-    "keywords": ["shell", "command", "system", "terminal", "execute", "xdg", "open", "app", "launch"]
+    "tools": ["run_command", "open_app", "web_search"],
+    "categories": ["system", "shell", "desktop", "search"],
+    "keywords": ["shell", "command", "system", "terminal", "execute", "xdg", "open", "app", "launch", "search", "web", "duckduckgo"]
 }

@@ -11,6 +11,8 @@ import json
 import os
 import shlex
 import sys
+import urllib.parse
+import urllib.request
 
 # Commands that require root — prefix with sudo -A
 PRIVILEGED_PREFIXES = (
@@ -99,6 +101,44 @@ async def open_app(target: str) -> str:
         return f"Error: {e}"
 
 
+async def web_search(query: str, max_results: int = 5) -> str:
+    """Search the web via DuckDuckGo Instant Answer API (no API key required)."""
+    params = urllib.parse.urlencode(
+        {
+            "q": query,
+            "format": "json",
+            "no_html": "1",
+            "skip_disambig": "1",
+        }
+    )
+    url = f"https://api.duckduckgo.com/?{params}"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "JarvisOS/1.0"})
+        loop = asyncio.get_event_loop()
+        raw = await loop.run_in_executor(
+            None,
+            lambda: urllib.request.urlopen(req, timeout=10).read(),
+        )
+        data = json.loads(raw.decode())
+    except Exception as e:
+        return f"Search failed: {e}"
+
+    parts = []
+    if data.get("Answer"):
+        parts.append(f"Answer: {data['Answer']}")
+    if data.get("AbstractText"):
+        parts.append(f"Summary: {data['AbstractText']}")
+        if data.get("AbstractURL"):
+            parts.append(f"Source: {data['AbstractURL']}")
+    for topic in data.get("RelatedTopics", [])[:max_results]:
+        if isinstance(topic, dict) and topic.get("Text"):
+            line = f"- {topic['Text']}"
+            if topic.get("FirstURL"):
+                line += f"\n  {topic['FirstURL']}"
+            parts.append(line)
+    return "\n".join(parts) if parts else f"No results found for: {query}"
+
+
 async def run_command(command: str, timeout: int = 120) -> str:
     cmd = build_command(command)
     env = _display_env()
@@ -152,6 +192,29 @@ TOOLS = [
         },
     },
     {
+        "name": "web_search",
+        "description": (
+            "Search the web using DuckDuckGo. Returns direct answers, summaries, "
+            "and related results. No API key required. Use for current information, "
+            "factual lookups, news, documentation, and anything requiring internet knowledge."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Max related results to return (default: 5)",
+                    "default": 5,
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    {
         "name": "open_app",
         "description": (
             "Open a file, URL, or application using xdg-open. "
@@ -195,7 +258,17 @@ async def handle(request: dict):
         params = request.get("params", {})
         tool_name = params.get("name")
         args = params.get("arguments", {})
-        if tool_name == "run_command":
+        if tool_name == "web_search":
+            output = await web_search(
+                args.get("query", ""),
+                int(args.get("max_results", 5)),
+            )
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {"content": [{"type": "text", "text": output}]},
+            }
+        elif tool_name == "run_command":
             output = await run_command(
                 args.get("command", ""),
                 int(args.get("timeout", 120)),
