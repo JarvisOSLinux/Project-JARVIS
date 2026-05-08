@@ -3,7 +3,7 @@ import os
 
 from dotenv import load_dotenv
 
-# Load config: JARVIS_CONFIG_DIR (system install) or jarvis/.env (dev)
+# Load config: JARVIS_CONFIG_DIR > ~/.config/jarvis/jarvis.conf > package .env
 _config_dir = os.getenv("JARVIS_CONFIG_DIR")
 if _config_dir:
     _env_path = os.path.join(_config_dir, "jarvis.conf")
@@ -12,6 +12,9 @@ if _config_dir:
     else:
         load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 else:
+    _user_conf = os.path.join(os.path.expanduser("~"), ".config", "jarvis", "jarvis.conf")
+    if os.path.isfile(_user_conf):
+        load_dotenv(_user_conf)
     load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 
