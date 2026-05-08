@@ -12,7 +12,7 @@
             "description": "Shell command execution"
         }
     ],
-    "tools": ["run_command"],
-    "categories": ["system", "shell"],
-    "keywords": ["shell", "command", "system", "terminal", "execute"]
+    "tools": ["run_command", "open_app"],
+    "categories": ["system", "shell", "desktop"],
+    "keywords": ["shell", "command", "system", "terminal", "execute", "xdg", "open", "app", "launch"]
 }

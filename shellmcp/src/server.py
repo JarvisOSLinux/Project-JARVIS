@@ -9,6 +9,7 @@ GUI password dialog to maintain the autonomous + secure architecture.
 import asyncio
 import json
 import os
+import shlex
 import sys
 
 # Commands that require root — prefix with sudo -A
@@ -60,9 +61,47 @@ def build_command(command: str) -> str:
     return command
 
 
+def _display_env() -> dict:
+    """Build env with display vars set, detecting from XDG_RUNTIME_DIR if missing."""
+    env = os.environ.copy()
+    if "WAYLAND_DISPLAY" not in env:
+        xdg_runtime = env.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+        for candidate in ("wayland-1", "wayland-0"):
+            if os.path.exists(os.path.join(xdg_runtime, candidate)):
+                env["WAYLAND_DISPLAY"] = candidate
+                env.setdefault("XDG_RUNTIME_DIR", xdg_runtime)
+                break
+    env.setdefault("DISPLAY", ":0")
+    return env
+
+
+async def open_app(target: str) -> str:
+    """Open a file, URL, or application via xdg-open (never elevated)."""
+    env = _display_env()
+    cmd = f"xdg-open {shlex.quote(target)}"
+    try:
+        proc = await asyncio.create_subprocess_shell(
+            cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=5)
+            err = stderr.decode(errors="replace").strip()
+            if proc.returncode not in (0, None):
+                return f"xdg-open failed (exit {proc.returncode}): {err}"
+            return f"Opened: {target}"
+        except asyncio.TimeoutError:
+            # GUI app forked and detached — expected
+            return f"Launched: {target}"
+    except Exception as e:
+        return f"Error: {e}"
+
+
 async def run_command(command: str, timeout: int = 120) -> str:
     cmd = build_command(command)
-    env = os.environ.copy()
+    env = _display_env()
     for askpass in ("/usr/bin/ksshaskpass", "/usr/lib/ssh/ksshaskpass"):
         if os.path.exists(askpass):
             env["SUDO_ASKPASS"] = askpass
@@ -111,7 +150,28 @@ TOOLS = [
             },
             "required": ["command"],
         },
-    }
+    },
+    {
+        "name": "open_app",
+        "description": (
+            "Open a file, URL, or application using xdg-open. "
+            "Respects the user's default application associations. "
+            "Use for: launching GUI apps (firefox, dolphin, code), "
+            "opening files (PDF, images, documents) with their default app, "
+            "or opening URLs in the default browser. "
+            "Never requires sudo — always runs as the current user."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "target": {
+                    "type": "string",
+                    "description": "File path, URL, or application binary name to open",
+                },
+            },
+            "required": ["target"],
+        },
+    },
 ]
 
 
@@ -133,8 +193,9 @@ async def handle(request: dict):
         return {"jsonrpc": "2.0", "id": req_id, "result": {"tools": TOOLS}}
     elif method == "tools/call":
         params = request.get("params", {})
-        if params.get("name") == "run_command":
-            args = params.get("arguments", {})
+        tool_name = params.get("name")
+        args = params.get("arguments", {})
+        if tool_name == "run_command":
             output = await run_command(
                 args.get("command", ""),
                 int(args.get("timeout", 120)),
@@ -144,10 +205,17 @@ async def handle(request: dict):
                 "id": req_id,
                 "result": {"content": [{"type": "text", "text": output}]},
             }
+        elif tool_name == "open_app":
+            output = await open_app(args.get("target", ""))
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {"content": [{"type": "text", "text": output}]},
+            }
         return {
             "jsonrpc": "2.0",
             "id": req_id,
-            "error": {"code": -32601, "message": f"Unknown tool: {params.get('name')}"},
+            "error": {"code": -32601, "message": f"Unknown tool: {tool_name}"},
         }
     elif method in ("notifications/initialized", "notifications/cancelled"):
         return None
