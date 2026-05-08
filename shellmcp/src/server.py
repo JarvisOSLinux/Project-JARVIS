@@ -101,42 +101,76 @@ async def open_app(target: str) -> str:
         return f"Error: {e}"
 
 
-async def web_search(query: str, max_results: int = 5) -> str:
-    """Search the web via DuckDuckGo Instant Answer API (no API key required)."""
-    params = urllib.parse.urlencode(
-        {
-            "q": query,
-            "format": "json",
-            "no_html": "1",
-            "skip_disambig": "1",
-        }
-    )
-    url = f"https://api.duckduckgo.com/?{params}"
+_BRAVE_KEY_PATH = os.path.expanduser("~/.config/jarvis/brave_api_key")
+
+
+def _brave_api_key() -> str:
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "JarvisOS/1.0"})
-        loop = asyncio.get_event_loop()
-        raw = await loop.run_in_executor(
-            None,
-            lambda: urllib.request.urlopen(req, timeout=10).read(),
-        )
-        data = json.loads(raw.decode())
+        return open(_BRAVE_KEY_PATH).read().strip()
+    except OSError:
+        return ""
+
+
+async def _search_brave(query: str, max_results: int, api_key: str) -> str:
+    params = urllib.parse.urlencode({"q": query, "count": max_results})
+    url = f"https://api.search.brave.com/res/v1/web/search?{params}"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/json",
+            "Accept-Encoding": "gzip",
+            "X-Subscription-Token": api_key,
+        },
+    )
+    loop = asyncio.get_event_loop()
+    raw = await loop.run_in_executor(
+        None, lambda: urllib.request.urlopen(req, timeout=10).read()
+    )
+    data = json.loads(raw.decode())
+    results = data.get("web", {}).get("results", [])
+    if not results:
+        return f"No results found for: {query}"
+    parts = []
+    for r in results[:max_results]:
+        parts.append(f"- {r.get('title', '(no title)')}\n  {r.get('url', '')}")
+        if r.get("description"):
+            parts.append(f"  {r['description']}")
+    return "\n".join(parts)
+
+
+_SEARXNG_BASE = "https://trojanhoogle.pro"
+
+
+async def _search_searxng(query: str, max_results: int) -> str:
+    params = urllib.parse.urlencode({"q": query, "format": "json"})
+    url = f"{_SEARXNG_BASE}/search?{params}"
+    req = urllib.request.Request(url, headers={"User-Agent": "JarvisOS/1.0"})
+    loop = asyncio.get_event_loop()
+    raw = await loop.run_in_executor(
+        None, lambda: urllib.request.urlopen(req, timeout=10).read()
+    )
+    data = json.loads(raw.decode())
+    results = data.get("results", [])
+    if not results:
+        return f"No results found for: {query}"
+    parts = []
+    for r in results[:max_results]:
+        parts.append(f"- {r.get('title', '(no title)')}\n  {r.get('url', '')}")
+        if r.get("content"):
+            parts.append(f"  {r['content']}")
+    return "\n".join(parts)
+
+
+async def web_search(query: str, max_results: int = 5) -> str:
+    """Search the web. Uses Brave Search if API key present at ~/.config/jarvis/brave_api_key,
+    otherwise falls back to SearXNG at trojanhoogle.pro."""
+    try:
+        api_key = _brave_api_key()
+        if api_key:
+            return await _search_brave(query, max_results, api_key)
+        return await _search_searxng(query, max_results)
     except Exception as e:
         return f"Search failed: {e}"
-
-    parts = []
-    if data.get("Answer"):
-        parts.append(f"Answer: {data['Answer']}")
-    if data.get("AbstractText"):
-        parts.append(f"Summary: {data['AbstractText']}")
-        if data.get("AbstractURL"):
-            parts.append(f"Source: {data['AbstractURL']}")
-    for topic in data.get("RelatedTopics", [])[:max_results]:
-        if isinstance(topic, dict) and topic.get("Text"):
-            line = f"- {topic['Text']}"
-            if topic.get("FirstURL"):
-                line += f"\n  {topic['FirstURL']}"
-            parts.append(line)
-    return "\n".join(parts) if parts else f"No results found for: {query}"
 
 
 async def run_command(command: str, timeout: int = 120) -> str:
