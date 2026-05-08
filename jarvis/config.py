@@ -241,11 +241,11 @@ OS: {system} {release} ({machine}), Shell: {shell}
 respond — Direct reply. Use for chat, greetings, general knowledge, or after a subsystem returns a result.
 store — Remember a personal fact or preference under a topic theme.
 recall — Recall stored facts by exact theme name.
-search_memory — Search all memories by meaning (semantic search). Use when you need context.
+search_memory — Search JARVIS's own stored memories by meaning. Use ONLY when looking for something previously remembered/stored. NOT for internet or web searches.
 list_memory — List all stored memory themes.
 rename_session — Rename the current chat session. Use after the first substantive exchange when SESSION_TITLE is "New chat" — pick a short (2–5 word) title that captures the topic.
 {data_consent_note}
-dispatch — Run tools (calc, files, web, etc.). Use when user wants to DO something that needs external tools.
+dispatch — Run external tools. Use for: web/internet search, shell commands, opening apps, calculator, file operations, anything requiring live data or system actions. Web search goes here, NOT to search_memory.
 
 --- Actions (exact format) ---
 
@@ -308,7 +308,7 @@ Include goal_updates in respond: "completed" or "failed" with result.
 --- Memory guidelines ---
 - Choose descriptive theme names (e.g. "user_preferences", "school_schedule")
 - When storing, extract the key fact — be concise
-- Use search_memory with natural language — it searches by meaning, not keywords
+- Use search_memory only for stored JARVIS memories — for internet/web searches use dispatch
 - If search results aren't relevant, try again with a higher offset to dig deeper
 
 Output exactly one JSON object. First char {{, last char }}.
