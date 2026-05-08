@@ -15,10 +15,12 @@ RAG retrieval (Tier 3 / Cold) is handled in main.py via
 contextor subsystem into the ROOT context string.
 """
 
+import datetime
 import json
 import re
 from typing import Any, Optional
 
+from ..config import Config
 from ..core.logger import get_logger
 from .base import BaseLLMProvider
 from .context_manager import ContextManager
@@ -204,6 +206,14 @@ class LLM:
             return self._fallback_response()
 
         parsed, parse_source = self._extract_json(response_text)
+        self._log_llm_io(
+            attempt=attempt,
+            messages=messages,
+            raw_output=response_text,
+            parse_source=parse_source,
+            action=parsed.get("action") if parsed is not None else None,
+        )
+
         if parsed is not None:
             clean = json.dumps(parsed)
             self.chat_history.append(
@@ -230,6 +240,33 @@ class LLM:
 
         logger.error("LLM failed to return valid JSON after all retries")
         return self._fallback_response()
+
+    def _log_llm_io(
+        self,
+        attempt: int,
+        messages: list[dict],
+        raw_output: str,
+        parse_source: str,
+        action: Optional[str] = None,
+    ) -> None:
+        """Append one JSONL entry to LLM_IO_LOG if configured."""
+        if not Config.LLM_IO_LOG:
+            return
+        entry: dict[str, Any] = {
+            "ts": datetime.datetime.utcnow().isoformat() + "Z",
+            "mode": self._mode,
+            "attempt": attempt,
+            "messages": messages,
+            "raw_output": raw_output,
+            "parse_source": parse_source,
+        }
+        if action is not None:
+            entry["action"] = action
+        try:
+            with open(Config.LLM_IO_LOG, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry) + "\n")
+        except Exception as e:
+            logger.warning(f"LLM I/O log write failed: {e}")
 
     def _get_hot_exchanges(self) -> list[dict]:
         """Extract non-system messages from current root history (Tier 1)."""
