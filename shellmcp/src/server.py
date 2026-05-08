@@ -205,6 +205,9 @@ TOOLS = [
         "name": "run_command",
         "description": (
             "Execute a shell command and return its output. "
+            "Use for: hardware detection (lspci, nvidia-smi, lshw, inxi -G for GPU info), "
+            "system info (CPU, memory, disk, GPU model/VRAM), "
+            "file operations, package management, network, and any system task. "
             "Privileged commands (pacman, systemctl, etc.) automatically "
             "request elevation via a GUI password dialog (KWallet/ksshaskpass)."
         ),

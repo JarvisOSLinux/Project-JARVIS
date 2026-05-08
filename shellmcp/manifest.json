@@ -2,7 +2,7 @@
     "id": "ShellMCP",
     "name": "ShellMCP",
     "version": "1.0.0",
-    "description": "Shell command execution MCP server for JARVIS system operations",
+    "description": "Shell command execution MCP server for JARVIS system operations. Run any shell command: hardware detection (GPU, CPU, memory, disk), system info (lspci, nvidia-smi, lshw), file operations, package management, and more.",
     "scope": "user",
     "transports": [
         {
@@ -14,5 +14,5 @@
     ],
     "tools": ["run_command", "open_app", "web_search"],
     "categories": ["system", "shell", "desktop", "search"],
-    "keywords": ["shell", "command", "system", "terminal", "execute", "xdg", "open", "app", "launch", "search", "web", "duckduckgo"]
+    "keywords": ["shell", "command", "system", "terminal", "execute", "xdg", "open", "app", "launch", "search", "web", "duckduckgo", "hardware", "gpu", "cpu", "memory", "disk", "lspci", "nvidia", "amd", "intel", "detect", "info", "specs", "sysinfo", "lshw", "inxi", "file", "package", "install", "run"]
 }
