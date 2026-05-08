@@ -24,10 +24,24 @@ async def run_dispatch_subchain(
     Enter dispatch mode, give it the intent, and loop until it
     returns "done" with a summary.
 
-    Tool discovery always uses embedding search. The dispatch prompt
-    is static — no mode selection needed.
+    Before entering dispatch, JARVIS picks the active discovery
+    backend (embedding or keyword) and installs the matching
+    system prompt — the LLM never sees which backend is active.
+
+    The LLM starts with a "plan" action to split the intent into
+    sub-tasks. JARVIS runs the selected discovery backend and
+    injects MATCHED_TOOLS / CANDIDATE_SERVERS into the next prompt.
     """
-    app.llm.set_prompt("dispatch", Config.LLM_DISPATCH_PROMPT)
+    # Pick the discovery backend before switching modes so the
+    # dispatch system prompt matches the runtime behavior.
+    mode = await app.dispatch.select_discovery_mode(get_embeddings(app))
+    dispatch_prompt = (
+        Config.LLM_DISPATCH_PROMPT_EMBEDDING
+        if mode == "embedding"
+        else Config.LLM_DISPATCH_PROMPT_KEYWORD
+    )
+    app.llm.set_prompt("dispatch", dispatch_prompt)
+
     app.llm.switch_mode("dispatch")
 
     context_parts = [f"INTENT: {intent}"]
@@ -82,6 +96,11 @@ async def run_dispatch_subchain(
                     "if the request cannot be fulfilled.\n"
                     f"INTENT: {intent}"
                 )
+
+        elif action == "search":
+            emit_activity(app, "Searching MCP servers…", kind="dispatch")
+            result = await app.dispatch.search_servers(parsed["keywords"])
+            context = f"SEARCH_RESULTS: {compact_payload_for_llm(result)}"
 
         elif action == "list_tools":
             emit_activity(

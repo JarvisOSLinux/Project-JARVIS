@@ -1,4 +1,4 @@
-"""dmcp-backed registry operations (install/tools/list and command runner)."""
+"""dmcp-backed registry operations (browse/install/tools and command runner)."""
 
 from __future__ import annotations
 
@@ -36,6 +36,91 @@ async def run_dmcp(logger: Logger, *args: str) -> Optional[str]:
     return stdout.decode()
 
 
+async def _local_installed_servers(logger: Logger) -> List[Dict[str, Any]]:
+    """Return installed servers (with manifest keywords) via `dmcp list --json`."""
+    import os
+
+    raw = await run_dmcp(logger, "list", "--json")
+    if not raw:
+        return []
+    try:
+        entries = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(entries, list):
+        return []
+
+    result = []
+    for entry in entries:
+        manifest_path = entry.get("manifest_path", "")
+        keywords: List[str] = []
+        description = ""
+        if manifest_path and os.path.isfile(manifest_path):
+            try:
+                with open(manifest_path) as f:
+                    mf = json.load(f)
+                keywords = mf.get("keywords", [])
+                description = mf.get("description", "")
+            except Exception:
+                pass
+        result.append(
+            {
+                "id": entry.get("id", ""),
+                "name": entry.get("name", entry.get("id", "")),
+                "description": description,
+                "keywords": keywords,
+                "installed": True,
+            }
+        )
+    return result
+
+
+async def search_servers(logger: Logger, keywords: List[str]) -> Dict[str, Any]:
+    """Search for MCP servers by keywords via `dmcp browse` + locally installed manifests."""
+    logger.info(f"Dispatch: Searching MCP servers with keywords: {keywords}")
+
+    cmd_args = ["browse", "--json"]
+    for kw in keywords:
+        cmd_args.extend(["-k", kw])
+
+    raw = await run_dmcp(logger, *cmd_args)
+    if raw is None:
+        return {"error": "dmcp browse failed", "servers": []}
+
+    try:
+        servers = json.loads(raw)
+    except json.JSONDecodeError:
+        return {"error": "dmcp returned invalid JSON", "servers": []}
+
+    if not isinstance(servers, list):
+        servers = servers.get("servers", []) if isinstance(servers, dict) else []
+
+    # Also search locally installed servers not covered by remote registries.
+    local_servers = await _local_installed_servers(logger)
+    registry_ids = {s.get("id") for s in servers}
+    kw_lower = [k.lower() for k in keywords]
+
+    for ls in local_servers:
+        if ls["id"] in registry_ids:
+            continue
+        searchable = " ".join(
+            [ls["id"], ls["name"], ls["description"]] + ls["keywords"]
+        ).lower()
+        if any(kw in searchable for kw in kw_lower):
+            servers.append(ls)
+
+    installed = [s for s in servers if s.get("installed")]
+    available = [s for s in servers if not s.get("installed")]
+    sorted_servers = installed + available
+
+    logger.info(
+        f"Dispatch: Found {len(installed)} installed, "
+        f"{len(available)} available server(s) for keywords {keywords}"
+    )
+
+    return {"servers": sorted_servers}
+
+
 async def list_visible_servers(logger: Logger) -> Dict[str, Any]:
     """Return all visible MCP servers via `dmcp browse --json` with no keyword filter."""
     raw = await run_dmcp(logger, "browse", "--json")
@@ -67,13 +152,16 @@ async def list_server_tools(logger: Logger, server_id: str) -> Dict[str, Any]:
     raw = await run_dmcp(logger, "tools", server_id, "--json")
     if raw is None:
         return {"error": f"Failed to list tools for '{server_id}'", "tools": []}
+
     try:
         tools = json.loads(raw)
     except json.JSONDecodeError:
         return {"error": "dmcp returned invalid JSON", "tools": []}
+
     if isinstance(tools, dict) and "tools" in tools:
         tools = tools["tools"]
     if not isinstance(tools, list):
         tools = []
+
     logger.info(f"Dispatch: Server '{server_id}' has {len(tools)} tool(s)")
     return {"server": server_id, "tools": tools}

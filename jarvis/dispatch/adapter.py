@@ -7,9 +7,10 @@ stdio and provides methods to send task batches, kill tasks, and receive
 signals.
 
 The adapter also handles semantic tool discovery:
-- Embeds sub-task intents via Ollama (when embedding model is available)
+- Embeds sub-task intents via Ollama (when embedding search is enabled)
 - Passes vectors to dispatch → dmcp for cosine similarity search
-- Falls back to listing all visible servers when embeddings are unavailable
+- Falls back to keyword search when vector search is unavailable or
+  returns no results
 - Auto-indexes non-approved servers after installation
 
 All decision-making lives in JARVIS — dispatch and dmcp are tools that
@@ -34,8 +35,10 @@ from .dmcp_registry import install_server as registry_install_server
 from .dmcp_registry import list_server_tools as registry_list_server_tools
 from .dmcp_registry import list_visible_servers as registry_list_visible_servers
 from .dmcp_registry import run_dmcp as registry_run_dmcp
+from .dmcp_registry import search_servers as registry_search_servers
 from .tool_discovery import discover_tools as run_tool_discovery
 from .tool_discovery import format_available_tools as render_available_tools
+from .tool_discovery import keyword_fallback as run_keyword_fallback
 from .transport import call_tool as transport_call_tool
 from .transport import connect as transport_connect
 from .transport import disconnect as transport_disconnect
@@ -206,12 +209,20 @@ class DispatchAdapter:
         return {"output": str(result)}
 
     # ------------------------------------------------------------------
-    # MCP server registry operations via dmcp
+    # MCP server discovery via dmcp (on-demand, keyword-based)
     # ------------------------------------------------------------------
 
     async def _run_dmcp(self, *args: str) -> Optional[str]:
         """Run a dmcp command and return stdout, or None on failure."""
         return await registry_run_dmcp(logger, *args)
+
+    async def search_servers(self, keywords: List[str]) -> Dict[str, Any]:
+        """
+        Search for MCP servers by keywords via `dmcp browse`.
+
+        Returns installed matches first, then not-installed ones from registries.
+        """
+        return await registry_search_servers(logger, keywords)
 
     async def list_visible_servers(self) -> Dict[str, Any]:
         """Return all visible MCP servers via `dmcp browse` with no keyword filter."""
@@ -317,6 +328,36 @@ class DispatchAdapter:
             description,
         )
 
+    async def select_discovery_mode(
+        self,
+        embeddings: Optional[Any] = None,
+    ) -> str:
+        """
+        Return the active tool-discovery backend: ``"embedding"`` or ``"keyword"``.
+
+        Chosen from config + runtime state:
+          - embedding:  ALLOW_EMBEDDING_SEARCH, embeddings available,
+                        and (visible_servers >= threshold OR enforce flag)
+          - keyword:    everything else (embed model unavailable, master
+                        switch off, or server count below threshold)
+
+        EMBEDDING_SEARCH_THRESHOLD defaults to 0, so embedding runs
+        whenever the model is available. Raise it to force keyword search
+        below a certain registry size.
+        """
+        if not Config.ALLOW_EMBEDDING_SEARCH or embeddings is None:
+            return "keyword"
+
+        count = await self.server_count()
+        total = count.get("total", 0)
+
+        if (
+            Config.ENFORCE_EMBEDDING_SEARCH
+            or total >= Config.EMBEDDING_SEARCH_THRESHOLD
+        ):
+            return "embedding"
+        return "keyword"
+
     async def discover_tools(
         self,
         tasks: List[Dict[str, Any]],
@@ -325,15 +366,27 @@ class DispatchAdapter:
         """
         Tool discovery — the main entry point after a ``plan`` action.
 
-        Always uses embedding search. Falls back to listing all visible
-        servers when embeddings are unavailable or fail.
+        Runs whichever backend ``select_discovery_mode`` picked (embedding or
+        keyword) and returns a formatted ``MATCHED_TOOLS`` / ``CANDIDATE_SERVERS``
+        block for prompt injection. Empty string if nothing matched.
 
         Args:
             tasks: List of dicts with "intent" (required) and optional
-                   "top_k", "min_score".
+                   "keywords", "top_k", "min_score".
             embeddings: OllamaEmbeddings instance for local embedding.
         """
         return await run_tool_discovery(self, logger, tasks, embeddings)
+
+    async def _keyword_fallback(self, task: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Keyword search fallback for a single sub-task.
+
+        For installed servers, expand each server into per-tool rows with
+        real ``tool_name`` / ``description`` / ``params`` so the LLM can
+        dispatch directly without guessing. Non-installed matches stay
+        server-level — the LLM must install them before they become
+        dispatchable.
+        """
+        return await run_keyword_fallback(self, logger, task)
 
     @staticmethod
     def _format_available_tools(results: List[Dict[str, Any]]) -> str:

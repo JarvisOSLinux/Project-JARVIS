@@ -1,4 +1,4 @@
-"""High-level tool discovery helpers (embedding-based + formatting)."""
+"""High-level tool discovery helpers (embedding + keyword fallback + formatting)."""
 
 from __future__ import annotations
 
@@ -16,21 +16,16 @@ async def discover_tools(
     """
     Tool discovery entry point after a dispatch ``plan`` action.
 
-    Always uses embedding search. When embeddings are unavailable or fail,
-    falls back to listing all visible servers as CANDIDATE_SERVERS so the
-    LLM can still choose, install, and dispatch.
+    Runs whichever backend ``select_discovery_mode`` picked (embedding or
+    keyword) and returns a formatted ``MATCHED_TOOLS`` / ``CANDIDATE_SERVERS``
+    block for prompt injection. Empty string if nothing matched.
     """
+    mode = await adapter.select_discovery_mode(embeddings)
+    logger.info(f"Dispatch: discover_tools — {len(tasks)} sub-task(s), mode={mode}")
+
     all_results: List[Dict[str, Any]] = []
 
-    if embeddings is None:
-        logger.info(
-            "Dispatch: discover_tools — embeddings unavailable, listing all servers"
-        )
-        all_results = await _all_servers_as_candidates(adapter, logger)
-    else:
-        logger.info(
-            f"Dispatch: discover_tools — {len(tasks)} sub-task(s), embedding search"
-        )
+    if mode == "embedding":
         intents = [t.get("intent", "") for t in tasks]
         try:
             vectors = embeddings.embed_batch(intents)
@@ -50,12 +45,22 @@ async def discover_tools(
                         for r in result_set:
                             r["_source_task"] = intents[i]
                         all_results.extend(result_set)
+                    else:
+                        # No vector match for this task — fall back to
+                        # keyword search so the user still gets candidates.
+                        all_results.extend(
+                            await keyword_fallback(adapter, logger, tasks[i])
+                        )
 
         except Exception as e:
             logger.warning(
-                f"Dispatch: Embedding discovery failed, listing all servers: {e}"
+                f"Dispatch: Embedding discovery failed, falling back to keywords: {e}"
             )
-            all_results = await _all_servers_as_candidates(adapter, logger)
+            for task in tasks:
+                all_results.extend(await keyword_fallback(adapter, logger, task))
+    else:
+        for task in tasks:
+            all_results.extend(await keyword_fallback(adapter, logger, task))
 
     if not all_results:
         logger.info("Dispatch: discover_tools found no matching tools")
@@ -64,28 +69,79 @@ async def discover_tools(
     return format_available_tools(all_results)
 
 
-async def _all_servers_as_candidates(
-    adapter: Any, logger: Logger
+async def keyword_fallback(
+    adapter: Any, logger: Logger, task: Dict[str, Any]
 ) -> List[Dict[str, Any]]:
-    """Return all visible servers as candidate rows (graceful degradation fallback)."""
-    result = await adapter.list_visible_servers()
+    """Keyword search fallback for a single sub-task."""
+    keywords = task.get("keywords", [])
+    if not keywords:
+        intent = task.get("intent", "")
+        keywords = [w for w in intent.lower().split() if len(w) > 3]
+
+    if not keywords:
+        return []
+
+    result = await adapter.search_servers(keywords)
     servers = result.get("servers", [])
-    candidates = []
-    for s in servers:
-        server_id = s.get("id", s.get("server_id", ""))
+
+    source_task = task.get("intent", "")
+    tool_results: List[Dict[str, Any]] = []
+
+    for server in servers:
+        server_id = server.get("id", server.get("server_id", ""))
         if not server_id:
             continue
-        candidates.append(
+
+        installed = bool(server.get("installed", False))
+        server_name = server.get("name", server_id)
+        server_desc = server.get("description", "")
+
+        if installed:
+            tools_result = await adapter.list_server_tools(server_id)
+            tools = (
+                tools_result.get("tools", []) if isinstance(tools_result, dict) else []
+            )
+
+            if tools:
+                for tool in tools:
+                    if not isinstance(tool, dict):
+                        continue
+                    tool_name = tool.get("name", "")
+                    if not tool_name:
+                        continue
+                    tool_results.append(
+                        {
+                            "server_id": server_id,
+                            "server_name": server_name,
+                            "tool_name": tool_name,
+                            "description": tool.get("description", ""),
+                            "params": tool.get("inputSchema", tool.get("params", {})),
+                            "installed": True,
+                            "score": 0,
+                            "_source": "keyword",
+                            "_source_task": source_task,
+                        }
+                    )
+                continue
+
+            logger.debug(
+                f"Dispatch: installed server '{server_id}' exposed no tools "
+                "via list_server_tools; emitting server-level row"
+            )
+
+        tool_results.append(
             {
                 "server_id": server_id,
-                "server_name": s.get("name", server_id),
-                "description": s.get("description", ""),
-                "installed": bool(s.get("installed", False)),
+                "server_name": server_name,
+                "description": server_desc,
+                "installed": installed,
                 "score": 0,
-                "_source": "list_all",
+                "_source": "keyword",
+                "_source_task": source_task,
             }
         )
-    return candidates
+
+    return tool_results
 
 
 def format_available_tools(results: List[Dict[str, Any]]) -> str:

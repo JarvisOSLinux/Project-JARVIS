@@ -138,13 +138,18 @@ class Config:
     RAG_MIN_SCORE = float(os.getenv("RAG_MIN_SCORE", "0.3"))
 
     # --- Semantic Tool Discovery ---
-    # Tool discovery always uses embedding search (via dispatch → dmcp).
-    # When the embedding model is unavailable, all visible servers are shown
-    # as CANDIDATE_SERVERS so the LLM can still install and dispatch.
-    # Master switch: set false to completely disable embedding-based discovery.
+    # Master switch for vector-based tool search via dispatch/dmcp
     ALLOW_EMBEDDING_SEARCH = (
         os.getenv("ALLOW_EMBEDDING_SEARCH", "true").lower() == "true"
     )
+    # Bypass threshold — use vector search regardless of server count
+    ENFORCE_EMBEDDING_SEARCH = (
+        os.getenv("ENFORCE_EMBEDDING_SEARCH", "false").lower() == "true"
+    )
+    # Minimum visible servers before vector search auto-enables.
+    # Default 0 means embedding is always preferred when available;
+    # keyword search is the fallback when the embed model is unavailable.
+    EMBEDDING_SEARCH_THRESHOLD = int(os.getenv("EMBEDDING_SEARCH_THRESHOLD", "0"))
 
     # Data directory — when set (e.g. systemd JARVIS_DATA_DIR=/var/lib/jarvis),
     # memory, goal archive, and default socket use this base path
@@ -361,12 +366,104 @@ Output exactly one JSON object. First char {{, last char }}.
 """
 
     # ------------------------------------------------------------------
-    # Dispatch mode system prompt.
-    # Tool discovery always uses embedding search — the LLM never needs
-    # to know which backend is active; it just follows this schema.
+    # Dispatch mode: two variants selected per-turn by the system.
+    #
+    # JARVIS picks which prompt is active based on the current tool-
+    # discovery backend (see DispatchAdapter.select_discovery_mode).
+    # The LLM never sees the words "embedding", "semantic", "vector",
+    # or "keyword" — it just follows whichever schema is in front of it.
     # ------------------------------------------------------------------
 
-    LLM_DISPATCH_PROMPT = """\
+    LLM_DISPATCH_PROMPT_KEYWORD = """\
+You are operating in DISPATCH mode. Your job is to find and execute MCP server tools.
+
+CRITICAL: Your ENTIRE response must be a single valid JSON object.
+
+--- Workflow ---
+1. plan: ALWAYS start here. Break the intent into sub-tasks. For each sub-task,
+   give a short intent and a few keywords the system can look up.
+2. The system returns MATCHED_TOOLS (ready to dispatch) and/or
+   CANDIDATE_SERVERS (need installation first).
+3. If MATCHED_TOOLS is present → dispatch those tools with correct params.
+4. If only CANDIDATE_SERVERS is present → install a promising one,
+   then list_tools, then dispatch.
+5. If nothing matched → search with different keywords, or done with a failure summary.
+6. done: Return a concise summary to root.
+
+--- Actions ---
+
+Plan sub-tasks (ALWAYS start with this):
+{{
+    "action": "plan",
+    "tasks": [
+        {{"intent": "get weather forecast for Berlin", "keywords": ["weather", "forecast"]}},
+        {{"intent": "convert 50 EUR to USD", "keywords": ["currency", "convert"]}}
+    ]
+}}
+
+Search servers by keyword (use only if plan returned nothing useful):
+{{"action": "search", "keywords": ["calculator", "math"]}}
+
+List tools on an installed server:
+{{"action": "list_tools", "server_id": "com.example.server"}}
+
+Install a server:
+{{"action": "install", "server_id": "com.example.server"}}
+
+Dispatch tasks (concurrent execution):
+{{
+    "action": "dispatch",
+    "tasks": [
+        {{"server": "<server_id>", "tool": "<tool_name>", "params": {{}}, "remind_after": 60}}
+    ]
+}}
+
+Wait for running tasks:
+{{"action": "wait"}}
+
+Kill running tasks:
+{{"action": "kill", "pids": [1, 3]}}
+
+Defer a goal:
+{{"action": "defer", "goal_id": "<id>", "duration": 1800, "reason": "optional"}}
+
+Return to root with results:
+{{"action": "done", "summary": "<concise result summary for the root system>"}}
+
+--- Context you receive ---
+- INTENT: What root asked you to do
+- GOALS: Active goals
+- MATCHED_TOOLS: Tools ready to dispatch — server_id/tool_name plus params schema
+- CANDIDATE_SERVERS: Servers that look relevant but are NOT installed —
+                     use install + list_tools to make them dispatchable
+- TOOLS: Tool listings from a server (after list_tools)
+- SEARCH_RESULTS: Server search results (after search)
+- INSTALL_RESULT: Installation outcome
+- DISPATCH_RESULT / DISPATCH_ERROR: Task execution results
+- SIGNAL: Dispatch event (INIT, EXIT, REMIND, WAIT, KILL)
+
+--- Signal types ---
+- INIT: Task started (includes PID)
+- EXIT: Task finished (includes output or error)
+- REMIND: Task exceeded its reminder threshold
+- WAIT: You previously chose to wait
+- KILL: Task was terminated
+
+--- Rules ---
+- ALWAYS start with "plan" — even for a single task.
+- If MATCHED_TOOLS is present, dispatch those. Never invent tool names.
+- If only CANDIDATE_SERVERS is present, install + list_tools first.
+- If nothing matched, try search with different keywords, or done with a failure summary.
+- When done due to failure, the summary must be specific: "UNAVAILABLE: <reason>" or
+  "FAILED: <error>". Never write vague summaries like "please try again" — root must
+  know exactly why the task could not be completed.
+- You can dispatch multiple tasks in one action for parallelism.
+- Output exactly one JSON object — no preamble, no trailing text.
+
+The very first character of your response must be {{ and the very last must be }}.
+"""
+
+    LLM_DISPATCH_PROMPT_EMBEDDING = """\
 You are operating in DISPATCH mode. Your job is to find and execute MCP server tools.
 
 CRITICAL: Your ENTIRE response must be a single valid JSON object.
