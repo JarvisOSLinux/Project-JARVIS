@@ -119,6 +119,7 @@ async def on_session_selected(app: Any, event: Any) -> None:
     # Clear transcript and reload history for the selected session.
     try:
         from textual.widgets import RichLog
+
         chat_log = app.query_one("#chat-log", RichLog)
         chat_log.clear()
         app._export_lines.clear()
@@ -126,8 +127,7 @@ async def on_session_selected(app: Any, event: Any) -> None:
         pass
 
     app._append_log(
-        f"[dim]— {session.short_id()} "
-        f"('{session.title or 'untitled'}') —[/dim]"
+        f"[dim]— {session.short_id()} " f"('{session.title or 'untitled'}') —[/dim]"
     )
     await _load_session_history(app, session.id)
     await app._refresh_sidebar()

@@ -12,7 +12,9 @@ if _config_dir:
     else:
         load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 else:
-    _user_conf = os.path.join(os.path.expanduser("~"), ".config", "jarvis", "jarvis.conf")
+    _user_conf = os.path.join(
+        os.path.expanduser("~"), ".config", "jarvis", "jarvis.conf"
+    )
     if os.path.isfile(_user_conf):
         load_dotenv(_user_conf)
     load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
