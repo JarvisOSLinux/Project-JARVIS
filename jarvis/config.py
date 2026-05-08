@@ -241,6 +241,7 @@ store — Remember a personal fact or preference under a topic theme.
 recall — Recall stored facts by exact theme name.
 search_memory — Search all memories by meaning (semantic search). Use when you need context.
 list_memory — List all stored memory themes.
+rename_session — Rename the current chat session. Use after the first substantive exchange when SESSION_TITLE is "New chat" — pick a short (2–5 word) title that captures the topic.
 {data_consent_note}
 dispatch — Run tools (calc, files, web, etc.). Use when user wants to DO something that needs external tools.
 
@@ -280,15 +281,27 @@ dispatch — Run tools (calc, files, web, etc.). Use when user wants to DO somet
 }}
 
 {{
+    "action": "rename_session",
+    "title": "<short descriptive title, 2-5 words>",
+    "goal_updates": []
+}}
+
+{{
     "action": "dispatch",
     "intent": "<what to accomplish>"
 }}
 
 --- Context ---
-You receive: GOALS (with IDs), NEW INPUT, and optionally DISPATCH_SUMMARY from dispatch.
+You receive: GOALS (with IDs), SESSION_TITLE (current chat name), NEW INPUT, and optionally DISPATCH_SUMMARY from dispatch.
 Memory operation results appear as STORE_RESULT, RECALL_RESULT, SEARCH_MEMORY_RESULT, LIST_MEMORY_RESULT.
+RENAME_RESULT confirms the rename succeeded — then respond to the user normally.
 RELEVANT MEMORIES may be included automatically based on user input (RAG retrieval).
 Include goal_updates in respond: "completed" or "failed" with result.
+
+--- Session naming guidelines ---
+- When SESSION_TITLE is "New chat" and the user has sent a substantive message, use rename_session before responding.
+- Title should reflect the main topic (e.g. "System Update Verbose", "Python Help", "Music Recommendations").
+- After RENAME_RESULT arrives, respond to the user as normal.
 
 --- Memory guidelines ---
 - Choose descriptive theme names (e.g. "user_preferences", "school_schedule")
@@ -307,6 +320,7 @@ OS: {system} {release} ({machine}), Shell: {shell}
 --- When to use each action ---
 
 respond — Direct reply. Use for chat, greetings, general knowledge, or after a subsystem returns a summary.
+rename_session — Rename the current chat session. Use after the first substantive exchange when SESSION_TITLE is "New chat".
 dispatch — Run tools (calc, files, web, etc.). Use when user wants to DO something that needs external tools.
 Memory is disabled. Do not use store, recall, search_memory, or list_memory.
 
@@ -319,13 +333,24 @@ Memory is disabled. Do not use store, recall, search_memory, or list_memory.
 }}
 
 {{
+    "action": "rename_session",
+    "title": "<short descriptive title, 2-5 words>",
+    "goal_updates": []
+}}
+
+{{
     "action": "dispatch",
     "intent": "<what to accomplish>"
 }}
 
 --- Context ---
-You receive: GOALS (with IDs), NEW INPUT, and optionally DISPATCH_SUMMARY from subsystems.
+You receive: GOALS (with IDs), SESSION_TITLE (current chat name), NEW INPUT, and optionally DISPATCH_SUMMARY from subsystems.
+RENAME_RESULT confirms rename succeeded — then respond to the user normally.
 Include goal_updates in respond: "completed" or "failed" with result.
+
+--- Session naming guidelines ---
+- When SESSION_TITLE is "New chat" and the user has sent a substantive message, use rename_session before responding.
+- Title should reflect the main topic (2-5 words).
 
 Output exactly one JSON object. First char {{, last char }}.
 """

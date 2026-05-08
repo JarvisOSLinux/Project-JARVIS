@@ -8,7 +8,7 @@ from typing import Any
 from rich.text import Text
 from textual.widgets import RichLog
 
-_DEFAULT_TITLE_RE = re.compile(r"^Chat \d{4}-\d{2}-\d{2}")
+_DEFAULT_TITLE_RE = re.compile(r"^(New chat|Chat \d{4}-\d{2}-\d{2})", re.IGNORECASE)
 
 
 def markup_to_plain(markup: str) -> str:

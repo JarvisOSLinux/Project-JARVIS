@@ -24,6 +24,8 @@ VALID_ACTIONS = {
     "recall",
     "search_memory",
     "list_memory",
+    # Root — session management
+    "rename_session",
     # Dispatch subsystem
     "plan",
     "search",
@@ -377,5 +379,17 @@ def _parse_search_memory(response: Dict[str, Any]) -> Dict[str, Any]:
 def _parse_list_memory(response: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "action": "list_memory",
+        "goal_updates": response.get("goal_updates", []),
+    }
+
+
+@_parser("rename_session")
+def _parse_rename_session(response: Dict[str, Any]) -> Dict[str, Any]:
+    title = response.get("title", "").strip()
+    if not title:
+        return {"error": "rename_session requires 'title'", "raw": response}
+    return {
+        "action": "rename_session",
+        "title": title,
         "goal_updates": response.get("goal_updates", []),
     }

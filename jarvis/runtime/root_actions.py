@@ -65,6 +65,8 @@ async def act_on_root_response(
         emit_activity(app, "Planning tool execution…", kind="dispatch")
     elif action in ("store", "recall", "search_memory", "list_memory"):
         emit_activity(app, f"Running memory action: {action}", kind="memory")
+    elif action == "rename_session":
+        emit_activity(app, "Renaming session…", kind="memory")
 
     apply_goal_updates(app, parsed.get("goal_updates", []))
 
@@ -192,5 +194,18 @@ async def act_on_root_response(
             logger,
             "LIST_MEMORY_RESULT",
             compact_payload_for_llm(result),
+            depth,
+        )
+
+    elif action == "rename_session":
+        title = parsed["title"]
+        app.sessions.rename(title)
+        if hasattr(app, "schedule_sidebar_refresh"):
+            app.schedule_sidebar_refresh()
+        await feed_root_summary(
+            app,
+            logger,
+            "RENAME_RESULT",
+            json.dumps({"ok": True, "title": title}),
             depth,
         )
