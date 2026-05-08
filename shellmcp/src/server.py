@@ -118,7 +118,6 @@ async def _search_brave(query: str, max_results: int, api_key: str) -> str:
         url,
         headers={
             "Accept": "application/json",
-            "Accept-Encoding": "gzip",
             "X-Subscription-Token": api_key,
         },
     )
