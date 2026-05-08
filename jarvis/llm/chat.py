@@ -305,6 +305,27 @@ class LLM:
             if isinstance(obj, dict):
                 return obj, "raw_decode_scan"
 
+        # 5. Normalize Python f-string-style {{ -> { and }} -> } then retry.
+        #    LLMs sometimes emit double-brace escapes after seeing template
+        #    examples in their training context or after heavy compression.
+        normalized = text.replace("{{", "{").replace("}}", "}")
+        if normalized != text:
+            try:
+                obj = json.loads(normalized)
+                if isinstance(obj, dict):
+                    return obj, "normalize_double_braces"
+            except (json.JSONDecodeError, ValueError):
+                pass
+            for i, ch in enumerate(normalized):
+                if ch != "{":
+                    continue
+                try:
+                    obj, _ = decoder.raw_decode(normalized[i:])
+                except (json.JSONDecodeError, ValueError):
+                    continue
+                if isinstance(obj, dict):
+                    return obj, "normalize_double_braces_scan"
+
         return None, "none"
 
     def reset_history(self):

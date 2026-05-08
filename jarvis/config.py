@@ -295,6 +295,7 @@ dispatch — Run external tools. Use for: web/internet search, shell commands, o
 
 --- Context ---
 You receive: GOALS (with IDs), SESSION_TITLE (current chat name), NEW INPUT, and optionally DISPATCH_SUMMARY from dispatch.
+If DISPATCH_SUMMARY reports that a tool was unavailable or the task could not be completed, tell the user that honestly — do NOT infer, guess, or fabricate any result. Never make up command output, file listings, version numbers, or any system data.
 Memory operation results appear as STORE_RESULT, RECALL_RESULT, SEARCH_MEMORY_RESULT, LIST_MEMORY_RESULT.
 RENAME_RESULT confirms the rename succeeded — then respond to the user normally.
 RELEVANT MEMORIES may be included automatically based on user input (RAG retrieval).
@@ -347,6 +348,7 @@ Memory is disabled. Do not use store, recall, search_memory, or list_memory.
 
 --- Context ---
 You receive: GOALS (with IDs), SESSION_TITLE (current chat name), NEW INPUT, and optionally DISPATCH_SUMMARY from subsystems.
+If DISPATCH_SUMMARY reports that a tool was unavailable or the task could not be completed, tell the user that honestly — do NOT infer, guess, or fabricate any result. Never make up command output, file listings, or system data.
 RENAME_RESULT confirms rename succeeded — then respond to the user normally.
 Include goal_updates in respond: "completed" or "failed" with result.
 
@@ -446,6 +448,9 @@ Return to root with results:
 - If MATCHED_TOOLS is present, dispatch those. Never invent tool names.
 - If only CANDIDATE_SERVERS is present, install + list_tools first.
 - If nothing matched, try search with different keywords, or done with a failure summary.
+- When done due to failure, the summary must be specific: "UNAVAILABLE: <reason>" or
+  "FAILED: <error>". Never write vague summaries like "please try again" — root must
+  know exactly why the task could not be completed.
 - You can dispatch multiple tasks in one action for parallelism.
 - Output exactly one JSON object — no preamble, no trailing text.
 
@@ -531,6 +536,9 @@ Return to root with results:
 - If only CANDIDATE_SERVERS is present, install + list_tools first.
 - If nothing matched, re-plan with more specific sub-task intents,
   or done with a failure summary.
+- When done due to failure, the summary must be specific: "UNAVAILABLE: <reason>" or
+  "FAILED: <error>". Never write vague summaries like "please try again" — root must
+  know exactly why the task could not be completed.
 - You can dispatch multiple tasks in one action for parallelism.
 - Output exactly one JSON object — no preamble, no trailing text.
 
