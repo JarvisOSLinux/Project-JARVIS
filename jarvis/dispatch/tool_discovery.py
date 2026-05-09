@@ -145,9 +145,10 @@ async def keyword_fallback(
 
 
 def format_available_tools(results: List[Dict[str, Any]]) -> str:
-    """Render results into MATCHED_TOOLS and CANDIDATE_SERVERS blocks."""
+    """Render results into MATCHED_TOOLS, BROKEN_SERVERS, and CANDIDATE_SERVERS blocks."""
     matched: List[Dict[str, Any]] = []
-    candidates: List[Dict[str, Any]] = []
+    broken: List[Dict[str, Any]] = []    # installed but tools failed to load
+    candidates: List[Dict[str, Any]] = []  # not installed
 
     seen_tools: set = set()
     seen_servers: set = set()
@@ -170,7 +171,10 @@ def format_available_tools(results: List[Dict[str, Any]]) -> str:
             if server_id in seen_servers:
                 continue
             seen_servers.add(server_id)
-            candidates.append(r)
+            if installed:
+                broken.append(r)
+            else:
+                candidates.append(r)
 
     sections: List[str] = []
 
@@ -192,6 +196,20 @@ def format_available_tools(results: List[Dict[str, Any]]) -> str:
                     json.dumps(params) if isinstance(params, dict) else str(params)
                 )
                 line += f"\n    params: {params_str}"
+            lines.append(line)
+        sections.append("\n".join(lines))
+
+    if broken:
+        lines = [
+            "BROKEN_SERVERS (installed but tools failed to load — use list_tools to retry,"
+            " or install to reinstall):"
+        ]
+        for r in broken:
+            server_id = r.get("server_id", "unknown")
+            line = f"  {server_id}"
+            description = r.get("description", "")
+            if description:
+                line += f"\n    {description}"
             lines.append(line)
         sections.append("\n".join(lines))
 

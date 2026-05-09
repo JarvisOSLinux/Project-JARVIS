@@ -33,6 +33,7 @@ from .discovery import server_count as discovery_server_count
 from .discovery import sync_index as discovery_sync_index
 from .dmcp_registry import install_server as registry_install_server
 from .dmcp_registry import list_server_tools as registry_list_server_tools
+from .dmcp_registry import list_visible_servers as registry_list_visible_servers
 from .dmcp_registry import run_dmcp as registry_run_dmcp
 from .dmcp_registry import search_servers as registry_search_servers
 from .tool_discovery import discover_tools as run_tool_discovery
@@ -277,6 +278,10 @@ class DispatchAdapter:
         """
         return await registry_search_servers(logger, keywords)
 
+    async def list_visible_servers(self) -> Dict[str, Any]:
+        """Return all visible MCP servers via `dmcp browse` with no keyword filter."""
+        return await registry_list_visible_servers(logger)
+
     async def install_server(self, server_id: str) -> Dict[str, Any]:
         """Install an MCP server from registry via `dmcp install`."""
         return await registry_install_server(logger, server_id)
@@ -387,10 +392,12 @@ class DispatchAdapter:
         Chosen from config + runtime state:
           - embedding:  ALLOW_EMBEDDING_SEARCH, embeddings available,
                         and (visible_servers >= threshold OR enforce flag)
-          - keyword:    everything else
+          - keyword:    everything else (embed model unavailable, master
+                        switch off, or server count below threshold)
 
-        The LLM never sees these names — this only drives which dispatch
-        system prompt JARVIS installs and which search path runs.
+        EMBEDDING_SEARCH_THRESHOLD defaults to 0, so embedding runs
+        whenever the model is available. Raise it to force keyword search
+        below a certain registry size.
         """
         if not Config.ALLOW_EMBEDDING_SEARCH or embeddings is None:
             return "keyword"

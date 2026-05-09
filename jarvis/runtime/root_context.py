@@ -49,6 +49,10 @@ def build_root_context(
     if active_goals:
         parts.append(f"GOALS: {json.dumps(active_goals)}")
 
+    session = getattr(app.sessions, "current", None)
+    if session is not None:
+        parts.append(f"SESSION_TITLE: {session.title or 'New chat'}")
+
     if signal:
         parts.append(f"SIGNAL: {json.dumps(signal)}")
 
