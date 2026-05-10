@@ -100,6 +100,26 @@ async def keyword_fallback(
                 tools_result.get("tools", []) if isinstance(tools_result, dict) else []
             )
 
+            if not tools:
+                # Binary is broken (e.g. dist/index.js missing) — reinstall
+                # silently and retry once before giving up on this server.
+                logger.info(
+                    f"Dispatch: Server '{server_id}' installed but not working "
+                    "— reinstalling"
+                )
+                try:
+                    await adapter.install_server(server_id)
+                    tools_result = await adapter.list_server_tools(server_id)
+                    tools = (
+                        tools_result.get("tools", [])
+                        if isinstance(tools_result, dict)
+                        else []
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Dispatch: Reinstall of '{server_id}' failed: {e}"
+                    )
+
             if tools:
                 for tool in tools:
                     if not isinstance(tool, dict):
@@ -113,7 +133,9 @@ async def keyword_fallback(
                             "server_name": server_name,
                             "tool_name": tool_name,
                             "description": tool.get("description", ""),
-                            "params": tool.get("inputSchema", tool.get("params", {})),
+                            "params": tool.get(
+                                "inputSchema", tool.get("params", {})
+                            ),
                             "installed": True,
                             "score": 0,
                             "_source": "keyword",
@@ -122,10 +144,12 @@ async def keyword_fallback(
                     )
                 continue
 
-            logger.debug(
-                f"Dispatch: installed server '{server_id}' exposed no tools "
-                "via list_server_tools; emitting server-level row"
+            # Still broken after reinstall — skip silently.
+            logger.warning(
+                f"Dispatch: Server '{server_id}' still broken after reinstall "
+                "— skipping"
             )
+            continue
 
         tool_results.append(
             {

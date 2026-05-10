@@ -142,7 +142,7 @@ async def browse_vector(
     try:
         result = await asyncio.wait_for(
             adapter.session.call_tool(
-                "browse_vector",
+                "browse_servers",
                 {
                     "vector": vector,
                     "top_k": top_k,
@@ -187,7 +187,7 @@ async def browse_vectors_batch(
     try:
         result = await asyncio.wait_for(
             adapter.session.call_tool(
-                "browse_vectors",
+                "browse_servers_batch",
                 {
                     "vectors": vectors,
                     "top_k": top_k,
