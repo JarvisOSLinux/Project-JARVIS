@@ -160,15 +160,6 @@ class DispatchAdapter:
         )
 
     async def kill_tasks(self, pids: List[int]) -> Dict[str, Any]:
-        """
-        Kill running tasks by PID.
-
-        Args:
-            pids: List of task PIDs to terminate.
-
-        Returns:
-            Dict with kill confirmation.
-        """
         if not require_connection(self, logger, "kill_tasks"):
             return {"error": "Not connected to dispatch"}
 
@@ -187,17 +178,6 @@ class DispatchAdapter:
     async def set_timer(
         self, label: str, duration: int, metadata: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """
-        Set a one-shot timer in dispatch.
-
-        Args:
-            label: Human-readable label for the signal window.
-            duration: Seconds until REMIND fires.
-            metadata: Opaque key-value data passed through in signals.
-
-        Returns:
-            Dict with assigned PID and status, or error.
-        """
         if not require_connection(self, logger, "set_timer"):
             return {"error": "Not connected to dispatch"}
 
@@ -220,25 +200,9 @@ class DispatchAdapter:
         )
 
     async def get_signal_window(self) -> List[Dict[str, Any]]:
-        """
-        Get the current signal window from dispatch.
-
-        Returns:
-            List of signal dicts (up to 20), each with:
-                - pid: task PID
-                - type: INIT | EXIT | REMIND | WAIT | KILL
-                - timestamp: ISO string
-                - data: (optional) output or error payload
-        """
         return await transport_get_signal_window(self, logger)
 
     def _extract_content(self, result) -> Dict[str, Any]:
-        """
-        Extract content from an MCP CallToolResult.
-
-        Always returns a dict. Text content that isn't valid JSON is wrapped
-        as {"output": "<text>"} so callers can safely use .get().
-        """
         if (
             hasattr(result, "structuredContent")
             and result.structuredContent is not None
@@ -271,15 +235,9 @@ class DispatchAdapter:
         return await registry_run_dmcp(logger, *args)
 
     async def search_servers(self, keywords: List[str]) -> Dict[str, Any]:
-        """
-        Search for MCP servers by keywords via `dmcp browse`.
-
-        Returns installed matches first, then not-installed ones from registries.
-        """
         return await registry_search_servers(logger, keywords)
 
     async def list_visible_servers(self) -> Dict[str, Any]:
-        """Return all visible MCP servers via `dmcp browse` with no keyword filter."""
         return await registry_list_visible_servers(logger)
 
     async def install_server(self, server_id: str) -> Dict[str, Any]:
@@ -290,38 +248,44 @@ class DispatchAdapter:
         """List tools available on an installed MCP server."""
         return await registry_list_server_tools(logger, server_id)
 
+    async def get_server_manifest(self, server_id: str) -> Optional[Dict[str, Any]]:
+        """Return the installed manifest for a server via `dmcp info <id> --json`.
+
+        Returns None if the server is not installed or the output cannot be parsed.
+        """
+        output = await self._run_dmcp("info", server_id, "--json")
+        if output:
+            try:
+                return json.loads(output)
+            except json.JSONDecodeError:
+                pass
+        return None
+
+    async def set_server_config(self, server_id: str, config: Dict[str, str]) -> None:
+        """Persist config key-value pairs for a server via `dmcp config <id> set`.
+
+        Each key is stored in the server's installed manifest config section and
+        will be injected as an environment variable when the server is next run.
+        """
+        for key, value in config.items():
+            if value:
+                await self._run_dmcp("config", server_id, "set", key, value)
+
     # ------------------------------------------------------------------
     # Semantic tool discovery (vector-based via dispatch → dmcp)
     # ------------------------------------------------------------------
 
     async def server_count(self) -> Dict[str, Any]:
-        """
-        Get the number of visible MCP servers from dmcp.
-
-        Returns a dict normalized to ``{"total", "local", "registry"}``.
-        Handles three response shapes from the dispatch binary / dmcp:
-            - full dict       : {"total": N, "local": L, "registry": R}
-            - bare number     : wrapped as {"output": N}
-            - plain text "N"  : fallback from --json parse failure
-        """
         return await discovery_server_count(self, logger)
 
     @staticmethod
     def _normalize_count(content: Any) -> Dict[str, int]:
-        """Coerce a server-count response into {total, local, registry}."""
         return discovery_normalize_count(content)
 
     async def embedding_spec(self) -> Optional[Dict[str, Any]]:
-        """
-        Get the registry's embedding model spec from dmcp.
-
-        Returns: {"model": "nomic-embed-text", "version": "v1.5", "dimensions": 768}
-        or None if not available.
-        """
         return await discovery_embedding_spec(self, logger)
 
     async def sync_index(self) -> Dict[str, Any]:
-        """Trigger dmcp sync-index to refresh the vector index from registries."""
         return await discovery_sync_index(self, logger)
 
     async def browse_vector(
@@ -330,12 +294,6 @@ class DispatchAdapter:
         top_k: int = 5,
         min_score: float = 0.3,
     ) -> Dict[str, Any]:
-        """
-        Semantic search: find MCP servers/tools by vector similarity.
-
-        Passes the vector to dispatch → dmcp browse --vector for cosine
-        similarity search against the local vector index.
-        """
         return await discovery_browse_vector(self, logger, vector, top_k, min_score)
 
     async def browse_vectors_batch(
@@ -344,11 +302,6 @@ class DispatchAdapter:
         top_k: int = 5,
         min_score: float = 0.3,
     ) -> Dict[str, Any]:
-        """
-        Batch semantic search: search multiple vectors in one call.
-
-        Returns grouped results — one result set per input vector.
-        """
         return await discovery_browse_vectors_batch(
             self, logger, vectors, top_k, min_score
         )
@@ -360,19 +313,6 @@ class DispatchAdapter:
         name: str = "",
         description: str = "",
     ) -> Dict[str, Any]:
-        """
-        Index a non-approved server's vectors for semantic search.
-
-        Called after installing a server that doesn't have pre-computed
-        vectors in the registry. JARVIS embeds the tool descriptions
-        locally via Ollama and passes the vectors here for storage.
-
-        Args:
-            server_id: The MCP server ID.
-            vectors: {"server": [...], "tools": {"tool_name": [...]}}
-            name: Optional server name.
-            description: Optional server description.
-        """
         return await discovery_index_server(
             self,
             logger,
@@ -386,19 +326,7 @@ class DispatchAdapter:
         self,
         embeddings: Optional[Any] = None,
     ) -> str:
-        """
-        Return the active tool-discovery backend: ``"embedding"`` or ``"keyword"``.
-
-        Chosen from config + runtime state:
-          - embedding:  ALLOW_EMBEDDING_SEARCH, embeddings available,
-                        and (visible_servers >= threshold OR enforce flag)
-          - keyword:    everything else (embed model unavailable, master
-                        switch off, or server count below threshold)
-
-        EMBEDDING_SEARCH_THRESHOLD defaults to 0, so embedding runs
-        whenever the model is available. Raise it to force keyword search
-        below a certain registry size.
-        """
+        """Return the active tool-discovery backend: ``"embedding"`` or ``"keyword"``."""
         if not Config.ALLOW_EMBEDDING_SEARCH or embeddings is None:
             return "keyword"
 
@@ -417,43 +345,13 @@ class DispatchAdapter:
         tasks: List[Dict[str, Any]],
         embeddings: Optional[Any] = None,
     ) -> str:
-        """
-        Tool discovery — the main entry point after a ``plan`` action.
-
-        Runs whichever backend ``select_discovery_mode`` picked (embedding or
-        keyword) and returns a formatted ``MATCHED_TOOLS`` / ``CANDIDATE_SERVERS``
-        block for prompt injection. Empty string if nothing matched.
-
-        Args:
-            tasks: List of dicts with "intent" (required) and optional
-                   "keywords", "top_k", "min_score".
-            embeddings: OllamaEmbeddings instance for local embedding.
-        """
         return await run_tool_discovery(self, logger, tasks, embeddings)
 
     async def _keyword_fallback(self, task: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Keyword search fallback for a single sub-task.
-
-        For installed servers, expand each server into per-tool rows with
-        real ``tool_name`` / ``description`` / ``params`` so the LLM can
-        dispatch directly without guessing. Non-installed matches stay
-        server-level — the LLM must install them before they become
-        dispatchable.
-        """
         return await run_keyword_fallback(self, logger, task)
 
     @staticmethod
     def _format_available_tools(results: List[Dict[str, Any]]) -> str:
-        """
-        Render discovery results into the two blocks the LLM prompt names:
-
-          MATCHED_TOOLS       — installed + has tool_name; dispatch-ready
-          CANDIDATE_SERVERS   — not installed, or no tool_name yet; needs
-                                install + list_tools before dispatch
-
-        Deduplicated by (server_id, tool_name) for tool rows and by
-        server_id for server rows.
-        """
         return render_available_tools(results)
 
     async def auto_index_server(
@@ -461,20 +359,9 @@ class DispatchAdapter:
         server_id: str,
         embeddings: Optional[Any] = None,
     ) -> None:
-        """
-        Auto-index a non-approved server after installation.
-
-        Reads the server's tool descriptions, embeds them locally via
-        Ollama, and stores the vectors in dmcp's local index.
-        Does nothing if embeddings are unavailable.
-        """
         await discovery_auto_index_server(self, logger, server_id, embeddings)
 
     async def ensure_embedding_model(self, embeddings: Optional[Any] = None) -> None:
-        """
-        On startup, check the registry's embedding spec and ensure
-        the correct model is available locally.
-        """
         await discovery_ensure_embedding_model(self, logger, embeddings)
 
     async def __aenter__(self):

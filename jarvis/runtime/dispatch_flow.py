@@ -218,6 +218,8 @@ async def run_dispatch_subchain(
 
             server_id = parsed.get("server_id", "")
             if "error" not in result and server_id:
+                # Collect configurableProperties before the server is first used
+                await _collect_server_config(app, logger, server_id)
                 await app.dispatch.auto_index_server(
                     server_id=server_id,
                     embeddings=get_embeddings(app),
@@ -333,6 +335,40 @@ async def run_dispatch_subchain(
 
     logger.error("JARVIS: Dispatch sub-chain hit max steps")
     return "Tool execution timed out (too many steps)."
+
+
+async def _collect_server_config(app: Any, logger: Logger, server_id: str) -> None:
+    """After a successful install, prompt for configurableProperties if any are defined.
+
+    Fetches the installed manifest, checks for configurableProperties, shows a
+    Tkinter dialog to collect values, then persists them via dmcp config set.
+    Safe to call on every install — skips silently if no props are defined or
+    if Tkinter is unavailable.
+    """
+    manifest = await app.dispatch.get_server_manifest(server_id)
+    if not manifest:
+        return
+
+    props = manifest.get("configurableProperties", [])
+    if not props:
+        return
+
+    try:
+        from ..ui.config_prompt import prompt_configurable_properties
+    except ImportError:
+        logger.warning("JARVIS: config_prompt unavailable (tkinter missing)")
+        return
+
+    emit_activity(app, "Server needs configuration — opening prompt…", kind="dispatch")
+    collected = await prompt_configurable_properties(props)
+    if not collected:
+        logger.info(f"JARVIS: Config prompt skipped for {server_id}")
+        return
+
+    values = {k: v for k, v in collected.items() if v}
+    if values:
+        await app.dispatch.set_server_config(server_id, values)
+        logger.info(f"JARVIS: Stored config for {server_id}: keys={list(values.keys())}")
 
 
 async def dispatch_send(
