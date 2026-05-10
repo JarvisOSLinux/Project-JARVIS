@@ -458,6 +458,10 @@ Return to root with results:
   "FAILED: <error>". Never write vague summaries like "please try again" — root must
   know exactly why the task could not be completed.
 - You can dispatch multiple tasks in one action for parallelism.
+- When running shell or filesystem commands (ls, cat, find, cp, etc.), always use absolute
+  paths. Bare `ls` with no argument runs in the MCP server's install directory, not the
+  user's home folder. Always specify the full path: `ls /home/<username>`,
+  `cat /home/<username>/file.txt`, etc.
 - Output exactly one JSON object — no preamble, no trailing text.
 
 The very first character of your response must be {{ and the very last must be }}.
@@ -546,6 +550,10 @@ Return to root with results:
   "FAILED: <error>". Never write vague summaries like "please try again" — root must
   know exactly why the task could not be completed.
 - You can dispatch multiple tasks in one action for parallelism.
+- When running shell or filesystem commands (ls, cat, find, cp, etc.), always use absolute
+  paths. Bare `ls` with no argument runs in the MCP server's install directory, not the
+  user's home folder. Always specify the full path: `ls /home/<username>`,
+  `cat /home/<username>/file.txt`, etc.
 - Output exactly one JSON object — no preamble, no trailing text.
 
 The very first character of your response must be {{ and the very last must be }}.
