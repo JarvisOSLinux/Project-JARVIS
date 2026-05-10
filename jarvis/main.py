@@ -81,13 +81,10 @@ MAX_CHAIN_DEPTH = 15
 
 class Jarvis:
     def __init__(self, text_mode=False, tui_mode=False):
-        # TUI owns the terminal, so it always disables voice and stdin.
         self.text_mode = text_mode or tui_mode
         self.tui_mode = tui_mode
         self._running = False
 
-        # Textual owns the terminal surface; suppress plain stdout logging
-        # and stdout response printing while the TUI is active.
         JarvisLogger.set_console_enabled(not self.tui_mode)
         if self.tui_mode:
             JarvisLogger.apply_tui_root_mitigation()
@@ -110,9 +107,6 @@ class Jarvis:
         self.voice_manager = self.components.get("voice_manager")
         self._output_clients: List[asyncio.StreamWriter] = []
 
-        # Chat sessions — scopes conversation_log + memory to the active chat.
-        # Session metadata lives in the contextor binary; SessionManager
-        # just tracks the current-session pointer on the Python side.
         self.sessions = SessionManager(self.contextor)
 
     # ------------------------------------------------------------------
@@ -157,12 +151,6 @@ class Jarvis:
         await root_handlers.on_dispatch_signal(self, logger, signal)
 
     async def _on_confirmation_response(self, data: Dict[str, Any]):
-        """Handle a CONFIRMATION_RESPONSE event from the event loop.
-
-        Resolves the pending confirmation, then either dispatches the
-        approved tasks or feeds USER_DENIAL back to ROOT so the LLM
-        keeps communicating with the user.
-        """
         await root_handlers.on_confirmation_response(self, logger, data)
 
     async def _act_on_root_response(self, response: Dict[str, Any], depth: int = 0):
@@ -181,20 +169,29 @@ class Jarvis:
     # DISPATCH sub-chain
     # ------------------------------------------------------------------
 
-    async def _run_dispatch_subchain(self, intent: str) -> str:
+    async def _run_dispatch_subchain(
+        self, intent: str, goal_id: Optional[str] = None
+    ) -> str:
         return await runtime_run_dispatch_subchain(
             app=self,
             logger=logger,
             intent=intent,
             max_chain_depth=MAX_CHAIN_DEPTH,
+            goal_id=goal_id,
         )
 
-    async def _dispatch_send(self, tasks, dispatch_context=None) -> Dict[str, Any]:
+    async def _dispatch_send(
+        self,
+        tasks,
+        dispatch_context=None,
+        session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         return await runtime_dispatch_send(
             app=self,
             logger=logger,
             tasks=tasks,
             dispatch_context=dispatch_context,
+            session_id=session_id,
         )
 
     async def _get_tool_metadata(self, task: Dict[str, Any]) -> Dict[str, Any]:
@@ -213,15 +210,9 @@ class Jarvis:
     # ------------------------------------------------------------------
 
     def _handle_slash_command(self, text: str) -> bool:
-        """Handle /new, /sessions, /switch, /rename, /delete.
-
-        Returns True if the input was a slash-command (handled), else
-        False so it falls through to normal LLM routing.
-        """
         return runtime_handle_slash_command(self, text)
 
     def _session_reply(self, message: str) -> None:
-        """Emit a local reply for slash-commands (no LLM roundtrip)."""
         runtime_session_reply(self, message)
 
     # ------------------------------------------------------------------
@@ -229,23 +220,18 @@ class Jarvis:
     # ------------------------------------------------------------------
 
     def _get_embeddings(self):
-        """Return the OllamaEmbeddings instance, or None if unavailable."""
         return runtime_get_embeddings(self)
 
     def _activity(self, text: str, kind: str = "activity") -> None:
-        """Emit a concise, user-facing runtime status line."""
         runtime_emit_activity(self, text, kind)
 
     def _persist_assistant_turn(self, text: str) -> None:
-        """Append assistant-visible text to the session transcript in contextor."""
         runtime_persist_assistant_turn(self, text)
 
     def _ask_llm_sync(self, context: str, tag: str = "") -> Dict[str, Any]:
-        """Single LLM call with timing logs (synchronous)."""
         return runtime_ask_llm_sync(self, logger, context, tag)
 
     async def _ask_llm(self, context: str, tag: str = "") -> Dict[str, Any]:
-        """Single LLM call with timing logs (non-blocking for UI)."""
         return await runtime_ask_llm(self, logger, context, tag)
 
     def _compact_payload_for_llm(
@@ -254,11 +240,6 @@ class Jarvis:
         *,
         max_chars: int = 3000,
     ) -> str:
-        """Compact large payloads before injecting them into root context.
-
-        Keeps logs verbose but prevents giant vectors / stack traces from
-        bloating the active chat context.
-        """
         return runtime_compact_payload_for_llm(payload, max_chars=max_chars)
 
     def _build_root_context(
@@ -288,11 +269,9 @@ class Jarvis:
         return stdin_is_tty()
 
     def _run_voice_activation(self) -> None:
-        """Run voice activation in a thread; commands are injected into the event loop."""
         runtime_run_voice_activation(self, logger)
 
     def _process_voice_command_inject(self) -> None:
-        """Process voice command and inject into event loop (no direct ask)."""
         runtime_process_voice_command_inject(self, logger)
 
     async def _run_socket_listener(self) -> None:
@@ -324,9 +303,6 @@ class Jarvis:
     async def _await_user_input(self) -> str:
         return await runtime_events.await_user_input()
 
-    async def _await_dispatch_signal(self) -> Optional[Dict[str, Any]]:
-        return await runtime_events.await_dispatch_signal(self, logger)
-
     # ------------------------------------------------------------------
     # Synchronous / legacy interface
     # ------------------------------------------------------------------
@@ -336,7 +312,6 @@ class Jarvis:
         return runtime_sync_ask(self, logger, prompt)
 
     def _handle_voice_command(self, text: str) -> dict:
-        """Voice callback: inject into event loop when running, else call ask() directly."""
         return runtime_handle_voice_command(self, logger, text)
 
     # ------------------------------------------------------------------
@@ -344,7 +319,6 @@ class Jarvis:
     # ------------------------------------------------------------------
 
     def stop(self) -> None:
-        """Request graceful shutdown (e.g. from signal handler)."""
         request_stop(self)
 
     async def _shutdown(self):

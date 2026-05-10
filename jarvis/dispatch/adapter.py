@@ -49,6 +49,11 @@ from .transport import (
 
 logger = get_logger(__name__)
 
+# How long to wait for a blocking 'wait' call before giving up (seconds).
+# Tasks can run for a long time; this is intentionally much larger than
+# the regular DISPATCH_TIMEOUT.
+_WAIT_TIMEOUT = getattr(Config, "DISPATCH_WAIT_TIMEOUT", 600.0)
+
 
 class DispatchAdapter:
     """Async MCP client for the dispatch binary."""
@@ -71,7 +76,27 @@ class DispatchAdapter:
     def is_connected(self) -> bool:
         return self._connected
 
-    async def send_tasks(self, tasks: List[Dict[str, Any]]) -> Dict[str, Any]:
+    async def send_tasks(
+        self,
+        tasks: List[Dict[str, Any]],
+        session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Send a batch of tasks to dispatch for concurrent execution.
+
+        Args:
+            tasks: List of task dicts, each with:
+                - server: MCP server name
+                - tool: tool name on that server
+                - params: dict of arguments
+                - remind_after: (optional) seconds before a REMIND signal
+            session_id: Optional opaque session identifier (e.g. goal ID).
+                When provided, the dispatch binary scopes its signal window
+                to PIDs belonging to this session.
+
+        Returns:
+            Dict with assigned PIDs and status.
+        """
         if not require_connection(self, logger, "send_tasks"):
             return {"error": "Not connected to dispatch"}
 
@@ -81,15 +106,57 @@ class DispatchAdapter:
                 f"Dispatch:   task[{i}]: server={task.get('server')}, tool={task.get('tool')}, params={task.get('params')}"
             )
 
+        params: Dict[str, Any] = {"tasks": tasks}
+        if session_id is not None:
+            params["session_id"] = session_id
+
         return await transport_call_tool(
             self,
             logger,
             tool_name="dispatch",
-            params={"tasks": tasks},
+            params=params,
             op_name="send_tasks",
             timeout_error="Dispatch timed out after {timeout}s",
             failure_prefix="Failed to dispatch tasks",
             extractor=self._extract_content,
+        )
+
+    async def wait_task(self, pids: List[int]) -> Dict[str, Any]:
+        """
+        Acknowledge a REMIND signal and block until the given PIDs complete.
+
+        Calls the dispatch binary's 'wait' MCP tool, which records WAIT
+        signals for each PID and then calls wait_for_event() again —
+        blocking until EXIT or TIMEOUT fires, then returning the updated
+        signal window.
+
+        This is the correct mechanism to use after the LLM issues a
+        {"action": "wait"} response: it keeps the sub-chain alive and
+        delivers EXIT data directly, bypassing any EventMerger polling
+        race condition.
+
+        Args:
+            pids: List of task PIDs to wait for.
+
+        Returns:
+            Dict / list containing the signal window with EXIT signal(s).
+        """
+        if not require_connection(self, logger, "wait_task"):
+            return {"error": "Not connected to dispatch"}
+
+        logger.info(
+            f"Dispatch: Acknowledging REMIND — blocking until PIDs {pids} complete"
+        )
+        return await transport_call_tool(
+            self,
+            logger,
+            tool_name="wait",
+            params={"pids": pids},
+            op_name="wait_task",
+            timeout_error="wait_task timed out after {timeout}s",
+            failure_prefix="Failed to wait for task completion",
+            extractor=self._extract_content,
+            timeout=_WAIT_TIMEOUT,
         )
 
     async def kill_tasks(self, pids: List[int]) -> Dict[str, Any]:

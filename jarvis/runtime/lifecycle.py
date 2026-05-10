@@ -22,8 +22,6 @@ def install_signal_handlers(
         try:
             loop.add_signal_handler(sig, stop_callback)
         except (ValueError, OSError):
-            # Some environments (e.g. non-main thread/platform constraints)
-            # do not allow adding custom signal handlers.
             pass
 
 
@@ -75,7 +73,7 @@ async def start_runtime_services(
     """Start event sources and optional socket/voice runtime services."""
     user_source = resolve_user_source(app)
     app.events.start(
-        signal_source=app._await_dispatch_signal,
+        signal_window_source=app.dispatch.get_signal_window,
         user_source=user_source,
     )
 
@@ -98,8 +96,6 @@ async def start_runtime_services(
         input_socket_task = asyncio.create_task(app._run_socket_listener())
         logger.info(f"JARVIS: Socket listener at {Config.JARVIS_INPUT_SOCKET}")
 
-    # Wire confirmation manager's event injector so responses flow
-    # through the event loop instead of blocking.
     app.confirmation.set_event_injector(app.events.inject_confirmation_response)
 
     output_socket_task: Optional[asyncio.Task] = None

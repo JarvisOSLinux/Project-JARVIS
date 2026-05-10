@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from logging import Logger
-from typing import Any, Optional
+from typing import Any
 
 from ..core.logger import get_logger
 from ..dispatch.event_merger import Event, EventType
@@ -34,22 +33,3 @@ async def await_user_input() -> str:
         input,
         "",
     )
-
-
-async def await_dispatch_signal(app: Any, logger: Logger) -> Optional[dict[str, Any]]:
-    """Poll dispatch for new signals and return the latest one."""
-    if not app.dispatch.is_connected:
-        await asyncio.sleep(1)
-        return None
-
-    signals = await app.dispatch.get_signal_window()
-    if signals:
-        latest = signals[-1]
-        logger.debug(
-            f"JARVIS: Received {len(signals)} signal(s), forwarding latest: "
-            f"type={latest.get('type')}, pid={latest.get('pid')}",
-        )
-        return latest
-
-    await asyncio.sleep(0.5)
-    return None

@@ -91,7 +91,12 @@ async def act_on_root_response(
         if "tasks" in parsed:
             await app._dispatch_execute_tasks(parsed["tasks"], depth)
         else:
-            summary = await app._run_dispatch_subchain(parsed["intent"])
+            # Create a root goal so the sub-chain has scoped context, PID
+            # linking, output bubbling, and strategy persistence.
+            goal = app.goals.add_goal(parsed["intent"])
+            summary = await app._run_dispatch_subchain(
+                parsed["intent"], goal_id=goal.id
+            )
             await feed_root_summary(app, logger, "DISPATCH_SUMMARY", summary, depth)
 
     # -- Memory actions (direct, no sub-chain) --
