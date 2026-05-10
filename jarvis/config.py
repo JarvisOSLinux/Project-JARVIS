@@ -436,6 +436,9 @@ Return to root with results:
 - MATCHED_TOOLS: Tools ready to dispatch — server_id/tool_name plus params schema
 - CANDIDATE_SERVERS: Servers that look relevant but are NOT installed —
                      use install + list_tools to make them dispatchable
+- NO_TOOLS_FOUND: No tools or servers matched. You MUST respond with either a new
+                  "plan" action using different keywords, or "done" with a failure summary.
+                  Never return an empty response when you see this.
 - TOOLS: Tool listings from a server (after list_tools)
 - SEARCH_RESULTS: Server search results (after search)
 - INSTALL_RESULT: Installation outcome
@@ -453,7 +456,7 @@ Return to root with results:
 - ALWAYS start with "plan" — even for a single task.
 - If MATCHED_TOOLS is present, dispatch those. Never invent tool names.
 - If only CANDIDATE_SERVERS is present, install + list_tools first.
-- If nothing matched, try search with different keywords, or done with a failure summary.
+- If NO_TOOLS_FOUND, try a new plan with different keywords or use done.
 - When done due to failure, the summary must be specific: "UNAVAILABLE: <reason>" or
   "FAILED: <error>". Never write vague summaries like "please try again" — root must
   know exactly why the task could not be completed.
@@ -528,6 +531,10 @@ Return to root with results:
 - MATCHED_TOOLS: Tools ready to dispatch — server_id/tool_name plus params schema
 - CANDIDATE_SERVERS: Servers that look relevant but are NOT installed —
                      use install + list_tools to make them dispatchable
+- NO_TOOLS_FOUND: No tools or servers matched. You MUST respond with either a new
+                  "plan" action using a more specific or differently worded intent,
+                  or "done" with a failure summary. Never return an empty response
+                  when you see this.
 - TOOLS: Tool listings from a server (after list_tools)
 - INSTALL_RESULT: Installation outcome
 - DISPATCH_RESULT / DISPATCH_ERROR: Task execution results
@@ -544,8 +551,8 @@ Return to root with results:
 - ALWAYS start with "plan" — even for a single task.
 - If MATCHED_TOOLS is present, dispatch those. Never invent tool names.
 - If only CANDIDATE_SERVERS is present, install + list_tools first.
-- If nothing matched, re-plan with more specific sub-task intents,
-  or done with a failure summary.
+- If NO_TOOLS_FOUND, re-plan with a more specific or differently worded intent,
+  or use done with a clear failure summary.
 - When done due to failure, the summary must be specific: "UNAVAILABLE: <reason>" or
   "FAILED: <error>". Never write vague summaries like "please try again" — root must
   know exactly why the task could not be completed.
