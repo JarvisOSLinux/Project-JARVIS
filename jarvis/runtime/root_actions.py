@@ -255,13 +255,16 @@ async def act_on_root_response(
 
     elif action == "rename_session":
         # Rename silently — never send RENAME_RESULT back. The follow-up
-        # feedback loop causes blank-response cascades on smaller models
-        # because feed_root_summary rebuilds context with no new_input.
-        # Instead, rename and immediately re-ask with updated context
-        # (SESSION_TITLE is now non-"New chat", preventing another rename).
+        # feedback loop caused blank-response cascades on smaller models.
+        # After renaming, force the in-memory title so build_root_context
+        # immediately reflects the new name. Without this, update_session
+        # may return a session dict with an empty title (backend timing),
+        # leaving SESSION_TITLE as "New chat" and triggering an infinite
+        # rename loop.
         title = parsed.get("title", "")
         if title and app.sessions.current:
             app.sessions.rename(title)
+            app.sessions.current.title = title
             if hasattr(app, "schedule_sidebar_refresh"):
                 app.schedule_sidebar_refresh()
             logger.info(f"JARVIS: Session silently renamed to '{title}'")
