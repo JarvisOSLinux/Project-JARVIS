@@ -46,8 +46,6 @@ async def discover_tools(
                             r["_source_task"] = intents[i]
                         all_results.extend(result_set)
                     else:
-                        # No vector match for this task — fall back to
-                        # keyword search so the user still gets candidates.
                         all_results.extend(
                             await keyword_fallback(adapter, logger, tasks[i])
                         )
@@ -145,10 +143,15 @@ async def keyword_fallback(
 
 
 def format_available_tools(results: List[Dict[str, Any]]) -> str:
-    """Render results into MATCHED_TOOLS, BROKEN_SERVERS, and CANDIDATE_SERVERS blocks."""
+    """Render results into MATCHED_TOOLS and CANDIDATE_SERVERS blocks.
+
+    Servers that are installed but failed to load tools are shown in
+    CANDIDATE_SERVERS alongside uninstalled ones — the LLM should use
+    ``install`` for both cases. ``dmcp install`` always clears and rebuilds
+    the install directory, so reinstalling a broken server is safe.
+    """
     matched: List[Dict[str, Any]] = []
-    broken: List[Dict[str, Any]] = []    # installed but tools failed to load
-    candidates: List[Dict[str, Any]] = []  # not installed
+    candidates: List[Dict[str, Any]] = []
 
     seen_tools: set = set()
     seen_servers: set = set()
@@ -171,10 +174,7 @@ def format_available_tools(results: List[Dict[str, Any]]) -> str:
             if server_id in seen_servers:
                 continue
             seen_servers.add(server_id)
-            if installed:
-                broken.append(r)
-            else:
-                candidates.append(r)
+            candidates.append(r)
 
     sections: List[str] = []
 
@@ -199,22 +199,8 @@ def format_available_tools(results: List[Dict[str, Any]]) -> str:
             lines.append(line)
         sections.append("\n".join(lines))
 
-    if broken:
-        lines = [
-            "BROKEN_SERVERS (installed but tools failed to load — use list_tools to retry,"
-            " or install to reinstall):"
-        ]
-        for r in broken:
-            server_id = r.get("server_id", "unknown")
-            line = f"  {server_id}"
-            description = r.get("description", "")
-            if description:
-                line += f"\n    {description}"
-            lines.append(line)
-        sections.append("\n".join(lines))
-
     if candidates:
-        lines = ["CANDIDATE_SERVERS (not installed — use install + list_tools):"]
+        lines = ["CANDIDATE_SERVERS (not ready — use install to set up or reinstall):"]
         for r in candidates:
             server_id = r.get("server_id", "unknown")
             line = f"  {server_id}"

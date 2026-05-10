@@ -32,8 +32,6 @@ async def run_dispatch_subchain(
     sub-tasks. JARVIS runs the selected discovery backend and
     injects MATCHED_TOOLS / CANDIDATE_SERVERS into the next prompt.
     """
-    # Pick the discovery backend before switching modes so the
-    # dispatch system prompt matches the runtime behavior.
     mode = await app.dispatch.select_discovery_mode(get_embeddings(app))
     dispatch_prompt = (
         Config.LLM_DISPATCH_PROMPT_EMBEDDING
@@ -73,7 +71,6 @@ async def run_dispatch_subchain(
             return parsed["summary"]
 
         if action == "plan":
-            # LLM split the intent into sub-tasks — search for tools
             sub_tasks = parsed.get("tasks", [])
             logger.info(f"JARVIS: Plan has {len(sub_tasks)} sub-task(s)")
             emit_activity(
@@ -110,15 +107,14 @@ async def run_dispatch_subchain(
             context = f"TOOLS: {compact_payload_for_llm(result)}"
 
         elif action == "install":
-            emit_activity(
-                app, f"Installing server {parsed['server_id']}…", kind="dispatch"
-            )
-            result = await app.dispatch.install_server(parsed["server_id"])
+            server_id = parsed.get("server_id", "")
+            emit_activity(app, f"Installing server {server_id}…", kind="dispatch")
+            result = await app.dispatch.install_server(server_id)
             context = f"INSTALL_RESULT: {compact_payload_for_llm(result)}"
 
-            # Auto-index non-approved servers after successful install
-            server_id = parsed.get("server_id", "")
             if "error" not in result and server_id:
+                # Collect configurableProperties before the server is first used
+                await _collect_server_config(app, logger, server_id)
                 await app.dispatch.auto_index_server(
                     server_id=server_id,
                     embeddings=get_embeddings(app),
@@ -130,8 +126,6 @@ async def run_dispatch_subchain(
             )
             result = await app._dispatch_send(parsed["tasks"])
             if isinstance(result, dict) and result.get("awaiting_confirmation"):
-                # Non-blocking: confirmation sent, return to event loop.
-                # Dispatch will resume when CONFIRMATION_RESPONSE arrives.
                 logger.info(
                     f"JARVIS: Dispatch sub-chain paused for confirmation "
                     f"id={result['confirmation_id']}"
@@ -188,6 +182,40 @@ async def run_dispatch_subchain(
     return "Tool execution timed out (too many steps)."
 
 
+async def _collect_server_config(app: Any, logger: Logger, server_id: str) -> None:
+    """After a successful install, prompt for configurableProperties if any are defined.
+
+    Fetches the installed manifest, checks for configurableProperties, shows a
+    Tkinter dialog to collect values, then persists them via dmcp config set.
+    Safe to call on every install — skips silently if no props are defined or
+    if Tkinter is unavailable.
+    """
+    manifest = await app.dispatch.get_server_manifest(server_id)
+    if not manifest:
+        return
+
+    props = manifest.get("configurableProperties", [])
+    if not props:
+        return
+
+    try:
+        from ..ui.config_prompt import prompt_configurable_properties
+    except ImportError:
+        logger.warning("JARVIS: config_prompt unavailable (tkinter missing)")
+        return
+
+    emit_activity(app, "Server needs configuration — opening prompt…", kind="dispatch")
+    collected = await prompt_configurable_properties(props)
+    if not collected:
+        logger.info(f"JARVIS: Config prompt skipped for {server_id}")
+        return
+
+    values = {k: v for k, v in collected.items() if v}
+    if values:
+        await app.dispatch.set_server_config(server_id, values)
+        logger.info(f"JARVIS: Stored config for {server_id}: keys={list(values.keys())}")
+
+
 async def dispatch_send(
     app: Any,
     logger: Logger,
@@ -222,14 +250,10 @@ async def dispatch_send(
         else:
             approved_tasks.append(task)
 
-    # No confirmation needed — dispatch everything now.
     if not tools_needing_confirmation:
         return await app.dispatch.send_tasks(approved_tasks)
 
-    # Some tools need confirmation — stash and notify, return immediately.
     request_id = str(uuid.uuid4())[:8]
-
-    # Use the first tool's notification_silent preference for the batch.
     notification_silent = tools_needing_confirmation[0].get(
         "notification_silent",
         Config.NOTIFICATION_SILENT,
@@ -299,8 +323,6 @@ async def dispatch_execute_tasks(
 
     result = await dispatch_send(app, logger, tasks)
 
-    # If awaiting confirmation, return to event loop — the
-    # CONFIRMATION_RESPONSE event will resume this flow.
     if isinstance(result, dict) and result.get("awaiting_confirmation"):
         logger.info(
             f"JARVIS: Root dispatch paused for confirmation "
