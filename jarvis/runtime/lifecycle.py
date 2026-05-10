@@ -43,14 +43,17 @@ async def bootstrap_tool_index_nonfatal(
 
     try:
         await dispatch.ensure_embedding_model(embeddings)
+        spec = await dispatch.embedding_spec()
         count = await dispatch.server_count()
-        if count.get("registry", 0) > 0:
+        # dispatch's server_count MCP tool calls `dmcp count` without --json,
+        # so registry is always 0 when going through the MCP layer. Treat a
+        # missing embedding spec as "never synced" and sync unconditionally.
+        should_sync = count.get("registry", 0) > 0 or spec is None
+        if should_sync:
             await dispatch.sync_index()
             logger.info("JARVIS: Tool vector index synced")
         else:
-            logger.info(
-                "JARVIS: Skipping tool vector sync (no registry servers visible)"
-            )
+            logger.info("JARVIS: Skipping tool vector sync (index already populated)")
     except Exception as e:
         logger.warning(f"JARVIS: Tool index sync failed (non-fatal): {e}")
 
