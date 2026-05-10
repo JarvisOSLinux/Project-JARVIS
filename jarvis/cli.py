@@ -35,7 +35,11 @@ JarvisLogger.setup(
 
 logger = get_logger(__name__)
 
-ENV_FILE = Path(__file__).parent / ".env"
+_jarvis_config_dir = os.environ.get("JARVIS_CONFIG_DIR")
+if _jarvis_config_dir:
+    ENV_FILE = Path(_jarvis_config_dir) / "jarvis.conf"
+else:
+    ENV_FILE = Path.home() / ".config" / "jarvis" / "jarvis.conf"
 
 
 def _cmd_send() -> None:
@@ -246,6 +250,7 @@ def _update_env_setting(key: str, value: str) -> None:
     if not found:
         lines.append(f"{key}={value}")
 
+    ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
     ENV_FILE.write_text("\n".join(lines) + "\n")
 
     os.environ[key] = value

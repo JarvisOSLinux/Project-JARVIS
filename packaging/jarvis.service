@@ -26,13 +26,12 @@ RestartSec=10
 TimeoutStartSec=60
 TimeoutStopSec=30
 
-# /dev/jarvis requires CAP_SYS_ADMIN (kernel driver enforces it).
 # CAP_NET_ADMIN allows direct network interface operations.
 # CAP_SYS_NICE allows rtkit real-time scheduling for PipeWire audio.
-# These are granted as ambient capabilities so the daemon inherits them
-# at exec without needing a setuid binary.
-AmbientCapabilities=CAP_SYS_ADMIN CAP_NET_ADMIN CAP_SYS_NICE
-CapabilityBoundingSet=CAP_SYS_ADMIN CAP_NET_ADMIN CAP_SYS_NICE
+# /dev/jarvis access is via group membership (GROUP=jarvis, MODE=0660) —
+# CAP_SYS_ADMIN is not needed.
+AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_NICE
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_NICE
 
 # NoNewPrivileges and RestrictSUIDSGID are intentionally absent:
 # the daemon spawns `sudo` for system management (pacman, systemctl, etc.).
@@ -61,7 +60,7 @@ Environment=JARVIS_INPUT_SOCKET=/run/jarvis/input.sock
 Environment=JARVIS_OUTPUT_SOCKET=/run/jarvis/output.sock
 Environment=JARVIS_LOG_DIR=/var/log/jarvis
 Environment=JARVIS_MODELS_DIR=/var/lib/jarvis/models
-Environment=PYTHONPATH=/usr/lib/jarvis
+Environment=PYTHONPATH=/usr/lib
 Environment=OLLAMA_HOST=127.0.0.1:11434
 
 # Standard output/error

@@ -7,6 +7,8 @@ from typing import Any, Optional
 
 from textual.widgets import Label, ListItem, ListView
 
+from . import output as tui_output
+
 
 def schedule_sidebar_refresh(app: Any) -> None:
     """Rebuild the session list on Textual's message pump."""
@@ -63,6 +65,44 @@ async def refresh_sidebar(app: Any, session_item_cls: Any, logger: Any) -> None:
         app._update_status()
 
 
+async def _load_session_history(app: Any, session_id: str) -> None:
+    """Load stored conversation entries and render them into the RichLog."""
+    if app.jarvis is None:
+        return
+    ctx = getattr(app.jarvis, "contextor", None)
+    if ctx is None or not getattr(ctx, "is_connected", False):
+        return
+    try:
+        result = ctx.recall("conversation_log", limit=100, session_id=session_id)
+        entries = result.get("entries", [])
+    except Exception:
+        return
+
+    if not entries:
+        app._append_log("[dim](no messages in this session yet)[/dim]")
+        return
+
+    # Sort chronologically — contextor returns most-recent-first by default.
+    try:
+        entries.sort(key=lambda e: e.get("stored_at", ""))
+    except Exception:
+        pass
+
+    for entry in entries:
+        content = (entry.get("content") or "").strip()
+        if not content:
+            continue
+        meta = entry.get("metadata") or {}
+        entry_type = meta.get("type", "")
+        escaped = tui_output.escape(content)
+        if entry_type == "user_prompt":
+            app._append_log(f"[bold cyan]you[/bold cyan] > {escaped}")
+        elif entry_type == "assistant_reply":
+            app._append_log(f"[bold magenta]jarvis[/bold magenta] > {escaped}")
+        else:
+            app._append_log(escaped)
+
+
 async def on_session_selected(app: Any, event: Any) -> None:
     """Handle user selection of a session in the sidebar list."""
     item = event.item
@@ -75,10 +115,21 @@ async def on_session_selected(app: Any, event: Any) -> None:
     if session is None:
         app._append_log(f"[red]Could not switch to {item.session_id[:8]}[/red]")
         return
+
+    # Clear transcript and reload history for the selected session.
+    try:
+        from textual.widgets import RichLog
+
+        chat_log = app.query_one("#chat-log", RichLog)
+        chat_log.clear()
+        app._export_lines.clear()
+    except Exception:
+        pass
+
     app._append_log(
-        f"[dim]— switched to {session.short_id()} "
-        f"('{session.title or 'untitled'}') —[/dim]"
+        f"[dim]— {session.short_id()} " f"('{session.title or 'untitled'}') —[/dim]"
     )
+    await _load_session_history(app, session.id)
     await app._refresh_sidebar()
 
 

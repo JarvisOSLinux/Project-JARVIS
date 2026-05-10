@@ -109,6 +109,8 @@ async def act_on_root_response(
         emit_activity(app, "Planning tool execution…", kind="dispatch")
     elif action in ("store", "recall", "search_memory", "list_memory"):
         emit_activity(app, f"Running memory action: {action}", kind="memory")
+    elif action == "rename_session":
+        emit_activity(app, "Renaming session…", kind="memory")
 
     apply_goal_updates(app, parsed.get("goal_updates", []))
 
@@ -253,17 +255,15 @@ async def act_on_root_response(
             depth,
         )
 
-    else:
-        logger.warning(
-            f"JARVIS: Unknown root action '{action}' — retrying with valid-action prompt"
+    elif action == "rename_session":
+        title = parsed["title"]
+        app.sessions.rename(title)
+        if hasattr(app, "schedule_sidebar_refresh"):
+            app.schedule_sidebar_refresh()
+        await feed_root_summary(
+            app,
+            logger,
+            "RENAME_RESULT",
+            json.dumps({"ok": True, "title": title}),
+            depth,
         )
-        context = build_root_context(app, logger)
-        context += (
-            f"\nSYSTEM: '{action}' is not a valid action. "
-            "Valid actions: respond, dispatch, store, recall, search_memory, list_memory. "
-            "Output one of those now."
-        )
-        retry_response = await ask_llm(
-            app, logger, context, tag="root-unknown-action"
-        )
-        await app._act_on_root_response(retry_response, depth + 1)

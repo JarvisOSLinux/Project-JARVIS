@@ -46,8 +46,6 @@ async def discover_tools(
                             r["_source_task"] = intents[i]
                         all_results.extend(result_set)
                     else:
-                        # No vector match for this task — fall back to
-                        # keyword search so the user still gets candidates.
                         all_results.extend(
                             await keyword_fallback(adapter, logger, tasks[i])
                         )
@@ -169,7 +167,13 @@ async def keyword_fallback(
 
 
 def format_available_tools(results: List[Dict[str, Any]]) -> str:
-    """Render results into MATCHED_TOOLS and CANDIDATE_SERVERS blocks."""
+    """Render results into MATCHED_TOOLS and CANDIDATE_SERVERS blocks.
+
+    Servers that are installed but failed to load tools are shown in
+    CANDIDATE_SERVERS alongside uninstalled ones — the LLM should use
+    ``install`` for both cases. ``dmcp install`` always clears and rebuilds
+    the install directory, so reinstalling a broken server is safe.
+    """
     matched: List[Dict[str, Any]] = []
     candidates: List[Dict[str, Any]] = []
 
@@ -220,7 +224,7 @@ def format_available_tools(results: List[Dict[str, Any]]) -> str:
         sections.append("\n".join(lines))
 
     if candidates:
-        lines = ["CANDIDATE_SERVERS (not installed — use install + list_tools):"]
+        lines = ["CANDIDATE_SERVERS (not ready — use install to set up or reinstall):"]
         for r in candidates:
             server_id = r.get("server_id", "unknown")
             line = f"  {server_id}"

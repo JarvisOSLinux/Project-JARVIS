@@ -3,7 +3,7 @@ import os
 
 from dotenv import load_dotenv
 
-# Load config: JARVIS_CONFIG_DIR (system install) or jarvis/.env (dev)
+# Load config: JARVIS_CONFIG_DIR > ~/.config/jarvis/jarvis.conf > package .env
 _config_dir = os.getenv("JARVIS_CONFIG_DIR")
 if _config_dir:
     _env_path = os.path.join(_config_dir, "jarvis.conf")
@@ -12,6 +12,11 @@ if _config_dir:
     else:
         load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 else:
+    _user_conf = os.path.join(
+        os.path.expanduser("~"), ".config", "jarvis", "jarvis.conf"
+    )
+    if os.path.isfile(_user_conf):
+        load_dotenv(_user_conf)
     load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 
@@ -141,8 +146,10 @@ class Config:
     ENFORCE_EMBEDDING_SEARCH = (
         os.getenv("ENFORCE_EMBEDDING_SEARCH", "false").lower() == "true"
     )
-    # Minimum visible servers before vector search auto-enables
-    EMBEDDING_SEARCH_THRESHOLD = int(os.getenv("EMBEDDING_SEARCH_THRESHOLD", "100"))
+    # Minimum visible servers before vector search auto-enables.
+    # Default 0 means embedding is always preferred when available;
+    # keyword search is the fallback when the embed model is unavailable.
+    EMBEDDING_SEARCH_THRESHOLD = int(os.getenv("EMBEDDING_SEARCH_THRESHOLD", "0"))
 
     # Data directory — when set (e.g. systemd JARVIS_DATA_DIR=/var/lib/jarvis),
     # memory, goal archive, and default socket use this base path
@@ -193,6 +200,10 @@ class Config:
     LOG_COLORS = (
         os.getenv("LOG_COLORS", "true").lower() == "true"
     )  # Enable colored console output
+    # Optional: path to JSONL file capturing every LLM call (input + output).
+    # Each line: {ts, mode, attempt, messages, raw_output, parse_source[, action]}
+    # Empty (default) disables the log entirely.
+    LLM_IO_LOG = os.getenv("LLM_IO_LOG", "")
 
     # os.environ["OLLAMA_NO_GPU"] = "1"
     # os.environ["OLLAMA_NUM_THREADS"] = str(multiprocessing.cpu_count())
@@ -236,10 +247,11 @@ OS: {system} {release} ({machine}), Shell: {shell}
 respond — Direct reply. Use for chat, greetings, general knowledge, or after a subsystem returns a result.
 store — Remember a personal fact or preference under a topic theme.
 recall — Recall stored facts by exact theme name.
-search_memory — Search all memories by meaning (semantic search). Use when you need context.
+search_memory — Search JARVIS's own stored memories by meaning. Use ONLY when looking for something previously remembered/stored. NOT for internet or web searches.
 list_memory — List all stored memory themes.
+rename_session — Rename the current chat session. Use after the first substantive exchange when SESSION_TITLE is "New chat" — pick a short (2–5 word) title that captures the topic.
 {data_consent_note}
-dispatch — Run tools (calc, files, web, etc.). Use when user wants to DO something that needs external tools.
+dispatch — Run external tools. Use for: web/internet search, shell commands, opening apps, calculator, file operations, anything requiring live data or system actions. Web search goes here, NOT to search_memory.
 
 --- Actions (exact format) ---
 
@@ -277,20 +289,33 @@ dispatch — Run tools (calc, files, web, etc.). Use when user wants to DO somet
 }}
 
 {{
+    "action": "rename_session",
+    "title": "<short descriptive title, 2-5 words>",
+    "goal_updates": []
+}}
+
+{{
     "action": "dispatch",
     "intent": "<what to accomplish>"
 }}
 
 --- Context ---
-You receive: GOALS (with IDs), NEW INPUT, and optionally DISPATCH_SUMMARY from dispatch.
+You receive: GOALS (with IDs), SESSION_TITLE (current chat name), NEW INPUT, and optionally DISPATCH_SUMMARY from dispatch.
+If DISPATCH_SUMMARY reports that a tool was unavailable or the task could not be completed, tell the user that honestly — do NOT infer, guess, or fabricate any result. Never make up command output, file listings, version numbers, or any system data.
 Memory operation results appear as STORE_RESULT, RECALL_RESULT, SEARCH_MEMORY_RESULT, LIST_MEMORY_RESULT.
+RENAME_RESULT confirms the rename succeeded — then respond to the user normally.
 RELEVANT MEMORIES may be included automatically based on user input (RAG retrieval).
 Include goal_updates in respond: "completed" or "failed" with result.
+
+--- Session naming guidelines ---
+- When SESSION_TITLE is "New chat" and the user has sent a substantive message, use rename_session before responding.
+- Title should reflect the main topic (e.g. "System Update Verbose", "Python Help", "Music Recommendations").
+- After RENAME_RESULT arrives, respond to the user as normal.
 
 --- Memory guidelines ---
 - Choose descriptive theme names (e.g. "user_preferences", "school_schedule")
 - When storing, extract the key fact — be concise
-- Use search_memory with natural language — it searches by meaning, not keywords
+- Use search_memory only for stored JARVIS memories — for internet/web searches use dispatch
 - If search results aren't relevant, try again with a higher offset to dig deeper
 
 Output exactly one JSON object. First char {{, last char }}.
@@ -304,6 +329,7 @@ OS: {system} {release} ({machine}), Shell: {shell}
 --- When to use each action ---
 
 respond — Direct reply. Use for chat, greetings, general knowledge, or after a subsystem returns a summary.
+rename_session — Rename the current chat session. Use after the first substantive exchange when SESSION_TITLE is "New chat".
 dispatch — Run tools (calc, files, web, etc.). Use when user wants to DO something that needs external tools.
 Memory is disabled. Do not use store, recall, search_memory, or list_memory.
 
@@ -316,13 +342,25 @@ Memory is disabled. Do not use store, recall, search_memory, or list_memory.
 }}
 
 {{
+    "action": "rename_session",
+    "title": "<short descriptive title, 2-5 words>",
+    "goal_updates": []
+}}
+
+{{
     "action": "dispatch",
     "intent": "<what to accomplish>"
 }}
 
 --- Context ---
-You receive: GOALS (with IDs), NEW INPUT, and optionally DISPATCH_SUMMARY from subsystems.
+You receive: GOALS (with IDs), SESSION_TITLE (current chat name), NEW INPUT, and optionally DISPATCH_SUMMARY from subsystems.
+If DISPATCH_SUMMARY reports that a tool was unavailable or the task could not be completed, tell the user that honestly — do NOT infer, guess, or fabricate any result. Never make up command output, file listings, or system data.
+RENAME_RESULT confirms rename succeeded — then respond to the user normally.
 Include goal_updates in respond: "completed" or "failed" with result.
+
+--- Session naming guidelines ---
+- When SESSION_TITLE is "New chat" and the user has sent a substantive message, use rename_session before responding.
+- Title should reflect the main topic (2-5 words).
 
 Output exactly one JSON object. First char {{, last char }}.
 """
@@ -416,6 +454,9 @@ Return to root with results:
 - If MATCHED_TOOLS is present, dispatch those. Never invent tool names.
 - If only CANDIDATE_SERVERS is present, install + list_tools first.
 - If nothing matched, try search with different keywords, or done with a failure summary.
+- When done due to failure, the summary must be specific: "UNAVAILABLE: <reason>" or
+  "FAILED: <error>". Never write vague summaries like "please try again" — root must
+  know exactly why the task could not be completed.
 - You can dispatch multiple tasks in one action for parallelism.
 - When running shell or filesystem commands (ls, cat, find, cp, etc.), always use absolute
   paths. Bare `ls` with no argument runs in the MCP server's install directory, not the
@@ -505,6 +546,9 @@ Return to root with results:
 - If only CANDIDATE_SERVERS is present, install + list_tools first.
 - If nothing matched, re-plan with more specific sub-task intents,
   or done with a failure summary.
+- When done due to failure, the summary must be specific: "UNAVAILABLE: <reason>" or
+  "FAILED: <error>". Never write vague summaries like "please try again" — root must
+  know exactly why the task could not be completed.
 - You can dispatch multiple tasks in one action for parallelism.
 - When running shell or filesystem commands (ls, cat, find, cp, etc.), always use absolute
   paths. Bare `ls` with no argument runs in the MCP server's install directory, not the

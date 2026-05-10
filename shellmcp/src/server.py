@@ -9,7 +9,10 @@ GUI password dialog to maintain the autonomous + secure architecture.
 import asyncio
 import json
 import os
+import shlex
 import sys
+import urllib.parse
+import urllib.request
 
 # Commands that require root — prefix with sudo -A
 PRIVILEGED_PREFIXES = (
@@ -60,9 +63,118 @@ def build_command(command: str) -> str:
     return command
 
 
+def _display_env() -> dict:
+    """Build env with display vars set, detecting from XDG_RUNTIME_DIR if missing."""
+    env = os.environ.copy()
+    if "WAYLAND_DISPLAY" not in env:
+        xdg_runtime = env.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+        for candidate in ("wayland-1", "wayland-0"):
+            if os.path.exists(os.path.join(xdg_runtime, candidate)):
+                env["WAYLAND_DISPLAY"] = candidate
+                env.setdefault("XDG_RUNTIME_DIR", xdg_runtime)
+                break
+    env.setdefault("DISPLAY", ":0")
+    return env
+
+
+async def open_app(target: str) -> str:
+    """Open a file, URL, or application via xdg-open (never elevated)."""
+    env = _display_env()
+    cmd = f"xdg-open {shlex.quote(target)}"
+    try:
+        proc = await asyncio.create_subprocess_shell(
+            cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=5)
+            err = stderr.decode(errors="replace").strip()
+            if proc.returncode not in (0, None):
+                return f"xdg-open failed (exit {proc.returncode}): {err}"
+            return f"Opened: {target}"
+        except asyncio.TimeoutError:
+            # GUI app forked and detached — expected
+            return f"Launched: {target}"
+    except Exception as e:
+        return f"Error: {e}"
+
+
+_BRAVE_KEY_PATH = os.path.expanduser("~/.config/jarvis/brave_api_key")
+
+
+def _brave_api_key() -> str:
+    try:
+        return open(_BRAVE_KEY_PATH).read().strip()
+    except OSError:
+        return ""
+
+
+async def _search_brave(query: str, max_results: int, api_key: str) -> str:
+    params = urllib.parse.urlencode({"q": query, "count": max_results})
+    url = f"https://api.search.brave.com/res/v1/web/search?{params}"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/json",
+            "X-Subscription-Token": api_key,
+        },
+    )
+    loop = asyncio.get_event_loop()
+    raw = await loop.run_in_executor(
+        None, lambda: urllib.request.urlopen(req, timeout=10).read()
+    )
+    data = json.loads(raw.decode())
+    results = data.get("web", {}).get("results", [])
+    if not results:
+        return f"No results found for: {query}"
+    parts = []
+    for r in results[:max_results]:
+        parts.append(f"- {r.get('title', '(no title)')}\n  {r.get('url', '')}")
+        if r.get("description"):
+            parts.append(f"  {r['description']}")
+    return "\n".join(parts)
+
+
+_SEARXNG_BASE = "https://trojanhoogle.pro"
+
+
+async def _search_searxng(query: str, max_results: int) -> str:
+    params = urllib.parse.urlencode({"q": query, "format": "json"})
+    url = f"{_SEARXNG_BASE}/search?{params}"
+    req = urllib.request.Request(url, headers={"User-Agent": "JarvisOS/1.0"})
+    loop = asyncio.get_event_loop()
+    raw = await loop.run_in_executor(
+        None, lambda: urllib.request.urlopen(req, timeout=10).read()
+    )
+    data = json.loads(raw.decode())
+    results = data.get("results", [])
+    if not results:
+        return f"No results found for: {query}"
+    parts = []
+    for r in results[:max_results]:
+        parts.append(f"- {r.get('title', '(no title)')}\n  {r.get('url', '')}")
+        if r.get("content"):
+            parts.append(f"  {r['content']}")
+    return "\n".join(parts)
+
+
+async def web_search(query: str, max_results: int = 5) -> str:
+    """Search the web. Uses Brave Search if API key present at ~/.config/jarvis/brave_api_key,
+    otherwise falls back to SearXNG at trojanhoogle.pro."""
+    try:
+        api_key = _brave_api_key()
+        if api_key:
+            return await _search_brave(query, max_results, api_key)
+        return await _search_searxng(query, max_results)
+    except Exception as e:
+        return f"Search failed: {e}"
+
+
 async def run_command(command: str, timeout: int = 120) -> str:
     cmd = build_command(command)
-    env = os.environ.copy()
+    env = _display_env()
     for askpass in ("/usr/bin/ksshaskpass", "/usr/lib/ssh/ksshaskpass"):
         if os.path.exists(askpass):
             env["SUDO_ASKPASS"] = askpass
@@ -93,6 +205,9 @@ TOOLS = [
         "name": "run_command",
         "description": (
             "Execute a shell command and return its output. "
+            "Use for: hardware detection (lspci, nvidia-smi, lshw, inxi -G for GPU info), "
+            "system info (CPU, memory, disk, GPU model/VRAM), "
+            "file operations, package management, network, and any system task. "
             "Privileged commands (pacman, systemctl, etc.) automatically "
             "request elevation via a GUI password dialog (KWallet/ksshaskpass)."
         ),
@@ -111,7 +226,51 @@ TOOLS = [
             },
             "required": ["command"],
         },
-    }
+    },
+    {
+        "name": "web_search",
+        "description": (
+            "Search the web using DuckDuckGo. Returns direct answers, summaries, "
+            "and related results. No API key required. Use for current information, "
+            "factual lookups, news, documentation, and anything requiring internet knowledge."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Max related results to return (default: 5)",
+                    "default": 5,
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "open_app",
+        "description": (
+            "Open a file, URL, or application using xdg-open. "
+            "Respects the user's default application associations. "
+            "Use for: launching GUI apps (firefox, dolphin, code), "
+            "opening files (PDF, images, documents) with their default app, "
+            "or opening URLs in the default browser. "
+            "Never requires sudo — always runs as the current user."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "target": {
+                    "type": "string",
+                    "description": "File path, URL, or application binary name to open",
+                },
+            },
+            "required": ["target"],
+        },
+    },
 ]
 
 
@@ -133,8 +292,19 @@ async def handle(request: dict):
         return {"jsonrpc": "2.0", "id": req_id, "result": {"tools": TOOLS}}
     elif method == "tools/call":
         params = request.get("params", {})
-        if params.get("name") == "run_command":
-            args = params.get("arguments", {})
+        tool_name = params.get("name")
+        args = params.get("arguments", {})
+        if tool_name == "web_search":
+            output = await web_search(
+                args.get("query", ""),
+                int(args.get("max_results", 5)),
+            )
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {"content": [{"type": "text", "text": output}]},
+            }
+        elif tool_name == "run_command":
             output = await run_command(
                 args.get("command", ""),
                 int(args.get("timeout", 120)),
@@ -144,10 +314,17 @@ async def handle(request: dict):
                 "id": req_id,
                 "result": {"content": [{"type": "text", "text": output}]},
             }
+        elif tool_name == "open_app":
+            output = await open_app(args.get("target", ""))
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {"content": [{"type": "text", "text": output}]},
+            }
         return {
             "jsonrpc": "2.0",
             "id": req_id,
-            "error": {"code": -32601, "message": f"Unknown tool: {params.get('name')}"},
+            "error": {"code": -32601, "message": f"Unknown tool: {tool_name}"},
         }
     elif method in ("notifications/initialized", "notifications/cancelled"):
         return None
