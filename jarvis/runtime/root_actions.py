@@ -252,3 +252,18 @@ async def act_on_root_response(
             compact_payload_for_llm(result),
             depth,
         )
+
+    else:
+        logger.warning(
+            f"JARVIS: Unknown root action '{action}' — retrying with valid-action prompt"
+        )
+        context = build_root_context(app, logger)
+        context += (
+            f"\nSYSTEM: '{action}' is not a valid action. "
+            "Valid actions: respond, dispatch, store, recall, search_memory, list_memory. "
+            "Output one of those now."
+        )
+        retry_response = await ask_llm(
+            app, logger, context, tag="root-unknown-action"
+        )
+        await app._act_on_root_response(retry_response, depth + 1)

@@ -417,6 +417,10 @@ Return to root with results:
 - If only CANDIDATE_SERVERS is present, install + list_tools first.
 - If nothing matched, try search with different keywords, or done with a failure summary.
 - You can dispatch multiple tasks in one action for parallelism.
+- When running shell or filesystem commands (ls, cat, find, cp, etc.), always use absolute
+  paths. Bare `ls` with no argument runs in the MCP server's install directory, not the
+  user's home folder. Always specify the full path: `ls /home/<username>`,
+  `cat /home/<username>/file.txt`, etc.
 - Output exactly one JSON object — no preamble, no trailing text.
 
 The very first character of your response must be {{ and the very last must be }}.
@@ -502,6 +506,10 @@ Return to root with results:
 - If nothing matched, re-plan with more specific sub-task intents,
   or done with a failure summary.
 - You can dispatch multiple tasks in one action for parallelism.
+- When running shell or filesystem commands (ls, cat, find, cp, etc.), always use absolute
+  paths. Bare `ls` with no argument runs in the MCP server's install directory, not the
+  user's home folder. Always specify the full path: `ls /home/<username>`,
+  `cat /home/<username>/file.txt`, etc.
 - Output exactly one JSON object — no preamble, no trailing text.
 
 The very first character of your response must be {{ and the very last must be }}.
