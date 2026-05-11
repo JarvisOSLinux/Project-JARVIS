@@ -91,8 +91,8 @@ async def act_on_root_response(
 ) -> None:
     """Handle a ROOT-mode LLM response.
 
-    Unified mode: the root LLM handles tool discovery, install, dispatch,
-    wait, kill, and defer directly — no separate dispatch sub-chain.
+    Unified mode: the root LLM handles all actions in a single loop.
+    Primary path: run(intent) -> system discovers+dispatches+waits -> respond.
     """
     if depth >= max_chain_depth:
         logger.error("JARVIS: Max chain depth reached, forcing respond")
@@ -105,21 +105,19 @@ async def act_on_root_response(
 
     if "error" in parsed:
         logger.warning(f"JARVIS: Root parse error: {parsed['error']}")
-        # Retry with an explicit corrective hint rather than bailing out.
         context = build_root_context(app, logger)
         context += (
             "\nSYSTEM: Your last response was not a recognised action. "
             "You MUST output a JSON object with an \"action\" field. "
-            'Valid actions: respond, find_tools, list_tools, install, dispatch, '
+            'Valid actions: respond, run, find_tools, list_tools, install, dispatch, '
             'wait, kill, defer, store, recall, search_memory, list_memory. '
-            'Example: {"action": "find_tools", "intent": "what you need to do"}'
+            'Example: {"action": "run", "intent": "what you need to do"}'
         )
         retry_response = await ask_llm(
             app, logger, context, tag="root-parse-error-retry"
         )
         retry_parsed = app.task_parser.parse(retry_response)
         if "error" in retry_parsed:
-            # Still bad — give up and surface a user-facing message.
             logger.error("JARVIS: Root parse error on retry — giving up")
             app.output_manager.handle_response(
                 {"output": "I had trouble processing that. Could you try again?"}
@@ -135,7 +133,7 @@ async def act_on_root_response(
 
     if action == "respond":
         emit_activity(app, "Composing response…", kind="llm")
-    elif action in ("find_tools", "list_tools", "install", "dispatch", "wait", "kill", "defer"):
+    elif action in ("run", "find_tools", "list_tools", "install", "dispatch", "wait", "kill", "defer"):
         emit_activity(app, f"Tool action: {action}…", kind="dispatch")
     elif action in ("store", "recall", "search_memory", "list_memory"):
         emit_activity(app, f"Running memory action: {action}", kind="memory")
@@ -160,6 +158,106 @@ async def act_on_root_response(
         if Config.RESET_HISTORY_AFTER_RESPONSE:
             app.llm.reset_history()
 
+    # ----------------------------------------------------------------------- run
+    elif action == "run":
+        from ..dispatch.tool_discovery import discover_tools as _discover_tools
+        from .dispatch_flow import (
+            _extract_pids_from_result,
+            _signals_from_result,
+            dispatch_send,
+        )
+
+        intent = parsed.get("intent", "")
+        emit_activity(app, f"Running: {intent[:60]}…", kind="dispatch")
+        logger.info(f"JARVIS: run intent='{intent}'")
+
+        # Phase 1: discover tools
+        tool_results = await _discover_tools(
+            adapter=app.dispatch,
+            logger=logger,
+            tasks=[{"intent": intent}],
+            embeddings=get_embeddings(app),
+        )
+
+        if not tool_results:
+            await _continue_root(
+                app,
+                logger,
+                f"NO_TOOLS_FOUND: No tools available for '{intent}'. "
+                "Tell the user this task cannot be completed right now.",
+                depth,
+                "root-run-no-tools",
+                max_chain_depth,
+            )
+            return
+
+        # Phase 2: hidden LLM call — ask model to dispatch with the discovered tools
+        dispatch_context = build_root_context(app, logger)
+        dispatch_context += f"\n{tool_results}"
+        dispatch_context += (
+            f"\nSYSTEM: Tools found for '{intent}'. "
+            "Output a dispatch action with the correct params now. "
+            "Use only tool names from MATCHED_TOOLS above."
+        )
+        dispatch_response = await ask_llm(
+            app, logger, dispatch_context, tag="root-run-dispatch"
+        )
+        dispatch_parsed = app.task_parser.parse(dispatch_response)
+
+        tasks = (
+            dispatch_parsed.get("tasks")
+            if dispatch_parsed.get("action") == "dispatch"
+            else None
+        )
+        if not tasks:
+            # Model didn't dispatch — fall back to showing tools normally
+            logger.warning(
+                f"JARVIS: run — dispatch step didn't yield tasks "
+                f"(got action='{dispatch_parsed.get('action')}')"
+            )
+            await _continue_root(
+                app, logger, tool_results, depth, "root-run-fallback", max_chain_depth
+            )
+            return
+
+        # Phase 3: execute dispatch
+        emit_activity(app, f"Dispatching {len(tasks)} task(s)…", kind="dispatch")
+        result = await dispatch_send(app, logger, tasks)
+
+        if isinstance(result, dict) and result.get("awaiting_confirmation"):
+            logger.info(
+                f"JARVIS: run — paused for confirmation id={result['confirmation_id']}"
+            )
+            emit_activity(
+                app, "Waiting for your confirmation before running tools.", kind="dispatch"
+            )
+            return
+
+        pending_pids = _extract_pids_from_result(result)
+
+        # Phase 4: auto-wait for result (no LLM call needed)
+        if pending_pids and app.dispatch.is_connected:
+            app._pending_dispatch_pids = pending_pids
+            emit_activity(app, "Waiting for task to complete…", kind="dispatch")
+            logger.info(f"JARVIS: run — auto-waiting for PIDs {pending_pids}")
+            wait_result = await app.dispatch.wait_task(pending_pids)
+            returned_signals = _signals_from_result(wait_result)
+            if returned_signals and hasattr(app, "events"):
+                app.events.mark_signals_seen(returned_signals)
+            if isinstance(wait_result, dict) and "error" in wait_result:
+                extra = f"WAIT_ERROR: {compact_payload_for_llm(wait_result)}"
+            else:
+                extra = f"WAIT_RESULT: {compact_payload_for_llm(wait_result)}"
+        elif isinstance(result, dict) and "error" in result:
+            extra = f"DISPATCH_ERROR: {compact_payload_for_llm(result)}"
+        else:
+            extra = f"DISPATCH_RESULT: {compact_payload_for_llm(result)}"
+
+        emit_activity(app, "Task complete.", kind="dispatch")
+        await _continue_root(
+            app, logger, extra, depth, "root-run-result", max_chain_depth
+        )
+
     # --------------------------------------------------------------- find_tools
     elif action == "find_tools":
         from ..dispatch.tool_discovery import discover_tools as _discover_tools
@@ -176,7 +274,6 @@ async def act_on_root_response(
         )
 
         if tool_results:
-            # tool_results already contains MATCHED_TOOLS:/CANDIDATE_SERVERS: headers
             await _continue_root(
                 app, logger, tool_results, depth, "root-find-tools", max_chain_depth
             )
@@ -235,12 +332,11 @@ async def act_on_root_response(
         tasks = parsed.get("tasks", [])
 
         # Graceful fallback: old-style dispatch with intent only (no tasks).
-        # Treat it as find_tools so the LLM can recover without hard failure.
         if not tasks:
             intent = parsed.get("intent", "")
             if intent:
                 logger.info(
-                    f"JARVIS: dispatch without tasks — routing to find_tools: '{intent}'"
+                    f"JARVIS: dispatch without tasks — routing to run: '{intent}'"
                 )
                 from ..dispatch.tool_discovery import discover_tools as _discover_tools
 
@@ -258,8 +354,6 @@ async def act_on_root_response(
                     _no_found = (
                         f"NO_TOOLS_FOUND: Searching for '{intent}' found no tools.\n"
                         "IMPORTANT: You MUST retry with find_tools using a more specific intent.\n"
-                        "Use the EXACT TASK GOAL — e.g. 'check python version', "
-                        "'open Firefox', 'search web for X'.\n"
                         "Do NOT use generic types like 'run shell command'.\n"
                         "Only use respond if you have retried at least twice."
                     )
@@ -275,8 +369,8 @@ async def act_on_root_response(
                 await _continue_root(
                     app,
                     logger,
-                    "SYSTEM: dispatch requires a tasks array. Use find_tools first "
-                    "to discover available tools, then dispatch with their server/tool names.",
+                    "SYSTEM: dispatch requires a tasks array. Use run first "
+                    "to discover and execute tools automatically.",
                     depth,
                     "root-dispatch-no-tasks",
                     max_chain_depth,
@@ -517,7 +611,7 @@ async def act_on_root_response(
         context = build_root_context(app, logger)
         context += (
             f"\nSYSTEM: '{action}' is not a valid action. "
-            "Valid actions: respond, find_tools, list_tools, install, dispatch, "
+            "Valid actions: respond, run, find_tools, list_tools, install, dispatch, "
             "wait, kill, defer, store, recall, search_memory, list_memory. "
             "Output one of those now."
         )

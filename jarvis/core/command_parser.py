@@ -8,8 +8,9 @@ installation, and execution directly without a separate dispatch sub-chain.
 
 Actions:
   respond, store, recall, search_memory, list_memory, rename_session
-  find_tools, list_tools, install, dispatch, wait, kill, defer
-  plan, search, done  (legacy dispatch-mode, kept for fallback)
+  run                          (primary: discover + dispatch + wait in one step)
+  find_tools, list_tools, install, dispatch, wait, kill, defer  (advanced)
+  plan, search, done           (legacy dispatch-mode, kept for fallback)
 """
 
 from typing import Any, Dict
@@ -22,6 +23,8 @@ VALID_ACTIONS = {
     # Root — core
     "respond",
     "dispatch",
+    # Root — primary tool execution (discover + dispatch + wait in one action)
+    "run",
     # Root — memory
     "store",
     "recall",
@@ -29,7 +32,7 @@ VALID_ACTIONS = {
     "list_memory",
     # Root — session
     "rename_session",
-    # Root — unified tool actions
+    # Root — advanced tool actions
     "find_tools",
     "list_tools",
     "install",
@@ -62,14 +65,14 @@ class TaskParser:
     def parse(response: Dict[str, Any]) -> Dict[str, Any]:
         action = response.get("action")
 
-        # Some models omit the "action" key but include "intent" — treat as find_tools.
+        # Some models omit the "action" key but include "intent" — treat as run.
         if action is None and response.get("intent"):
             logger.info(
-                "TaskParser: Inferred action='find_tools' from bare intent field"
+                "TaskParser: Inferred action='run' from bare intent field"
             )
             response = dict(response)
-            response["action"] = "find_tools"
-            action = "find_tools"
+            response["action"] = "run"
+            action = "run"
 
         if action not in VALID_ACTIONS:
             logger.warning(f"TaskParser: Unknown action '{action}'")
@@ -97,15 +100,15 @@ class TaskParser:
     @staticmethod
     def _summarize(result: Dict[str, Any]) -> str:
         action = result.get("action", "")
+        if action in ("run", "find_tools"):
+            intent = result.get("intent", "")
+            preview = (intent[:80] + "...") if len(intent) > 80 else intent
+            return f", intent='{preview}'"
         if action == "dispatch":
             tasks = result.get("tasks")
             if tasks:
                 parts = [f"{t.get('server')}/{t.get('tool')}" for t in tasks]
                 return f", tasks=[{', '.join(parts)}]"
-            intent = result.get("intent", "")
-            preview = (intent[:80] + "...") if len(intent) > 80 else intent
-            return f", intent='{preview}'"
-        if action == "find_tools":
             intent = result.get("intent", "")
             preview = (intent[:80] + "...") if len(intent) > 80 else intent
             return f", intent='{preview}'"
@@ -159,9 +162,21 @@ def _parse_respond(response: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+@_parser("run")
+def _parse_run(response: Dict[str, Any]) -> Dict[str, Any]:
+    """Parse run — single action that discovers, dispatches, and waits."""
+    intent = response.get("intent", "")
+    if not intent:
+        return {"error": "run action requires 'intent'", "raw": response}
+    return {
+        "action": "run",
+        "intent": str(intent),
+    }
+
+
 @_parser("find_tools")
 def _parse_find_tools(response: Dict[str, Any]) -> Dict[str, Any]:
-    """Parse find_tools — root LLM searches for tools by natural language intent."""
+    """Parse find_tools — advanced: root LLM searches for tools by intent."""
     intent = response.get("intent", "")
     if not intent:
         return {"error": "find_tools action requires 'intent'", "raw": response}
