@@ -124,14 +124,45 @@ async def _run_handle(
         "\"tool\": \"<name>\", \"params\": {{}}}}]}}"
     )
     app.llm.switch_mode("root")
-    dispatch_response = await ask_llm(app, logger, dispatch_context, tag="root-run-dispatch")
+    dispatch_response = await ask_llm(
+        app, logger, dispatch_context, tag="root-run-dispatch"
+    )
     dispatch_parsed = app.task_parser.parse(dispatch_response)
 
-    tasks = dispatch_parsed.get("tasks") if dispatch_parsed.get("action") == "dispatch" else None
+    tasks = (
+        dispatch_parsed.get("tasks")
+        if dispatch_parsed.get("action") == "dispatch"
+        else None
+    )
     if not tasks:
-        logger.warning("JARVIS: run — dispatch step didn't yield tasks; falling back")
-        await _continue_root(app, logger, tool_results, depth, "root-run-fallback", max_chain_depth)
-        return
+        # Some models reflexively emit another "run" even when instructed to
+        # output a concrete dispatch. Give one explicit correction attempt
+        # before falling back to generic reasoning.
+        logger.warning(
+            "JARVIS: run — dispatch step didn't yield tasks; retrying once with stricter instruction"
+        )
+        retry_ctx = dispatch_context + (
+            "\nSYSTEM: Your previous response was INVALID for this step. "
+            "DO NOT output action=run. You MUST output action=dispatch with a non-empty tasks list. "
+            "Copy server_id and tool_name exactly from MATCHED_TOOLS lines of the form 'server_id/tool_name'. "
+            "Example: {\"action\":\"dispatch\",\"tasks\":[{\"server\":\"server_id\",\"tool\":\"tool_name\",\"params\":{}}]}"
+        )
+        retry_response = await ask_llm(
+            app, logger, retry_ctx, tag="root-run-dispatch-retry"
+        )
+        retry_parsed = app.task_parser.parse(retry_response)
+        tasks = (
+            retry_parsed.get("tasks")
+            if retry_parsed.get("action") == "dispatch"
+            else None
+        )
+
+        if not tasks:
+            logger.warning("JARVIS: run — dispatch retry still didn't yield tasks; falling back")
+            await _continue_root(
+                app, logger, tool_results, depth, "root-run-fallback", max_chain_depth
+            )
+            return
 
     # Phase 3: execute dispatch
     result = await dispatch_send(app, logger, tasks)
