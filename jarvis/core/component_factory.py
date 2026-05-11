@@ -82,15 +82,16 @@ class ComponentFactory:
             data_consent_note=Config.DATA_CONSENT_NOTE,
         )
 
+        # Unified root prompt: handles tool discovery, install, dispatch, memory
+        # all in a single LLM loop without a separate dispatch sub-chain.
         root_prompt = (
-            Config.LLM_ROOT_PROMPT.format(**fmt)
+            Config.LLM_ROOT_PROMPT_UNIFIED.format(**fmt)
             if Config.CONTEXTOR_ENABLED
-            else Config.LLM_ROOT_PROMPT_NO_CONTEXTOR.format(**fmt)
+            else Config.LLM_ROOT_PROMPT_UNIFIED_NO_CONTEXTOR.format(**fmt)
         )
 
-        # Default dispatch prompt is the keyword variant. main.py swaps
-        # in the embedding variant at dispatch entry when the gate selects
-        # that backend (see DispatchAdapter.select_discovery_mode).
+        # Keep the legacy dispatch prompt available for backwards-compat
+        # (confirmation-resume flow, any code still referencing dispatch mode).
         default_dispatch_prompt = Config.LLM_DISPATCH_PROMPT_KEYWORD
         if "{system}" in default_dispatch_prompt:
             default_dispatch_prompt = default_dispatch_prompt.format(**fmt)

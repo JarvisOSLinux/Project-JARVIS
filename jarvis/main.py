@@ -1,16 +1,10 @@
 """
 JARVIS — the brain.
 
-Hierarchical orchestrator:
-
-  ROOT  →  responds directly, runs memory ops (store/recall/search),
-           or routes to DISPATCH subsystem
-  DISPATCH  →  tool discovery and execution sub-chain
-               (plan → search → install → dispatch → done)
-
-Memory operations (store, recall, search_memory, list_memory) are
-ROOT-level actions — no separate LLM sub-chain.  The Rust contextor
-binary handles storage and vector search; JARVIS calls it directly.
+Unified orchestrator: the root LLM handles all actions in a single loop—
+responding, managing memory (store/recall/search/list), AND discovering,
+installing, and executing MCP tools (find_tools/install/dispatch/wait/kill)
+without a separate dispatch sub-chain or mode switch.
 
 Dual input: voice (wake word) and socket/CLI ("jarvis send") feed the same
 event queue. Both can be active simultaneously.
@@ -107,6 +101,9 @@ class Jarvis:
         self.voice_manager = self.components.get("voice_manager")
         self._output_clients: List[asyncio.StreamWriter] = []
 
+        # PIDs from the most recently dispatched task batch (used by wait action).
+        self._pending_dispatch_pids: list = []
+
         self.sessions = SessionManager(self.contextor)
 
     # ------------------------------------------------------------------
@@ -166,7 +163,7 @@ class Jarvis:
         await runtime_feed_root_summary(self, logger, label, summary, depth)
 
     # ------------------------------------------------------------------
-    # DISPATCH sub-chain
+    # DISPATCH helpers (kept for confirmation-resume flow and legacy use)
     # ------------------------------------------------------------------
 
     async def _run_dispatch_subchain(

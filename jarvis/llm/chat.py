@@ -146,15 +146,17 @@ class LLM:
         self._mode = mode
         self.chat_history = self._histories[mode]
 
-    # Mode-specific retry hints so the LLM knows what actions are valid
+    # Mode-specific retry hints so the LLM knows what actions are valid.
+    # In unified mode the root prompt covers all tool + memory actions.
     _MODE_RETRY_HINTS: dict[str, str] = {
         "root": (
-            'Valid actions: "respond", "dispatch", "store", "recall", '
-            '"search_memory", "list_memory".\n'
-            'Example: {"action": "respond", "output": "your message", "goal_updates": []}'
+            'Valid actions: "respond", "find_tools", "list_tools", "install", '
+            '"dispatch", "wait", "kill", "defer", '
+            '"store", "recall", "search_memory", "list_memory".\n'
+            'Example: {"action": "find_tools", "intent": "run a shell command"}'
         ),
         "dispatch": (
-            'Valid actions: "search", "list_tools", "install", "dispatch", '
+            'Valid actions: "plan", "search", "list_tools", "install", "dispatch", '
             '"wait", "kill", "defer", "done".\n'
             'Example: {"action": "done", "summary": "result summary"}'
         ),
