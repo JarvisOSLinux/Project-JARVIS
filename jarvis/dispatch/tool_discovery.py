@@ -46,9 +46,26 @@ async def discover_tools(
                             r["_source_task"] = intents[i]
                         all_results.extend(result_set)
                     else:
+                        # Per-task fallback when embedding returns empty for this task.
                         all_results.extend(
                             await keyword_fallback(adapter, logger, tasks[i])
                         )
+                # If embedding returned fewer result sets than tasks, cover the rest.
+                for i in range(len(result_sets), len(tasks)):
+                    all_results.extend(
+                        await keyword_fallback(adapter, logger, tasks[i])
+                    )
+
+            # Global fallback: embedding search ran but returned nothing at all
+            # (e.g. vector index is empty because no servers are installed yet).
+            # Keyword search hits the full server catalog including uninstalled
+            # servers, so this is the path that surfaces CANDIDATE_SERVERS.
+            if not all_results:
+                logger.info(
+                    "Dispatch: Embedding index empty — falling back to keyword search"
+                )
+                for task in tasks:
+                    all_results.extend(await keyword_fallback(adapter, logger, task))
 
         except Exception as e:
             logger.warning(
@@ -57,6 +74,13 @@ async def discover_tools(
             for task in tasks:
                 all_results.extend(await keyword_fallback(adapter, logger, task))
     else:
+        for task in tasks:
+            all_results.extend(await keyword_fallback(adapter, logger, task))
+
+    # Global fallback: embedding index was empty (result_sets=[]) so the
+    # per-task fallback loop never ran.
+    if not all_results and mode == "embedding":
+        logger.info("Dispatch: Embedding index empty — falling back to keyword search")
         for task in tasks:
             all_results.extend(await keyword_fallback(adapter, logger, task))
 

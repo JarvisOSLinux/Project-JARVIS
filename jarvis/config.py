@@ -3,7 +3,7 @@ import os
 
 from dotenv import load_dotenv
 
-# Load config: JARVIS_CONFIG_DIR > ~/.config/jarvis/jarvis.conf > package .env
+# Load config: JARVIS_CONFIG_DIR (system install) or jarvis/.env (dev)
 _config_dir = os.getenv("JARVIS_CONFIG_DIR")
 if _config_dir:
     _env_path = os.path.join(_config_dir, "jarvis.conf")
@@ -12,11 +12,6 @@ if _config_dir:
     else:
         load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 else:
-    _user_conf = os.path.join(
-        os.path.expanduser("~"), ".config", "jarvis", "jarvis.conf"
-    )
-    if os.path.isfile(_user_conf):
-        load_dotenv(_user_conf)
     load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 
@@ -103,11 +98,15 @@ class Config:
     CONTEXTOR_ENABLED = os.getenv("CONTEXTOR_ENABLED", "true").lower() == "true"
 
     # Sudo Access Configuration
+    # Note: This is a preference setting. Actual sudo access is managed by sudo_manager
+    # This setting tracks whether sudo should be enabled (for installation/configuration purposes)
     JARVIS_SUDO_ENABLED = os.getenv("JARVIS_SUDO_ENABLED", "false").lower() == "true"
 
     # Dispatch Configuration
-    DISPATCH_BINARY = os.getenv("DISPATCH_BINARY", "dispatch")
-    DMCP_BINARY = os.getenv("DMCP_BINARY", "dmcp")
+    DISPATCH_BINARY = os.getenv(
+        "DISPATCH_BINARY", "dispatch"
+    )  # Path to dispatch binary
+    DMCP_BINARY = os.getenv("DMCP_BINARY", "dmcp")  # Path to dmcp binary
     DISPATCH_TIMEOUT = int(os.getenv("DISPATCH_TIMEOUT", "60"))  # seconds
 
     # Contextor (memory) binary — Rust subprocess over stdio
@@ -121,21 +120,32 @@ class Config:
     MAX_ENTRIES_PER_THEME = int(os.getenv("MAX_ENTRIES_PER_THEME", "500"))
 
     # --- Context Retrieval (RAG) ---
+    # Embedding model for semantic search (runs on Ollama)
     EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")
+    # Ollama URL for embeddings — defaults to local instance, NOT LLM_URL
+    # (the LLM may live on a remote server; embeddings always need local Ollama)
     EMBED_URL = os.getenv("EMBED_URL", "http://localhost:11434")
+    # Enable semantic search via contextor binary (requires embed model)
     RAG_ENABLED = os.getenv("RAG_ENABLED", "true").lower() == "true"
+    # Number of memories to retrieve per RAG query
     RAG_TOP_K = int(os.getenv("RAG_TOP_K", "5"))
+    # Minimum cosine similarity for RAG results (0.0-1.0)
     RAG_MIN_SCORE = float(os.getenv("RAG_MIN_SCORE", "0.3"))
 
     # --- Semantic Tool Discovery ---
+    # Master switch for vector-based tool search via dispatch/dmcp
     ALLOW_EMBEDDING_SEARCH = (
         os.getenv("ALLOW_EMBEDDING_SEARCH", "true").lower() == "true"
     )
+    # Bypass threshold — use vector search regardless of server count
     ENFORCE_EMBEDDING_SEARCH = (
         os.getenv("ENFORCE_EMBEDDING_SEARCH", "false").lower() == "true"
     )
-    EMBEDDING_SEARCH_THRESHOLD = int(os.getenv("EMBEDDING_SEARCH_THRESHOLD", "0"))
+    # Minimum visible servers before vector search auto-enables
+    EMBEDDING_SEARCH_THRESHOLD = int(os.getenv("EMBEDDING_SEARCH_THRESHOLD", "100"))
 
+    # Data directory — when set (e.g. systemd JARVIS_DATA_DIR=/var/lib/jarvis),
+    # memory, goal archive, and default socket use this base path
     _DEFAULT_DATA_DIR = os.path.join(
         os.getenv(
             "XDG_DATA_HOME", os.path.join(os.path.expanduser("~"), ".local", "share")
@@ -144,165 +154,77 @@ class Config:
     )
     JARVIS_DATA_DIR = os.getenv("JARVIS_DATA_DIR", _DEFAULT_DATA_DIR)
 
+    # Dual input — Unix socket for "jarvis send" and app integration
+    # Default: JARVIS_DATA_DIR/input.sock (or ~/.jarvis/input.sock)
     JARVIS_INPUT_SOCKET = os.getenv(
         "JARVIS_INPUT_SOCKET",
         os.path.join(JARVIS_DATA_DIR, "input.sock"),
     )
+
+    # Output IPC — Unix socket for apps/widgets to receive responses
+    # Clients connect and receive JSON lines: {"output": "...", ...}
     JARVIS_OUTPUT_SOCKET = os.getenv(
         "JARVIS_OUTPUT_SOCKET",
         os.path.join(JARVIS_DATA_DIR, "output.sock"),
     )
 
+    # Tool-Level Action (TLA) Confirmation
+    # - "allow_all": never ask, run everything (power users / trusted environments)
+    # - "smart":     only ask when tool has confirmation_required=true (default)
+    # - "ask_all":   ask for every tool call, regardless of metadata
     CONFIRMATION_MODE = os.getenv("CONFIRMATION_MODE", "smart")
+
+    # Default notification style for confirmation prompts:
+    # - false: show desktop notification (notify-send)
+    # - true:  suppress desktop notification; only use socket/CLI
+    #          (lets external apps render their own confirmation UI)
     NOTIFICATION_SILENT = os.getenv("NOTIFICATION_SILENT", "false").lower() == "true"
+
+    # Timeout (seconds) for user to respond to a confirmation prompt
     CONFIRMATION_TIMEOUT = int(os.getenv("CONFIRMATION_TIMEOUT", "30"))
 
-    LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-    LOG_FILE = os.getenv("LOG_FILE", "")
-    LOG_COLORS = os.getenv("LOG_COLORS", "true").lower() == "true"
-    LLM_IO_LOG = os.getenv("LLM_IO_LOG", "")
+    # Logging Configuration
+    LOG_LEVEL = os.getenv(
+        "LOG_LEVEL", "INFO"
+    ).upper()  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+    LOG_FILE = os.getenv(
+        "LOG_FILE", ""
+    )  # Optional: path to log file (empty = no file logging)
+    LOG_COLORS = (
+        os.getenv("LOG_COLORS", "true").lower() == "true"
+    )  # Enable colored console output
+
+    # os.environ["OLLAMA_NO_GPU"] = "1"
+    # os.environ["OLLAMA_NUM_THREADS"] = str(multiprocessing.cpu_count())
 
     # ------------------------------------------------------------------
-    # Prompt system — unified root mode handles all tool + memory ops.
+    # Hierarchical prompt system: ROOT → DISPATCH
+    # Memory actions (store, recall, search, list) are ROOT-level —
+    # no separate CONTEXTOR LLM sub-chain.
     # ------------------------------------------------------------------
 
     LLM_WRONG_JSON_FORMAT_MESSAGE = """\
-BAD RESPONSE. You must output a JSON object with an "action" field.
+Your response was not valid JSON. Output ONLY a single JSON object — nothing else.
+No thinking, no explanation, no markdown fences. Just the JSON.
 
-COMMON MISTAKE — WRONG (missing action):
-  {{"intent": "check python version"}}
+Valid formats:
 
-CORRECT:
-  {{"action": "run", "intent": "check python version"}}
+{{"action": "respond", "output": "your message", "goal_updates": []}}
 
-Valid action values: respond, run, find_tools, list_tools, install, dispatch,
-  wait, kill, defer, store, recall, search_memory, list_memory.
+{{"action": "dispatch", "intent": "what to accomplish"}}
 
-Output ONLY the corrected JSON object. First char {{, last char }}."""
+{{"action": "store", "theme": "topic", "content": "fact", "goal_updates": []}}
 
-    LLM_ROOT_PROMPT_UNIFIED = """\
-You are JARVIS, a personal AI assistant. Respond in JSON only.
+{{"action": "recall", "theme": "topic", "goal_updates": []}}
 
-OS: {system} {release} ({machine}), Shell: {shell}
+{{"action": "search_memory", "query": "natural language query", "goal_updates": []}}
 
-=== CRITICAL RULE ===
-Every response MUST be a JSON object where the FIRST key is "action".
+{{"action": "list_memory", "goal_updates": []}}
 
-WRONG — never output this:
-  {{"intent": "check python version"}}
+{{"action": "done", "summary": "result summary"}}
 
-CORRECT — always include action:
-  {{"action": "run", "intent": "check python version"}}
-
-=== ACTIONS ===
-
-For talking to the user:
-  {{"action": "respond", "output": "<message>", "goal_updates": [...]}}
-
-For running external tools / system commands / web / files / anything live:
-  {{"action": "run", "intent": "check python version"}}
-  The system finds and executes the right tool automatically.
-  You receive the result and then respond to the user.
-
-For memory:
-  {{"action": "store", "theme": "<topic>", "content": "<fact>", "goal_updates": []}}
-  {{"action": "recall", "theme": "<topic>", "goal_updates": []}}
-  {{"action": "search_memory", "query": "<query>", "top_k": 5, "goal_updates": []}}
-  {{"action": "list_memory", "goal_updates": []}}
-{data_consent_note}
-For session naming (use when SESSION_TITLE is "New chat"):
-  {{"action": "rename_session", "title": "<2-5 words>", "goal_updates": []}}
-
-Advanced tool actions (for multi-step or parallel tasks):
-  {{"action": "find_tools", "intent": "<specific task>"}}
-  {{"action": "dispatch", "tasks": [{{"server": "<id>", "tool": "<name>", "params": {{}}}}]}}
-  {{"action": "wait"}}
-  {{"action": "install", "server_id": "<id>"}}
-  {{"action": "list_tools", "server_id": "<id>"}}
-  {{"action": "kill", "pids": [1, 2]}}
-  {{"action": "defer", "goal_id": "<id>", "duration": 1800}}
-
-=== WORKFLOW ===
-1. Use "run" for all tool tasks. System returns WAIT_RESULT or DISPATCH_RESULT.
-2. Respond to the user with the result.
-3. If NO_TOOLS_FOUND: tell the user the tool is not available.
-
-=== CONTEXT ===
-GOALS, SESSION_TITLE, NEW INPUT, RELEVANT MEMORIES (auto-injected).
-After run: WAIT_RESULT or DISPATCH_RESULT or NO_TOOLS_FOUND.
-After memory ops: STORE_RESULT, RECALL_RESULT, SEARCH_MEMORY_RESULT, LIST_MEMORY_RESULT.
-
-=== RULES ===
-- "action" key is REQUIRED in every response. Never omit it.
-- Never invent tool names. Only use names from MATCHED_TOOLS or list_tools output.
-- Always use absolute paths in shell commands (/home/user/file.txt, not ./file.txt).
-- If a task fails, tell the user honestly. Never fabricate output.
-- Include goal_updates in respond to mark goals completed or failed.
-- Use search_memory for stored memories only, not internet searches.
-
-Output exactly one JSON object. First char {{, last char }}.
-"""
-
-    LLM_ROOT_PROMPT_UNIFIED_NO_CONTEXTOR = """\
-You are JARVIS, a personal AI assistant. Respond in JSON only.
-
-OS: {system} {release} ({machine}), Shell: {shell}
-
-=== CRITICAL RULE ===
-Every response MUST be a JSON object where the FIRST key is "action".
-
-WRONG — never output this:
-  {{"intent": "check python version"}}
-
-CORRECT — always include action:
-  {{"action": "run", "intent": "check python version"}}
-
-=== ACTIONS ===
-
-For talking to the user:
-  {{"action": "respond", "output": "<message>", "goal_updates": [...]}}
-
-For running external tools / system commands / web / files / anything live:
-  {{"action": "run", "intent": "check python version"}}
-  The system finds and executes the right tool automatically.
-  You receive the result and then respond to the user.
-
-Memory is disabled. Do not use store, recall, search_memory, or list_memory.
-
-For session naming (use when SESSION_TITLE is "New chat"):
-  {{"action": "rename_session", "title": "<2-5 words>", "goal_updates": []}}
-
-Advanced tool actions (for multi-step or parallel tasks):
-  {{"action": "find_tools", "intent": "<specific task>"}}
-  {{"action": "dispatch", "tasks": [{{"server": "<id>", "tool": "<name>", "params": {{}}}}]}}
-  {{"action": "wait"}}
-  {{"action": "install", "server_id": "<id>"}}
-  {{"action": "list_tools", "server_id": "<id>"}}
-  {{"action": "kill", "pids": [1, 2]}}
-  {{"action": "defer", "goal_id": "<id>", "duration": 1800}}
-
-=== WORKFLOW ===
-1. Use "run" for all tool tasks. System returns WAIT_RESULT or DISPATCH_RESULT.
-2. Respond to the user with the result.
-3. If NO_TOOLS_FOUND: tell the user the tool is not available.
-
-=== CONTEXT ===
-GOALS, SESSION_TITLE, NEW INPUT.
-After run: WAIT_RESULT or DISPATCH_RESULT or NO_TOOLS_FOUND.
-
-=== RULES ===
-- "action" key is REQUIRED in every response. Never omit it.
-- Never invent tool names. Only use names from MATCHED_TOOLS or list_tools output.
-- Always use absolute paths in shell commands (/home/user/file.txt, not ./file.txt).
-- If a task fails, tell the user honestly. Never fabricate output.
-- Include goal_updates in respond to mark goals completed or failed.
-
-Output exactly one JSON object. First char {{, last char }}.
-"""
-
-    # ------------------------------------------------------------------
-    # Legacy two-mode prompts kept for reference / rollback.
-    # ------------------------------------------------------------------
+The very first character must be {{ and the very last must be }}.
+Now, return ONLY the corrected JSON."""
 
     LLM_ROOT_PROMPT = """\
 You are JARVIS, a personal assistant. Route or respond. Output ONLY valid JSON — no text before or after.
@@ -311,14 +233,17 @@ OS: {system} {release} ({machine}), Shell: {shell}
 
 --- When to use each action ---
 
-respond — Direct reply. Use for chat, greetings, general knowledge, or after a subsystem returns a result.
-store — Remember a personal fact or preference under a topic theme.
+respond — Direct reply. Use for chat, greetings, or after a result comes back.
+store — Remember a personal fact or preference.
 recall — Recall stored facts by exact theme name.
-search_memory — Search JARVIS's own stored memories by meaning. Use ONLY when looking for something previously remembered/stored. NOT for internet or web searches.
+search_memory — Search all memories by meaning. Use when you need context.
 list_memory — List all stored memory themes.
-rename_session — Rename the current chat session. Use after the first substantive exchange when SESSION_TITLE is "New chat" — pick a short (2–5 word) title that captures the topic.
 {data_consent_note}
-dispatch — Run external tools. Use for: web/internet search, shell commands, opening apps, calculator, file operations, anything requiring live data or system actions. Web search goes here, NOT to search_memory.
+run — Execute a task using external tools (shell, files, web, etc.).
+      The system finds and runs the right tool automatically.
+      intent = SPECIFIC TASK, NOT the tool type.
+      WRONG:   {{"action": "run", "intent": "run shell command"}}
+      CORRECT: {{"action": "run", "intent": "check python version"}}
 
 --- Actions (exact format) ---
 
@@ -326,6 +251,12 @@ dispatch — Run external tools. Use for: web/internet search, shell commands, o
     "action": "respond",
     "output": "<your message>",
     "goal_updates": [{{"id": "<goal_id>", "status": "completed", "result": "summary"}}]
+}}
+
+{{
+    "action": "run",
+    "intent": "<specific task to accomplish>",
+    "goal_updates": []
 }}
 
 {{
@@ -355,24 +286,18 @@ dispatch — Run external tools. Use for: web/internet search, shell commands, o
     "goal_updates": []
 }}
 
-{{
-    "action": "rename_session",
-    "title": "<short descriptive title, 2-5 words>",
-    "goal_updates": []
-}}
-
-{{
-    "action": "dispatch",
-    "intent": "<what to accomplish>"
-}}
-
 --- Context ---
-You receive: GOALS (with IDs), SESSION_TITLE (current chat name), NEW INPUT, and optionally DISPATCH_SUMMARY from dispatch.
-If DISPATCH_SUMMARY reports that a tool was unavailable or the task could not be completed, tell the user that honestly — do NOT infer, guess, or fabricate any result.
+You receive: GOALS (with IDs), NEW INPUT, and optionally WAIT_RESULT/DISPATCH_RESULT from tool execution.
 Memory operation results appear as STORE_RESULT, RECALL_RESULT, SEARCH_MEMORY_RESULT, LIST_MEMORY_RESULT.
-RENAME_RESULT confirms the rename succeeded — then respond to the user normally.
 RELEVANT MEMORIES may be included automatically based on user input (RAG retrieval).
 Include goal_updates in respond: "completed" or "failed" with result.
+NO_TOOLS_FOUND means retry run with a more specific intent — MUST retry at least twice before giving up.
+
+--- Memory guidelines ---
+- Choose descriptive theme names (e.g. "user_preferences", "school_schedule")
+- When storing, extract the key fact — be concise
+- Use search_memory with natural language — it searches by meaning, not keywords
+- If search results aren't relevant, try again with a higher offset to dig deeper
 
 Output exactly one JSON object. First char {{, last char }}.
 """
@@ -382,20 +307,45 @@ You are JARVIS, a personal assistant. Route or respond. Output ONLY valid JSON �
 
 OS: {system} {release} ({machine}), Shell: {shell}
 
-respond — Direct reply.
-rename_session — Rename the current chat session when SESSION_TITLE is "New chat".
-dispatch — Run tools (calc, files, web, etc.).
-Memory is disabled.
+--- When to use each action ---
 
-{{"action": "respond", "output": "<message>", "goal_updates": [...]}}
-{{"action": "rename_session", "title": "<2-5 words>", "goal_updates": []}}
-{{"action": "dispatch", "intent": "<what to accomplish>"}}
+respond — Direct reply. Use for chat, greetings, or after a result comes back.
+Memory is disabled. Do not use store, recall, search_memory, or list_memory.
+run — Execute a task using external tools (shell, files, web, etc.).
+      The system finds and runs the right tool automatically.
+      intent = SPECIFIC TASK, NOT the tool type.
+      WRONG:   {{"action": "run", "intent": "run shell command"}}
+      CORRECT: {{"action": "run", "intent": "check python version"}}
+
+--- Actions (exact format) ---
+
+{{
+    "action": "respond",
+    "output": "<your message>",
+    "goal_updates": [{{"id": "<goal_id>", "status": "completed", "result": "summary"}}]
+}}
+
+{{
+    "action": "run",
+    "intent": "<specific task to accomplish>",
+    "goal_updates": []
+}}
+
+--- Context ---
+You receive: GOALS (with IDs), NEW INPUT, and optionally WAIT_RESULT/DISPATCH_RESULT from tool execution.
+Include goal_updates in respond: "completed" or "failed" with result.
+NO_TOOLS_FOUND means retry run with a more specific intent — MUST retry at least twice before giving up.
 
 Output exactly one JSON object. First char {{, last char }}.
 """
 
     # ------------------------------------------------------------------
-    # Legacy dispatch-mode prompts (kept for sub-chain fallback).
+    # Dispatch mode: two variants selected per-turn by the system.
+    #
+    # JARVIS picks which prompt is active based on the current tool-
+    # discovery backend (see DispatchAdapter.select_discovery_mode).
+    # The LLM never sees the words "embedding", "semantic", "vector",
+    # or "keyword" — it just follows whichever schema is in front of it.
     # ------------------------------------------------------------------
 
     LLM_DISPATCH_PROMPT_KEYWORD = """\
@@ -460,24 +410,25 @@ Return to root with results:
 - MATCHED_TOOLS: Tools ready to dispatch — server_id/tool_name plus params schema
 - CANDIDATE_SERVERS: Servers that look relevant but are NOT installed —
                      use install + list_tools to make them dispatchable
-- NO_TOOLS_FOUND: No tools or servers matched. You MUST respond with either a new
-                  "plan" action using different keywords, or "done" with a failure summary.
-                  Never return an empty response when you see this.
 - TOOLS: Tool listings from a server (after list_tools)
 - SEARCH_RESULTS: Server search results (after search)
 - INSTALL_RESULT: Installation outcome
 - DISPATCH_RESULT / DISPATCH_ERROR: Task execution results
 - SIGNAL: Dispatch event (INIT, EXIT, REMIND, WAIT, KILL)
 
+--- Signal types ---
+- INIT: Task started (includes PID)
+- EXIT: Task finished (includes output or error)
+- REMIND: Task exceeded its reminder threshold
+- WAIT: You previously chose to wait
+- KILL: Task was terminated
+
 --- Rules ---
 - ALWAYS start with "plan" — even for a single task.
 - If MATCHED_TOOLS is present, dispatch those. Never invent tool names.
 - If only CANDIDATE_SERVERS is present, install + list_tools first.
-- If NO_TOOLS_FOUND, try a new plan with different keywords or use done.
-- When done due to failure, the summary must be specific: "UNAVAILABLE: <reason>" or
-  "FAILED: <error>". Never write vague summaries like "please try again".
+- If nothing matched, try search with different keywords, or done with a failure summary.
 - You can dispatch multiple tasks in one action for parallelism.
-- Always use absolute paths in shell/filesystem commands.
 - Output exactly one JSON object — no preamble, no trailing text.
 
 The very first character of your response must be {{ and the very last must be }}.
@@ -544,25 +495,25 @@ Return to root with results:
 - MATCHED_TOOLS: Tools ready to dispatch — server_id/tool_name plus params schema
 - CANDIDATE_SERVERS: Servers that look relevant but are NOT installed —
                      use install + list_tools to make them dispatchable
-- NO_TOOLS_FOUND: No tools or servers matched. You MUST respond with either a new
-                  "plan" action using a more specific or differently worded intent,
-                  or "done" with a failure summary. Never return an empty response
-                  when you see this.
 - TOOLS: Tool listings from a server (after list_tools)
 - INSTALL_RESULT: Installation outcome
 - DISPATCH_RESULT / DISPATCH_ERROR: Task execution results
 - SIGNAL: Dispatch event (INIT, EXIT, REMIND, WAIT, KILL)
 
+--- Signal types ---
+- INIT: Task started (includes PID)
+- EXIT: Task finished (includes output or error)
+- REMIND: Task exceeded its reminder threshold
+- WAIT: You previously chose to wait
+- KILL: Task was terminated
+
 --- Rules ---
 - ALWAYS start with "plan" — even for a single task.
 - If MATCHED_TOOLS is present, dispatch those. Never invent tool names.
 - If only CANDIDATE_SERVERS is present, install + list_tools first.
-- If NO_TOOLS_FOUND, re-plan with a more specific or differently worded intent,
-  or use done with a clear failure summary.
-- When done due to failure, the summary must be specific: "UNAVAILABLE: <reason>" or
-  "FAILED: <error>". Never write vague summaries.
+- If nothing matched, re-plan with more specific sub-task intents,
+  or done with a failure summary.
 - You can dispatch multiple tasks in one action for parallelism.
-- Always use absolute paths in shell/filesystem commands.
 - Output exactly one JSON object — no preamble, no trailing text.
 
 The very first character of your response must be {{ and the very last must be }}.
