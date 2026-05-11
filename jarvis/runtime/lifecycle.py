@@ -75,7 +75,7 @@ async def start_runtime_services(
     """Start event sources and optional socket/voice runtime services."""
     user_source = resolve_user_source(app)
     app.events.start(
-        signal_source=app._await_dispatch_signal,
+        signal_window_source=app.dispatch.get_signal_window,
         user_source=user_source,
     )
 
