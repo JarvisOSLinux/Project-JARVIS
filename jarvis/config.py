@@ -173,9 +173,9 @@ COMMON MISTAKE — WRONG (missing action):
   {{"intent": "check python version"}}
 
 CORRECT:
-  {{"action": "find_tools", "intent": "check python version"}}
+  {{"action": "run", "intent": "check python version"}}
 
-Valid action values: respond, find_tools, list_tools, install, dispatch,
+Valid action values: respond, run, find_tools, list_tools, install, dispatch,
   wait, kill, defer, store, recall, search_memory, list_memory.
 
 Output ONLY the corrected JSON object. First char {{, last char }}."""
@@ -189,10 +189,10 @@ OS: {system} {release} ({machine}), Shell: {shell}
 Every response MUST be a JSON object where the FIRST key is "action".
 
 WRONG — never output this:
-  {{"intent": "run shell command"}}
+  {{"intent": "check python version"}}
 
 CORRECT — always include action:
-  {{"action": "find_tools", "intent": "run shell command"}}
+  {{"action": "run", "intent": "check python version"}}
 
 === ACTIONS ===
 
@@ -200,17 +200,9 @@ For talking to the user:
   {{"action": "respond", "output": "<message>", "goal_updates": [...]}}
 
 For running external tools / system commands / web / files / anything live:
-  Step 1 — find the tool:   {{"action": "find_tools", "intent": "check python version"}}
-            (intent = the SPECIFIC TASK — "check python version", NOT the tool type "run shell command")
-  Step 2 — run the tool:    {{"action": "dispatch", "tasks": [{{"server": "<id>", "tool": "<name>", "params": {{}}}}]}}
-  Step 3 — wait if needed:  {{"action": "wait"}}
-  Step 4 — reply:           {{"action": "respond", "output": "<result>"}}
-
-Other tool actions:
-  {{"action": "list_tools", "server_id": "<id>"}}
-  {{"action": "install", "server_id": "<id>"}}
-  {{"action": "kill", "pids": [1, 2]}}
-  {{"action": "defer", "goal_id": "<id>", "duration": 1800}}
+  {{"action": "run", "intent": "check python version"}}
+  The system finds and executes the right tool automatically.
+  You receive the result and then respond to the user.
 
 For memory:
   {{"action": "store", "theme": "<topic>", "content": "<fact>", "goal_updates": []}}
@@ -221,18 +213,23 @@ For memory:
 For session naming (use when SESSION_TITLE is "New chat"):
   {{"action": "rename_session", "title": "<2-5 words>", "goal_updates": []}}
 
-=== TOOL WORKFLOW ===
-1. find_tools → system returns MATCHED_TOOLS or CANDIDATE_SERVERS or NO_TOOLS_FOUND
-2. MATCHED_TOOLS → dispatch immediately. Never invent tool names.
-3. CANDIDATE_SERVERS → install, then list_tools, then dispatch.
-4. NO_TOOLS_FOUND → MUST retry find_tools with a more specific intent. Use the exact task
-   goal ("check python version", "search web for X") — never give up on the first miss.
-   Only use respond if you have retried at least twice with different intents.
-5. Long tasks → wait after dispatch, then respond with the result.
+Advanced tool actions (for multi-step or parallel tasks):
+  {{"action": "find_tools", "intent": "<specific task>"}}
+  {{"action": "dispatch", "tasks": [{{"server": "<id>", "tool": "<name>", "params": {{}}}}]}}
+  {{"action": "wait"}}
+  {{"action": "install", "server_id": "<id>"}}
+  {{"action": "list_tools", "server_id": "<id>"}}
+  {{"action": "kill", "pids": [1, 2]}}
+  {{"action": "defer", "goal_id": "<id>", "duration": 1800}}
+
+=== WORKFLOW ===
+1. Use "run" for all tool tasks. System returns WAIT_RESULT or DISPATCH_RESULT.
+2. Respond to the user with the result.
+3. If NO_TOOLS_FOUND: tell the user the tool is not available.
 
 === CONTEXT ===
 GOALS, SESSION_TITLE, NEW INPUT, RELEVANT MEMORIES (auto-injected).
-After tool runs: MATCHED_TOOLS, DISPATCH_RESULT, DISPATCH_ERROR, WAIT_RESULT, SIGNAL.
+After run: WAIT_RESULT or DISPATCH_RESULT or NO_TOOLS_FOUND.
 After memory ops: STORE_RESULT, RECALL_RESULT, SEARCH_MEMORY_RESULT, LIST_MEMORY_RESULT.
 
 === RULES ===
@@ -255,10 +252,10 @@ OS: {system} {release} ({machine}), Shell: {shell}
 Every response MUST be a JSON object where the FIRST key is "action".
 
 WRONG — never output this:
-  {{"intent": "run shell command"}}
+  {{"intent": "check python version"}}
 
 CORRECT — always include action:
-  {{"action": "find_tools", "intent": "run shell command"}}
+  {{"action": "run", "intent": "check python version"}}
 
 === ACTIONS ===
 
@@ -266,35 +263,32 @@ For talking to the user:
   {{"action": "respond", "output": "<message>", "goal_updates": [...]}}
 
 For running external tools / system commands / web / files / anything live:
-  Step 1 — find the tool:   {{"action": "find_tools", "intent": "check python version"}}
-            (intent = the SPECIFIC TASK — "check python version", NOT the tool type "run shell command")
-  Step 2 — run the tool:    {{"action": "dispatch", "tasks": [{{"server": "<id>", "tool": "<name>", "params": {{}}}}]}}
-  Step 3 — wait if needed:  {{"action": "wait"}}
-  Step 4 — reply:           {{"action": "respond", "output": "<result>"}}
-
-Other tool actions:
-  {{"action": "list_tools", "server_id": "<id>"}}
-  {{"action": "install", "server_id": "<id>"}}
-  {{"action": "kill", "pids": [1, 2]}}
-  {{"action": "defer", "goal_id": "<id>", "duration": 1800}}
+  {{"action": "run", "intent": "check python version"}}
+  The system finds and executes the right tool automatically.
+  You receive the result and then respond to the user.
 
 Memory is disabled. Do not use store, recall, search_memory, or list_memory.
 
 For session naming (use when SESSION_TITLE is "New chat"):
   {{"action": "rename_session", "title": "<2-5 words>", "goal_updates": []}}
 
-=== TOOL WORKFLOW ===
-1. find_tools → system returns MATCHED_TOOLS or CANDIDATE_SERVERS or NO_TOOLS_FOUND
-2. MATCHED_TOOLS → dispatch immediately. Never invent tool names.
-3. CANDIDATE_SERVERS → install, then list_tools, then dispatch.
-4. NO_TOOLS_FOUND → MUST retry find_tools with a more specific intent. Use the exact task
-   goal ("check python version", "search web for X") — never give up on the first miss.
-   Only use respond if you have retried at least twice with different intents.
-5. Long tasks → wait after dispatch, then respond with the result.
+Advanced tool actions (for multi-step or parallel tasks):
+  {{"action": "find_tools", "intent": "<specific task>"}}
+  {{"action": "dispatch", "tasks": [{{"server": "<id>", "tool": "<name>", "params": {{}}}}]}}
+  {{"action": "wait"}}
+  {{"action": "install", "server_id": "<id>"}}
+  {{"action": "list_tools", "server_id": "<id>"}}
+  {{"action": "kill", "pids": [1, 2]}}
+  {{"action": "defer", "goal_id": "<id>", "duration": 1800}}
+
+=== WORKFLOW ===
+1. Use "run" for all tool tasks. System returns WAIT_RESULT or DISPATCH_RESULT.
+2. Respond to the user with the result.
+3. If NO_TOOLS_FOUND: tell the user the tool is not available.
 
 === CONTEXT ===
 GOALS, SESSION_TITLE, NEW INPUT.
-After tool runs: MATCHED_TOOLS, DISPATCH_RESULT, DISPATCH_ERROR, WAIT_RESULT, SIGNAL.
+After run: WAIT_RESULT or DISPATCH_RESULT or NO_TOOLS_FOUND.
 
 === RULES ===
 - "action" key is REQUIRED in every response. Never omit it.

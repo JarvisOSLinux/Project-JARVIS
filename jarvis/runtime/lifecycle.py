@@ -37,23 +37,22 @@ async def connect_dispatch_nonfatal(dispatch: Any, logger: Logger) -> None:
 async def bootstrap_tool_index_nonfatal(
     dispatch: Any, embeddings: Any, logger: Logger
 ) -> None:
-    """Ensure embedding model and sync tool index when dispatch is available."""
+    """Sync tool embedding index on every startup when servers are available."""
     if not (dispatch.is_connected and embeddings):
         return
 
     try:
         await dispatch.ensure_embedding_model(embeddings)
-        spec = await dispatch.embedding_spec()
         count = await dispatch.server_count()
-        # dispatch's server_count MCP tool calls `dmcp count` without --json,
-        # so registry is always 0 when going through the MCP layer. Treat a
-        # missing embedding spec as "never synced" and sync unconditionally.
-        should_sync = count.get("registry", 0) > 0 or spec is None
-        if should_sync:
+        total = count.get("total", 0)
+        # Always sync when there are known servers. The registry count coming
+        # through the MCP layer is always 0 (dmcp count without --json), so
+        # the old `registry > 0` check caused the index to stay stale forever.
+        if total > 0:
             await dispatch.sync_index()
-            logger.info("JARVIS: Tool vector index synced")
+            logger.info(f"JARVIS: Tool vector index synced ({total} servers)")
         else:
-            logger.info("JARVIS: Skipping tool vector sync (index already populated)")
+            logger.info("JARVIS: No servers to index")
     except Exception as e:
         logger.warning(f"JARVIS: Tool index sync failed (non-fatal): {e}")
 
