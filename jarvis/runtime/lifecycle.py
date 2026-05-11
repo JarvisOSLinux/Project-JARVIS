@@ -22,6 +22,8 @@ def install_signal_handlers(
         try:
             loop.add_signal_handler(sig, stop_callback)
         except (ValueError, OSError):
+            # Some environments (e.g. non-main thread/platform constraints)
+            # do not allow adding custom signal handlers.
             pass
 
 
@@ -37,17 +39,15 @@ async def connect_dispatch_nonfatal(dispatch: Any, logger: Logger) -> None:
 async def bootstrap_tool_index_nonfatal(
     dispatch: Any, embeddings: Any, logger: Logger
 ) -> None:
-    """Sync tool embedding index on every startup when servers are available."""
+    """Ensure embedding model and sync tool index when dispatch is available."""
     if not (dispatch.is_connected and embeddings):
         return
 
     try:
         await dispatch.ensure_embedding_model(embeddings)
         count = await dispatch.server_count()
+        # registry count is always 0 through the MCP layer; use total instead.
         total = count.get("total", 0)
-        # Always sync when there are known servers. The registry count coming
-        # through the MCP layer is always 0 (dmcp count without --json), so
-        # the old `registry > 0` check caused the index to stay stale forever.
         if total > 0:
             await dispatch.sync_index()
             logger.info(f"JARVIS: Tool vector index synced ({total} servers)")
@@ -75,7 +75,7 @@ async def start_runtime_services(
     """Start event sources and optional socket/voice runtime services."""
     user_source = resolve_user_source(app)
     app.events.start(
-        signal_window_source=app.dispatch.get_signal_window,
+        signal_source=app._await_dispatch_signal,
         user_source=user_source,
     )
 
@@ -94,10 +94,12 @@ async def start_runtime_services(
         from ..core.socket_security import harden_socket_path, warn_if_allow_all
 
         harden_socket_path(Config.JARVIS_INPUT_SOCKET)
-        warn_if_allow_all(Config.CONFIRMATION_MODE)
+        warn_if_allow_all()
         input_socket_task = asyncio.create_task(app._run_socket_listener())
         logger.info(f"JARVIS: Socket listener at {Config.JARVIS_INPUT_SOCKET}")
 
+    # Wire confirmation manager's event injector so responses flow
+    # through the event loop instead of blocking.
     app.confirmation.set_event_injector(app.events.inject_confirmation_response)
 
     output_socket_task: Optional[asyncio.Task] = None

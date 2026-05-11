@@ -77,6 +77,13 @@ async def discover_tools(
         for task in tasks:
             all_results.extend(await keyword_fallback(adapter, logger, task))
 
+    # Global fallback: embedding index was empty (result_sets=[]) so the
+    # per-task fallback loop never ran.
+    if not all_results and mode == "embedding":
+        logger.info("Dispatch: Embedding index empty — falling back to keyword search")
+        for task in tasks:
+            all_results.extend(await keyword_fallback(adapter, logger, task))
+
     if not all_results:
         logger.info("Dispatch: discover_tools found no matching tools")
         return ""
