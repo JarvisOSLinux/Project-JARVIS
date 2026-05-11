@@ -200,7 +200,8 @@ For talking to the user:
   {{"action": "respond", "output": "<message>", "goal_updates": [...]}}
 
 For running external tools / system commands / web / files / anything live:
-  Step 1 — find the tool:   {{"action": "find_tools", "intent": "<what you need to do>"}}
+  Step 1 — find the tool:   {{"action": "find_tools", "intent": "check python version"}}
+            (intent = the SPECIFIC TASK — "check python version", NOT the tool type "run shell command")
   Step 2 — run the tool:    {{"action": "dispatch", "tasks": [{{"server": "<id>", "tool": "<name>", "params": {{}}}}]}}
   Step 3 — wait if needed:  {{"action": "wait"}}
   Step 4 — reply:           {{"action": "respond", "output": "<result>"}}
@@ -224,7 +225,9 @@ For session naming (use when SESSION_TITLE is "New chat"):
 1. find_tools → system returns MATCHED_TOOLS or CANDIDATE_SERVERS or NO_TOOLS_FOUND
 2. MATCHED_TOOLS → dispatch immediately. Never invent tool names.
 3. CANDIDATE_SERVERS → install, then list_tools, then dispatch.
-4. NO_TOOLS_FOUND → retry find_tools with different wording, or respond honestly.
+4. NO_TOOLS_FOUND → MUST retry find_tools with a more specific intent. Use the exact task
+   goal ("check python version", "search web for X") — never give up on the first miss.
+   Only use respond if you have retried at least twice with different intents.
 5. Long tasks → wait after dispatch, then respond with the result.
 
 === CONTEXT ===
@@ -263,7 +266,8 @@ For talking to the user:
   {{"action": "respond", "output": "<message>", "goal_updates": [...]}}
 
 For running external tools / system commands / web / files / anything live:
-  Step 1 — find the tool:   {{"action": "find_tools", "intent": "<what you need to do>"}}
+  Step 1 — find the tool:   {{"action": "find_tools", "intent": "check python version"}}
+            (intent = the SPECIFIC TASK — "check python version", NOT the tool type "run shell command")
   Step 2 — run the tool:    {{"action": "dispatch", "tasks": [{{"server": "<id>", "tool": "<name>", "params": {{}}}}]}}
   Step 3 — wait if needed:  {{"action": "wait"}}
   Step 4 — reply:           {{"action": "respond", "output": "<result>"}}
@@ -283,7 +287,9 @@ For session naming (use when SESSION_TITLE is "New chat"):
 1. find_tools → system returns MATCHED_TOOLS or CANDIDATE_SERVERS or NO_TOOLS_FOUND
 2. MATCHED_TOOLS → dispatch immediately. Never invent tool names.
 3. CANDIDATE_SERVERS → install, then list_tools, then dispatch.
-4. NO_TOOLS_FOUND → retry find_tools with different wording, or respond honestly.
+4. NO_TOOLS_FOUND → MUST retry find_tools with a more specific intent. Use the exact task
+   goal ("check python version", "search web for X") — never give up on the first miss.
+   Only use respond if you have retried at least twice with different intents.
 5. Long tasks → wait after dispatch, then respond with the result.
 
 === CONTEXT ===
