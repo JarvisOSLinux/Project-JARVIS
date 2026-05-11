@@ -62,6 +62,15 @@ class TaskParser:
     def parse(response: Dict[str, Any]) -> Dict[str, Any]:
         action = response.get("action")
 
+        # Some models omit the "action" key but include "intent" — treat as find_tools.
+        if action is None and response.get("intent"):
+            logger.info(
+                "TaskParser: Inferred action='find_tools' from bare intent field"
+            )
+            response = dict(response)
+            response["action"] = "find_tools"
+            action = "find_tools"
+
         if action not in VALID_ACTIONS:
             logger.warning(f"TaskParser: Unknown action '{action}'")
             logger.debug(f"TaskParser: Raw response for unknown action: {response}")
