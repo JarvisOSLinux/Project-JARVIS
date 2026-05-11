@@ -134,6 +134,8 @@ async def run_dispatch_subchain(
 
     # PIDs of the most recently dispatched task batch.
     pending_pids: list[int] = []
+    # Track whether the plan step has been completed at least once.
+    planned = False
 
     for step in range(max_chain_depth):
         logger.info(
@@ -156,6 +158,22 @@ async def run_dispatch_subchain(
         if goal and parsed.get("strategy"):
             app.goals.update_strategy(goal.id, parsed["strategy"])
 
+        # ------------------------------------------------------------------
+        # Guard: the LLM must plan before it can declare done or dispatch.
+        # Some models skip straight to done at step 0 without attempting tool
+        # discovery. Push back once so discover_tools gets a chance to run.
+        # ------------------------------------------------------------------
+        if action == "done" and not planned:
+            logger.warning(
+                "JARVIS: Dispatch LLM returned 'done' before planning — "
+                "forcing plan step"
+            )
+            context = "\n".join(context_parts) + (
+                "\nSYSTEM: You must output a 'plan' action first so tools can be "
+                "located. Output a plan action now."
+            )
+            continue
+
         if action == "done":
             summary = parsed["summary"]
             logger.info(f"JARVIS: Dispatch sub-chain completed: {summary}")
@@ -165,6 +183,7 @@ async def run_dispatch_subchain(
             return summary
 
         if action == "plan":
+            planned = True
             sub_tasks = parsed.get("tasks", [])
             logger.info(f"JARVIS: Plan has {len(sub_tasks)} sub-task(s)")
             emit_activity(
