@@ -181,12 +181,18 @@ async def act_on_root_response(
                 app, logger, tool_results, depth, "root-find-tools", max_chain_depth
             )
         else:
+            _no_found = (
+                f"NO_TOOLS_FOUND: Searching for '{intent}' found no tools.\n"
+                "IMPORTANT: You MUST retry with find_tools using a more specific intent.\n"
+                "Use the EXACT TASK GOAL as intent — e.g. 'check python version', "
+                "'open Firefox', 'search web for X'.\n"
+                "Do NOT use generic tool types like 'run shell command'.\n"
+                "Only use respond if you have retried at least twice with different intents."
+            )
             await _continue_root(
                 app,
                 logger,
-                "NO_TOOLS_FOUND: No matching tools or servers found. "
-                "Try find_tools again with a more specific or differently worded intent, "
-                "or use respond to explain the tool is unavailable.",
+                _no_found,
                 depth,
                 "root-find-tools-empty",
                 max_chain_depth,
@@ -249,11 +255,18 @@ async def act_on_root_response(
                         app, logger, tool_results, depth, "root-find-tools", max_chain_depth
                     )
                 else:
+                    _no_found = (
+                        f"NO_TOOLS_FOUND: Searching for '{intent}' found no tools.\n"
+                        "IMPORTANT: You MUST retry with find_tools using a more specific intent.\n"
+                        "Use the EXACT TASK GOAL — e.g. 'check python version', "
+                        "'open Firefox', 'search web for X'.\n"
+                        "Do NOT use generic types like 'run shell command'.\n"
+                        "Only use respond if you have retried at least twice."
+                    )
                     await _continue_root(
                         app,
                         logger,
-                        "NO_TOOLS_FOUND: No matching tools or servers found. "
-                        "Try find_tools with a differently worded intent, or respond.",
+                        _no_found,
                         depth,
                         "root-find-tools-empty",
                         max_chain_depth,
