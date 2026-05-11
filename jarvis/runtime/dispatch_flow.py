@@ -404,6 +404,23 @@ async def dispatch_send(
         emit_activity(app, "Dispatch is unavailable right now.", kind="dispatch")
         return {"error": "Dispatch not connected"}
 
+    # Normalize common LLM schema mistakes:
+    # - tool set to "server_id/tool_name" (fused) instead of separate fields
+    # - server set to "local" (non-existent dmcp server id) while tool is fused
+    for task in tasks:
+        tool = task.get("tool")
+        server = task.get("server")
+        if isinstance(tool, str) and "/" in tool:
+            fused_server, fused_tool = tool.split("/", 1)
+            if fused_server and fused_tool and (
+                not isinstance(server, str)
+                or not server
+                or server == "local"
+                or server != fused_server
+            ):
+                task["server"] = fused_server
+                task["tool"] = fused_tool
+
     # Normalize common "shell command" params for MCP servers that model expects
     # as {command: <exe>, args: [..]}. Many LLMs will put everything into
     # command="python --version"; convert that to command="python", args=["--version"].
