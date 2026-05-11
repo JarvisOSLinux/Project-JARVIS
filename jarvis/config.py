@@ -246,6 +246,9 @@ run — Execute a task using external tools (shell, files, web, etc.).
       WRONG:   {{"action": "run", "intent": "run shell command"}}
       CORRECT: {{"action": "run", "intent": "check python version"}}
 
+Many MCP servers can exist in the registry (shell, filesystem, web APIs, databases, and more). Discovery matches from the task; you are not given a full catalog of names.
+If NO_TOOLS_FOUND or the wrong tools show up, retry run with a clearer or rephrased intent. After several real tries, respond honestly that no suitable installed tool is available — do not invent servers.
+
 --- Actions (exact format) ---
 
 {{
@@ -292,7 +295,7 @@ You receive: GOALS (with IDs), NEW INPUT, and optionally WAIT_RESULT/DISPATCH_RE
 Memory operation results appear as STORE_RESULT, RECALL_RESULT, SEARCH_MEMORY_RESULT, LIST_MEMORY_RESULT.
 RELEVANT MEMORIES may be included automatically based on user input (RAG retrieval).
 Include goal_updates in respond: "completed" or "failed" with result.
-NO_TOOLS_FOUND means retry run with a more specific intent — MUST retry at least twice before giving up.
+NO_TOOLS_FOUND means retry run with a more specific or rephrased intent — MUST retry at least twice before giving up. If still no match, tell the user the right tool is unavailable.
 
 --- Memory guidelines ---
 - Choose descriptive theme names (e.g. "user_preferences", "school_schedule")
@@ -320,6 +323,9 @@ run — Execute a task using external tools (shell, files, web, etc.).
       WRONG:   {{"action": "run", "intent": "run shell command"}}
       CORRECT: {{"action": "run", "intent": "check python version"}}
 
+Many MCP servers can exist in the registry (shell, filesystem, web APIs, databases, and more). Discovery matches from the task; you are not given a full catalog of names.
+If NO_TOOLS_FOUND or the wrong tools show up, retry run with a clearer or rephrased intent. After several real tries, respond honestly that no suitable installed tool is available — do not invent servers.
+
 --- Actions (exact format) ---
 
 {{
@@ -337,7 +343,7 @@ run — Execute a task using external tools (shell, files, web, etc.).
 --- Context ---
 You receive: GOALS (with IDs), NEW INPUT, and optionally WAIT_RESULT/DISPATCH_RESULT from tool execution.
 Include goal_updates in respond: "completed" or "failed" with result.
-NO_TOOLS_FOUND means retry run with a more specific intent — MUST retry at least twice before giving up.
+NO_TOOLS_FOUND means retry run with a more specific or rephrased intent — MUST retry at least twice before giving up. If still no match, tell the user the right tool is unavailable.
 
 Output exactly one JSON object. First char {{, last char }}.
 """
@@ -358,6 +364,8 @@ You are operating in DISPATCH mode. Your job is to find and execute MCP server t
 
 CRITICAL: Your ENTIRE response must be a single valid JSON object.
 
+The registry can contain many kinds of servers; only installed ones appear as MATCHED_TOOLS. If discovery is weak, re-plan with different wording, search with different keywords, or install from CANDIDATE_SERVERS. If nothing fits after real attempts, use done with an honest failure summary — do not invent servers.
+
 --- Workflow ---
 1. plan: ALWAYS start here. Break the intent into sub-tasks. For each sub-task,
    give a short intent and a few keywords the system can look up.
@@ -366,7 +374,7 @@ CRITICAL: Your ENTIRE response must be a single valid JSON object.
 3. If MATCHED_TOOLS is present → dispatch those tools with correct params.
 4. If only CANDIDATE_SERVERS is present → install a promising one,
    then list_tools, then dispatch.
-5. If nothing matched → search with different keywords, or done with a failure summary.
+5. If nothing matched → re-plan, search with different keywords, or done with a failure summary.
 6. done: Return a concise summary to root.
 
 --- Actions ---
@@ -432,7 +440,7 @@ Return to root with results:
 - ALWAYS start with "plan" — even for a single task.
 - If MATCHED_TOOLS is present, dispatch those. Never invent tool names.
 - If only CANDIDATE_SERVERS is present, install + list_tools first.
-- If nothing matched, try search with different keywords, or done with a failure summary.
+- If nothing matched, re-plan or search with different wording/keywords before giving up; then done with a failure summary if still no fit.
 - You can dispatch multiple tasks in one action for parallelism.
 - Output exactly one JSON object — no preamble, no trailing text.
 
@@ -444,6 +452,8 @@ You are operating in DISPATCH mode. Your job is to find and execute MCP server t
 
 CRITICAL: Your ENTIRE response must be a single valid JSON object.
 
+The registry can contain many kinds of servers; only installed ones appear as MATCHED_TOOLS. If discovery is weak, re-plan with different sub-task wording or install from CANDIDATE_SERVERS. If nothing fits after real attempts, use done with an honest failure summary — do not invent servers.
+
 --- Workflow ---
 1. plan: ALWAYS start here. Break the intent into sub-tasks. For each sub-task,
    describe in natural language what it needs. Be specific — the clearer the
@@ -453,8 +463,7 @@ CRITICAL: Your ENTIRE response must be a single valid JSON object.
 3. If MATCHED_TOOLS is present → dispatch those tools with correct params.
 4. If only CANDIDATE_SERVERS is present → install a promising one,
    then list_tools, then dispatch.
-5. If nothing matched → re-plan with more specific sub-task intents,
-   or done with a failure summary.
+5. If nothing matched → re-plan with different sub-task wording, or done with a failure summary.
 6. done: Return a concise summary to root.
 
 --- Actions ---
@@ -516,8 +525,7 @@ Return to root with results:
 - ALWAYS start with "plan" — even for a single task.
 - If MATCHED_TOOLS is present, dispatch those. Never invent tool names.
 - If only CANDIDATE_SERVERS is present, install + list_tools first.
-- If nothing matched, re-plan with more specific sub-task intents,
-  or done with a failure summary.
+- If nothing matched, re-plan with different sub-task wording before giving up; then done with a failure summary if still no fit.
 - You can dispatch multiple tasks in one action for parallelism.
 - Output exactly one JSON object — no preamble, no trailing text.
 
