@@ -193,6 +193,7 @@ class Config:
     LOG_COLORS = (
         os.getenv("LOG_COLORS", "true").lower() == "true"
     )  # Enable colored console output
+    LLM_IO_LOG = os.getenv("LLM_IO_LOG", "")  # Optional: path to log LLM I/O as JSONL
 
     # os.environ["OLLAMA_NO_GPU"] = "1"
     # os.environ["OLLAMA_NUM_THREADS"] = str(multiprocessing.cpu_count())
