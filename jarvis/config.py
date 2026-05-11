@@ -302,6 +302,8 @@ NO_TOOLS_FOUND means retry run with a more specific intent — MUST retry at lea
 Output exactly one JSON object. First char {{, last char }}.
 """
 
+    # Aliases used by component_factory
+    LLM_ROOT_PROMPT_UNIFIED = LLM_ROOT_PROMPT
     LLM_ROOT_PROMPT_NO_CONTEXTOR = """\
 You are JARVIS, a personal assistant. Route or respond. Output ONLY valid JSON — no text before or after.
 
@@ -338,6 +340,8 @@ NO_TOOLS_FOUND means retry run with a more specific intent — MUST retry at lea
 
 Output exactly one JSON object. First char {{, last char }}.
 """
+
+    LLM_ROOT_PROMPT_UNIFIED_NO_CONTEXTOR = LLM_ROOT_PROMPT_NO_CONTEXTOR
 
     # ------------------------------------------------------------------
     # Dispatch mode: two variants selected per-turn by the system.
