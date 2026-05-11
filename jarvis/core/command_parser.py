@@ -1,12 +1,15 @@
 """
-Task parser for JARVIS hierarchical prompt system.
+Task parser for JARVIS unified prompt system.
 
 Validates and parses LLM responses into structured actions.
 
-ROOT mode actions:  respond, dispatch (route),
-                    store, recall, search_memory, list_memory (memory)
-DISPATCH mode actions: plan, search, list_tools, install, dispatch (tasks),
-                       wait, kill, defer, done
+All actions are now ROOT-level — the unified prompt handles tool discovery,
+installation, and execution directly without a separate dispatch sub-chain.
+
+Actions:
+  respond, store, recall, search_memory, list_memory, rename_session
+  find_tools, list_tools, install, dispatch, wait, kill, defer
+  plan, search, done  (legacy dispatch-mode, kept for fallback)
 """
 
 from typing import Any, Dict
@@ -19,21 +22,23 @@ VALID_ACTIONS = {
     # Root — core
     "respond",
     "dispatch",
-    # Root — memory (direct operations, no sub-chain)
+    # Root — memory
     "store",
     "recall",
     "search_memory",
     "list_memory",
-    # Root — session management
+    # Root — session
     "rename_session",
-    # Dispatch subsystem
-    "plan",
-    "search",
+    # Root — unified tool actions
+    "find_tools",
     "list_tools",
     "install",
     "wait",
     "kill",
     "defer",
+    # Legacy dispatch subsystem (kept for fallback / sub-chain rollback)
+    "plan",
+    "search",
     "done",
 }
 
@@ -91,6 +96,10 @@ class TaskParser:
             intent = result.get("intent", "")
             preview = (intent[:80] + "...") if len(intent) > 80 else intent
             return f", intent='{preview}'"
+        if action == "find_tools":
+            intent = result.get("intent", "")
+            preview = (intent[:80] + "...") if len(intent) > 80 else intent
+            return f", intent='{preview}'"
         if action == "respond":
             output = result.get("output", "")
             preview = (output[:80] + "...") if len(output) > 80 else output
@@ -141,9 +150,21 @@ def _parse_respond(response: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+@_parser("find_tools")
+def _parse_find_tools(response: Dict[str, Any]) -> Dict[str, Any]:
+    """Parse find_tools — root LLM searches for tools by natural language intent."""
+    intent = response.get("intent", "")
+    if not intent:
+        return {"error": "find_tools action requires 'intent'", "raw": response}
+    return {
+        "action": "find_tools",
+        "intent": str(intent),
+    }
+
+
 @_parser("dispatch")
 def _parse_dispatch(response: Dict[str, Any]) -> Dict[str, Any]:
-    """Parse dispatch — either a ROOT routing intent or DISPATCH-mode tasks."""
+    """Parse dispatch — either concrete tasks or legacy intent routing."""
     tasks = response.get("tasks")
     intent = response.get("intent")
 
@@ -192,13 +213,85 @@ def _parse_dispatch(response: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ------------------------------------------------------------------
-# DISPATCH subsystem actions
+# Tool actions (unified root)
+# ------------------------------------------------------------------
+
+
+@_parser("list_tools")
+def _parse_list_tools(response: Dict[str, Any]) -> Dict[str, Any]:
+    server_id = response.get("server_id")
+    if not server_id:
+        return {"error": "list_tools action requires 'server_id'", "raw": response}
+    return {
+        "action": "list_tools",
+        "server_id": str(server_id),
+        "goal_updates": response.get("goal_updates", []),
+    }
+
+
+@_parser("install")
+def _parse_install(response: Dict[str, Any]) -> Dict[str, Any]:
+    server_id = response.get("server_id")
+    if not server_id:
+        return {"error": "Install action requires 'server_id'", "raw": response}
+    return {
+        "action": "install",
+        "server_id": str(server_id),
+        "goal_updates": response.get("goal_updates", []),
+    }
+
+
+@_parser("wait")
+def _parse_wait(response: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "action": "wait",
+        "pids": response.get("pids"),
+        "goal_updates": response.get("goal_updates", []),
+    }
+
+
+@_parser("kill")
+def _parse_kill(response: Dict[str, Any]) -> Dict[str, Any]:
+    pids = response.get("pids", [])
+    if not isinstance(pids, list) or not pids:
+        return {
+            "error": "Kill action requires a non-empty 'pids' list",
+            "raw": response,
+        }
+    return {
+        "action": "kill",
+        "pids": [int(p) for p in pids],
+        "goal_updates": response.get("goal_updates", []),
+    }
+
+
+@_parser("defer")
+def _parse_defer(response: Dict[str, Any]) -> Dict[str, Any]:
+    goal_id = response.get("goal_id")
+    duration = response.get("duration")
+    if not goal_id:
+        return {"error": "Defer action requires 'goal_id'", "raw": response}
+    if not duration or not isinstance(duration, (int, float)) or duration <= 0:
+        return {
+            "error": "Defer action requires a positive 'duration' (seconds)",
+            "raw": response,
+        }
+    return {
+        "action": "defer",
+        "goal_id": str(goal_id),
+        "duration": int(duration),
+        "reason": response.get("reason", ""),
+        "goal_updates": response.get("goal_updates", []),
+    }
+
+
+# ------------------------------------------------------------------
+# Legacy dispatch subsystem actions (kept for sub-chain fallback)
 # ------------------------------------------------------------------
 
 
 @_parser("plan")
 def _parse_plan(response: Dict[str, Any]) -> Dict[str, Any]:
-    """Parse plan action — LLM breaks intent into sub-tasks for tool discovery."""
     tasks = response.get("tasks", [])
     if not isinstance(tasks, list) or not tasks:
         return {
@@ -251,76 +344,8 @@ def _parse_search(response: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-@_parser("list_tools")
-def _parse_list_tools(response: Dict[str, Any]) -> Dict[str, Any]:
-    server_id = response.get("server_id")
-    if not server_id:
-        return {"error": "list_tools action requires 'server_id'", "raw": response}
-    return {
-        "action": "list_tools",
-        "server_id": str(server_id),
-        "goal_updates": response.get("goal_updates", []),
-    }
-
-
-@_parser("install")
-def _parse_install(response: Dict[str, Any]) -> Dict[str, Any]:
-    server_id = response.get("server_id")
-    if not server_id:
-        return {"error": "Install action requires 'server_id'", "raw": response}
-    return {
-        "action": "install",
-        "server_id": str(server_id),
-        "goal_updates": response.get("goal_updates", []),
-    }
-
-
-@_parser("wait")
-def _parse_wait(response: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        "action": "wait",
-        "goal_updates": response.get("goal_updates", []),
-    }
-
-
-@_parser("kill")
-def _parse_kill(response: Dict[str, Any]) -> Dict[str, Any]:
-    pids = response.get("pids", [])
-    if not isinstance(pids, list) or not pids:
-        return {
-            "error": "Kill action requires a non-empty 'pids' list",
-            "raw": response,
-        }
-    return {
-        "action": "kill",
-        "pids": [int(p) for p in pids],
-        "goal_updates": response.get("goal_updates", []),
-    }
-
-
-@_parser("defer")
-def _parse_defer(response: Dict[str, Any]) -> Dict[str, Any]:
-    goal_id = response.get("goal_id")
-    duration = response.get("duration")
-    if not goal_id:
-        return {"error": "Defer action requires 'goal_id'", "raw": response}
-    if not duration or not isinstance(duration, (int, float)) or duration <= 0:
-        return {
-            "error": "Defer action requires a positive 'duration' (seconds)",
-            "raw": response,
-        }
-    return {
-        "action": "defer",
-        "goal_id": str(goal_id),
-        "duration": int(duration),
-        "reason": response.get("reason", ""),
-        "goal_updates": response.get("goal_updates", []),
-    }
-
-
 @_parser("done")
 def _parse_done(response: Dict[str, Any]) -> Dict[str, Any]:
-    """Subsystem signals completion and returns a summary to root."""
     summary = response.get("summary", "")
     return {
         "action": "done",
@@ -329,7 +354,7 @@ def _parse_done(response: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ------------------------------------------------------------------
-# ROOT-level memory actions (direct operations, no sub-chain)
+# Memory actions
 # ------------------------------------------------------------------
 
 
@@ -343,6 +368,7 @@ def _parse_store(response: Dict[str, Any]) -> Dict[str, Any]:
         "action": "store",
         "theme": str(theme),
         "content": str(content),
+        "scope": response.get("scope", "session"),
         "goal_updates": response.get("goal_updates", []),
     }
 
@@ -361,7 +387,6 @@ def _parse_recall(response: Dict[str, Any]) -> Dict[str, Any]:
 
 @_parser("search_memory")
 def _parse_search_memory(response: Dict[str, Any]) -> Dict[str, Any]:
-    """Parse search_memory — semantic search with natural language query."""
     query = response.get("query", "")
     if not query:
         return {"error": "search_memory requires a 'query' string", "raw": response}
