@@ -105,9 +105,29 @@ async def act_on_root_response(
 
     if "error" in parsed:
         logger.warning(f"JARVIS: Root parse error: {parsed['error']}")
-        app.output_manager.handle_response(
-            {"output": "I had trouble processing that. Could you try again?"}
+        # Retry with an explicit corrective hint rather than bailing out.
+        context = build_root_context(app, logger)
+        context += (
+            "\nSYSTEM: Your last response was not a recognised action. "
+            "You MUST output a JSON object with an \"action\" field. "
+            'Valid actions: respond, find_tools, list_tools, install, dispatch, '
+            'wait, kill, defer, store, recall, search_memory, list_memory. '
+            'Example: {"action": "find_tools", "intent": "what you need to do"}'
         )
+        retry_response = await ask_llm(
+            app, logger, context, tag="root-parse-error-retry"
+        )
+        retry_parsed = app.task_parser.parse(retry_response)
+        if "error" in retry_parsed:
+            # Still bad — give up and surface a user-facing message.
+            logger.error("JARVIS: Root parse error on retry — giving up")
+            app.output_manager.handle_response(
+                {"output": "I had trouble processing that. Could you try again?"}
+            )
+        else:
+            await act_on_root_response(
+                app, logger, retry_response, depth + 1, max_chain_depth
+            )
         return
 
     action = parsed["action"]
