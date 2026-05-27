@@ -19,7 +19,6 @@ VALID_ACTIONS = {
     # Root — core
     "respond",
     "dispatch",
-    "run",
     # Root — tool discovery (multi-step: search → docs → dispatch)
     "search_tools",
     "get_server_docs",
@@ -60,13 +59,6 @@ class TaskParser:
     @staticmethod
     def parse(response: Dict[str, Any]) -> Dict[str, Any]:
         action = response.get("action")
-
-        # Some models omit "action" but include "intent" — treat as run.
-        if action is None and response.get("intent"):
-            logger.info("TaskParser: Inferred action='run' from bare intent field")
-            response = dict(response)
-            response["action"] = "run"
-            action = "run"
 
         if action not in VALID_ACTIONS:
             logger.warning(f"TaskParser: Unknown action '{action}'")
@@ -120,10 +112,6 @@ class TaskParser:
             tasks = result.get("tasks", [])
             intents = [t.get("intent", "")[:40] for t in tasks]
             return f", tasks={intents}"
-        if action == "run":
-            intent = result.get("intent", "")
-            preview = (intent[:80] + "...") if len(intent) > 80 else intent
-            return f", intent='{preview}'"
         if action == "search_tools":
             cap = result.get("capability", "")
             preview = (cap[:80] + "...") if len(cap) > 80 else cap
@@ -163,18 +151,6 @@ def _parse_respond(response: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "action": "respond",
         "output": str(output),
-        "goal_updates": response.get("goal_updates", []),
-    }
-
-
-@_parser("run")
-def _parse_run(response: Dict[str, Any]) -> Dict[str, Any]:
-    intent = response.get("intent", "")
-    if not intent:
-        return {"error": "run action requires 'intent'", "raw": response}
-    return {
-        "action": "run",
-        "intent": str(intent),
         "goal_updates": response.get("goal_updates", []),
     }
 

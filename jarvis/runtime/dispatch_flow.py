@@ -87,9 +87,22 @@ async def run_dispatch_subchain(
     max_chain_depth: int,
     goal_id: Optional[str] = None,
 ) -> str:
+    """Kept for compatibility; ROOT now uses search_tools/get_server_docs/dispatch directly."""
+    return f"Direct dispatch unavailable — use search_tools to find tools for: {intent}"
+
+
+async def _run_dispatch_subchain_legacy(
+    app: Any,
+    logger: Logger,
+    intent: str,
+    max_chain_depth: int,
+    goal_id: Optional[str] = None,
+) -> str:
     """
-    Enter dispatch mode, give it the intent, and loop until the LLM
-    calls 'done' with a summary.
+    Legacy DISPATCH sub-chain. No longer reachable from ROOT since the new
+    prompt generates search_tools → get_server_docs → dispatch instead of
+    intent-only dispatch. Preserved for reference; will be deleted once the
+    new flow is confirmed stable.
 
     goal_id: if provided, the sub-chain operates on behalf of this Goal
     node — linking PIDs, creating subgoals, writing output on completion,

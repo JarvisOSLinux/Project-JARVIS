@@ -163,22 +163,6 @@ async def search_servers(logger: Logger, keywords: List[str]) -> Dict[str, Any]:
     return {"servers": sorted_servers}
 
 
-async def list_visible_servers(logger: Logger) -> Dict[str, Any]:
-    """Return all visible MCP servers via `dmcp browse --json` with no keyword filter."""
-    raw = await run_dmcp(logger, "browse", "--json")
-    if raw is None:
-        return {"error": "dmcp browse failed", "servers": []}
-    try:
-        servers = json.loads(raw)
-    except json.JSONDecodeError:
-        return {"error": "dmcp returned invalid JSON", "servers": []}
-    if not isinstance(servers, list):
-        servers = servers.get("servers", []) if isinstance(servers, dict) else []
-    installed = [s for s in servers if s.get("installed")]
-    available = [s for s in servers if not s.get("installed")]
-    return {"servers": installed + available}
-
-
 async def install_server(logger: Logger, server_id: str) -> Dict[str, Any]:
     """Install an MCP server from registry via `dmcp install`."""
     logger.info(f"Dispatch: Installing MCP server '{server_id}'")

@@ -7,7 +7,6 @@ from logging import Logger
 from typing import Any
 
 from ..config import Config
-from .dispatch_flow import dispatch_send
 from .goal_updates import apply_goal_updates
 from .llm_bridge import ask_llm
 from .output_hooks import emit_activity, get_embeddings, persist_assistant_turn
@@ -33,168 +32,6 @@ async def feed_root_summary(
 
     response = await ask_llm(app, logger, context, tag="root-chain")
     await app._act_on_root_response(response, depth + 1)
-
-
-async def _continue_root(
-    app: Any,
-    logger: Logger,
-    extra: str,
-    depth: int,
-    tag: str,
-    max_chain_depth: int,
-) -> None:
-    """Re-enter ROOT with extra context injected (used by run handler)."""
-    app.llm.switch_mode("root")
-    context = build_root_context(app, logger)
-    context += f"\n{extra}"
-    response = await ask_llm(app, logger, context, tag=tag)
-    await app._act_on_root_response(response, depth + 1)
-
-
-async def _run_handle(
-    app: Any,
-    logger: Logger,
-    parsed: dict,
-    depth: int,
-    max_chain_depth: int,
-) -> None:
-    """Handle the 'run' action: discover → (auto-install) → dispatch → wait → respond."""
-    from ..dispatch.tool_discovery import discover_tools as _discover_tools
-
-    intent = parsed.get("intent", "")
-    emit_activity(app, f"Running: {intent[:60]}…", kind="dispatch")
-
-    # Phase 1: discover tools
-    tool_results = await _discover_tools(
-        adapter=app.dispatch,
-        logger=logger,
-        tasks=[{"intent": intent}],
-        embeddings=get_embeddings(app),
-    )
-
-    if not tool_results:
-        logger.warning(f"JARVIS: run — no tools found for '{intent}'")
-        await _continue_root(
-            app, logger,
-            f"NO_TOOLS_FOUND: Could not find any tool for '{intent}'. "
-            "MUST retry with a more specific or different intent. "
-            "Only give up and respond to the user after 2+ retries.",
-            depth, "root-run-no-tools", max_chain_depth,
-        )
-        return
-
-    # Phase 1b: if only CANDIDATE_SERVERS returned, auto-install the first one
-    if "MATCHED_TOOLS" not in tool_results and "CANDIDATE_SERVERS" in tool_results:
-        server_id = _first_candidate_id(tool_results)
-        if server_id:
-            emit_activity(app, f"Installing {server_id}…", kind="dispatch")
-            install_result = await app.dispatch.install_server(server_id)
-            if "error" not in install_result:
-                logger.info(f"JARVIS: run — auto-installed '{server_id}'")
-                await app.dispatch.auto_index_server(
-                    server_id=server_id,
-                    embeddings=get_embeddings(app),
-                )
-                # Re-discover now that server is installed
-                tool_results = await _discover_tools(
-                    adapter=app.dispatch,
-                    logger=logger,
-                    tasks=[{"intent": intent}],
-                    embeddings=get_embeddings(app),
-                )
-            else:
-                logger.warning(
-                    f"JARVIS: run — auto-install failed for '{server_id}': "
-                    f"{install_result.get('error')}"
-                )
-
-    if not tool_results or "MATCHED_TOOLS" not in tool_results:
-        await _continue_root(
-            app, logger,
-            f"NO_TOOLS_FOUND: Could not find any installed tool for '{intent}'. "
-            "MUST retry with a more specific or different intent. "
-            "Only give up and respond to the user after 2+ retries.",
-            depth, "root-run-no-tools-after-install", max_chain_depth,
-        )
-        return
-
-    # Phase 2: hidden LLM dispatch call — produce concrete tasks
-    dispatch_context = build_root_context(app, logger)
-    dispatch_context += f"\n{tool_results}"
-    dispatch_context += (
-        f"\nSYSTEM: Tools found for '{intent}'. "
-        "Output a dispatch action with concrete tasks now. "
-        "Use only tool names from MATCHED_TOOLS above. "
-        "Format: {{\"action\": \"dispatch\", \"tasks\": [{{\"server\": \"<id>\", "
-        "\"tool\": \"<name>\", \"params\": {{}}}}]}}"
-    )
-    app.llm.switch_mode("root")
-    dispatch_response = await ask_llm(
-        app, logger, dispatch_context, tag="root-run-dispatch"
-    )
-    dispatch_parsed = app.task_parser.parse(dispatch_response)
-
-    tasks = (
-        dispatch_parsed.get("tasks")
-        if dispatch_parsed.get("action") == "dispatch"
-        else None
-    )
-    if not tasks:
-        # Some models reflexively emit another "run" even when instructed to
-        # output a concrete dispatch. Give one explicit correction attempt
-        # before falling back to generic reasoning.
-        logger.warning(
-            "JARVIS: run — dispatch step didn't yield tasks; retrying once with stricter instruction"
-        )
-        retry_ctx = dispatch_context + (
-            "\nSYSTEM: Your previous response was INVALID for this step. "
-            "DO NOT output action=run. You MUST output action=dispatch with a non-empty tasks list. "
-            "Copy server_id and tool_name exactly from MATCHED_TOOLS lines of the form 'server_id/tool_name'. "
-            "Example: {\"action\":\"dispatch\",\"tasks\":[{\"server\":\"server_id\",\"tool\":\"tool_name\",\"params\":{}}]}"
-        )
-        retry_response = await ask_llm(
-            app, logger, retry_ctx, tag="root-run-dispatch-retry"
-        )
-        retry_parsed = app.task_parser.parse(retry_response)
-        tasks = (
-            retry_parsed.get("tasks")
-            if retry_parsed.get("action") == "dispatch"
-            else None
-        )
-
-        if not tasks:
-            logger.warning("JARVIS: run — dispatch retry still didn't yield tasks; falling back")
-            await _continue_root(
-                app, logger,
-                f"NO_TOOLS_FOUND: The tools discovered for '{intent}' don't match the task. "
-                "Use run with a more descriptive intent that names the capability directly "
-                "(e.g. 'execute shell command' or 'run terminal command' for system tasks, "
-                "'read file' for file access, 'web search' for browsing). "
-                "MUST retry at least once with a rephrased intent before telling the user you can't help.",
-                depth, "root-run-fallback", max_chain_depth,
-            )
-            return
-
-    # Phase 3: execute dispatch
-    result = await dispatch_send(app, logger, tasks)
-    if isinstance(result, dict) and result.get("awaiting_confirmation"):
-        return
-
-    # Phase 4: auto-wait if dispatch returned PIDs
-    pids = []
-    if isinstance(result, dict):
-        pids = result.get("pids", [])
-
-    if pids and app.dispatch.is_connected:
-        app._pending_dispatch_pids = pids
-        wait_result = await app.dispatch.wait_task(pids)
-        extra = f"WAIT_RESULT: {compact_payload_for_llm(wait_result)}"
-    elif isinstance(result, dict) and "error" in result:
-        extra = f"DISPATCH_ERROR: {compact_payload_for_llm(result)}"
-    else:
-        extra = f"DISPATCH_RESULT: {compact_payload_for_llm(result)}"
-
-    await _continue_root(app, logger, extra, depth, "root-run-result", max_chain_depth)
 
 
 async def _handle_search_tools(
@@ -305,20 +142,6 @@ async def _handle_configure_server(
     await app._act_on_root_response(response, depth + 1)
 
 
-def _first_candidate_id(tool_results: str) -> str:
-    """Extract the first server ID from a CANDIDATE_SERVERS block."""
-    in_candidates = False
-    for line in tool_results.splitlines():
-        if line.startswith("CANDIDATE_SERVERS"):
-            in_candidates = True
-            continue
-        if in_candidates and line.startswith("  ") and not line.startswith("   "):
-            candidate_id = line.strip().split()[0]
-            if candidate_id:
-                return candidate_id
-    return ""
-
-
 async def act_on_root_response(
     app: Any,
     logger: Logger,
@@ -358,10 +181,6 @@ async def act_on_root_response(
 
     apply_goal_updates(app, parsed.get("goal_updates", []))
 
-    if action == "run":
-        await _run_handle(app, logger, parsed, depth, max_chain_depth)
-        return
-
     if action == "search_tools":
         await _handle_search_tools(app, logger, parsed, depth, max_chain_depth)
         return
@@ -399,8 +218,7 @@ async def act_on_root_response(
         if "tasks" in parsed:
             await app._dispatch_execute_tasks(parsed["tasks"], depth)
         else:
-            summary = await app._run_dispatch_subchain(parsed["intent"])
-            await feed_root_summary(app, logger, "DISPATCH_SUMMARY", summary, depth)
+            logger.warning("JARVIS: dispatch action without tasks — ignored (use search_tools first)")
 
     # -- Memory actions (direct, no sub-chain) --
     elif action == "store":

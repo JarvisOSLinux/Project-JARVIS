@@ -33,12 +33,8 @@ from .discovery import server_count as discovery_server_count
 from .discovery import sync_index as discovery_sync_index
 from .dmcp_registry import install_server as registry_install_server
 from .dmcp_registry import list_server_tools as registry_list_server_tools
-from .dmcp_registry import list_visible_servers as registry_list_visible_servers
 from .dmcp_registry import run_dmcp as registry_run_dmcp
 from .dmcp_registry import search_servers as registry_search_servers
-from .tool_discovery import discover_tools as run_tool_discovery
-from .tool_discovery import format_available_tools as render_available_tools
-from .tool_discovery import keyword_fallback as run_keyword_fallback
 from .transport import call_tool as transport_call_tool
 from .transport import connect as transport_connect
 from .transport import disconnect as transport_disconnect
@@ -237,9 +233,6 @@ class DispatchAdapter:
     async def search_servers(self, keywords: List[str]) -> Dict[str, Any]:
         return await registry_search_servers(logger, keywords)
 
-    async def list_visible_servers(self) -> Dict[str, Any]:
-        return await registry_list_visible_servers(logger)
-
     async def install_server(self, server_id: str) -> Dict[str, Any]:
         """Install an MCP server from registry via `dmcp install`."""
         return await registry_install_server(logger, server_id)
@@ -339,20 +332,6 @@ class DispatchAdapter:
         ):
             return "embedding"
         return "keyword"
-
-    async def discover_tools(
-        self,
-        tasks: List[Dict[str, Any]],
-        embeddings: Optional[Any] = None,
-    ) -> str:
-        return await run_tool_discovery(self, logger, tasks, embeddings)
-
-    async def _keyword_fallback(self, task: Dict[str, Any]) -> List[Dict[str, Any]]:
-        return await run_keyword_fallback(self, logger, task)
-
-    @staticmethod
-    def _format_available_tools(results: List[Dict[str, Any]]) -> str:
-        return render_available_tools(results)
 
     async def auto_index_server(
         self,
