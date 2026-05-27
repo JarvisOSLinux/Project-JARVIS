@@ -364,6 +364,70 @@ class DispatchAdapter:
     async def ensure_embedding_model(self, embeddings: Optional[Any] = None) -> None:
         await discovery_ensure_embedding_model(self, logger, embeddings)
 
+    async def search_by_capability(
+        self,
+        capability: str,
+        embeddings: Optional[Any] = None,
+        top_k: int = 5,
+        min_score: float = 0.25,
+    ) -> Dict[str, Any]:
+        """Semantic search for MCP servers/tools matching a capability description.
+
+        Embeds `capability` and runs a vector similarity search against the full
+        index (installed + registry). Falls back to keyword search on the
+        capability words when embeddings are unavailable.
+        """
+        if embeddings is not None and Config.ALLOW_EMBEDDING_SEARCH:
+            try:
+                vector = embeddings.embed_single(capability)
+                result = await self.browse_vector(vector, top_k=top_k, min_score=min_score)
+                entries = result.get("results", [])
+                if entries:
+                    logger.info(
+                        f"Dispatch: search_by_capability '{capability}' → "
+                        f"{len(entries)} hit(s) via embedding"
+                    )
+                    return {"results": entries, "mode": "embedding"}
+                logger.info(
+                    f"Dispatch: search_by_capability '{capability}' — "
+                    "embedding returned nothing, falling back to keyword"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Dispatch: search_by_capability embedding failed: {e}, "
+                    "falling back to keyword"
+                )
+
+        # Keyword fallback — split capability into words, strip short tokens
+        words = [w for w in capability.lower().split() if len(w) > 2]
+        if not words:
+            return {"results": [], "mode": "keyword"}
+
+        kw_result = await self.search_servers(words)
+        servers = kw_result.get("servers", [])
+
+        # Flatten servers into the same result shape as vector search
+        entries: List[Dict[str, Any]] = []
+        seen: set = set()
+        for s in servers:
+            sid = s.get("id", s.get("server_id", ""))
+            if not sid or sid in seen:
+                continue
+            seen.add(sid)
+            entries.append({
+                "server_id": sid,
+                "server_name": s.get("name", sid),
+                "server_description": s.get("description", s.get("summary", "")),
+                "installed": bool(s.get("installed", False)),
+                "score": 0.0,
+            })
+
+        logger.info(
+            f"Dispatch: search_by_capability '{capability}' → "
+            f"{len(entries)} hit(s) via keyword"
+        )
+        return {"results": entries, "mode": "keyword"}
+
     async def __aenter__(self):
         await self.connect()
         return self
