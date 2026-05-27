@@ -141,8 +141,9 @@ class Config:
     ENFORCE_EMBEDDING_SEARCH = (
         os.getenv("ENFORCE_EMBEDDING_SEARCH", "false").lower() == "true"
     )
-    # Minimum visible servers before vector search auto-enables
-    EMBEDDING_SEARCH_THRESHOLD = int(os.getenv("EMBEDDING_SEARCH_THRESHOLD", "100"))
+    # Minimum visible servers before vector search auto-enables.
+    # Default is 3 so embedding fires as soon as any servers are indexed.
+    EMBEDDING_SEARCH_THRESHOLD = int(os.getenv("EMBEDDING_SEARCH_THRESHOLD", "3"))
 
     # Data directory — when set (e.g. systemd JARVIS_DATA_DIR=/var/lib/jarvis),
     # memory, goal archive, and default socket use this base path
@@ -212,7 +213,15 @@ Valid formats:
 
 {{"action": "respond", "output": "your message", "goal_updates": []}}
 
-{{"action": "dispatch", "intent": "what to accomplish"}}
+{{"action": "search_tools", "capability": "execute shell commands", "goal_updates": []}}
+
+{{"action": "get_server_docs", "server_id": "some-server", "goal_updates": []}}
+
+{{"action": "install_server", "server_id": "some-server", "goal_updates": []}}
+
+{{"action": "configure_server", "server_id": "some-server", "config": {{"KEY": "value"}}, "goal_updates": []}}
+
+{{"action": "dispatch", "tasks": [{{"server": "s", "tool": "t", "params": {{}}}}], "goal_updates": []}}
 
 {{"action": "store", "theme": "topic", "content": "fact", "goal_updates": []}}
 
@@ -240,11 +249,27 @@ recall — Recall stored facts by exact theme name.
 search_memory — Search all memories by meaning. Use when you need context.
 list_memory — List all stored memory themes.
 {data_consent_note}
-run — Execute a task using external tools (shell, files, web, etc.).
-      The system finds and runs the right tool automatically.
-      intent = SPECIFIC TASK, NOT the tool type.
-      WRONG:   {{"action": "run", "intent": "run shell command"}}
-      CORRECT: {{"action": "run", "intent": "check python version"}}
+--- Tool use (multi-step) ---
+
+search_tools — Find MCP servers that can perform a task.
+  Think about WHAT CAPABILITY you need, not the user's literal words.
+  WRONG:   {{"action": "search_tools", "capability": "check python version"}}
+  CORRECT: {{"action": "search_tools", "capability": "execute shell commands"}}
+
+get_server_docs — Fetch full tool list for a server shown in SEARCH_RESULTS.
+  Only use this on servers marked [INSTALLED].
+  {{"action": "get_server_docs", "server_id": "<id from SEARCH_RESULTS>"}}
+
+install_server — Install a server shown in SEARCH_RESULTS as [available].
+  After install, SERVER_DOCS are provided automatically — no extra step needed.
+  {{"action": "install_server", "server_id": "<id>"}}
+
+configure_server — Set required config values on an installed server.
+  Use when SERVER_DOCS or install output indicates required configuration.
+  {{"action": "configure_server", "server_id": "<id>", "config": {{"KEY": "value"}}}}
+
+dispatch — Execute tool calls. Only after seeing SERVER_DOCS.
+  Use exact tool names and server id from SERVER_DOCS.
 
 --- Actions (exact format) ---
 
@@ -255,8 +280,33 @@ run — Execute a task using external tools (shell, files, web, etc.).
 }}
 
 {{
-    "action": "run",
-    "intent": "<specific task to accomplish>",
+    "action": "search_tools",
+    "capability": "<capability needed, not user's words>",
+    "goal_updates": []
+}}
+
+{{
+    "action": "get_server_docs",
+    "server_id": "<server id from SEARCH_RESULTS>",
+    "goal_updates": []
+}}
+
+{{
+    "action": "install_server",
+    "server_id": "<server id from SEARCH_RESULTS>",
+    "goal_updates": []
+}}
+
+{{
+    "action": "configure_server",
+    "server_id": "<server id>",
+    "config": {{"KEY": "value"}},
+    "goal_updates": []
+}}
+
+{{
+    "action": "dispatch",
+    "tasks": [{{"server": "<server_id>", "tool": "<tool_name>", "params": {{}}}}],
     "goal_updates": []
 }}
 
@@ -288,11 +338,16 @@ run — Execute a task using external tools (shell, files, web, etc.).
 }}
 
 --- Context ---
-You receive: GOALS (with IDs), NEW INPUT, and optionally WAIT_RESULT/DISPATCH_RESULT from tool execution.
-Memory operation results appear as STORE_RESULT, RECALL_RESULT, SEARCH_MEMORY_RESULT, LIST_MEMORY_RESULT.
-RELEVANT MEMORIES may be included automatically based on user input (RAG retrieval).
+You receive: GOALS (with IDs), NEW INPUT, SEARCH_RESULTS, SERVER_DOCS, DISPATCH_RESULT, WAIT_RESULT.
+Memory results: STORE_RESULT, RECALL_RESULT, SEARCH_MEMORY_RESULT, LIST_MEMORY_RESULT.
+RELEVANT MEMORIES may be included automatically (RAG).
 Include goal_updates in respond: "completed" or "failed" with result.
-NO_TOOLS_FOUND means retry run with a more specific intent — MUST retry at least twice before giving up.
+
+--- Tool search rules ---
+- SEARCH_RESULTS empty → retry search_tools with a different capability description.
+- Make at least 2 genuinely different attempts before telling the user you cannot help.
+- No installed server fits → use install_server, then dispatch using SERVER_DOCS.
+- You may search for multiple servers in sequence for complex multi-tool tasks.
 
 --- Memory guidelines ---
 - Choose descriptive theme names (e.g. "user_preferences", "school_schedule")
@@ -314,11 +369,26 @@ OS: {system} {release} ({machine}), Shell: {shell}
 
 respond — Direct reply. Use for chat, greetings, or after a result comes back.
 Memory is disabled. Do not use store, recall, search_memory, or list_memory.
-run — Execute a task using external tools (shell, files, web, etc.).
-      The system finds and runs the right tool automatically.
-      intent = SPECIFIC TASK, NOT the tool type.
-      WRONG:   {{"action": "run", "intent": "run shell command"}}
-      CORRECT: {{"action": "run", "intent": "check python version"}}
+
+--- Tool use (multi-step) ---
+
+search_tools — Find MCP servers that can perform a task.
+  Think about WHAT CAPABILITY you need, not the user's literal words.
+  WRONG:   {{"action": "search_tools", "capability": "check python version"}}
+  CORRECT: {{"action": "search_tools", "capability": "execute shell commands"}}
+
+get_server_docs — Fetch full tool list for a server shown in SEARCH_RESULTS.
+  Only use this on servers marked [INSTALLED].
+  {{"action": "get_server_docs", "server_id": "<id from SEARCH_RESULTS>"}}
+
+install_server — Install a server shown in SEARCH_RESULTS as [available].
+  After install, SERVER_DOCS are provided automatically — no extra step needed.
+  {{"action": "install_server", "server_id": "<id>"}}
+
+configure_server — Set required config values on an installed server.
+  {{"action": "configure_server", "server_id": "<id>", "config": {{"KEY": "value"}}}}
+
+dispatch — Execute tool calls. Only after seeing SERVER_DOCS.
 
 --- Actions (exact format) ---
 
@@ -329,15 +399,44 @@ run — Execute a task using external tools (shell, files, web, etc.).
 }}
 
 {{
-    "action": "run",
-    "intent": "<specific task to accomplish>",
+    "action": "search_tools",
+    "capability": "<capability needed, not user's words>",
+    "goal_updates": []
+}}
+
+{{
+    "action": "get_server_docs",
+    "server_id": "<server id from SEARCH_RESULTS>",
+    "goal_updates": []
+}}
+
+{{
+    "action": "install_server",
+    "server_id": "<server id from SEARCH_RESULTS>",
+    "goal_updates": []
+}}
+
+{{
+    "action": "configure_server",
+    "server_id": "<server id>",
+    "config": {{"KEY": "value"}},
+    "goal_updates": []
+}}
+
+{{
+    "action": "dispatch",
+    "tasks": [{{"server": "<server_id>", "tool": "<tool_name>", "params": {{}}}}],
     "goal_updates": []
 }}
 
 --- Context ---
-You receive: GOALS (with IDs), NEW INPUT, and optionally WAIT_RESULT/DISPATCH_RESULT from tool execution.
+You receive: GOALS (with IDs), NEW INPUT, SEARCH_RESULTS, SERVER_DOCS, DISPATCH_RESULT, WAIT_RESULT.
 Include goal_updates in respond: "completed" or "failed" with result.
-NO_TOOLS_FOUND means retry run with a more specific intent — MUST retry at least twice before giving up.
+
+--- Tool search rules ---
+- SEARCH_RESULTS empty → retry search_tools with a different capability description.
+- Make at least 2 genuinely different attempts before telling the user you cannot help.
+- No installed server fits → use install_server, then dispatch using SERVER_DOCS.
 
 Output exactly one JSON object. First char {{, last char }}.
 """
