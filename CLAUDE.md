@@ -50,54 +50,89 @@ They are not alternatives — Python dispatch wraps Rust dispatch.
 
 - **Working branch**: `yakup/dev`
 - **Open PR**: #43 "Yakup/dev" → main (created 2026-04-24)
-- **Claude feature branches**: `claude/review-jarvis-core-EQODl`
+- **Claude feature branches**: `claude/ai-os-security-research-CdkTO`
 
 ---
 
-## Current State of yakup/dev (as of 2026-04-24)
+## Current State (as of 2026-05-27)
 
-### What's done
+### What's done (on `claude/ai-os-security-research-CdkTO`)
 
-**Phase 2.2 — TUI decomposition** (many commits, complete):
-`main.py` and `app.py` were shrunk significantly. The TUI is now split into:
-`app.py`, `actions.py`, `lifecycle.py`, `local_input.py`, `output.py`,
-`session_sidebar.py`, `status_bar.py`, `help_screen.py`,
-`slash_commands_doc.py`, `confirm_modal.py`, `settings_modal.py`.
+**Phase 2.2 — TUI decomposition** (complete):
+`main.py` and `app.py` were shrunk. TUI split into: `app.py`, `actions.py`,
+`lifecycle.py`, `local_input.py`, `output.py`, `session_sidebar.py`,
+`status_bar.py`, `help_screen.py`, `slash_commands_doc.py`, `confirm_modal.py`,
+`settings_modal.py`.
 
-**Phase 2.2 security additions** (commit `09e39d50`, complete):
-Four new files added, all additive (nothing calls them yet):
-- `jarvis/tui/confirm_modal.py` — Textual `ModalScreen` for tool confirmation;
-  shows tool list with Allow/Deny buttons + y/n/Escape keybindings
-- `jarvis/tui/settings_modal.py` — Read-only `DataTable` of all 16 Config
-  attributes; highlights `CONFIRMATION_MODE=allow_all` and
-  `JARVIS_SUDO_ENABLED=true` in red
-- `jarvis/core/socket_security.py` — `harden_socket_path()` (chmod 0600),
-  `verify_socket_ownership()`, `warn_if_allow_all()`
-- `jarvis/core/input_guard.py` — regex scanner for 4 prompt-injection
-  patterns: instruction override, jailbreak preamble, role override, system
-  tag injection
+**Phase 2.2 security additions** (files exist, not yet wired):
+- `jarvis/tui/confirm_modal.py` — Textual `ModalScreen` for tool confirmation
+- `jarvis/tui/settings_modal.py` — Read-only `DataTable` of all Config attributes
+- `jarvis/core/socket_security.py` — `harden_socket_path()`, `verify_socket_ownership()`, `warn_if_allow_all()`
+- `jarvis/core/input_guard.py` — regex scanner for 4 prompt-injection patterns
 
-**Security architecture doc** (commit `c63df55a`, complete):
-`docs/SECURITY-ARCHITECTURE.md` — maps OpenClaw CVEs to JARVIS design decisions,
-documents remaining attack surfaces and mitigations.
+**Security wiring still pending** (these files exist but nothing calls them yet):
+1. `jarvis/tui/app.py` — import + mount `ConfirmModal` + `SettingsModal`; bind `Ctrl+,`
+2. `jarvis/tui/lifecycle.py` — register TUI confirmation callback
+3. `jarvis/core/confirmation_manager.py` — add TUI channel
+4. Socket setup (`cli.py` or `runtime/`) — call `harden_socket_path()` + `warn_if_allow_all()`
+5. Input handling — call `input_guard.scan()` before LLM
 
-### What's pending (Commit 3 — timed out before it could be pushed)
+**`run` action + startup bug fixes** (pushed):
+- Fixed `lifecycle.py` sync condition, event merger kwarg, `warn_if_allow_all` call
+- Fixed `Config` missing `LLM_IO_LOG` and `LLM_ROOT_PROMPT_UNIFIED` attributes
+- Added `run` action to `command_parser.py` and `root_actions.py`
+- Added global keyword fallback and stop-word filtering to `tool_discovery.py`
 
-The 4 security files above exist but are **not yet imported or called by
-anything**. The following wiring changes are needed across ~5 existing files:
+### Known issues on current branch
 
-1. `jarvis/tui/app.py` — import and mount `ConfirmModal` + `SettingsModal`;
-   bind `Ctrl+,` to open settings modal
-2. `jarvis/tui/lifecycle.py` — register TUI confirmation callback so
-   `confirmation_manager` can push confirm requests to the TUI
-3. `jarvis/core/confirmation_manager.py` — add TUI channel alongside the
-   existing socket/CLI channels
-4. Socket setup code (likely `cli.py` or `runtime/`) — call
-   `harden_socket_path()` and `warn_if_allow_all()` at startup
-5. Input handling path — call `input_guard.scan()` before passing user input
-   to the LLM
+- `run` action is still fundamentally broken (keyword discovery finds wrong servers)
+- Embedding search never fires (`EMBEDDING_SEARCH_THRESHOLD=100`, registry has ~24 servers)
+- **Planned replacement**: see Tool Discovery Redesign below
 
-This is the immediate next task when resuming work.
+---
+
+## Tool Discovery Redesign (next major task)
+
+Full spec: `docs/tool-discovery-redesign.md`
+
+The `run` action is being replaced with a multi-step explicit flow. The LLM
+reasons about what *capability* it needs, then searches, selects, and dispatches.
+
+### New LLM action set
+
+| Action | Purpose |
+|--------|---------|
+| `search_tools` | LLM outputs a capability description; system does embedding search on full vector index |
+| `get_server_docs` | LLM picks a server from results; system returns full tool list + param schemas |
+| `install_server` | LLM installs an available (not yet installed) server from registry |
+| `configure_server` | LLM sets config values on an installed server (`dmcp config set`) |
+| `dispatch` | Unchanged — LLM dispatches concrete tool calls after seeing SERVER_DOCS |
+
+### Key principle
+
+The LLM must derive the capability from the user's request:
+```
+User: "check my python version"
+LLM:  → "to do this I need to execute a shell command"
+      → {"action": "search_tools", "capability": "execute shell commands"}
+```
+
+NOT keyword pass-through:
+```
+WRONG: {"action": "search_tools", "capability": "check python version"}
+```
+
+### Files to change
+
+| File | Change |
+|------|--------|
+| `jarvis/config.py` | Lower `EMBEDDING_SEARCH_THRESHOLD` to 3; rewrite `LLM_ROOT_PROMPT` |
+| `jarvis/core/command_parser.py` | Add 4 new actions; remove `run` and `find_tools` |
+| `jarvis/runtime/root_actions.py` | Add 4 new handlers; remove `_run_handle` |
+| `jarvis/runtime/root_context.py` | Add `format_search_results()`, `format_server_docs()` |
+| `jarvis/dispatch/adapter.py` | Add `search_tools()`, `get_server_docs()`, `configure_server()` |
+| `jarvis/dispatch/tool_discovery.py` | **Delete** (keyword discovery removed entirely) |
+| `jarvis/dispatch/dmcp_registry.py` | Remove `search_servers`, `_local_installed_servers`, `list_visible_servers` |
 
 ---
 
@@ -105,8 +140,7 @@ This is the immediate next task when resuming work.
 
 ### 1. deps/rust/ submodule reorganization
 
-`dispatch`, `dmcp`, and `contextor` are currently submodules at repo root.
-Move them to:
+Move `dispatch`, `dmcp`, `contextor` to:
 ```
 deps/
   rust/
@@ -114,36 +148,20 @@ deps/
     dmcp/
     contextor/
 ```
-This cleanly separates Python source from vendored Rust dependencies.
 
 ### 2. pyproject.toml Rust integration
 
-Add `deps/rust/` components as installable extras via a build hook:
-- Base install (`jarvis-ai`) — Python runtime only
-- `jarvis-ai[tools]` — also builds and installs Rust binaries
-  (`dispatch`, `dmcp`) via `cargo build --release` + copies to
-  `~/.local/bin` (or similar)
-- Approach: binaries route first (subprocess-invoked). PyO3/maturin only
-  if `contextor` needs to be called directly from Python for vector search.
+- `jarvis-ai` — Python runtime only
+- `jarvis-ai[tools]` — also builds Rust binaries via `cargo build --release`
 
 ---
 
 ## Security / Threat Model Notes
 
-### Context Bloat (Threat #7 in jarvisos taxonomy)
+### Context Bloat (Threat #7)
 
-The jarvisos README calls this "Forgetful context constraint enforcement" but
-"context bloat" is the more precise engineering description:
-
-- **Cause (context bloat)**: as conversation grows, early-session security
-  constraints get diluted or pushed down in attention weight
-- **Effect**: LLM stops honoring rules it was told at session start
-
-**Mitigation (planned, not yet implemented)**:
-The daemon must own security invariants, not the model. Implement a
-**persistent constraint register** that prepends active security rules into
-every LLM prompt, independent of conversation length. The model's context
-window is unreliable for security enforcement; the daemon wrapper is not.
+- **Cause**: as conversation grows, early security constraints get diluted in attention weight
+- **Mitigation (planned)**: persistent constraint register prepended to every prompt by the daemon
 
 ### 4-Tier Action Policy
 
@@ -154,30 +172,18 @@ window is unreliable for security enforcement; the daemon wrapper is not.
 | DANGEROUS | Block until explicit user confirmation |
 | FORBIDDEN | Hard block unconditionally |
 
-The `confirm_modal.py` TUI component and `confirmation_manager.py` are the
-Python-level implementation of the DANGEROUS tier gate.
-`socket_security.py` hardens the confirmation channel against replay.
-`input_guard.py` catches prompt injection before it reaches the LLM.
+`confirm_modal.py` + `confirmation_manager.py` implement the DANGEROUS gate.
+`socket_security.py` hardens the confirmation channel.
+`input_guard.py` catches prompt injection before LLM.
 
 ---
 
 ## Focus & Priorities
 
-### Primary: Project-JARVIS — distro-agnostic daemon
-
-The goal is a daemon that works on any Linux (and eventually macOS/Windows)
-with stock Ollama. Kernel integration (`linux-jarvisos`) is research, not the
-deployment path.
-
-### jarvisos
-
-Lower priority. Target is a minimal base: the custom kernel + the TUI-only
-JARVIS daemon. No ISO installer work right now. Will revisit later.
-
-### mcp-registry
-
-Needs real servers beyond the current calculator/hello examples. Even 5-10
-useful servers would significantly change the `dmcp` value proposition.
+1. **Tool Discovery Redesign** — replace `run` with `search_tools` / `get_server_docs` / `dispatch`
+2. **Security wiring** — wire the 4 security files that exist but aren't called yet
+3. **mcp-registry** — add real servers beyond calculator/hello examples
+4. **jarvisos** — lower priority; minimal base (custom kernel + TUI daemon)
 
 ---
 
@@ -194,11 +200,11 @@ useful servers would significantly change the `dmcp` value proposition.
 
 ---
 
-## Quick File Reference (yakup/dev)
+## Quick File Reference
 
 | Path | Purpose |
 |------|---------|
-| `jarvis/main.py` | Entry point (shrunk in Phase 2.2) |
+| `jarvis/main.py` | Entry point |
 | `jarvis/tui/app.py` | Textual app shell |
 | `jarvis/tui/lifecycle.py` | App startup/shutdown, callback registration |
 | `jarvis/tui/confirm_modal.py` | Tool confirmation modal (UNWIRED) |
@@ -206,8 +212,14 @@ useful servers would significantly change the `dmcp` value proposition.
 | `jarvis/core/confirmation_manager.py` | Multi-channel confirmation gate |
 | `jarvis/core/socket_security.py` | Socket hardening (UNWIRED) |
 | `jarvis/core/input_guard.py` | Prompt-injection scanner (UNWIRED) |
+| `jarvis/core/command_parser.py` | LLM response parser + action registry |
 | `jarvis/dispatch/adapter.py` | Python wrapper for Rust dispatch binary |
-| `jarvis/dispatch/discovery.py` | MCP server discovery logic |
+| `jarvis/dispatch/discovery.py` | Embedding search via dmcp vector index |
+| `jarvis/dispatch/dmcp_registry.py` | dmcp CLI wrappers (install, tools, config) |
+| `jarvis/dispatch/tool_discovery.py` | Keyword fallback (SCHEDULED FOR DELETION) |
 | `jarvis/dispatch/event_merger.py` | Merges voice/CLI/socket/dispatch events |
 | `jarvis/dispatch/goal_manager.py` | Long-horizon goal tracking with timers |
+| `jarvis/runtime/root_actions.py` | ROOT-mode LLM response action handlers |
+| `jarvis/runtime/root_context.py` | Context assembly for ROOT-mode prompts |
+| `docs/tool-discovery-redesign.md` | Full spec for the new discovery workflow |
 | `docs/SECURITY-ARCHITECTURE.md` | Threat model vs OpenClaw CVEs |
