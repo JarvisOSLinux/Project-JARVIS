@@ -95,10 +95,22 @@ async def keyword_fallback(
     adapter: Any, logger: Logger, task: Dict[str, Any]
 ) -> List[Dict[str, Any]]:
     """Keyword search fallback for a single sub-task."""
+    # Words that describe the action type, not the domain — they match everything
+    # and cause false positives (e.g. "check" matches calculator, "python" in
+    # "check python version" matches calculator-py instead of shell).
+    _STOP = {
+        "check", "what", "my", "the", "get", "find", "show", "tell",
+        "give", "look", "please", "want", "need", "help", "make",
+        "can", "could", "would", "should", "will", "from", "with",
+    }
+
     keywords = task.get("keywords", [])
     if not keywords:
         intent = task.get("intent", "")
-        keywords = [w for w in intent.lower().split() if len(w) > 3]
+        keywords = [
+            w for w in intent.lower().split()
+            if len(w) > 3 and w not in _STOP
+        ]
 
     if not keywords:
         return []
