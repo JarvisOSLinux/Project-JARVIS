@@ -11,7 +11,12 @@ from .dispatch_flow import dispatch_send
 from .goal_updates import apply_goal_updates
 from .llm_bridge import ask_llm
 from .output_hooks import emit_activity, get_embeddings, persist_assistant_turn
-from .root_context import build_root_context, compact_payload_for_llm
+from .root_context import (
+    build_root_context,
+    compact_payload_for_llm,
+    format_search_results,
+    format_server_docs,
+)
 
 
 async def feed_root_summary(
@@ -192,6 +197,114 @@ async def _run_handle(
     await _continue_root(app, logger, extra, depth, "root-run-result", max_chain_depth)
 
 
+async def _handle_search_tools(
+    app: Any,
+    logger: Logger,
+    parsed: dict,
+    depth: int,
+    max_chain_depth: int,
+) -> None:
+    capability = parsed["capability"]
+    top_k = parsed.get("top_k", 5)
+    min_score = parsed.get("min_score", 0.25)
+    emit_activity(app, f"Searching for: {capability[:60]}…", kind="dispatch")
+
+    result = await app.dispatch.search_by_capability(
+        capability=capability,
+        embeddings=get_embeddings(app),
+        top_k=top_k,
+        min_score=min_score,
+    )
+    entries = result.get("results", [])
+    mode = result.get("mode", "unknown")
+    logger.info(
+        f"JARVIS: search_tools '{capability}' → {len(entries)} result(s) via {mode}"
+    )
+
+    context = build_root_context(app, logger)
+    context += "\n" + format_search_results(capability, entries)
+    response = await ask_llm(app, logger, context, tag="root-search-tools")
+    await app._act_on_root_response(response, depth + 1)
+
+
+async def _handle_get_server_docs(
+    app: Any,
+    logger: Logger,
+    parsed: dict,
+    depth: int,
+    max_chain_depth: int,
+) -> None:
+    server_id = parsed["server_id"]
+    emit_activity(app, f"Fetching docs for {server_id}…", kind="dispatch")
+
+    tools_result = await app.dispatch.list_server_tools(server_id)
+    tools = tools_result.get("tools", []) if isinstance(tools_result, dict) else []
+    logger.info(f"JARVIS: get_server_docs '{server_id}' → {len(tools)} tool(s)")
+
+    context = build_root_context(app, logger)
+    context += "\n" + format_server_docs(server_id, tools)
+    response = await ask_llm(app, logger, context, tag="root-get-server-docs")
+    await app._act_on_root_response(response, depth + 1)
+
+
+async def _handle_install_server(
+    app: Any,
+    logger: Logger,
+    parsed: dict,
+    depth: int,
+    max_chain_depth: int,
+) -> None:
+    server_id = parsed["server_id"]
+    emit_activity(app, f"Installing {server_id}…", kind="dispatch")
+
+    install_result = await app.dispatch.install_server(server_id)
+    if "error" in install_result:
+        logger.warning(f"JARVIS: install_server '{server_id}' failed: {install_result['error']}")
+        context = build_root_context(app, logger)
+        context += f"\nINSTALL_ERROR: {install_result['error']}"
+        response = await ask_llm(app, logger, context, tag="root-install-error")
+        await app._act_on_root_response(response, depth + 1)
+        return
+
+    logger.info(f"JARVIS: install_server '{server_id}' succeeded")
+    await app.dispatch.auto_index_server(server_id=server_id, embeddings=get_embeddings(app))
+
+    # Immediately fetch docs so the LLM can dispatch without an extra round-trip.
+    tools_result = await app.dispatch.list_server_tools(server_id)
+    tools = tools_result.get("tools", []) if isinstance(tools_result, dict) else []
+
+    context = build_root_context(app, logger)
+    context += f"\nINSTALL_RESULT: {server_id} installed successfully."
+    context += "\n" + format_server_docs(server_id, tools)
+    response = await ask_llm(app, logger, context, tag="root-install-result")
+    await app._act_on_root_response(response, depth + 1)
+
+
+async def _handle_configure_server(
+    app: Any,
+    logger: Logger,
+    parsed: dict,
+    depth: int,
+    max_chain_depth: int,
+) -> None:
+    server_id = parsed["server_id"]
+    config = parsed["config"]
+    emit_activity(app, f"Configuring {server_id}…", kind="dispatch")
+
+    try:
+        await app.dispatch.set_server_config(server_id, config)
+        logger.info(f"JARVIS: configure_server '{server_id}' set {list(config.keys())}")
+        label = f"CONFIGURE_RESULT: set {len(config)} value(s) on {server_id}"
+    except Exception as e:
+        logger.warning(f"JARVIS: configure_server '{server_id}' failed: {e}")
+        label = f"CONFIGURE_ERROR: {e}"
+
+    context = build_root_context(app, logger)
+    context += f"\n{label}"
+    response = await ask_llm(app, logger, context, tag="root-configure-server")
+    await app._act_on_root_response(response, depth + 1)
+
+
 def _first_candidate_id(tool_results: str) -> str:
     """Extract the first server ID from a CANDIDATE_SERVERS block."""
     in_candidates = False
@@ -247,6 +360,22 @@ async def act_on_root_response(
 
     if action == "run":
         await _run_handle(app, logger, parsed, depth, max_chain_depth)
+        return
+
+    if action == "search_tools":
+        await _handle_search_tools(app, logger, parsed, depth, max_chain_depth)
+        return
+
+    if action == "get_server_docs":
+        await _handle_get_server_docs(app, logger, parsed, depth, max_chain_depth)
+        return
+
+    if action == "install_server":
+        await _handle_install_server(app, logger, parsed, depth, max_chain_depth)
+        return
+
+    if action == "configure_server":
+        await _handle_configure_server(app, logger, parsed, depth, max_chain_depth)
         return
 
     if action == "respond":
