@@ -160,7 +160,13 @@ async def _run_handle(
         if not tasks:
             logger.warning("JARVIS: run — dispatch retry still didn't yield tasks; falling back")
             await _continue_root(
-                app, logger, tool_results, depth, "root-run-fallback", max_chain_depth
+                app, logger,
+                f"NO_TOOLS_FOUND: The tools discovered for '{intent}' don't match the task. "
+                "Use run with a more descriptive intent that names the capability directly "
+                "(e.g. 'execute shell command' or 'run terminal command' for system tasks, "
+                "'read file' for file access, 'web search' for browsing). "
+                "MUST retry at least once with a rephrased intent before telling the user you can't help.",
+                depth, "root-run-fallback", max_chain_depth,
             )
             return
 
