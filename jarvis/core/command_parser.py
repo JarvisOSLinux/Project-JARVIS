@@ -20,6 +20,11 @@ VALID_ACTIONS = {
     "respond",
     "dispatch",
     "run",
+    # Root — tool discovery (multi-step: search → docs → dispatch)
+    "search_tools",
+    "get_server_docs",
+    "install_server",
+    "configure_server",
     # Root — memory (direct operations, no sub-chain)
     "store",
     "recall",
@@ -119,6 +124,17 @@ class TaskParser:
             intent = result.get("intent", "")
             preview = (intent[:80] + "...") if len(intent) > 80 else intent
             return f", intent='{preview}'"
+        if action == "search_tools":
+            cap = result.get("capability", "")
+            preview = (cap[:80] + "...") if len(cap) > 80 else cap
+            return f", capability='{preview}'"
+        if action == "get_server_docs":
+            return f", server_id={result.get('server_id')}"
+        if action == "install_server":
+            return f", server_id={result.get('server_id')}"
+        if action == "configure_server":
+            keys = list(result.get("config", {}).keys())
+            return f", server_id={result.get('server_id')}, keys={keys}"
         if action == "search":
             return f", keywords={result.get('keywords', [])}"
         if action == "list_tools":
@@ -159,6 +175,60 @@ def _parse_run(response: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "action": "run",
         "intent": str(intent),
+        "goal_updates": response.get("goal_updates", []),
+    }
+
+
+@_parser("search_tools")
+def _parse_search_tools(response: Dict[str, Any]) -> Dict[str, Any]:
+    capability = response.get("capability", "")
+    if not capability:
+        return {"error": "search_tools requires 'capability'", "raw": response}
+    return {
+        "action": "search_tools",
+        "capability": str(capability),
+        "top_k": int(response.get("top_k", 5)),
+        "min_score": float(response.get("min_score", 0.25)),
+        "goal_updates": response.get("goal_updates", []),
+    }
+
+
+@_parser("get_server_docs")
+def _parse_get_server_docs(response: Dict[str, Any]) -> Dict[str, Any]:
+    server_id = response.get("server_id", "")
+    if not server_id:
+        return {"error": "get_server_docs requires 'server_id'", "raw": response}
+    return {
+        "action": "get_server_docs",
+        "server_id": str(server_id),
+        "goal_updates": response.get("goal_updates", []),
+    }
+
+
+@_parser("install_server")
+def _parse_install_server(response: Dict[str, Any]) -> Dict[str, Any]:
+    server_id = response.get("server_id", "")
+    if not server_id:
+        return {"error": "install_server requires 'server_id'", "raw": response}
+    return {
+        "action": "install_server",
+        "server_id": str(server_id),
+        "goal_updates": response.get("goal_updates", []),
+    }
+
+
+@_parser("configure_server")
+def _parse_configure_server(response: Dict[str, Any]) -> Dict[str, Any]:
+    server_id = response.get("server_id", "")
+    config = response.get("config", {})
+    if not server_id:
+        return {"error": "configure_server requires 'server_id'", "raw": response}
+    if not isinstance(config, dict) or not config:
+        return {"error": "configure_server requires a non-empty 'config' dict", "raw": response}
+    return {
+        "action": "configure_server",
+        "server_id": str(server_id),
+        "config": {str(k): str(v) for k, v in config.items()},
         "goal_updates": response.get("goal_updates", []),
     }
 
