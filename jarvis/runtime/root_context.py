@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from logging import Logger
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from ..config import Config
 
@@ -91,3 +91,72 @@ def build_root_context(
     )
 
     return "\n".join(parts) if parts else "No active context."
+
+
+def format_search_results(capability: str, results: List[Dict[str, Any]]) -> str:
+    """Format vector/keyword search results into a SEARCH_RESULTS context block.
+
+    Each entry shows server id, installed status, and a one-line description.
+    The LLM uses this to pick a server and output get_server_docs or install_server.
+    """
+    if not results:
+        return f'SEARCH_RESULTS: No servers found for "{capability}".'
+
+    lines = [f'SEARCH_RESULTS (top {len(results)} for "{capability}"):']
+    for r in results:
+        sid = r.get("server_id", r.get("id", "unknown"))
+        name = r.get("server_name", r.get("name", sid))
+        desc = r.get("server_description", r.get("description", r.get("summary", "")))
+        installed = bool(r.get("installed", False))
+        status = "INSTALLED" if installed else "available"
+        line = f"  {sid} [{status}]"
+        if name and name != sid:
+            line += f" — {name}"
+        if desc:
+            line += f"\n    {desc}"
+        score = r.get("score", 0.0)
+        if score and score > 0:
+            line += f" (score: {score:.0%})"
+        lines.append(line)
+
+    lines.append(
+        "\nUse get_server_docs on an INSTALLED server, or install_server on an available one."
+    )
+    return "\n".join(lines)
+
+
+def format_server_docs(server_id: str, tools: List[Dict[str, Any]]) -> str:
+    """Format a server's tool list into a SERVER_DOCS context block.
+
+    Shows each tool name, description, and parameter schema so the LLM
+    can output a concrete dispatch action.
+    """
+    if not tools:
+        return f"SERVER_DOCS: {server_id} — no tools found (server may need reinstalling)."
+
+    lines = [f"SERVER_DOCS: {server_id} ({len(tools)} tool(s))"]
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        name = tool.get("name", "")
+        if not name:
+            continue
+        desc = tool.get("description", "")
+        line = f"  {name}"
+        if desc:
+            line += f" — {desc}"
+        params = tool.get("inputSchema", tool.get("params", {}))
+        if params and isinstance(params, dict):
+            props = params.get("properties", {})
+            required = set(params.get("required", []))
+            if props:
+                param_parts = []
+                for pname, pdef in props.items():
+                    ptype = pdef.get("type", "any") if isinstance(pdef, dict) else "any"
+                    req = " (required)" if pname in required else " (optional)"
+                    param_parts.append(f"{pname}: {ptype}{req}")
+                line += f"\n    params: {{{', '.join(param_parts)}}}"
+        lines.append(line)
+
+    lines.append(f"\nNow output a dispatch action using tools from {server_id}.")
+    return "\n".join(lines)
