@@ -270,11 +270,15 @@ configure_server — Set required config values on an installed server.
 
 dispatch — Execute tool calls. Only after seeing SERVER_DOCS.
   Use exact tool names and server id from SERVER_DOCS.
-  CONCURRENCY: all tasks in one dispatch run IN PARALLEL. If step B requires step A to
-  finish first, send TWO separate dispatch actions — one for A, then after seeing
-  DISPATCH_RESULT confirm A succeeded, send another for B.
-  WRONG: dispatch [add_to_whitelist, execute_command]  ← execute starts before whitelist is written
-  CORRECT: dispatch [add_to_whitelist] → read result → dispatch [execute_command]
+  ⚠ RULE — PARALLEL EXECUTION: Every task in one dispatch call starts at the same instant.
+  Before batching two tasks, ask yourself: "Does task 2 need task 1 to finish first?"
+  If YES → two separate dispatch calls. Get DISPATCH_RESULT from the first, then send the second.
+  If NO → safe to batch.
+  Common failure — whitelist/setup before use:
+    WRONG (race): {{"action":"dispatch","tasks":[{{"tool":"add_to_whitelist",...}},{{"tool":"execute_command",...}}]}}
+      execute_command starts BEFORE add_to_whitelist writes the entry → fails every time.
+    CORRECT (sequential): dispatch [add_to_whitelist] → wait for success EXIT → dispatch [execute_command]
+  Other sequential patterns: install → configure, create_file → read_file, grant_permission → use_resource.
 
 --- Actions (exact format) ---
 
@@ -397,11 +401,15 @@ configure_server — Set required config values on an installed server.
   {{"action": "configure_server", "server_id": "<id>", "config": {{"KEY": "value"}}}}
 
 dispatch — Execute tool calls. Only after seeing SERVER_DOCS.
-  CONCURRENCY: all tasks in one dispatch run IN PARALLEL. If step B requires step A to
-  finish first, send TWO separate dispatch actions — one for A, then after seeing
-  DISPATCH_RESULT confirm A succeeded, send another for B.
-  WRONG: dispatch [add_to_whitelist, execute_command]  ← execute starts before whitelist is written
-  CORRECT: dispatch [add_to_whitelist] → read result → dispatch [execute_command]
+  ⚠ RULE — PARALLEL EXECUTION: Every task in one dispatch call starts at the same instant.
+  Before batching two tasks, ask yourself: "Does task 2 need task 1 to finish first?"
+  If YES → two separate dispatch calls. Get DISPATCH_RESULT from the first, then send the second.
+  If NO → safe to batch.
+  Common failure — whitelist/setup before use:
+    WRONG (race): {{"action":"dispatch","tasks":[{{"tool":"add_to_whitelist",...}},{{"tool":"execute_command",...}}]}}
+      execute_command starts BEFORE add_to_whitelist writes the entry → fails every time.
+    CORRECT (sequential): dispatch [add_to_whitelist] → wait for success EXIT → dispatch [execute_command]
+  Other sequential patterns: install → configure, create_file → read_file, grant_permission → use_resource.
 
 --- Actions (exact format) ---
 
