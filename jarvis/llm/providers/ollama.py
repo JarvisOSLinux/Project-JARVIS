@@ -67,7 +67,7 @@ class OllamaProvider(BaseLLMProvider):
 
         try:
             response = self._client.chat(**kwargs)
-            return response["message"]["content"]
+            return self._extract_content(response)
         except Exception as e:
             error_str = str(e).lower()
             if "model" in error_str and (
@@ -79,7 +79,7 @@ class OllamaProvider(BaseLLMProvider):
                 if self.ensure_model():
                     try:
                         response = self._client.chat(**kwargs)
-                        return response["message"]["content"]
+                        return self._extract_content(response)
                     except Exception as retry_error:
                         logger.error(
                             f"Ollama chat error after model pull: {retry_error}"
@@ -91,6 +91,28 @@ class OllamaProvider(BaseLLMProvider):
                     )
             logger.error(f"Ollama chat error: {e}")
             raise
+
+    @staticmethod
+    def _extract_content(response) -> str:
+        """Return the text content from an Ollama chat response.
+
+        Thinking/reasoning models (e.g. qwq, deepseek-r1) place their
+        reasoning in a separate ``thinking`` field and may leave ``content``
+        empty for turns that require deep reasoning. Fall back to ``thinking``
+        so those models still return parseable output.
+        """
+        msg = response["message"]
+        content = msg.get("content") or ""
+        if content:
+            return content
+        thinking = msg.get("thinking") or ""
+        if thinking:
+            logger.debug(
+                "Ollama: content empty, falling back to thinking field "
+                f"({len(thinking)} chars)"
+            )
+            return thinking
+        return content
 
     def is_available(self) -> bool:
         try:
