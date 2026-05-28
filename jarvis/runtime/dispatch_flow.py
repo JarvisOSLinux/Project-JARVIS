@@ -86,9 +86,10 @@ def _trim_to_current_batch(result: Any, num_tasks: int) -> Any:
 
     The dispatch binary accumulates all signals since startup. When the LLM
     dispatches N tasks it receives that full history, which makes it impossible
-    to distinguish old failures from current-batch results. We find the N
-    highest INIT PIDs (the ones just assigned) and strip everything else so
-    the LLM only reasons about what it just did.
+    to distinguish old failures from current-batch results. We find the first
+    INIT line of the current batch (the N highest-PID INITs are current) and
+    return everything from that line onwards — preserving multi-line EXIT bodies
+    that contain error details the LLM needs to read.
     """
     if not isinstance(result, dict) or num_tasks <= 0:
         return result
@@ -110,19 +111,21 @@ def _trim_to_current_batch(result: Any, num_tasks: int) -> Any:
         return result
 
     # Current batch = the num_tasks highest PIDs (dispatch allocates monotonically).
-    current_pids = {str(p) for p in sorted(init_pids)[-num_tasks:]}
+    min_current_pid = sorted(init_pids)[-num_tasks]
 
-    kept = [f"Signal window (current batch, {num_tasks} task(s)):"]
-    for line in lines:
-        if not line.strip() or line.startswith("Signal window"):
-            continue
-        m = _PID_ANY_RE.search(line)
-        if m and m.group(1) in current_pids:
-            kept.append(line)
+    # Find the line where the current batch starts and slice from there.
+    start_idx = None
+    for i, line in enumerate(lines):
+        m = _PID_INIT_RE.search(line)
+        if m and int(m.group(1)) == min_current_pid:
+            start_idx = i
+            break
 
-    if len(kept) == 1:
+    if start_idx is None:
         return result
 
+    kept = [f"Signal window (current batch, {num_tasks} task(s)):"]
+    kept.extend(lines[start_idx:])
     return {"output": "\n".join(kept)}
 
 
