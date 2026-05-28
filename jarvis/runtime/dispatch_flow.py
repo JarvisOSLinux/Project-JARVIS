@@ -18,6 +18,7 @@ from .root_context import build_root_context, compact_payload_for_llm
 
 # Signal window text line: "[14:11:04] PID 2 INIT server tool {...}"
 _PID_INIT_RE = re.compile(r"PID (\d+) INIT")
+_PID_ANY_RE = re.compile(r"PID (\d+)")
 
 
 def _extract_pids_from_result(result: Any) -> list[int]:
@@ -78,6 +79,51 @@ def _find_exits_for_pids(window: list[dict], pids: list[int]) -> list[dict]:
         for s in window
         if s.get("type") in ("EXIT", "TIMEOUT") and s.get("pid") in pid_set
     ]
+
+
+def _trim_to_current_batch(result: Any, num_tasks: int) -> Any:
+    """Return a version of result whose signal window only contains the current batch.
+
+    The dispatch binary accumulates all signals since startup. When the LLM
+    dispatches N tasks it receives that full history, which makes it impossible
+    to distinguish old failures from current-batch results. We find the N
+    highest INIT PIDs (the ones just assigned) and strip everything else so
+    the LLM only reasons about what it just did.
+    """
+    if not isinstance(result, dict) or num_tasks <= 0:
+        return result
+    output = result.get("output", "")
+    if not isinstance(output, str) or "Signal window" not in output:
+        return result
+
+    lines = output.splitlines()
+
+    # Collect all INIT PIDs from the window.
+    init_pids: list[int] = []
+    for line in lines:
+        m = _PID_INIT_RE.search(line)
+        if m:
+            init_pids.append(int(m.group(1)))
+
+    if len(init_pids) <= num_tasks:
+        # Not enough history to be worth trimming — pass through unchanged.
+        return result
+
+    # Current batch = the num_tasks highest PIDs (dispatch allocates monotonically).
+    current_pids = {str(p) for p in sorted(init_pids)[-num_tasks:]}
+
+    kept = [f"Signal window (current batch, {num_tasks} task(s)):"]
+    for line in lines:
+        if not line.strip() or line.startswith("Signal window"):
+            continue
+        m = _PID_ANY_RE.search(line)
+        if m and m.group(1) in current_pids:
+            kept.append(line)
+
+    if len(kept) == 1:
+        return result
+
+    return {"output": "\n".join(kept)}
 
 
 async def run_dispatch_subchain(
@@ -556,7 +602,8 @@ async def dispatch_execute_tasks(
     if isinstance(result, dict) and "error" in result:
         context += f"\nDISPATCH_ERROR: {compact_payload_for_llm(result)}"
     else:
-        context += f"\nDISPATCH_RESULT: {compact_payload_for_llm(result)}"
+        trimmed = _trim_to_current_batch(result, len(tasks))
+        context += f"\nDISPATCH_RESULT: {compact_payload_for_llm(trimmed)}"
 
     response = await ask_llm(app, logger, context, tag="root-dispatch-result")
     await app._act_on_root_response(response, depth + 1)

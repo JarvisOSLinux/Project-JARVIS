@@ -270,6 +270,11 @@ configure_server — Set required config values on an installed server.
 
 dispatch — Execute tool calls. Only after seeing SERVER_DOCS.
   Use exact tool names and server id from SERVER_DOCS.
+  CONCURRENCY: all tasks in one dispatch run IN PARALLEL. If step B requires step A to
+  finish first, send TWO separate dispatch actions — one for A, then after seeing
+  DISPATCH_RESULT confirm A succeeded, send another for B.
+  WRONG: dispatch [add_to_whitelist, execute_command]  ← execute starts before whitelist is written
+  CORRECT: dispatch [add_to_whitelist] → read result → dispatch [execute_command]
 
 --- Actions (exact format) ---
 
@@ -342,6 +347,9 @@ You receive: GOALS (with IDs), NEW INPUT, SEARCH_RESULTS, SERVER_DOCS, DISPATCH_
 Memory results: STORE_RESULT, RECALL_RESULT, SEARCH_MEMORY_RESULT, LIST_MEMORY_RESULT.
 RELEVANT MEMORIES may be included automatically (RAG).
 Include goal_updates in respond: "completed" or "failed" with result.
+DISPATCH_RESULT shows only the signals for YOUR CURRENT BATCH. EXIT signals in it confirm
+success or failure. No EXIT yet means tasks are still running — dispatch again to re-check or
+proceed only when you have a success EXIT.
 
 --- Tool search rules ---
 - SEARCH_RESULTS empty → retry search_tools with a different capability description.
@@ -389,6 +397,11 @@ configure_server — Set required config values on an installed server.
   {{"action": "configure_server", "server_id": "<id>", "config": {{"KEY": "value"}}}}
 
 dispatch — Execute tool calls. Only after seeing SERVER_DOCS.
+  CONCURRENCY: all tasks in one dispatch run IN PARALLEL. If step B requires step A to
+  finish first, send TWO separate dispatch actions — one for A, then after seeing
+  DISPATCH_RESULT confirm A succeeded, send another for B.
+  WRONG: dispatch [add_to_whitelist, execute_command]  ← execute starts before whitelist is written
+  CORRECT: dispatch [add_to_whitelist] → read result → dispatch [execute_command]
 
 --- Actions (exact format) ---
 
@@ -432,6 +445,8 @@ dispatch — Execute tool calls. Only after seeing SERVER_DOCS.
 --- Context ---
 You receive: GOALS (with IDs), NEW INPUT, SEARCH_RESULTS, SERVER_DOCS, DISPATCH_RESULT, WAIT_RESULT.
 Include goal_updates in respond: "completed" or "failed" with result.
+DISPATCH_RESULT shows only the signals for YOUR CURRENT BATCH. EXIT signals in it confirm
+success or failure. No EXIT yet means tasks are still running.
 
 --- Tool search rules ---
 - SEARCH_RESULTS empty → retry search_tools with a different capability description.
