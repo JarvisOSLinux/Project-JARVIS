@@ -264,6 +264,10 @@ install_server — Install a server shown in SEARCH_RESULTS as [available].
   After install, SERVER_DOCS are provided automatically — no extra step needed.
   {{"action": "install_server", "server_id": "<id>"}}
 
+uninstall_server — Remove an installed MCP server from the system.
+  Use when the user asks to uninstall, remove, or delete an installed server.
+  {{"action": "uninstall_server", "server_id": "<id>"}}
+
 configure_server — Set required config values on an installed server.
   Use when SERVER_DOCS or install output indicates required configuration.
   {{"action": "configure_server", "server_id": "<id>", "config": {{"KEY": "value"}}}}
