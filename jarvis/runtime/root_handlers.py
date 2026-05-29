@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from logging import Logger
 from typing import Any
 
@@ -14,20 +15,14 @@ from .session_commands import handle_slash_command
 async def on_user_input(app: Any, logger: Logger, text: str) -> None:
     logger.info(f"JARVIS: User input: '{text}'")
 
-    # Slash-commands are session-control shortcuts, not LLM input.
     if text.startswith("/"):
         handled = handle_slash_command(app, text)
         if handled:
             return
 
-    # Ensure we have a session to log against.  First-ever input
-    # lazily creates one so history is always session-scoped.
     app.sessions.ensure_session()
-
     app.goals.add_goal(text)
 
-    # Auto-store every user prompt for long-term recall.
-    # No LLM decision — every prompt gets persisted + embedded.
     if app.contextor:
         app.contextor.auto_store_prompt(
             text,
@@ -43,18 +38,53 @@ async def on_user_input(app: Any, logger: Logger, text: str) -> None:
 
 
 async def on_dispatch_signal(app: Any, logger: Logger, signal: dict[str, Any]) -> None:
+    # Extract EventMerger enrichment keys before passing the signal downstream.
+    remind_completed = signal.pop("_remind_completed", False)
+    exit_data = signal.pop("_exit", None)
+
     sig_type = signal.get("type")
     sig_pid = signal.get("pid")
-    logger.info(f"JARVIS: Dispatch signal: type={sig_type}, pid={sig_pid}")
+    logger.info(
+        f"JARVIS: Dispatch signal: type={sig_type}, pid={sig_pid}"
+        + (" (task already completed — REMIND+EXIT merged)" if remind_completed else "")
+    )
     if sig_type:
         emit_activity(
             app, f"Dispatch signal: {sig_type} (pid {sig_pid})", kind="dispatch"
         )
 
     app.goals.update_from_signal(signal)
-
     app.llm.switch_mode("root")
-    context = build_root_context(app, logger, signal=signal)
+
+    # Build a context scoped to the goal that owns this PID.
+    # If no goal owns the PID (e.g. a timer from defer), fall back to
+    # the full root context so the LLM still has useful information.
+    owning_goal = app.goals.find_goal_by_task_pid(sig_pid) if sig_pid else None
+
+    if owning_goal:
+        goal_ctx = app.goals.get_goal_context(owning_goal.id)
+        parts = []
+        if goal_ctx:
+            parts.append(f"INTENT: {owning_goal.description}")
+            parts.append(f"GOAL_STATE: {compact_payload_for_llm(goal_ctx)}")
+        parts.append(f"SIGNAL: {json.dumps(signal)}")
+        summary = app.sessions.load_summary()
+        if summary:
+            parts.append(f"CONVERSATION_SUMMARY: {summary}")
+        context = "\n".join(parts)
+        logger.debug(
+            f"JARVIS: Signal context scoped to goal [{owning_goal.id}] "
+            f"({owning_goal.description[:60]})"
+        )
+    else:
+        context = build_root_context(app, logger, signal=signal)
+
+    if remind_completed and exit_data:
+        context += (
+            f"\nREMIND_COMPLETED: Reminder fired for pid={sig_pid}, but the task "
+            f"finished before the LLM was reached.\n"
+            f"EXIT_DATA: {compact_payload_for_llm(exit_data)}"
+        )
 
     response = await ask_llm(app, logger, context, tag="root")
     await app._act_on_root_response(response)
@@ -63,15 +93,8 @@ async def on_dispatch_signal(app: Any, logger: Logger, signal: dict[str, Any]) -
 async def on_confirmation_response(
     app: Any, logger: Logger, data: dict[str, Any]
 ) -> None:
-    """Handle a CONFIRMATION_RESPONSE event from the event loop.
-
-    Resolves the pending confirmation, then either dispatches the
-    approved tasks or feeds USER_DENIAL back to ROOT so the LLM
-    keeps communicating with the user.
-    """
     pending = app.confirmation.resolve(data)
     if pending is None:
-        # Already expired / resolved — ignore.
         return
 
     logger.info(
@@ -80,7 +103,6 @@ async def on_confirmation_response(
         f"denied={len(pending.denied_tools)}"
     )
 
-    # All denied — feed USER_DENIAL to ROOT.
     if pending.denied_tools and not pending.approved_tasks:
         denied_list = ", ".join(pending.denied_tools)
         app.llm.switch_mode("root")
@@ -90,7 +112,6 @@ async def on_confirmation_response(
         await app._act_on_root_response(response)
         return
 
-    # Some or all approved — dispatch the approved tasks.
     if pending.approved_tasks:
         result = await app.dispatch.send_tasks(pending.approved_tasks)
 
@@ -102,7 +123,6 @@ async def on_confirmation_response(
         else:
             context += f"\nDISPATCH_RESULT: {compact_payload_for_llm(result)}"
 
-        # Include partial denial if some tools were denied.
         if pending.denied_tools:
             denied_list = ", ".join(pending.denied_tools)
             context += f"\nUSER_DENIAL: Action {denied_list} was denied by the user"

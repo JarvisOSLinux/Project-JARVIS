@@ -35,9 +35,7 @@ from .dmcp_registry import install_server as registry_install_server
 from .dmcp_registry import list_server_tools as registry_list_server_tools
 from .dmcp_registry import run_dmcp as registry_run_dmcp
 from .dmcp_registry import search_servers as registry_search_servers
-from .tool_discovery import discover_tools as run_tool_discovery
-from .tool_discovery import format_available_tools as render_available_tools
-from .tool_discovery import keyword_fallback as run_keyword_fallback
+from .dmcp_registry import uninstall_server as registry_uninstall_server
 from .transport import call_tool as transport_call_tool
 from .transport import connect as transport_connect
 from .transport import disconnect as transport_disconnect
@@ -47,6 +45,11 @@ from .transport import (
 )
 
 logger = get_logger(__name__)
+
+# How long to wait for a blocking 'wait' call before giving up (seconds).
+# Tasks can run for a long time; this is intentionally much larger than
+# the regular DISPATCH_TIMEOUT.
+_WAIT_TIMEOUT = getattr(Config, "DISPATCH_WAIT_TIMEOUT", 600.0)
 
 
 class DispatchAdapter:
@@ -70,7 +73,11 @@ class DispatchAdapter:
     def is_connected(self) -> bool:
         return self._connected
 
-    async def send_tasks(self, tasks: List[Dict[str, Any]]) -> Dict[str, Any]:
+    async def send_tasks(
+        self,
+        tasks: List[Dict[str, Any]],
+        session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         Send a batch of tasks to dispatch for concurrent execution.
 
@@ -80,6 +87,9 @@ class DispatchAdapter:
                 - tool: tool name on that server
                 - params: dict of arguments
                 - remind_after: (optional) seconds before a REMIND signal
+            session_id: Optional opaque session identifier (e.g. goal ID).
+                When provided, the dispatch binary scopes its signal window
+                to PIDs belonging to this session.
 
         Returns:
             Dict with assigned PIDs and status.
@@ -93,27 +103,60 @@ class DispatchAdapter:
                 f"Dispatch:   task[{i}]: server={task.get('server')}, tool={task.get('tool')}, params={task.get('params')}"
             )
 
+        params: Dict[str, Any] = {"tasks": tasks}
+        if session_id is not None:
+            params["session_id"] = session_id
+
         return await transport_call_tool(
             self,
             logger,
             tool_name="dispatch",
-            params={"tasks": tasks},
+            params=params,
             op_name="send_tasks",
             timeout_error="Dispatch timed out after {timeout}s",
             failure_prefix="Failed to dispatch tasks",
             extractor=self._extract_content,
         )
 
-    async def kill_tasks(self, pids: List[int]) -> Dict[str, Any]:
+    async def wait_task(self, pids: List[int]) -> Dict[str, Any]:
         """
-        Kill running tasks by PID.
+        Acknowledge a REMIND signal and block until the given PIDs complete.
+
+        Calls the dispatch binary's 'wait' MCP tool, which records WAIT
+        signals for each PID and then calls wait_for_event() again —
+        blocking until EXIT or TIMEOUT fires, then returning the updated
+        signal window.
+
+        This is the correct mechanism to use after the LLM issues a
+        {"action": "wait"} response: it keeps the sub-chain alive and
+        delivers EXIT data directly, bypassing any EventMerger polling
+        race condition.
 
         Args:
-            pids: List of task PIDs to terminate.
+            pids: List of task PIDs to wait for.
 
         Returns:
-            Dict with kill confirmation.
+            Dict / list containing the signal window with EXIT signal(s).
         """
+        if not require_connection(self, logger, "wait_task"):
+            return {"error": "Not connected to dispatch"}
+
+        logger.info(
+            f"Dispatch: Acknowledging REMIND — blocking until PIDs {pids} complete"
+        )
+        return await transport_call_tool(
+            self,
+            logger,
+            tool_name="wait",
+            params={"pids": pids},
+            op_name="wait_task",
+            timeout_error="wait_task timed out after {timeout}s",
+            failure_prefix="Failed to wait for task completion",
+            extractor=self._extract_content,
+            timeout=_WAIT_TIMEOUT,
+        )
+
+    async def kill_tasks(self, pids: List[int]) -> Dict[str, Any]:
         if not require_connection(self, logger, "kill_tasks"):
             return {"error": "Not connected to dispatch"}
 
@@ -132,17 +175,6 @@ class DispatchAdapter:
     async def set_timer(
         self, label: str, duration: int, metadata: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """
-        Set a one-shot timer in dispatch.
-
-        Args:
-            label: Human-readable label for the signal window.
-            duration: Seconds until REMIND fires.
-            metadata: Opaque key-value data passed through in signals.
-
-        Returns:
-            Dict with assigned PID and status, or error.
-        """
         if not require_connection(self, logger, "set_timer"):
             return {"error": "Not connected to dispatch"}
 
@@ -165,25 +197,9 @@ class DispatchAdapter:
         )
 
     async def get_signal_window(self) -> List[Dict[str, Any]]:
-        """
-        Get the current signal window from dispatch.
-
-        Returns:
-            List of signal dicts (up to 20), each with:
-                - pid: task PID
-                - type: INIT | EXIT | REMIND | WAIT | KILL
-                - timestamp: ISO string
-                - data: (optional) output or error payload
-        """
         return await transport_get_signal_window(self, logger)
 
     def _extract_content(self, result) -> Dict[str, Any]:
-        """
-        Extract content from an MCP CallToolResult.
-
-        Always returns a dict. Text content that isn't valid JSON is wrapped
-        as {"output": "<text>"} so callers can safely use .get().
-        """
         if (
             hasattr(result, "structuredContent")
             and result.structuredContent is not None
@@ -216,53 +232,58 @@ class DispatchAdapter:
         return await registry_run_dmcp(logger, *args)
 
     async def search_servers(self, keywords: List[str]) -> Dict[str, Any]:
-        """
-        Search for MCP servers by keywords via `dmcp browse`.
-
-        Returns installed matches first, then not-installed ones from registries.
-        """
         return await registry_search_servers(logger, keywords)
 
     async def install_server(self, server_id: str) -> Dict[str, Any]:
         """Install an MCP server from registry via `dmcp install`."""
         return await registry_install_server(logger, server_id)
 
+    async def uninstall_server(self, server_id: str) -> Dict[str, Any]:
+        """Uninstall an MCP server via `dmcp uninstall`."""
+        return await registry_uninstall_server(logger, server_id)
+
     async def list_server_tools(self, server_id: str) -> Dict[str, Any]:
         """List tools available on an installed MCP server."""
         return await registry_list_server_tools(logger, server_id)
+
+    async def get_server_manifest(self, server_id: str) -> Optional[Dict[str, Any]]:
+        """Return the installed manifest for a server via `dmcp info <id> --json`.
+
+        Returns None if the server is not installed or the output cannot be parsed.
+        """
+        output = await self._run_dmcp("info", server_id, "--json")
+        if output:
+            try:
+                return json.loads(output)
+            except json.JSONDecodeError:
+                pass
+        return None
+
+    async def set_server_config(self, server_id: str, config: Dict[str, str]) -> None:
+        """Persist config key-value pairs for a server via `dmcp config <id> set`.
+
+        Each key is stored in the server's installed manifest config section and
+        will be injected as an environment variable when the server is next run.
+        """
+        for key, value in config.items():
+            if value:
+                await self._run_dmcp("config", server_id, "set", key, value)
 
     # ------------------------------------------------------------------
     # Semantic tool discovery (vector-based via dispatch → dmcp)
     # ------------------------------------------------------------------
 
     async def server_count(self) -> Dict[str, Any]:
-        """
-        Get the number of visible MCP servers from dmcp.
-
-        Returns a dict normalized to ``{"total", "local", "registry"}``.
-        Handles three response shapes from the dispatch binary / dmcp:
-            - full dict       : {"total": N, "local": L, "registry": R}
-            - bare number     : wrapped as {"output": N}
-            - plain text "N"  : fallback from --json parse failure
-        """
         return await discovery_server_count(self, logger)
 
     @staticmethod
     def _normalize_count(content: Any) -> Dict[str, int]:
-        """Coerce a server-count response into {total, local, registry}."""
         return discovery_normalize_count(content)
 
     async def embedding_spec(self) -> Optional[Dict[str, Any]]:
-        """
-        Get the registry's embedding model spec from dmcp.
-
-        Returns: {"model": "nomic-embed-text", "version": "v1.5", "dimensions": 768}
-        or None if not available.
-        """
         return await discovery_embedding_spec(self, logger)
 
     async def sync_index(self) -> Dict[str, Any]:
-        """Trigger dmcp sync-index to refresh the vector index from registries."""
         return await discovery_sync_index(self, logger)
 
     async def browse_vector(
@@ -271,12 +292,6 @@ class DispatchAdapter:
         top_k: int = 5,
         min_score: float = 0.3,
     ) -> Dict[str, Any]:
-        """
-        Semantic search: find MCP servers/tools by vector similarity.
-
-        Passes the vector to dispatch → dmcp browse --vector for cosine
-        similarity search against the local vector index.
-        """
         return await discovery_browse_vector(self, logger, vector, top_k, min_score)
 
     async def browse_vectors_batch(
@@ -285,11 +300,6 @@ class DispatchAdapter:
         top_k: int = 5,
         min_score: float = 0.3,
     ) -> Dict[str, Any]:
-        """
-        Batch semantic search: search multiple vectors in one call.
-
-        Returns grouped results — one result set per input vector.
-        """
         return await discovery_browse_vectors_batch(
             self, logger, vectors, top_k, min_score
         )
@@ -301,19 +311,6 @@ class DispatchAdapter:
         name: str = "",
         description: str = "",
     ) -> Dict[str, Any]:
-        """
-        Index a non-approved server's vectors for semantic search.
-
-        Called after installing a server that doesn't have pre-computed
-        vectors in the registry. JARVIS embeds the tool descriptions
-        locally via Ollama and passes the vectors here for storage.
-
-        Args:
-            server_id: The MCP server ID.
-            vectors: {"server": [...], "tools": {"tool_name": [...]}}
-            name: Optional server name.
-            description: Optional server description.
-        """
         return await discovery_index_server(
             self,
             logger,
@@ -327,17 +324,7 @@ class DispatchAdapter:
         self,
         embeddings: Optional[Any] = None,
     ) -> str:
-        """
-        Return the active tool-discovery backend: ``"embedding"`` or ``"keyword"``.
-
-        Chosen from config + runtime state:
-          - embedding:  ALLOW_EMBEDDING_SEARCH, embeddings available,
-                        and (visible_servers >= threshold OR enforce flag)
-          - keyword:    everything else
-
-        The LLM never sees these names — this only drives which dispatch
-        system prompt JARVIS installs and which search path runs.
-        """
+        """Return the active tool-discovery backend: ``"embedding"`` or ``"keyword"``."""
         if not Config.ALLOW_EMBEDDING_SEARCH or embeddings is None:
             return "keyword"
 
@@ -351,70 +338,83 @@ class DispatchAdapter:
             return "embedding"
         return "keyword"
 
-    async def discover_tools(
-        self,
-        tasks: List[Dict[str, Any]],
-        embeddings: Optional[Any] = None,
-    ) -> str:
-        """
-        Tool discovery — the main entry point after a ``plan`` action.
-
-        Runs whichever backend ``select_discovery_mode`` picked (embedding or
-        keyword) and returns a formatted ``MATCHED_TOOLS`` / ``CANDIDATE_SERVERS``
-        block for prompt injection. Empty string if nothing matched.
-
-        Args:
-            tasks: List of dicts with "intent" (required) and optional
-                   "keywords", "top_k", "min_score".
-            embeddings: OllamaEmbeddings instance for local embedding.
-        """
-        return await run_tool_discovery(self, logger, tasks, embeddings)
-
-    async def _keyword_fallback(self, task: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Keyword search fallback for a single sub-task.
-
-        For installed servers, expand each server into per-tool rows with
-        real ``tool_name`` / ``description`` / ``params`` so the LLM can
-        dispatch directly without guessing. Non-installed matches stay
-        server-level — the LLM must install them before they become
-        dispatchable.
-        """
-        return await run_keyword_fallback(self, logger, task)
-
-    @staticmethod
-    def _format_available_tools(results: List[Dict[str, Any]]) -> str:
-        """
-        Render discovery results into the two blocks the LLM prompt names:
-
-          MATCHED_TOOLS       — installed + has tool_name; dispatch-ready
-          CANDIDATE_SERVERS   — not installed, or no tool_name yet; needs
-                                install + list_tools before dispatch
-
-        Deduplicated by (server_id, tool_name) for tool rows and by
-        server_id for server rows.
-        """
-        return render_available_tools(results)
-
     async def auto_index_server(
         self,
         server_id: str,
         embeddings: Optional[Any] = None,
     ) -> None:
-        """
-        Auto-index a non-approved server after installation.
-
-        Reads the server's tool descriptions, embeds them locally via
-        Ollama, and stores the vectors in dmcp's local index.
-        Does nothing if embeddings are unavailable.
-        """
         await discovery_auto_index_server(self, logger, server_id, embeddings)
 
     async def ensure_embedding_model(self, embeddings: Optional[Any] = None) -> None:
-        """
-        On startup, check the registry's embedding spec and ensure
-        the correct model is available locally.
-        """
         await discovery_ensure_embedding_model(self, logger, embeddings)
+
+    async def search_by_capability(
+        self,
+        capability: str,
+        embeddings: Optional[Any] = None,
+        top_k: int = 5,
+        min_score: float = 0.25,
+    ) -> Dict[str, Any]:
+        """Semantic search for MCP servers/tools matching a capability description.
+
+        Embeds `capability` and runs a vector similarity search against the full
+        index (installed + registry). Falls back to keyword search on the
+        capability words when embeddings are unavailable.
+        """
+        if embeddings is not None and Config.ALLOW_EMBEDDING_SEARCH:
+            try:
+                vector = embeddings.embed_single(capability)
+                result = await self.browse_vector(
+                    vector, top_k=top_k, min_score=min_score
+                )
+                entries = result.get("results", [])
+                if entries:
+                    logger.info(
+                        f"Dispatch: search_by_capability '{capability}' → "
+                        f"{len(entries)} hit(s) via embedding"
+                    )
+                    return {"results": entries, "mode": "embedding"}
+                logger.info(
+                    f"Dispatch: search_by_capability '{capability}' — "
+                    "embedding returned nothing, falling back to keyword"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Dispatch: search_by_capability embedding failed: {e}, "
+                    "falling back to keyword"
+                )
+
+        # Keyword fallback — split capability into words, strip short tokens
+        words = [w for w in capability.lower().split() if len(w) > 2]
+        if not words:
+            return {"results": [], "mode": "keyword"}
+
+        kw_result = await self.search_servers(words)
+        servers = kw_result.get("servers", [])
+
+        # Flatten servers into the same result shape as vector search
+        entries: List[Dict[str, Any]] = []
+        seen: set = set()
+        for s in servers:
+            sid = s.get("id", s.get("server_id", ""))
+            if not sid or sid in seen:
+                continue
+            seen.add(sid)
+            entries.append(
+                {
+                    "server_id": sid,
+                    "server_name": s.get("name", sid),
+                    "server_description": s.get("description", s.get("summary", "")),
+                    "installed": bool(s.get("installed", False)),
+                    "score": 0.0,
+                }
+            )
+
+        logger.info(
+            f"Dispatch: search_by_capability '{capability}' → "
+            f"{len(entries)} hit(s) via keyword"
+        )
+        return {"results": entries, "mode": "keyword"}
 
     async def __aenter__(self):
         await self.connect()

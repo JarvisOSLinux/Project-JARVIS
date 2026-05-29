@@ -5,9 +5,29 @@ Merges multiple input sources into a single event stream:
 1. User input (voice, stdin, socket, or injected)
 2. Dispatch signals (task completions, reminders, etc.)
 
-Supports inject_user_input() for thread-safe injection from voice,
-socket listeners, or CLI "jarvis send" — enabling dual input
-(voice + app/CLI) in daemon or interactive mode.
+The signal reader runs as a background asyncio Task, polling the dispatch
+signal window every 0.5 s. Each signal is fingerprinted by
+(pid, type, timestamp) and tracked in a seen-set; duplicates are silently
+dropped so the same signal is never delivered twice even if it stays in the
+Rust window for multiple polls.
+
+On the first poll, all already-present signals are marked seen without being
+enqueued — this prevents stale signals from a previous JARVIS session being
+replayed on startup.
+
+Signal type filtering: INIT and WAIT are never delivered via the async queue.
+INIT is always captured inline by the send_tasks result; delivering it again
+via EventMerger would cause redundant ROOT processing. WAIT is an internal
+acknowledgement signal emitted by the dispatch 'wait' tool.
+
+REMIND+EXIT merging: if a REMIND for PID X is first-seen and an EXIT for the
+same PID is already present in the same window snapshot, the REMIND is
+enriched with _remind_completed=True / _exit=<exit signal> so ROOT gets the
+full output in a single LLM turn instead of two.
+
+Double-delivery prevention: when the dispatch sub-chain calls wait_task()
+and receives EXIT signals inline, it marks those signals via
+mark_signals_seen() so the background poller does not re-enqueue them.
 """
 
 import asyncio
@@ -18,6 +38,9 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 from ..core.logger import get_logger
 
 logger = get_logger(__name__)
+
+# Signal types that the sub-chain always handles inline; never enqueue these.
+_INLINE_SIGNAL_TYPES = frozenset({"INIT", "WAIT"})
 
 
 class EventType(Enum):
@@ -56,13 +79,15 @@ class EventMerger:
     """
     Merges user input and dispatch signals into a single async event queue.
 
-    Supports dual input: voice, stdin, socket, or inject_user_input() all feed
-    the same pipeline. Use inject_user_input() for thread-safe injection from
-    voice callbacks, socket listeners, or "jarvis send".
+    The signal reader runs as a background asyncio Task that polls the
+    dispatch signal window. Each signal is fingerprinted by
+    (pid, type, timestamp); duplicates are silently dropped so the same
+    signal is never delivered twice even if it stays in the window for
+    multiple polls.
 
     Usage:
         merger = EventMerger()
-        merger.start(user_source=..., signal_source=...)
+        merger.start(signal_window_source=adapter.get_signal_window, ...)
         merger.inject_user_input("hello")  # thread-safe, from any thread
 
         async for event in merger:
@@ -70,11 +95,18 @@ class EventMerger:
                 ...
     """
 
-    def __init__(self, max_queue_size: int = 100):
+    def __init__(self, max_queue_size: int = 100, poll_interval: float = 0.5):
         self._queue: asyncio.Queue = asyncio.Queue(maxsize=max_queue_size)
         self._running = False
         self._tasks: List[asyncio.Task] = []
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._poll_interval = poll_interval
+        self._seen: set = set()
+        self._signals_initialized = False
+
+    # ------------------------------------------------------------------
+    # Thread-safe injection helpers
+    # ------------------------------------------------------------------
 
     def inject_user_input(self, text: str) -> None:
         """
@@ -100,10 +132,7 @@ class EventMerger:
         self._loop.call_soon_threadsafe(_put)
 
     def inject_confirmation_response(self, data: Dict[str, Any]) -> None:
-        """
-        Inject a confirmation response from any thread (socket, notification).
-        Thread-safe.
-        """
+        """Thread-safe."""
         if self._loop is None:
             logger.warning(
                 "EventMerger: inject_confirmation_response called before start"
@@ -137,38 +166,61 @@ class EventMerger:
         """Push SHUTDOWN event to end the async iteration."""
         await self._queue.put(Event.shutdown())
 
+    def mark_signals_seen(self, signals: List[Dict[str, Any]]) -> None:
+        """
+        Mark a list of signals as already-processed.
+
+        Call this after receiving EXIT/TIMEOUT signals inline (e.g. from
+        wait_task) to prevent the background polling loop from re-enqueueing
+        the same signals as new events.
+        """
+        for sig in signals:
+            self._seen.add(self._signal_key(sig))
+        if signals:
+            logger.debug(
+                f"EventMerger: Marked {len(signals)} signal(s) as seen (inline handling)"
+            )
+
+    # ------------------------------------------------------------------
+    # Startup / teardown
+    # ------------------------------------------------------------------
+
     def start(
         self,
-        signal_source: Callable[[], Awaitable[Optional[Dict[str, Any]]]],
+        signal_window_source: Callable[[], Awaitable[List[Dict[str, Any]]]],
         user_source: Optional[Callable[[], Awaitable[str]]] = None,
-    ):
+    ) -> None:
         """
         Start listening to input sources.
 
         Args:
-            signal_source: Async callable that awaits and returns the next dispatch signal.
-                           Returns None if no signal (timeout). Called in a loop.
-            user_source: Optional. Async callable that awaits and returns user text input.
-                         When provided (e.g. stdin for chat mode), runs in parallel.
-                         When None (daemon mode), only inject_user_input and socket feed input.
+            signal_window_source: Async callable that returns the full current
+                dispatch signal window (list of signal dicts). Called in a
+                polling loop; deduplication and REMIND+EXIT merging happen here.
+            user_source: Optional. Async callable that awaits and returns user
+                text input (e.g. stdin). When None (daemon/TUI mode), only
+                inject_user_input() and socket listeners feed user input.
         """
         self._running = True
         self._loop = asyncio.get_running_loop()
-        tasks = [asyncio.create_task(self._listen_signals(signal_source))]
+        tasks = [asyncio.create_task(self._listen_signals(signal_window_source))]
         if user_source is not None:
             tasks.append(asyncio.create_task(self._listen_user_source(user_source)))
         self._tasks = tasks
-        logger.info("EventMerger: Started listening (dual input enabled)")
+        logger.info("EventMerger: Started (deduplicating signal queue active)")
 
     async def stop(self):
         """Stop listening and clean up."""
         self._running = False
         for task in self._tasks:
             task.cancel()
-        # Drain any cancelled tasks
         await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks.clear()
         logger.info("EventMerger: Stopped")
+
+    # ------------------------------------------------------------------
+    # Queue helpers
+    # ------------------------------------------------------------------
 
     async def get_next_event(self) -> Event:
         """Block until the next event arrives from either source."""
@@ -177,6 +229,10 @@ class EventMerger:
     async def push_event(self, event: Event):
         """Manually push an event (e.g., for shutdown)."""
         await self._queue.put(event)
+
+    # ------------------------------------------------------------------
+    # Background tasks
+    # ------------------------------------------------------------------
 
     async def _listen_user_source(self, source: Callable[[], Awaitable[str]]):
         """Loop: await user input from stdin/chat, push as event."""
@@ -194,21 +250,97 @@ class EventMerger:
                 logger.error(f"EventMerger: User input error: {e}")
 
     async def _listen_signals(
-        self, source: Callable[[], Awaitable[Optional[Dict[str, Any]]]]
-    ):
-        """Loop: await dispatch signals, push as events."""
+        self,
+        window_source: Callable[[], Awaitable[List[Dict[str, Any]]]],
+    ) -> None:
+        """
+        Poll the dispatch signal window, deduplicate, and enqueue new signals.
+
+        INIT and WAIT signals are never delivered — INIT is always captured
+        inline by the send_tasks result; WAIT is an internal acknowledgement.
+
+        On the first poll, all present signals are marked seen without enqueueing
+        to avoid replaying stale signals from a previous JARVIS session.
+
+        REMIND+EXIT merging: if a REMIND for PID X is seen for the first time
+        and an EXIT for the same PID is already in the same window snapshot, the
+        signal is enriched with _remind_completed=True and _exit=<exit sig> so
+        ROOT can respond with the actual task output in a single LLM turn.
+        """
         while self._running:
             try:
-                signal = await source()
-                if signal is not None:
+                signals = await window_source()
+
+                if not self._signals_initialized:
+                    # Mark pre-existing signals as seen on the first poll.
+                    # This prevents replaying signals from a previous session.
+                    for sig in signals:
+                        self._seen.add(self._signal_key(sig))
+                    self._signals_initialized = True
                     logger.debug(
-                        f"EventMerger: Queued dispatch signal type={signal.get('type')}, pid={signal.get('pid')}"
+                        f"EventMerger: Signal seen-set initialized "
+                        f"({len(self._seen)} pre-existing signal(s) skipped)"
                     )
-                    await self._queue.put(Event.dispatch_signal(signal))
+                    await asyncio.sleep(self._poll_interval)
+                    continue
+
+                if signals:
+                    exits_by_pid: Dict[Any, Dict[str, Any]] = {
+                        s["pid"]: s
+                        for s in signals
+                        if s.get("type") in ("EXIT", "TIMEOUT") and "pid" in s
+                    }
+                    for sig in signals:
+                        key = self._signal_key(sig)
+                        if key in self._seen:
+                            continue
+                        self._seen.add(key)
+
+                        # INIT and WAIT are always handled inline; skip delivery.
+                        if sig.get("type") in _INLINE_SIGNAL_TYPES:
+                            continue
+
+                        if sig.get("type") == "REMIND":
+                            pid = sig.get("pid")
+                            if pid in exits_by_pid:
+                                # Task already finished — merge exit info so
+                                # ROOT gets the full picture in one LLM turn.
+                                sig = {
+                                    **sig,
+                                    "_remind_completed": True,
+                                    "_exit": exits_by_pid[pid],
+                                }
+                                logger.info(
+                                    f"EventMerger: REMIND+EXIT merged for pid={pid}"
+                                )
+
+                        logger.debug(
+                            f"EventMerger: Queued signal "
+                            f"type={sig.get('type')}, pid={sig.get('pid')}"
+                        )
+                        try:
+                            self._queue.put_nowait(Event.dispatch_signal(sig))
+                        except asyncio.QueueFull:
+                            logger.warning(
+                                f"EventMerger: Queue full, dropping signal "
+                                f"type={sig.get('type')}, pid={sig.get('pid')}"
+                            )
+
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"EventMerger: Signal source error: {e}")
+                logger.error(f"EventMerger: Signal reader error: {e}")
+
+            await asyncio.sleep(self._poll_interval)
+
+    @staticmethod
+    def _signal_key(sig: Dict[str, Any]) -> str:
+        """Fingerprint a signal for deduplication."""
+        return f"{sig.get('pid')}:{sig.get('type')}:{sig.get('timestamp', '')}"
+
+    # ------------------------------------------------------------------
+    # Async iteration
+    # ------------------------------------------------------------------
 
     def __aiter__(self):
         return self

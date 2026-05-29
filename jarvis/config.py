@@ -3,7 +3,7 @@ import os
 
 from dotenv import load_dotenv
 
-# Load config: JARVIS_CONFIG_DIR > ~/.config/jarvis/jarvis.conf > package .env
+# Load config: JARVIS_CONFIG_DIR (system install) or jarvis/.env (dev)
 _config_dir = os.getenv("JARVIS_CONFIG_DIR")
 if _config_dir:
     _env_path = os.path.join(_config_dir, "jarvis.conf")
@@ -12,11 +12,6 @@ if _config_dir:
     else:
         load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 else:
-    _user_conf = os.path.join(
-        os.path.expanduser("~"), ".config", "jarvis", "jarvis.conf"
-    )
-    if os.path.isfile(_user_conf):
-        load_dotenv(_user_conf)
     load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 
@@ -146,8 +141,9 @@ class Config:
     ENFORCE_EMBEDDING_SEARCH = (
         os.getenv("ENFORCE_EMBEDDING_SEARCH", "false").lower() == "true"
     )
-    # Minimum visible servers before vector search auto-enables
-    EMBEDDING_SEARCH_THRESHOLD = int(os.getenv("EMBEDDING_SEARCH_THRESHOLD", "100"))
+    # Minimum visible servers before vector search auto-enables.
+    # Default is 3 so embedding fires as soon as any servers are indexed.
+    EMBEDDING_SEARCH_THRESHOLD = int(os.getenv("EMBEDDING_SEARCH_THRESHOLD", "3"))
 
     # Data directory — when set (e.g. systemd JARVIS_DATA_DIR=/var/lib/jarvis),
     # memory, goal archive, and default socket use this base path
@@ -198,6 +194,7 @@ class Config:
     LOG_COLORS = (
         os.getenv("LOG_COLORS", "true").lower() == "true"
     )  # Enable colored console output
+    LLM_IO_LOG = os.getenv("LLM_IO_LOG", "")  # Optional: path to log LLM I/O as JSONL
 
     # os.environ["OLLAMA_NO_GPU"] = "1"
     # os.environ["OLLAMA_NUM_THREADS"] = str(multiprocessing.cpu_count())
@@ -216,7 +213,15 @@ Valid formats:
 
 {{"action": "respond", "output": "your message", "goal_updates": []}}
 
-{{"action": "dispatch", "intent": "what to accomplish"}}
+{{"action": "search_tools", "capability": "execute shell commands", "goal_updates": []}}
+
+{{"action": "get_server_docs", "server_id": "some-server", "goal_updates": []}}
+
+{{"action": "install_server", "server_id": "some-server", "goal_updates": []}}
+
+{{"action": "configure_server", "server_id": "some-server", "config": {{"KEY": "value"}}, "goal_updates": []}}
+
+{{"action": "dispatch", "tasks": [{{"server": "s", "tool": "t", "params": {{}}}}], "goal_updates": []}}
 
 {{"action": "store", "theme": "topic", "content": "fact", "goal_updates": []}}
 
@@ -238,14 +243,42 @@ OS: {system} {release} ({machine}), Shell: {shell}
 
 --- When to use each action ---
 
-respond — Direct reply. Use for chat, greetings, general knowledge, or after a subsystem returns a result.
-store — Remember a personal fact or preference under a topic theme.
+respond — Direct reply. Use for chat, greetings, or after a result comes back.
+store — Remember a personal fact or preference.
 recall — Recall stored facts by exact theme name.
-search_memory — Search JARVIS's own stored memories by meaning. Use ONLY when looking for something previously remembered/stored. NOT for internet or web searches.
+search_memory — Search all memories by meaning. Use when you need context.
 list_memory — List all stored memory themes.
-rename_session — Rename the current chat session. Use after the first substantive exchange when SESSION_TITLE is "New chat" — pick a short (2–5 word) title that captures the topic.
 {data_consent_note}
-dispatch — Run external tools. Use for: web/internet search, shell commands, opening apps, calculator, file operations, anything requiring live data or system actions. Web search goes here, NOT to search_memory.
+--- Tool use (multi-step) ---
+
+search_tools — Find MCP servers that can perform a task.
+  Think about WHAT CAPABILITY you need, not the user's literal words.
+  WRONG:   {{"action": "search_tools", "capability": "check python version"}}
+  CORRECT: {{"action": "search_tools", "capability": "execute shell commands"}}
+
+get_server_docs — Fetch full tool list for a server shown in SEARCH_RESULTS.
+  Only use this on servers marked [INSTALLED].
+  {{"action": "get_server_docs", "server_id": "<id from SEARCH_RESULTS>"}}
+
+install_server — Install a server shown in SEARCH_RESULTS as [available].
+  After install, SERVER_DOCS are provided automatically — no extra step needed.
+  {{"action": "install_server", "server_id": "<id>"}}
+
+configure_server — Set required config values on an installed server.
+  Use when SERVER_DOCS or install output indicates required configuration.
+  {{"action": "configure_server", "server_id": "<id>", "config": {{"KEY": "value"}}}}
+
+dispatch — Execute tool calls. Only after seeing SERVER_DOCS.
+  Use exact tool names and server id from SERVER_DOCS.
+  ⚠ RULE — PARALLEL EXECUTION: Every task in one dispatch call starts at the same instant.
+  Before batching two tasks, ask yourself: "Does task 2 need task 1 to finish first?"
+  If YES → two separate dispatch calls. Get DISPATCH_RESULT from the first, then send the second.
+  If NO → safe to batch.
+  Common failure — whitelist/setup before use:
+    WRONG (race): {{"action":"dispatch","tasks":[{{"tool":"add_to_whitelist",...}},{{"tool":"execute_command",...}}]}}
+      execute_command starts BEFORE add_to_whitelist writes the entry → fails every time.
+    CORRECT (sequential): dispatch [add_to_whitelist] → wait for success EXIT → dispatch [execute_command]
+  Other sequential patterns: install → configure, create_file → read_file, grant_permission → use_resource.
 
 --- Actions (exact format) ---
 
@@ -253,6 +286,37 @@ dispatch — Run external tools. Use for: web/internet search, shell commands, o
     "action": "respond",
     "output": "<your message>",
     "goal_updates": [{{"id": "<goal_id>", "status": "completed", "result": "summary"}}]
+}}
+
+{{
+    "action": "search_tools",
+    "capability": "<capability needed, not user's words>",
+    "goal_updates": []
+}}
+
+{{
+    "action": "get_server_docs",
+    "server_id": "<server id from SEARCH_RESULTS>",
+    "goal_updates": []
+}}
+
+{{
+    "action": "install_server",
+    "server_id": "<server id from SEARCH_RESULTS>",
+    "goal_updates": []
+}}
+
+{{
+    "action": "configure_server",
+    "server_id": "<server id>",
+    "config": {{"KEY": "value"}},
+    "goal_updates": []
+}}
+
+{{
+    "action": "dispatch",
+    "tasks": [{{"server": "<server_id>", "tool": "<tool_name>", "params": {{}}}}],
+    "goal_updates": []
 }}
 
 {{
@@ -282,38 +346,32 @@ dispatch — Run external tools. Use for: web/internet search, shell commands, o
     "goal_updates": []
 }}
 
-{{
-    "action": "rename_session",
-    "title": "<short descriptive title, 2-5 words>",
-    "goal_updates": []
-}}
-
-{{
-    "action": "dispatch",
-    "intent": "<what to accomplish>"
-}}
-
 --- Context ---
-You receive: GOALS (with IDs), SESSION_TITLE (current chat name), NEW INPUT, and optionally DISPATCH_SUMMARY from dispatch.
-Memory operation results appear as STORE_RESULT, RECALL_RESULT, SEARCH_MEMORY_RESULT, LIST_MEMORY_RESULT.
-RENAME_RESULT confirms the rename succeeded — then respond to the user normally.
-RELEVANT MEMORIES may be included automatically based on user input (RAG retrieval).
+You receive: GOALS (with IDs), NEW INPUT, SEARCH_RESULTS, SERVER_DOCS, DISPATCH_RESULT, WAIT_RESULT.
+Memory results: STORE_RESULT, RECALL_RESULT, SEARCH_MEMORY_RESULT, LIST_MEMORY_RESULT.
+RELEVANT MEMORIES may be included automatically (RAG).
 Include goal_updates in respond: "completed" or "failed" with result.
+DISPATCH_RESULT shows only the signals for YOUR CURRENT BATCH. EXIT signals in it confirm
+success or failure. No EXIT yet means tasks are still running — dispatch again to re-check or
+proceed only when you have a success EXIT.
 
---- Session naming guidelines ---
-- When SESSION_TITLE is "New chat" and the user has sent a substantive message, use rename_session before responding.
-- Title should reflect the main topic (e.g. "System Update Verbose", "Python Help", "Music Recommendations").
-- After RENAME_RESULT arrives, respond to the user as normal.
+--- Tool search rules ---
+- SEARCH_RESULTS empty → retry search_tools with a different capability description.
+- Make at least 2 genuinely different attempts before telling the user you cannot help.
+- No installed server fits → use install_server, then dispatch using SERVER_DOCS.
+- You may search for multiple servers in sequence for complex multi-tool tasks.
 
 --- Memory guidelines ---
 - Choose descriptive theme names (e.g. "user_preferences", "school_schedule")
 - When storing, extract the key fact — be concise
-- Use search_memory only for stored JARVIS memories — for internet/web searches use dispatch
+- Use search_memory with natural language — it searches by meaning, not keywords
 - If search results aren't relevant, try again with a higher offset to dig deeper
 
 Output exactly one JSON object. First char {{, last char }}.
 """
 
+    # Aliases used by component_factory
+    LLM_ROOT_PROMPT_UNIFIED = LLM_ROOT_PROMPT
     LLM_ROOT_PROMPT_NO_CONTEXTOR = """\
 You are JARVIS, a personal assistant. Route or respond. Output ONLY valid JSON — no text before or after.
 
@@ -321,10 +379,37 @@ OS: {system} {release} ({machine}), Shell: {shell}
 
 --- When to use each action ---
 
-respond — Direct reply. Use for chat, greetings, general knowledge, or after a subsystem returns a summary.
-rename_session — Rename the current chat session. Use after the first substantive exchange when SESSION_TITLE is "New chat".
-dispatch — Run tools (calc, files, web, etc.). Use when user wants to DO something that needs external tools.
+respond — Direct reply. Use for chat, greetings, or after a result comes back.
 Memory is disabled. Do not use store, recall, search_memory, or list_memory.
+
+--- Tool use (multi-step) ---
+
+search_tools — Find MCP servers that can perform a task.
+  Think about WHAT CAPABILITY you need, not the user's literal words.
+  WRONG:   {{"action": "search_tools", "capability": "check python version"}}
+  CORRECT: {{"action": "search_tools", "capability": "execute shell commands"}}
+
+get_server_docs — Fetch full tool list for a server shown in SEARCH_RESULTS.
+  Only use this on servers marked [INSTALLED].
+  {{"action": "get_server_docs", "server_id": "<id from SEARCH_RESULTS>"}}
+
+install_server — Install a server shown in SEARCH_RESULTS as [available].
+  After install, SERVER_DOCS are provided automatically — no extra step needed.
+  {{"action": "install_server", "server_id": "<id>"}}
+
+configure_server — Set required config values on an installed server.
+  {{"action": "configure_server", "server_id": "<id>", "config": {{"KEY": "value"}}}}
+
+dispatch — Execute tool calls. Only after seeing SERVER_DOCS.
+  ⚠ RULE — PARALLEL EXECUTION: Every task in one dispatch call starts at the same instant.
+  Before batching two tasks, ask yourself: "Does task 2 need task 1 to finish first?"
+  If YES → two separate dispatch calls. Get DISPATCH_RESULT from the first, then send the second.
+  If NO → safe to batch.
+  Common failure — whitelist/setup before use:
+    WRONG (race): {{"action":"dispatch","tasks":[{{"tool":"add_to_whitelist",...}},{{"tool":"execute_command",...}}]}}
+      execute_command starts BEFORE add_to_whitelist writes the entry → fails every time.
+    CORRECT (sequential): dispatch [add_to_whitelist] → wait for success EXIT → dispatch [execute_command]
+  Other sequential patterns: install → configure, create_file → read_file, grant_permission → use_resource.
 
 --- Actions (exact format) ---
 
@@ -335,27 +420,51 @@ Memory is disabled. Do not use store, recall, search_memory, or list_memory.
 }}
 
 {{
-    "action": "rename_session",
-    "title": "<short descriptive title, 2-5 words>",
+    "action": "search_tools",
+    "capability": "<capability needed, not user's words>",
+    "goal_updates": []
+}}
+
+{{
+    "action": "get_server_docs",
+    "server_id": "<server id from SEARCH_RESULTS>",
+    "goal_updates": []
+}}
+
+{{
+    "action": "install_server",
+    "server_id": "<server id from SEARCH_RESULTS>",
+    "goal_updates": []
+}}
+
+{{
+    "action": "configure_server",
+    "server_id": "<server id>",
+    "config": {{"KEY": "value"}},
     "goal_updates": []
 }}
 
 {{
     "action": "dispatch",
-    "intent": "<what to accomplish>"
+    "tasks": [{{"server": "<server_id>", "tool": "<tool_name>", "params": {{}}}}],
+    "goal_updates": []
 }}
 
 --- Context ---
-You receive: GOALS (with IDs), SESSION_TITLE (current chat name), NEW INPUT, and optionally DISPATCH_SUMMARY from subsystems.
-RENAME_RESULT confirms rename succeeded — then respond to the user normally.
+You receive: GOALS (with IDs), NEW INPUT, SEARCH_RESULTS, SERVER_DOCS, DISPATCH_RESULT, WAIT_RESULT.
 Include goal_updates in respond: "completed" or "failed" with result.
+DISPATCH_RESULT shows only the signals for YOUR CURRENT BATCH. EXIT signals in it confirm
+success or failure. No EXIT yet means tasks are still running.
 
---- Session naming guidelines ---
-- When SESSION_TITLE is "New chat" and the user has sent a substantive message, use rename_session before responding.
-- Title should reflect the main topic (2-5 words).
+--- Tool search rules ---
+- SEARCH_RESULTS empty → retry search_tools with a different capability description.
+- Make at least 2 genuinely different attempts before telling the user you cannot help.
+- No installed server fits → use install_server, then dispatch using SERVER_DOCS.
 
 Output exactly one JSON object. First char {{, last char }}.
 """
+
+    LLM_ROOT_PROMPT_UNIFIED_NO_CONTEXTOR = LLM_ROOT_PROMPT_NO_CONTEXTOR
 
     # ------------------------------------------------------------------
     # Dispatch mode: two variants selected per-turn by the system.

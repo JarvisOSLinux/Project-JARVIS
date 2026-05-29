@@ -9,8 +9,13 @@ from typing import Any
 from ..config import Config
 from .goal_updates import apply_goal_updates
 from .llm_bridge import ask_llm
-from .output_hooks import emit_activity, persist_assistant_turn
-from .root_context import build_root_context, compact_payload_for_llm
+from .output_hooks import emit_activity, get_embeddings, persist_assistant_turn
+from .root_context import (
+    build_root_context,
+    compact_payload_for_llm,
+    format_search_results,
+    format_server_docs,
+)
 
 
 async def feed_root_summary(
@@ -26,6 +31,143 @@ async def feed_root_summary(
     context += f"\n{label}: {summary}"
 
     response = await ask_llm(app, logger, context, tag="root-chain")
+    await app._act_on_root_response(response, depth + 1)
+
+
+async def _handle_search_tools(
+    app: Any,
+    logger: Logger,
+    parsed: dict,
+    depth: int,
+    max_chain_depth: int,
+) -> None:
+    capability = parsed["capability"]
+    top_k = parsed.get("top_k", 5)
+    min_score = parsed.get("min_score", 0.25)
+    emit_activity(app, f"Searching for: {capability[:60]}…", kind="dispatch")
+
+    result = await app.dispatch.search_by_capability(
+        capability=capability,
+        embeddings=get_embeddings(app),
+        top_k=top_k,
+        min_score=min_score,
+    )
+    entries = result.get("results", [])
+    mode = result.get("mode", "unknown")
+    logger.info(
+        f"JARVIS: search_tools '{capability}' → {len(entries)} result(s) via {mode}"
+    )
+
+    context = build_root_context(app, logger)
+    context += "\n" + format_search_results(capability, entries)
+    response = await ask_llm(app, logger, context, tag="root-search-tools")
+    await app._act_on_root_response(response, depth + 1)
+
+
+async def _handle_get_server_docs(
+    app: Any,
+    logger: Logger,
+    parsed: dict,
+    depth: int,
+    max_chain_depth: int,
+) -> None:
+    server_id = parsed["server_id"]
+    emit_activity(app, f"Fetching docs for {server_id}…", kind="dispatch")
+
+    tools_result = await app.dispatch.list_server_tools(server_id)
+    tools = tools_result.get("tools", []) if isinstance(tools_result, dict) else []
+    logger.info(f"JARVIS: get_server_docs '{server_id}' → {len(tools)} tool(s)")
+
+    context = build_root_context(app, logger)
+    context += "\n" + format_server_docs(server_id, tools)
+    response = await ask_llm(app, logger, context, tag="root-get-server-docs")
+    await app._act_on_root_response(response, depth + 1)
+
+
+async def _handle_install_server(
+    app: Any,
+    logger: Logger,
+    parsed: dict,
+    depth: int,
+    max_chain_depth: int,
+) -> None:
+    server_id = parsed["server_id"]
+    emit_activity(app, f"Installing {server_id}…", kind="dispatch")
+
+    install_result = await app.dispatch.install_server(server_id)
+    if "error" in install_result:
+        logger.warning(
+            f"JARVIS: install_server '{server_id}' failed: {install_result['error']}"
+        )
+        context = build_root_context(app, logger)
+        context += f"\nINSTALL_ERROR: {install_result['error']}"
+        response = await ask_llm(app, logger, context, tag="root-install-error")
+        await app._act_on_root_response(response, depth + 1)
+        return
+
+    logger.info(f"JARVIS: install_server '{server_id}' succeeded")
+    await app.dispatch.auto_index_server(
+        server_id=server_id, embeddings=get_embeddings(app)
+    )
+
+    # Immediately fetch docs so the LLM can dispatch without an extra round-trip.
+    tools_result = await app.dispatch.list_server_tools(server_id)
+    tools = tools_result.get("tools", []) if isinstance(tools_result, dict) else []
+
+    context = build_root_context(app, logger)
+    context += f"\nINSTALL_RESULT: {server_id} installed successfully."
+    context += "\n" + format_server_docs(server_id, tools)
+    response = await ask_llm(app, logger, context, tag="root-install-result")
+    await app._act_on_root_response(response, depth + 1)
+
+
+async def _handle_uninstall_server(
+    app: Any,
+    logger: Logger,
+    parsed: dict,
+    depth: int,
+    max_chain_depth: int,
+) -> None:
+    server_id = parsed["server_id"]
+    emit_activity(app, f"Uninstalling {server_id}…", kind="dispatch")
+
+    result = await app.dispatch.uninstall_server(server_id)
+    context = build_root_context(app, logger)
+    if "error" in result:
+        logger.warning(
+            f"JARVIS: uninstall_server '{server_id}' failed: {result['error']}"
+        )
+        context += f"\nUNINSTALL_ERROR: {result['error']}"
+    else:
+        logger.info(f"JARVIS: uninstall_server '{server_id}' succeeded")
+        context += f"\nUNINSTALL_RESULT: {server_id} removed successfully."
+
+    response = await ask_llm(app, logger, context, tag="root-uninstall-result")
+    await app._act_on_root_response(response, depth + 1)
+
+
+async def _handle_configure_server(
+    app: Any,
+    logger: Logger,
+    parsed: dict,
+    depth: int,
+    max_chain_depth: int,
+) -> None:
+    server_id = parsed["server_id"]
+    config = parsed["config"]
+    emit_activity(app, f"Configuring {server_id}…", kind="dispatch")
+
+    try:
+        await app.dispatch.set_server_config(server_id, config)
+        logger.info(f"JARVIS: configure_server '{server_id}' set {list(config.keys())}")
+        label = f"CONFIGURE_RESULT: set {len(config)} value(s) on {server_id}"
+    except Exception as e:
+        logger.warning(f"JARVIS: configure_server '{server_id}' failed: {e}")
+        label = f"CONFIGURE_ERROR: {e}"
+
+    context = build_root_context(app, logger)
+    context += f"\n{label}"
+    response = await ask_llm(app, logger, context, tag="root-configure-server")
     await app._act_on_root_response(response, depth + 1)
 
 
@@ -65,10 +207,28 @@ async def act_on_root_response(
         emit_activity(app, "Planning tool execution…", kind="dispatch")
     elif action in ("store", "recall", "search_memory", "list_memory"):
         emit_activity(app, f"Running memory action: {action}", kind="memory")
-    elif action == "rename_session":
-        emit_activity(app, "Renaming session…", kind="memory")
 
     apply_goal_updates(app, parsed.get("goal_updates", []))
+
+    if action == "search_tools":
+        await _handle_search_tools(app, logger, parsed, depth, max_chain_depth)
+        return
+
+    if action == "get_server_docs":
+        await _handle_get_server_docs(app, logger, parsed, depth, max_chain_depth)
+        return
+
+    if action == "install_server":
+        await _handle_install_server(app, logger, parsed, depth, max_chain_depth)
+        return
+
+    if action == "uninstall_server":
+        await _handle_uninstall_server(app, logger, parsed, depth, max_chain_depth)
+        return
+
+    if action == "configure_server":
+        await _handle_configure_server(app, logger, parsed, depth, max_chain_depth)
+        return
 
     if action == "respond":
         output = parsed["output"]
@@ -91,8 +251,9 @@ async def act_on_root_response(
         if "tasks" in parsed:
             await app._dispatch_execute_tasks(parsed["tasks"], depth)
         else:
-            summary = await app._run_dispatch_subchain(parsed["intent"])
-            await feed_root_summary(app, logger, "DISPATCH_SUMMARY", summary, depth)
+            logger.warning(
+                "JARVIS: dispatch action without tasks — ignored (use search_tools first)"
+            )
 
     # -- Memory actions (direct, no sub-chain) --
     elif action == "store":
@@ -194,18 +355,5 @@ async def act_on_root_response(
             logger,
             "LIST_MEMORY_RESULT",
             compact_payload_for_llm(result),
-            depth,
-        )
-
-    elif action == "rename_session":
-        title = parsed["title"]
-        app.sessions.rename(title)
-        if hasattr(app, "schedule_sidebar_refresh"):
-            app.schedule_sidebar_refresh()
-        await feed_root_summary(
-            app,
-            logger,
-            "RENAME_RESULT",
-            json.dumps({"ok": True, "title": title}),
             depth,
         )

@@ -46,13 +46,13 @@ async def bootstrap_tool_index_nonfatal(
     try:
         await dispatch.ensure_embedding_model(embeddings)
         count = await dispatch.server_count()
-        if count.get("registry", 0) > 0:
+        # registry count is always 0 through the MCP layer; use total instead.
+        total = count.get("total", 0)
+        if total > 0:
             await dispatch.sync_index()
-            logger.info("JARVIS: Tool vector index synced")
+            logger.info(f"JARVIS: Tool vector index synced ({total} servers)")
         else:
-            logger.info(
-                "JARVIS: Skipping tool vector sync (no registry servers visible)"
-            )
+            logger.info("JARVIS: No servers to index")
     except Exception as e:
         logger.warning(f"JARVIS: Tool index sync failed (non-fatal): {e}")
 
@@ -75,7 +75,7 @@ async def start_runtime_services(
     """Start event sources and optional socket/voice runtime services."""
     user_source = resolve_user_source(app)
     app.events.start(
-        signal_source=app._await_dispatch_signal,
+        signal_window_source=app.dispatch.get_signal_window,
         user_source=user_source,
     )
 
