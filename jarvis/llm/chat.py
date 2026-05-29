@@ -33,7 +33,7 @@ ROOT_HISTORY_WINDOW = 3
 class LLM:
     """Main LLM interface with hierarchical mode support and tiered context."""
 
-    MAX_JSON_RETRIES = 1
+    MAX_JSON_RETRIES = 10
 
     def __init__(
         self,
