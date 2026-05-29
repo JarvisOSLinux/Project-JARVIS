@@ -145,9 +145,7 @@ async def search_servers(logger: Logger, keywords: List[str]) -> Dict[str, Any]:
         # Match against description and keywords only — not the server ID.
         # Server IDs encode implementation details (e.g. "-py" suffix) that
         # would cause false positives when users search by language intent.
-        searchable = " ".join(
-            [ls["name"], ls["description"]] + ls["keywords"]
-        ).lower()
+        searchable = " ".join([ls["name"], ls["description"]] + ls["keywords"]).lower()
         if any(kw in searchable for kw in kw_lower):
             servers.append(ls)
 

@@ -96,7 +96,9 @@ async def _handle_install_server(
 
     install_result = await app.dispatch.install_server(server_id)
     if "error" in install_result:
-        logger.warning(f"JARVIS: install_server '{server_id}' failed: {install_result['error']}")
+        logger.warning(
+            f"JARVIS: install_server '{server_id}' failed: {install_result['error']}"
+        )
         context = build_root_context(app, logger)
         context += f"\nINSTALL_ERROR: {install_result['error']}"
         response = await ask_llm(app, logger, context, tag="root-install-error")
@@ -104,7 +106,9 @@ async def _handle_install_server(
         return
 
     logger.info(f"JARVIS: install_server '{server_id}' succeeded")
-    await app.dispatch.auto_index_server(server_id=server_id, embeddings=get_embeddings(app))
+    await app.dispatch.auto_index_server(
+        server_id=server_id, embeddings=get_embeddings(app)
+    )
 
     # Immediately fetch docs so the LLM can dispatch without an extra round-trip.
     tools_result = await app.dispatch.list_server_tools(server_id)
@@ -130,7 +134,9 @@ async def _handle_uninstall_server(
     result = await app.dispatch.uninstall_server(server_id)
     context = build_root_context(app, logger)
     if "error" in result:
-        logger.warning(f"JARVIS: uninstall_server '{server_id}' failed: {result['error']}")
+        logger.warning(
+            f"JARVIS: uninstall_server '{server_id}' failed: {result['error']}"
+        )
         context += f"\nUNINSTALL_ERROR: {result['error']}"
     else:
         logger.info(f"JARVIS: uninstall_server '{server_id}' succeeded")
@@ -245,7 +251,9 @@ async def act_on_root_response(
         if "tasks" in parsed:
             await app._dispatch_execute_tasks(parsed["tasks"], depth)
         else:
-            logger.warning("JARVIS: dispatch action without tasks — ignored (use search_tools first)")
+            logger.warning(
+                "JARVIS: dispatch action without tasks — ignored (use search_tools first)"
+            )
 
     # -- Memory actions (direct, no sub-chain) --
     elif action == "store":

@@ -32,10 +32,10 @@ from .discovery import normalize_count as discovery_normalize_count
 from .discovery import server_count as discovery_server_count
 from .discovery import sync_index as discovery_sync_index
 from .dmcp_registry import install_server as registry_install_server
-from .dmcp_registry import uninstall_server as registry_uninstall_server
 from .dmcp_registry import list_server_tools as registry_list_server_tools
 from .dmcp_registry import run_dmcp as registry_run_dmcp
 from .dmcp_registry import search_servers as registry_search_servers
+from .dmcp_registry import uninstall_server as registry_uninstall_server
 from .transport import call_tool as transport_call_tool
 from .transport import connect as transport_connect
 from .transport import disconnect as transport_disconnect
@@ -364,7 +364,9 @@ class DispatchAdapter:
         if embeddings is not None and Config.ALLOW_EMBEDDING_SEARCH:
             try:
                 vector = embeddings.embed_single(capability)
-                result = await self.browse_vector(vector, top_k=top_k, min_score=min_score)
+                result = await self.browse_vector(
+                    vector, top_k=top_k, min_score=min_score
+                )
                 entries = result.get("results", [])
                 if entries:
                     logger.info(
@@ -398,13 +400,15 @@ class DispatchAdapter:
             if not sid or sid in seen:
                 continue
             seen.add(sid)
-            entries.append({
-                "server_id": sid,
-                "server_name": s.get("name", sid),
-                "server_description": s.get("description", s.get("summary", "")),
-                "installed": bool(s.get("installed", False)),
-                "score": 0.0,
-            })
+            entries.append(
+                {
+                    "server_id": sid,
+                    "server_name": s.get("name", sid),
+                    "server_description": s.get("description", s.get("summary", "")),
+                    "installed": bool(s.get("installed", False)),
+                    "score": 0.0,
+                }
+            )
 
         logger.info(
             f"Dispatch: search_by_capability '{capability}' → "

@@ -135,7 +135,9 @@ def format_server_docs(server_id: str, tools: List[Dict[str, Any]]) -> str:
     can output a concrete dispatch action.
     """
     if not tools:
-        return f"SERVER_DOCS: {server_id} — no tools found (server may need reinstalling)."
+        return (
+            f"SERVER_DOCS: {server_id} — no tools found (server may need reinstalling)."
+        )
 
     lines = [f"SERVER_DOCS: {server_id} ({len(tools)} tool(s))"]
     for tool in tools:

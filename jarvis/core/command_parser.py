@@ -213,7 +213,10 @@ def _parse_configure_server(response: Dict[str, Any]) -> Dict[str, Any]:
     if not server_id:
         return {"error": "configure_server requires 'server_id'", "raw": response}
     if not isinstance(config, dict) or not config:
-        return {"error": "configure_server requires a non-empty 'config' dict", "raw": response}
+        return {
+            "error": "configure_server requires a non-empty 'config' dict",
+            "raw": response,
+        }
     return {
         "action": "configure_server",
         "server_id": str(server_id),
