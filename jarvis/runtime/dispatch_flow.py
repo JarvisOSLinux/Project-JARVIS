@@ -479,7 +479,9 @@ async def _collect_server_config(app: Any, logger: Logger, server_id: str) -> No
     values = {k: v for k, v in collected.items() if v}
     if values:
         await app.dispatch.set_server_config(server_id, values)
-        logger.info(f"JARVIS: Stored config for {server_id}: keys={list(values.keys())}")
+        logger.info(
+            f"JARVIS: Stored config for {server_id}: keys={list(values.keys())}"
+        )
 
 
 async def dispatch_send(
@@ -502,11 +504,15 @@ async def dispatch_send(
         server = task.get("server")
         if isinstance(tool, str) and "/" in tool:
             fused_server, fused_tool = tool.split("/", 1)
-            if fused_server and fused_tool and (
-                not isinstance(server, str)
-                or not server
-                or server == "local"
-                or server != fused_server
+            if (
+                fused_server
+                and fused_tool
+                and (
+                    not isinstance(server, str)
+                    or not server
+                    or server == "local"
+                    or server != fused_server
+                )
             ):
                 task["server"] = fused_server
                 task["tool"] = fused_tool

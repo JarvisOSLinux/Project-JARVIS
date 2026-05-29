@@ -36,11 +36,11 @@ _ARCHIVE_FILENAME = "goal_archive.jsonl"
 
 
 class GoalStatus(Enum):
-    PENDING = "pending"      # Parsed but not yet dispatched
-    ACTIVE = "active"        # Tasks dispatched, waiting for results
-    DEFERRED = "deferred"    # Parked with a timer — will reactivate on REMIND
+    PENDING = "pending"  # Parsed but not yet dispatched
+    ACTIVE = "active"  # Tasks dispatched, waiting for results
+    DEFERRED = "deferred"  # Parked with a timer — will reactivate on REMIND
     COMPLETED = "completed"  # Done, output written
-    FAILED = "failed"        # Tasks failed or user cancelled
+    FAILED = "failed"  # Tasks failed or user cancelled
 
 
 @dataclass
@@ -48,12 +48,12 @@ class Goal:
     """A single goal node in the goal tree."""
 
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
-    description: str = ""           # the intent — set at creation, immutable
+    description: str = ""  # the intent — set at creation, immutable
     status: GoalStatus = GoalStatus.PENDING
-    strategy: str = ""              # mutable forward-looking plan written by LLM
-    output: Optional[str] = None    # final result written when done, bubbles to parent
-    result: Optional[str] = None    # legacy alias kept for archive compatibility
-    parent_id: Optional[str] = None # None for root goals
+    strategy: str = ""  # mutable forward-looking plan written by LLM
+    output: Optional[str] = None  # final result written when done, bubbles to parent
+    result: Optional[str] = None  # legacy alias kept for archive compatibility
+    parent_id: Optional[str] = None  # None for root goals
     child_goal_ids: List[str] = field(default_factory=list)
     task_pids: List[int] = field(default_factory=list)
     created_at: float = field(default_factory=time.time)
@@ -210,9 +210,7 @@ class GoalManager:
             return None
         ctx = goal.to_context()
         if goal.child_goal_ids:
-            ctx["children"] = [
-                self._child_summary(cid) for cid in goal.child_goal_ids
-            ]
+            ctx["children"] = [self._child_summary(cid) for cid in goal.child_goal_ids]
         return ctx
 
     def get_context(self) -> List[Dict[str, Any]]:
@@ -224,7 +222,8 @@ class GoalManager:
         parent's get_goal_context() slice.
         """
         active_roots = [
-            g for g in self._goals
+            g
+            for g in self._goals
             if g.parent_id is None and g.status != GoalStatus.COMPLETED
         ]
         limit = getattr(Config, "MAX_GOALS_IN_CONTEXT", 20)
@@ -233,7 +232,8 @@ class GoalManager:
 
     def get_active_goals(self) -> List[Goal]:
         return [
-            g for g in self._goals
+            g
+            for g in self._goals
             if g.status in (GoalStatus.PENDING, GoalStatus.ACTIVE, GoalStatus.DEFERRED)
         ]
 
@@ -359,7 +359,9 @@ class GoalManager:
         matches = []
         for entry in all_entries:
             text = (
-                entry.get("description", "") + " " + (entry.get("output") or entry.get("result") or "")
+                entry.get("description", "")
+                + " "
+                + (entry.get("output") or entry.get("result") or "")
             ).lower()
             if any(kw in text for kw in keywords_lower):
                 matches.append(entry)
@@ -409,8 +411,7 @@ class GoalManager:
         )
         if all_resolved and children:
             outputs = [
-                f"{c.description}: {c.output or '(no output)'}"
-                for c in children if c
+                f"{c.description}: {c.output or '(no output)'}" for c in children if c
             ]
             logger.info(
                 f"GoalManager: All {len(children)} child goal(s) of [{parent_id}] resolved. "
