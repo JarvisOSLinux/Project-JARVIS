@@ -32,6 +32,7 @@ from .discovery import normalize_count as discovery_normalize_count
 from .discovery import server_count as discovery_server_count
 from .discovery import sync_index as discovery_sync_index
 from .dmcp_registry import install_server as registry_install_server
+from .dmcp_registry import uninstall_server as registry_uninstall_server
 from .dmcp_registry import list_server_tools as registry_list_server_tools
 from .dmcp_registry import run_dmcp as registry_run_dmcp
 from .dmcp_registry import search_servers as registry_search_servers
@@ -236,6 +237,10 @@ class DispatchAdapter:
     async def install_server(self, server_id: str) -> Dict[str, Any]:
         """Install an MCP server from registry via `dmcp install`."""
         return await registry_install_server(logger, server_id)
+
+    async def uninstall_server(self, server_id: str) -> Dict[str, Any]:
+        """Uninstall an MCP server via `dmcp uninstall`."""
+        return await registry_uninstall_server(logger, server_id)
 
     async def list_server_tools(self, server_id: str) -> Dict[str, Any]:
         """List tools available on an installed MCP server."""

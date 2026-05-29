@@ -172,6 +172,15 @@ async def install_server(logger: Logger, server_id: str) -> Dict[str, Any]:
     return {"installed": server_id, "output": raw.strip()}
 
 
+async def uninstall_server(logger: Logger, server_id: str) -> Dict[str, Any]:
+    """Uninstall an MCP server via `dmcp uninstall`."""
+    logger.info(f"Dispatch: Uninstalling MCP server '{server_id}'")
+    raw = await run_dmcp(logger, "uninstall", server_id)
+    if raw is None:
+        return {"error": f"Failed to uninstall server '{server_id}'"}
+    return {"uninstalled": server_id, "output": raw.strip()}
+
+
 async def list_server_tools(logger: Logger, server_id: str) -> Dict[str, Any]:
     """List tools available on an installed MCP server."""
     logger.info(f"Dispatch: Listing tools for server '{server_id}'")

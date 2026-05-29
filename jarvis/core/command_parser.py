@@ -23,6 +23,7 @@ VALID_ACTIONS = {
     "search_tools",
     "get_server_docs",
     "install_server",
+    "uninstall_server",
     "configure_server",
     # Root — memory (direct operations, no sub-chain)
     "store",
@@ -188,6 +189,18 @@ def _parse_install_server(response: Dict[str, Any]) -> Dict[str, Any]:
         return {"error": "install_server requires 'server_id'", "raw": response}
     return {
         "action": "install_server",
+        "server_id": str(server_id),
+        "goal_updates": response.get("goal_updates", []),
+    }
+
+
+@_parser("uninstall_server")
+def _parse_uninstall_server(response: Dict[str, Any]) -> Dict[str, Any]:
+    server_id = response.get("server_id", "")
+    if not server_id:
+        return {"error": "uninstall_server requires 'server_id'", "raw": response}
+    return {
+        "action": "uninstall_server",
         "server_id": str(server_id),
         "goal_updates": response.get("goal_updates", []),
     }

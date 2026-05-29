@@ -117,6 +117,29 @@ async def _handle_install_server(
     await app._act_on_root_response(response, depth + 1)
 
 
+async def _handle_uninstall_server(
+    app: Any,
+    logger: Logger,
+    parsed: dict,
+    depth: int,
+    max_chain_depth: int,
+) -> None:
+    server_id = parsed["server_id"]
+    emit_activity(app, f"Uninstalling {server_id}…", kind="dispatch")
+
+    result = await app.dispatch.uninstall_server(server_id)
+    context = build_root_context(app, logger)
+    if "error" in result:
+        logger.warning(f"JARVIS: uninstall_server '{server_id}' failed: {result['error']}")
+        context += f"\nUNINSTALL_ERROR: {result['error']}"
+    else:
+        logger.info(f"JARVIS: uninstall_server '{server_id}' succeeded")
+        context += f"\nUNINSTALL_RESULT: {server_id} removed successfully."
+
+    response = await ask_llm(app, logger, context, tag="root-uninstall-result")
+    await app._act_on_root_response(response, depth + 1)
+
+
 async def _handle_configure_server(
     app: Any,
     logger: Logger,
@@ -191,6 +214,10 @@ async def act_on_root_response(
 
     if action == "install_server":
         await _handle_install_server(app, logger, parsed, depth, max_chain_depth)
+        return
+
+    if action == "uninstall_server":
+        await _handle_uninstall_server(app, logger, parsed, depth, max_chain_depth)
         return
 
     if action == "configure_server":
