@@ -120,7 +120,10 @@ def format_search_results(capability: str, results: List[Dict[str, Any]]) -> str
         lines.append(line)
 
     lines.append(
-        "\nUse get_server_docs on an INSTALLED server, or install_server on an available one."
+        "\nChoose the server whose summary best fits the task."
+        " Use get_server_docs to inspect an [INSTALLED] server,"
+        " or install_server to add an [available] one."
+        " An available server may be a better fit than an installed one — read summaries carefully."
     )
     return "\n".join(lines)
 
