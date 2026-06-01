@@ -1,30 +1,72 @@
 # Project JARVIS
 
-**AI-Native Voice Assistant with Dynamic Capability Discovery**
+**An open-source, privacy-first AI assistant system with dynamic capability discovery.**
 
 [![CI](https://github.com/YakupAtahanov/Project-JARVIS/actions/workflows/ci.yml/badge.svg)](https://github.com/YakupAtahanov/Project-JARVIS/actions/workflows/ci.yml)
 
-Project JARVIS is an innovative AI-powered voice assistant that combines natural language processing with dynamic tool discovery through SuperMCP (Super Model Context Protocol) orchestration. Featuring always-listening wake word detection, it can understand spoken commands, discover available tools dynamically, and execute them through specialized MCP servers - all while maintaining complete privacy through local processing.
+Project JARVIS is a modular AI assistant that combines voice and text interfaces
+with dynamic tool discovery through MCP (Model Context Protocol) orchestration.
+It runs entirely on local hardware — no cloud dependencies, no data leaving your
+device.
 
 ---
 
-## ✨ Core Features
+## Why This Exists
 
-- **🎤 Voice-First Interface**: Real-time speech recognition and synthesis
-- **👂 Wake Word Detection**: Always-listening voice activation with customizable wake words ("Jarvis", "Hey Jarvis", etc.)
-- **💻 CLI Support**: Text-based interface with `jarvis ask` command for scripting and accessibility
-- **🧠 Hierarchical Orchestration**: ROOT mode handles dialogue/memory, DISPATCH mode handles tool execution
-- **🔍 AI-Driven Tool Discovery**: Uses embedding-first discovery when available, keyword fallback otherwise
-- **🔧 Dynamic Capability Extension**: Add new tools without code changes
-- **🛡️ Secure Local Processing**: All operations run locally for privacy
-- **🌐 Cross-Platform Support**: Windows, Linux, macOS compatibility
-- **⚡ Event-Driven Execution**: One event queue merges voice, CLI, socket, and dispatch signals
-- **🎯 Smart Audio Management**: Automatically switches between wake word detection and command processing
-- **🔄 Flexible Output**: Choose between text or voice output for responses  
+AI assistants that understand and control your computer are coming regardless.
+The question is who builds them and who controls the data.
+
+Corporate implementations have inherent incentives — data collection, vendor
+lock-in, surveillance potential — that cannot be resolved through policy alone.
+The only structural solution is open-source: code that anyone can read, audit,
+and verify. Following the model established by the Free Software Foundation,
+Project JARVIS is built as community-owned infrastructure, not a product.
+
+During development, we identified security threats that the industry is only
+now beginning to recognize — including novel phenomena like "forgetful context,"
+where LLMs silently drop security constraints mid-session. These findings
+informed both the system's architecture and an ongoing academic research effort
+at Washington State University.
 
 ---
 
-## ⚡ Installation
+## System vs. Implementation
+
+Project JARVIS is the **system** — a modular stack of components that can be
+used independently or composed together:
+
+| Component | Role |
+|-----------|------|
+| **Project-JARVIS** | AI daemon: voice/text interface, LLM orchestration, TUI |
+| [**dispatch**](https://github.com/JarvisOSLinux/dispatch) | Signal-driven parallel task executor (Rust) |
+| [**dmcp**](https://github.com/JarvisOSLinux/dmcp) | MCP server manager — discover, install, run, invoke (Rust) |
+| [**contextor**](https://github.com/JarvisOSLinux/contextor) | Long-term memory store with vector search (Rust) |
+| [**mcp-registry**](https://github.com/JarvisOSLinux/mcp-registry) | Curated catalog of installable MCP servers |
+
+[**JARVIS OS**](https://github.com/JarvisOSLinux/jarvisos) is one
+*implementation* — a complete Linux distribution that instantiates the system at
+the OS level, with kernel-integrated policy enforcement and hardware monitoring.
+But the system runs standalone on any platform: `pip install jarvis-ai` on any
+Linux, macOS, or Windows machine.
+
+---
+
+## Core Features
+
+- **Voice-First Interface**: Real-time speech recognition and synthesis
+- **Wake Word Detection**: Always-listening voice activation with customizable wake words
+- **CLI Support**: Text-based interface with `jarvis ask` command for scripting and accessibility
+- **Hierarchical Orchestration**: ROOT mode handles dialogue/memory, DISPATCH mode handles tool execution
+- **AI-Driven Tool Discovery**: Embedding-based semantic search across the MCP registry
+- **Dynamic Capability Extension**: Add new tools without code changes via MCP servers
+- **Local Processing**: All operations run locally — no data leaves your device
+- **Cross-Platform**: Windows, Linux, macOS
+- **Event-Driven Execution**: One event queue merges voice, CLI, socket, and dispatch signals
+- **Flexible Output**: Text or voice responses
+
+---
+
+## Installation
 
 ### Quick Start (Minimal Install - CLI/Text Only)
 
@@ -126,7 +168,7 @@ JARVIS supports optional dependencies for flexible installation:
 
 ---
 
-## 🐳 Docker Support
+## Docker Support
 
 Run JARVIS in Docker for easy cross-platform deployment and testing!
 
@@ -170,7 +212,7 @@ docker-compose up
 
 ---
 
-## 💻 CLI Interface
+## CLI Interface
 
 JARVIS now supports a command-line interface for text-based interaction without voice input!
 
@@ -256,7 +298,7 @@ $ jarvis ask "What's my name?"
 
 ---
 
-## 🎤 Voice Activation Configuration
+## Voice Activation Configuration
 
 JARVIS features advanced voice activation capabilities with customizable wake words and sensitivity settings.
 
@@ -303,7 +345,7 @@ LOG_COLORS=true               # Colored console output
 
 ---
 
-## 🖥️ System Requirements
+## System Requirements
 
 ### Core Requirements (CLI/Text Mode)
 - **Python**: 3.10 or later
@@ -321,7 +363,7 @@ LOG_COLORS=true               # Colored console output
 
 ---
 
-## 🔧 How It Works
+## How It Works
 
 JARVIS is designed as a conversational controller that can either answer directly or use tools when needed.
 
@@ -355,51 +397,7 @@ If you want internals (state machine, dispatch loop, signal model, confirmation 
 
 ---
 
-## 🚀 Innovation & Future Vision
-
-### **Current Capabilities**
-- ✅ **Voice-First AI Assistant**: Real-time speech processing
-- ✅ **Wake Word Detection**: Always-listening voice activation system
-- ✅ **CLI Interface**: Text-based command interface for scripting
-- ✅ **Flexible Output**: Text or voice response modes
-- ✅ **Dynamic Tool Discovery**: SuperMCP orchestration
-- ✅ **Local Privacy**: All processing on-device
-- ✅ **Cross-Platform**: Windows, Linux, macOS support
-- ✅ **Extensible Architecture**: Plugin-based MCP servers
-- ✅ **Smart Audio Management**: Automatic mode switching
-- ✅ **Customizable Wake Words**: User-defined activation phrases
-- ✅ **Professional Logging**: Configurable logging system with colored output and file logging support
-
-### **Revolutionary Features in Development**
-- 🔄 **AI-Driven MCP Generation**: AI creates new tools on demand
-- 🧠 **Intelligent Server Routing**: Automatic tool selection
-- 🌐 **MCP Registry Integration**: Access to ecosystem of tools
-- 🔒 **Enhanced Security**: Sandboxed execution environments
-- 📊 **Performance Analytics**: Usage tracking and optimization
-
-### **Future Applications**
-- **🏠 Smart Home Integration**: Voice-controlled IoT devices
-- **💼 Enterprise Automation**: Business process automation
-- **🎓 Educational Tools**: Interactive learning assistants
-- **🔬 Research Platform**: Scientific computation and analysis
-- **🎨 Creative Workflows**: Content creation and design
-
----
-
-## 🏆 Why This Matters
-
-JARVIS represents a **paradigm shift** in AI assistant technology:
-
-- **🎯 True Intelligence**: Not just command execution, but dynamic capability discovery
-- **🔧 Self-Extending**: Grows its own capabilities based on user needs
-- **🛡️ Privacy-First**: Local processing ensures data never leaves your device
-- **🌱 Open Ecosystem**: Community-driven tool development and sharing
-
-This is the future of human-computer interaction - **AI that truly understands and adapts**.
-
----
-
-## 🤝 Project Quality and Contribution
+## Project Quality and Contribution
 
 To keep Project JARVIS clean, consistent, and professional:
 
