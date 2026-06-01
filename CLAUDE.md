@@ -50,7 +50,7 @@ They are not alternatives — Python dispatch wraps Rust dispatch.
 
 - **Working branch**: `yakup/dev`
 - **Open PR**: #43 "Yakup/dev" → main (created 2026-04-24)
-- **Claude feature branches**: `claude/review-jarvis-core-EQODl`
+- **Claude feature branches**: `claude/review-jarvis-core-EQODl`, `claude/memory-update-forget`
 
 ---
 
@@ -211,3 +211,4 @@ useful servers would significantly change the `dmcp` value proposition.
 | `jarvis/dispatch/event_merger.py` | Merges voice/CLI/socket/dispatch events |
 | `jarvis/dispatch/goal_manager.py` | Long-horizon goal tracking with timers |
 | `docs/SECURITY-ARCHITECTURE.md` | Threat model vs OpenClaw CVEs |
+| `docs/memory-management.md` | Update & forget design spec (`update_memory` action) |
