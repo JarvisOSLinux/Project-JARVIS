@@ -142,7 +142,7 @@ class Config:
         os.getenv("ENFORCE_EMBEDDING_SEARCH", "false").lower() == "true"
     )
     # Minimum visible servers before vector search auto-enables
-    EMBEDDING_SEARCH_THRESHOLD = int(os.getenv("EMBEDDING_SEARCH_THRESHOLD", "100"))
+    EMBEDDING_SEARCH_THRESHOLD = int(os.getenv("EMBEDDING_SEARCH_THRESHOLD", "3"))
 
     # Data directory — when set (e.g. systemd JARVIS_DATA_DIR=/var/lib/jarvis),
     # memory, goal archive, and default socket use this base path
@@ -246,9 +246,12 @@ peek_memento — Look up the archived history of a theme (previous entries befor
 {data_consent_note}
 run — Execute a task using external tools (shell, files, web, etc.).
       The system finds and runs the right tool automatically.
-      intent = SPECIFIC TASK, NOT the tool type.
+      intent = SPECIFIC TASK, name the service or domain when relevant.
       WRONG:   {{"action": "run", "intent": "run shell command"}}
       CORRECT: {{"action": "run", "intent": "check python version"}}
+      WRONG:   {{"action": "run", "intent": "execute curl to fetch from brave"}}
+      CORRECT: {{"action": "run", "intent": "search brave for OpenClaw project info"}}
+      For web/API tasks always name the service (brave, github, slack, …) in the intent — never fall back to shell/curl when a dedicated server may exist.
 
 Many MCP servers can exist in the registry (shell, filesystem, web APIs, databases, and more). Discovery matches from the task; you are not given a full catalog of names.
 If NO_TOOLS_FOUND or the wrong tools show up, retry run with a clearer or rephrased intent. After several real tries, respond honestly that no suitable installed tool is available — do not invent servers.
@@ -337,9 +340,12 @@ respond — Direct reply. Use for chat, greetings, or after a result comes back.
 Memory is disabled. Do not use store, recall, search_memory, or list_memory.
 run — Execute a task using external tools (shell, files, web, etc.).
       The system finds and runs the right tool automatically.
-      intent = SPECIFIC TASK, NOT the tool type.
+      intent = SPECIFIC TASK, name the service or domain when relevant.
       WRONG:   {{"action": "run", "intent": "run shell command"}}
       CORRECT: {{"action": "run", "intent": "check python version"}}
+      WRONG:   {{"action": "run", "intent": "execute curl to fetch from brave"}}
+      CORRECT: {{"action": "run", "intent": "search brave for OpenClaw project info"}}
+      For web/API tasks always name the service (brave, github, slack, …) in the intent — never fall back to shell/curl when a dedicated server may exist.
 
 Many MCP servers can exist in the registry (shell, filesystem, web APIs, databases, and more). Discovery matches from the task; you are not given a full catalog of names.
 If NO_TOOLS_FOUND or the wrong tools show up, retry run with a clearer or rephrased intent. After several real tries, respond honestly that no suitable installed tool is available — do not invent servers.
