@@ -213,7 +213,7 @@ Valid formats:
 
 {{"action": "respond", "output": "your message", "goal_updates": []}}
 
-{{"action": "search_tools", "capability": "execute shell commands", "goal_updates": []}}
+{{"action": "search_tools", "capability": "<domain or service — e.g. web search, github api, file access>", "goal_updates": []}}
 
 {{"action": "get_server_docs", "server_id": "some-server", "goal_updates": []}}
 
@@ -251,10 +251,17 @@ list_memory — List all stored memory themes.
 {data_consent_note}
 --- Tool use (multi-step) ---
 
-search_tools — Find MCP servers that can perform a task.
-  Think about WHAT CAPABILITY you need, not the user's literal words.
-  WRONG:   {{"action": "search_tools", "capability": "check python version"}}
-  CORRECT: {{"action": "search_tools", "capability": "execute shell commands"}}
+search_tools — Find MCP servers by the domain or service you need.
+  Describe WHAT YOU NEED (the domain/service), not HOW to implement it manually.
+  The registry contains servers for every domain — web search, GitHub, email,
+  music, databases, smart home, and more. It grows independently; never assume
+  only installed servers exist.
+  Shell is the last resort — only search for "shell commands" when the task is
+  genuinely about running a script with no specialized alternative available.
+  Good capability strings: "web search", "brave search", "github API",
+    "read and write files", "execute shell commands"
+  Bad:  "check python version"  ← too literal, not a domain
+  Bad:  "execute shell commands"  ← when you actually need web search or a specific API
 
 get_server_docs — Fetch full tool list for a server shown in SEARCH_RESULTS.
   Only use this on servers marked [INSTALLED].
@@ -388,10 +395,17 @@ Memory is disabled. Do not use store, recall, search_memory, or list_memory.
 
 --- Tool use (multi-step) ---
 
-search_tools — Find MCP servers that can perform a task.
-  Think about WHAT CAPABILITY you need, not the user's literal words.
-  WRONG:   {{"action": "search_tools", "capability": "check python version"}}
-  CORRECT: {{"action": "search_tools", "capability": "execute shell commands"}}
+search_tools — Find MCP servers by the domain or service you need.
+  Describe WHAT YOU NEED (the domain/service), not HOW to implement it manually.
+  The registry contains servers for every domain — web search, GitHub, email,
+  music, databases, smart home, and more. It grows independently; never assume
+  only installed servers exist.
+  Shell is the last resort — only search for "shell commands" when the task is
+  genuinely about running a script with no specialized alternative available.
+  Good capability strings: "web search", "brave search", "github API",
+    "read and write files", "execute shell commands"
+  Bad:  "check python version"  ← too literal, not a domain
+  Bad:  "execute shell commands"  ← when you actually need web search or a specific API
 
 get_server_docs — Fetch full tool list for a server shown in SEARCH_RESULTS.
   Only use this on servers marked [INSTALLED].
