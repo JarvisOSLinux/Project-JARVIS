@@ -417,13 +417,13 @@ Plan sub-tasks (ALWAYS start with this):
 {{
     "action": "plan",
     "tasks": [
-        {{"intent": "get weather forecast for Berlin", "keywords": ["weather", "forecast"]}},
-        {{"intent": "convert 50 EUR to USD", "keywords": ["currency", "convert"]}}
+        {{"intent": "<capability description — what you need, not how to implement it>", "keywords": ["<domain>", "<service-type>"]}},
+        {{"intent": "<second sub-task if needed>", "keywords": ["<domain>", "<keyword>"]}}
     ]
 }}
 
 Search servers by keyword (use only if plan returned nothing useful):
-{{"action": "search", "keywords": ["calculator", "math"]}}
+{{"action": "search", "keywords": ["<domain>", "<capability>"]}}
 
 List tools on an installed server:
 {{"action": "list_tools", "server_id": "com.example.server"}}
@@ -472,6 +472,8 @@ Return to root with results:
 
 --- Rules ---
 - ALWAYS start with "plan" — even for a single task.
+- Write sub-task intents as capability descriptions (what you need), not implementations.
+  Shell execution is a last resort — only plan for it when nothing more specific exists.
 - If MATCHED_TOOLS is present, dispatch those. Never invent tool names.
 - If only CANDIDATE_SERVERS is present, install + list_tools first.
 - If nothing matched, re-plan or search with different wording/keywords before giving up; then done with a failure summary if still no fit.
@@ -506,8 +508,8 @@ Plan sub-tasks (ALWAYS start with this):
 {{
     "action": "plan",
     "tasks": [
-        {{"intent": "get weather forecast for Berlin"}},
-        {{"intent": "convert 50 EUR to USD"}}
+        {{"intent": "<capability description — what you need, not how to implement it>"}},
+        {{"intent": "<second sub-task if needed>"}}
     ]
 }}
 
@@ -557,6 +559,8 @@ Return to root with results:
 
 --- Rules ---
 - ALWAYS start with "plan" — even for a single task.
+- Write sub-task intents as capability descriptions (what you need), not implementations.
+  Shell execution is a last resort — only plan for it when nothing more specific exists.
 - If MATCHED_TOOLS is present, dispatch those. Never invent tool names.
 - If only CANDIDATE_SERVERS is present, install + list_tools first.
 - If nothing matched, re-plan with different sub-task wording before giving up; then done with a failure summary if still no fit.
