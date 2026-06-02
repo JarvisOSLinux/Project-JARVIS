@@ -244,17 +244,22 @@ update_memory — Correct or forget an existing memory. Old entry is archived as
 peek_memento — Look up the archived history of a theme (previous entries before the current one).
   Use when you need to understand how something changed or recover a previous value.
 {data_consent_note}
-run — Execute a task using external tools (shell, files, web, etc.).
-      The system finds and runs the right tool automatically.
-      intent = SPECIFIC TASK, name the service or domain when relevant.
-      WRONG:   {{"action": "run", "intent": "run shell command"}}
-      CORRECT: {{"action": "run", "intent": "check python version"}}
-      WRONG:   {{"action": "run", "intent": "execute curl to fetch from brave"}}
-      CORRECT: {{"action": "run", "intent": "search brave for OpenClaw project info"}}
-      For web/API tasks always name the service (brave, github, slack, …) in the intent — never fall back to shell/curl when a dedicated server may exist.
+run — Execute a task using any MCP server in the registry.
+      The registry contains specialized servers for every domain — web search, code
+      execution, email, calendar, music, GitHub, databases, smart home, and more.
+      It grows independently; you will never see the full catalog.
+      The system discovers and auto-installs the best match from your intent.
 
-Many MCP servers can exist in the registry (shell, filesystem, web APIs, databases, and more). Discovery matches from the task; you are not given a full catalog of names.
-If NO_TOOLS_FOUND or the wrong tools show up, retry run with a clearer or rephrased intent. After several real tries, respond honestly that no suitable installed tool is available — do not invent servers.
+      Write the intent as a CAPABILITY DESCRIPTION — what you need, not how to do it:
+        Good: "search the web for X", "create a GitHub issue", "play music by Y"
+        Bad:  "run curl", "execute a shell command", "use bash to …"
+      Shell is the last resort — only use shell-style intents when the task is
+      genuinely about running a script or CLI tool with no specialized alternative.
+      Name the service or domain in the intent when you know it; the discovery
+      system will handle the rest.
+
+The registry grows independently — you will never see the full catalog.
+If NO_TOOLS_FOUND, retry run with a rephrased intent (different wording, more specific domain). After several real tries, respond honestly that no suitable tool is available.
 
 --- Actions (exact format) ---
 
@@ -338,17 +343,22 @@ OS: {system} {release} ({machine}), Shell: {shell}
 
 respond — Direct reply. Use for chat, greetings, or after a result comes back.
 Memory is disabled. Do not use store, recall, search_memory, or list_memory.
-run — Execute a task using external tools (shell, files, web, etc.).
-      The system finds and runs the right tool automatically.
-      intent = SPECIFIC TASK, name the service or domain when relevant.
-      WRONG:   {{"action": "run", "intent": "run shell command"}}
-      CORRECT: {{"action": "run", "intent": "check python version"}}
-      WRONG:   {{"action": "run", "intent": "execute curl to fetch from brave"}}
-      CORRECT: {{"action": "run", "intent": "search brave for OpenClaw project info"}}
-      For web/API tasks always name the service (brave, github, slack, …) in the intent — never fall back to shell/curl when a dedicated server may exist.
+run — Execute a task using any MCP server in the registry.
+      The registry contains specialized servers for every domain — web search, code
+      execution, email, calendar, music, GitHub, databases, smart home, and more.
+      It grows independently; you will never see the full catalog.
+      The system discovers and auto-installs the best match from your intent.
 
-Many MCP servers can exist in the registry (shell, filesystem, web APIs, databases, and more). Discovery matches from the task; you are not given a full catalog of names.
-If NO_TOOLS_FOUND or the wrong tools show up, retry run with a clearer or rephrased intent. After several real tries, respond honestly that no suitable installed tool is available — do not invent servers.
+      Write the intent as a CAPABILITY DESCRIPTION — what you need, not how to do it:
+        Good: "search the web for X", "create a GitHub issue", "play music by Y"
+        Bad:  "run curl", "execute a shell command", "use bash to …"
+      Shell is the last resort — only use shell-style intents when the task is
+      genuinely about running a script or CLI tool with no specialized alternative.
+      Name the service or domain in the intent when you know it; the discovery
+      system will handle the rest.
+
+The registry grows independently — you will never see the full catalog.
+If NO_TOOLS_FOUND, retry run with a rephrased intent (different wording, more specific domain). After several real tries, respond honestly that no suitable tool is available.
 
 --- Actions (exact format) ---
 
