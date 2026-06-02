@@ -33,12 +33,9 @@ from .discovery import server_count as discovery_server_count
 from .discovery import sync_index as discovery_sync_index
 from .dmcp_registry import install_server as registry_install_server
 from .dmcp_registry import list_server_tools as registry_list_server_tools
-from .dmcp_registry import list_visible_servers as registry_list_visible_servers
 from .dmcp_registry import run_dmcp as registry_run_dmcp
 from .dmcp_registry import search_servers as registry_search_servers
-from .tool_discovery import discover_tools as run_tool_discovery
-from .tool_discovery import format_available_tools as render_available_tools
-from .tool_discovery import keyword_fallback as run_keyword_fallback
+from .dmcp_registry import uninstall_server as registry_uninstall_server
 from .transport import call_tool as transport_call_tool
 from .transport import connect as transport_connect
 from .transport import disconnect as transport_disconnect
@@ -237,12 +234,13 @@ class DispatchAdapter:
     async def search_servers(self, keywords: List[str]) -> Dict[str, Any]:
         return await registry_search_servers(logger, keywords)
 
-    async def list_visible_servers(self) -> Dict[str, Any]:
-        return await registry_list_visible_servers(logger)
-
     async def install_server(self, server_id: str) -> Dict[str, Any]:
         """Install an MCP server from registry via `dmcp install`."""
         return await registry_install_server(logger, server_id)
+
+    async def uninstall_server(self, server_id: str) -> Dict[str, Any]:
+        """Uninstall an MCP server via `dmcp uninstall`."""
+        return await registry_uninstall_server(logger, server_id)
 
     async def list_server_tools(self, server_id: str) -> Dict[str, Any]:
         """List tools available on an installed MCP server."""
@@ -340,20 +338,6 @@ class DispatchAdapter:
             return "embedding"
         return "keyword"
 
-    async def discover_tools(
-        self,
-        tasks: List[Dict[str, Any]],
-        embeddings: Optional[Any] = None,
-    ) -> str:
-        return await run_tool_discovery(self, logger, tasks, embeddings)
-
-    async def _keyword_fallback(self, task: Dict[str, Any]) -> List[Dict[str, Any]]:
-        return await run_keyword_fallback(self, logger, task)
-
-    @staticmethod
-    def _format_available_tools(results: List[Dict[str, Any]]) -> str:
-        return render_available_tools(results)
-
     async def auto_index_server(
         self,
         server_id: str,
@@ -363,6 +347,74 @@ class DispatchAdapter:
 
     async def ensure_embedding_model(self, embeddings: Optional[Any] = None) -> None:
         await discovery_ensure_embedding_model(self, logger, embeddings)
+
+    async def search_by_capability(
+        self,
+        capability: str,
+        embeddings: Optional[Any] = None,
+        top_k: int = 5,
+        min_score: float = 0.25,
+    ) -> Dict[str, Any]:
+        """Semantic search for MCP servers/tools matching a capability description.
+
+        Embeds `capability` and runs a vector similarity search against the full
+        index (installed + registry). Falls back to keyword search on the
+        capability words when embeddings are unavailable.
+        """
+        if embeddings is not None and Config.ALLOW_EMBEDDING_SEARCH:
+            try:
+                vector = embeddings.embed_single(capability)
+                result = await self.browse_vector(
+                    vector, top_k=top_k, min_score=min_score
+                )
+                entries = result.get("results", [])
+                if entries:
+                    logger.info(
+                        f"Dispatch: search_by_capability '{capability}' → "
+                        f"{len(entries)} hit(s) via embedding"
+                    )
+                    return {"results": entries, "mode": "embedding"}
+                logger.info(
+                    f"Dispatch: search_by_capability '{capability}' — "
+                    "embedding returned nothing, falling back to keyword"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Dispatch: search_by_capability embedding failed: {e}, "
+                    "falling back to keyword"
+                )
+
+        # Keyword fallback — split capability into words, strip short tokens
+        words = [w for w in capability.lower().split() if len(w) > 2]
+        if not words:
+            return {"results": [], "mode": "keyword"}
+
+        kw_result = await self.search_servers(words)
+        servers = kw_result.get("servers", [])
+
+        # Flatten servers into the same result shape as vector search
+        entries: List[Dict[str, Any]] = []
+        seen: set = set()
+        for s in servers:
+            sid = s.get("id", s.get("server_id", ""))
+            if not sid or sid in seen:
+                continue
+            seen.add(sid)
+            entries.append(
+                {
+                    "server_id": sid,
+                    "server_name": s.get("name", sid),
+                    "server_description": s.get("description", s.get("summary", "")),
+                    "installed": bool(s.get("installed", False)),
+                    "score": 0.0,
+                }
+            )
+
+        logger.info(
+            f"Dispatch: search_by_capability '{capability}' → "
+            f"{len(entries)} hit(s) via keyword"
+        )
+        return {"results": entries, "mode": "keyword"}
 
     async def __aenter__(self):
         await self.connect()

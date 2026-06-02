@@ -27,9 +27,6 @@ from .runtime.dispatch_flow import dispatch_send as runtime_dispatch_send
 from .runtime.dispatch_flow import do_defer as runtime_do_defer
 from .runtime.dispatch_flow import do_kill as runtime_do_kill
 from .runtime.dispatch_flow import get_tool_metadata as runtime_get_tool_metadata
-from .runtime.dispatch_flow import (
-    run_dispatch_subchain as runtime_run_dispatch_subchain,
-)
 from .runtime.goal_updates import apply_goal_updates as runtime_apply_goal_updates
 from .runtime.lifecycle import (
     bootstrap_tool_index_nonfatal,
@@ -163,19 +160,8 @@ class Jarvis:
         await runtime_feed_root_summary(self, logger, label, summary, depth)
 
     # ------------------------------------------------------------------
-    # DISPATCH helpers (kept for confirmation-resume flow and legacy use)
+    # DISPATCH helpers
     # ------------------------------------------------------------------
-
-    async def _run_dispatch_subchain(
-        self, intent: str, goal_id: Optional[str] = None
-    ) -> str:
-        return await runtime_run_dispatch_subchain(
-            app=self,
-            logger=logger,
-            intent=intent,
-            max_chain_depth=MAX_CHAIN_DEPTH,
-            goal_id=goal_id,
-        )
 
     async def _dispatch_send(
         self,

@@ -142,9 +142,10 @@ async def search_servers(logger: Logger, keywords: List[str]) -> Dict[str, Any]:
     for ls in local_servers:
         if ls["id"] in registry_ids:
             continue
-        searchable = " ".join(
-            [ls["id"], ls["name"], ls["description"]] + ls["keywords"]
-        ).lower()
+        # Match against description and keywords only — not the server ID.
+        # Server IDs encode implementation details (e.g. "-py" suffix) that
+        # would cause false positives when users search by language intent.
+        searchable = " ".join([ls["name"], ls["description"]] + ls["keywords"]).lower()
         if any(kw in searchable for kw in kw_lower):
             servers.append(ls)
 
@@ -160,22 +161,6 @@ async def search_servers(logger: Logger, keywords: List[str]) -> Dict[str, Any]:
     return {"servers": sorted_servers}
 
 
-async def list_visible_servers(logger: Logger) -> Dict[str, Any]:
-    """Return all visible MCP servers via `dmcp browse --json` with no keyword filter."""
-    raw = await run_dmcp(logger, "browse", "--json")
-    if raw is None:
-        return {"error": "dmcp browse failed", "servers": []}
-    try:
-        servers = json.loads(raw)
-    except json.JSONDecodeError:
-        return {"error": "dmcp returned invalid JSON", "servers": []}
-    if not isinstance(servers, list):
-        servers = servers.get("servers", []) if isinstance(servers, dict) else []
-    installed = [s for s in servers if s.get("installed")]
-    available = [s for s in servers if not s.get("installed")]
-    return {"servers": installed + available}
-
-
 async def install_server(logger: Logger, server_id: str) -> Dict[str, Any]:
     """Install an MCP server from registry via `dmcp install`."""
     logger.info(f"Dispatch: Installing MCP server '{server_id}'")
@@ -183,6 +168,15 @@ async def install_server(logger: Logger, server_id: str) -> Dict[str, Any]:
     if raw is None:
         return {"error": f"Failed to install server '{server_id}'"}
     return {"installed": server_id, "output": raw.strip()}
+
+
+async def uninstall_server(logger: Logger, server_id: str) -> Dict[str, Any]:
+    """Uninstall an MCP server via `dmcp uninstall`."""
+    logger.info(f"Dispatch: Uninstalling MCP server '{server_id}'")
+    raw = await run_dmcp(logger, "uninstall", server_id)
+    if raw is None:
+        return {"error": f"Failed to uninstall server '{server_id}'"}
+    return {"uninstalled": server_id, "output": raw.strip()}
 
 
 async def list_server_tools(logger: Logger, server_id: str) -> Dict[str, Any]:

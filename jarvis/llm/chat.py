@@ -33,7 +33,7 @@ ROOT_HISTORY_WINDOW = 3
 class LLM:
     """Main LLM interface with hierarchical mode support and tiered context."""
 
-    MAX_JSON_RETRIES = 3
+    MAX_JSON_RETRIES = 10
 
     def __init__(
         self,
@@ -150,10 +150,10 @@ class LLM:
     # In unified mode the root prompt covers all tool + memory actions.
     _MODE_RETRY_HINTS: dict[str, str] = {
         "root": (
-            'Valid actions: "respond", "find_tools", "list_tools", "install", '
-            '"dispatch", "wait", "kill", "defer", '
+            'Valid actions: "respond", "search_tools", "get_server_docs", '
+            '"install_server", "configure_server", "dispatch", '
             '"store", "recall", "search_memory", "list_memory".\n'
-            'Example: {"action": "find_tools", "intent": "run a shell command"}'
+            'Example: {"action": "search_tools", "capability": "execute shell commands"}'
         ),
         "dispatch": (
             'Valid actions: "plan", "search", "list_tools", "install", "dispatch", '
