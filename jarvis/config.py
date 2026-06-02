@@ -239,6 +239,10 @@ store — Remember a personal fact or preference.
 recall — Recall stored facts by exact theme name.
 search_memory — Search all memories by meaning. Use when you need context.
 list_memory — List all stored memory themes.
+update_memory — Correct or forget an existing memory. Old entry is archived as a memento.
+  Pass empty string for content to forget the theme entirely.
+peek_memento — Look up the archived history of a theme (previous entries before the current one).
+  Use when you need to understand how something changed or recover a previous value.
 {data_consent_note}
 run — Execute a task using external tools (shell, files, web, etc.).
       The system finds and runs the right tool automatically.
@@ -290,9 +294,23 @@ If NO_TOOLS_FOUND or the wrong tools show up, retry run with a clearer or rephra
     "goal_updates": []
 }}
 
+{{
+    "action": "update_memory",
+    "theme": "<topic>",
+    "content": "<corrected fact, or empty string to forget>",
+    "goal_updates": []
+}}
+
+{{
+    "action": "peek_memento",
+    "theme": "<topic>",
+    "limit": 5,
+    "goal_updates": []
+}}
+
 --- Context ---
 You receive: GOALS (with IDs), NEW INPUT, and optionally WAIT_RESULT/DISPATCH_RESULT from tool execution.
-Memory operation results appear as STORE_RESULT, RECALL_RESULT, SEARCH_MEMORY_RESULT, LIST_MEMORY_RESULT.
+Memory operation results appear as STORE_RESULT, RECALL_RESULT, SEARCH_MEMORY_RESULT, LIST_MEMORY_RESULT, UPDATE_MEMORY_RESULT, PEEK_MEMENTO_RESULT.
 RELEVANT MEMORIES may be included automatically based on user input (RAG retrieval).
 Include goal_updates in respond: "completed" or "failed" with result.
 NO_TOOLS_FOUND means retry run with a more specific or rephrased intent — MUST retry at least twice before giving up. If still no match, tell the user the right tool is unavailable.

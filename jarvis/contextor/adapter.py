@@ -501,6 +501,77 @@ class ContextorAdapter:
 
         return {"error": result.get("error", "Delete failed")}
 
+    def update_memory(
+        self,
+        theme: str,
+        content: str,
+        session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Replace the active memory for a theme, archiving the old entry as a memento.
+
+        Empty content forgets the theme — no new active entry is created and
+        search_memory will no longer return anything for this theme.
+        """
+        if not self._connected:
+            return {"error": "Contextor not connected"}
+
+        vector = self._embed(content) if content else []
+        if content and vector is None:
+            return {"error": "Embedding failed"}
+
+        result = self._send(
+            {
+                "cmd": "replace_active",
+                "theme": theme,
+                "content": content,
+                "vector": vector or [],
+                "session_id": session_id,
+            }
+        )
+
+        if result.get("ok"):
+            if result.get("forgotten"):
+                logger.info(f"Contextor: Forgot theme '{theme}'")
+                return {"forgotten": True, "theme": theme}
+            logger.info(
+                f"Contextor: Updated active memory for '{theme}' "
+                f"(archived={result.get('archived', False)})"
+            )
+            return {
+                "updated": True,
+                "theme": theme,
+                "archived": result.get("archived", False),
+            }
+
+        logger.warning(f"Contextor: update_memory failed: {result.get('error')}")
+        return {"error": result.get("error", "update_memory failed")}
+
+    def peek_memento(
+        self,
+        theme: str,
+        limit: int = 5,
+        session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Return the last N archived entries (mementos) for a theme, newest first."""
+        if not self._connected:
+            return {"theme": theme, "mementos": []}
+
+        result = self._send(
+            {
+                "cmd": "peek_memento",
+                "theme": theme,
+                "limit": limit,
+                "session_id": session_id,
+            }
+        )
+
+        if result.get("ok"):
+            mementos = result.get("mementos", [])
+            logger.info(f"Contextor: Peeked {len(mementos)} memento(s) for '{theme}'")
+            return {"theme": theme, "mementos": mementos}
+
+        return {"theme": theme, "mementos": [], "error": result.get("error")}
+
     def reindex(self) -> Dict[str, Any]:
         """Rebuild the vector index from stored entries."""
         if not self._connected:

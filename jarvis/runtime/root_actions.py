@@ -234,7 +234,10 @@ async def act_on_root_response(
         emit_activity(app, "Composing response…", kind="llm")
     elif action == "dispatch":
         emit_activity(app, "Planning tool execution…", kind="dispatch")
-    elif action in ("store", "recall", "search_memory", "list_memory"):
+    elif action in (
+        "store", "recall", "search_memory", "list_memory",
+        "update_memory", "peek_memento",
+    ):
         emit_activity(app, f"Running memory action: {action}", kind="memory")
 
     apply_goal_updates(app, parsed.get("goal_updates", []))
@@ -366,6 +369,54 @@ async def act_on_root_response(
             app,
             logger,
             "LIST_MEMORY_RESULT",
+            compact_payload_for_llm(result),
+            depth,
+        )
+
+    elif action == "update_memory":
+        if not app.contextor:
+            await feed_root_summary(
+                app,
+                logger,
+                "UPDATE_MEMORY_RESULT",
+                json.dumps({"error": "Memory is disabled"}),
+                depth,
+            )
+            return
+        scope = parsed.get("scope", "global")
+        sid = None if scope == "global" else app.sessions.current_id
+        result = app.contextor.update_memory(
+            parsed["theme"],
+            parsed["content"],
+            session_id=sid,
+        )
+        await feed_root_summary(
+            app,
+            logger,
+            "UPDATE_MEMORY_RESULT",
+            compact_payload_for_llm(result),
+            depth,
+        )
+
+    elif action == "peek_memento":
+        if not app.contextor:
+            await feed_root_summary(
+                app,
+                logger,
+                "PEEK_MEMENTO_RESULT",
+                json.dumps({"theme": parsed.get("theme"), "mementos": []}),
+                depth,
+            )
+            return
+        result = app.contextor.peek_memento(
+            parsed["theme"],
+            limit=parsed.get("limit", 5),
+            session_id=app.sessions.current_id,
+        )
+        await feed_root_summary(
+            app,
+            logger,
+            "PEEK_MEMENTO_RESULT",
             compact_payload_for_llm(result),
             depth,
         )

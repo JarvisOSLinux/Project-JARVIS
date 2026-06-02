@@ -25,6 +25,8 @@ VALID_ACTIONS = {
     "recall",
     "search_memory",
     "list_memory",
+    "update_memory",
+    "peek_memento",
     # Dispatch subsystem
     "plan",
     "search",
@@ -129,6 +131,11 @@ class TaskParser:
             return f", theme={result.get('theme')}"
         if action == "recall":
             return f", theme={result.get('theme')}"
+        if action == "update_memory":
+            content = result.get("content", "")
+            return f", theme={result.get('theme')}, forget={not bool(content)}"
+        if action == "peek_memento":
+            return f", theme={result.get('theme')}, limit={result.get('limit', 5)}"
         if action == "search_memory":
             query = result.get("query", "")[:40]
             offset = result.get("offset", 0)
@@ -401,5 +408,32 @@ def _parse_search_memory(response: Dict[str, Any]) -> Dict[str, Any]:
 def _parse_list_memory(response: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "action": "list_memory",
+        "goal_updates": response.get("goal_updates", []),
+    }
+
+
+@_parser("update_memory")
+def _parse_update_memory(response: Dict[str, Any]) -> Dict[str, Any]:
+    theme = response.get("theme")
+    if not theme:
+        return {"error": "update_memory requires 'theme'", "raw": response}
+    return {
+        "action": "update_memory",
+        "theme": str(theme),
+        "content": str(response.get("content", "")),
+        "scope": response.get("scope", "global"),
+        "goal_updates": response.get("goal_updates", []),
+    }
+
+
+@_parser("peek_memento")
+def _parse_peek_memento(response: Dict[str, Any]) -> Dict[str, Any]:
+    theme = response.get("theme")
+    if not theme:
+        return {"error": "peek_memento requires 'theme'", "raw": response}
+    return {
+        "action": "peek_memento",
+        "theme": str(theme),
+        "limit": int(response.get("limit", 5)),
         "goal_updates": response.get("goal_updates", []),
     }
