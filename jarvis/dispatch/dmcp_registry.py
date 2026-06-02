@@ -182,10 +182,26 @@ async def uninstall_server(logger: Logger, server_id: str) -> Dict[str, Any]:
 async def list_server_tools(logger: Logger, server_id: str) -> Dict[str, Any]:
     """List tools available on an installed MCP server."""
     logger.info(f"Dispatch: Listing tools for server '{server_id}'")
-    raw = await run_dmcp(logger, "tools", server_id, "--json")
-    if raw is None:
-        return {"error": f"Failed to list tools for '{server_id}'", "tools": []}
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            Config.DMCP_BINARY,
+            "tools", server_id, "--json",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+    except FileNotFoundError:
+        return {"error": "dmcp binary not found", "tools": []}
+    except asyncio.TimeoutError:
+        return {"error": "dmcp tools timed out", "tools": []}
 
+    stderr_text = stderr.decode().strip()
+
+    if proc.returncode != 0:
+        logger.warning(f"Dispatch: dmcp tools {server_id} failed: {stderr_text}")
+        return {"error": stderr_text or f"Failed to list tools for '{server_id}'", "tools": []}
+
+    raw = stdout.decode()
     try:
         tools = json.loads(raw)
     except json.JSONDecodeError:

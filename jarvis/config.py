@@ -276,7 +276,9 @@ uninstall_server — Remove an installed MCP server from the system.
   {{"action": "uninstall_server", "server_id": "<id>"}}
 
 configure_server — Set required config values on an installed server.
-  Use when SERVER_DOCS or install output indicates required configuration.
+  Use when SERVER_DOCS indicates "server requires configuration" (e.g. missing API key).
+  If you do not know the required value, use respond to ask the user for it first.
+  Never invent or guess API keys — always ask the user when the value is unknown.
   {{"action": "configure_server", "server_id": "<id>", "config": {{"KEY": "value"}}}}
 
 dispatch — Execute tool calls. Only after seeing SERVER_DOCS.

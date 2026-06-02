@@ -76,10 +76,11 @@ async def _handle_get_server_docs(
 
     tools_result = await app.dispatch.list_server_tools(server_id)
     tools = tools_result.get("tools", []) if isinstance(tools_result, dict) else []
+    tools_error = tools_result.get("error") if isinstance(tools_result, dict) else None
     logger.info(f"JARVIS: get_server_docs '{server_id}' → {len(tools)} tool(s)")
 
     context = build_root_context(app, logger)
-    context += "\n" + format_server_docs(server_id, tools)
+    context += "\n" + format_server_docs(server_id, tools, error=tools_error)
     response = await ask_llm(app, logger, context, tag="root-get-server-docs")
     await app._act_on_root_response(response, depth + 1)
 
@@ -113,10 +114,11 @@ async def _handle_install_server(
     # Immediately fetch docs so the LLM can dispatch without an extra round-trip.
     tools_result = await app.dispatch.list_server_tools(server_id)
     tools = tools_result.get("tools", []) if isinstance(tools_result, dict) else []
+    tools_error = tools_result.get("error") if isinstance(tools_result, dict) else None
 
     context = build_root_context(app, logger)
     context += f"\nINSTALL_RESULT: {server_id} installed successfully."
-    context += "\n" + format_server_docs(server_id, tools)
+    context += "\n" + format_server_docs(server_id, tools, error=tools_error)
     response = await ask_llm(app, logger, context, tag="root-install-result")
     await app._act_on_root_response(response, depth + 1)
 

@@ -128,13 +128,35 @@ def format_search_results(capability: str, results: List[Dict[str, Any]]) -> str
     return "\n".join(lines)
 
 
-def format_server_docs(server_id: str, tools: List[Dict[str, Any]]) -> str:
+_CONFIG_ERROR_HINTS = (
+    "api-key", "api_key", "apikey", "required", "configuration",
+    "token", "credentials", "secret", "auth",
+)
+
+
+def format_server_docs(
+    server_id: str,
+    tools: List[Dict[str, Any]],
+    error: Optional[str] = None,
+) -> str:
     """Format a server's tool list into a SERVER_DOCS context block.
 
     Shows each tool name, description, and parameter schema so the LLM
     can output a concrete dispatch action.
     """
     if not tools:
+        if error:
+            err_lower = error.lower()
+            if any(hint in err_lower for hint in _CONFIG_ERROR_HINTS):
+                return (
+                    f"SERVER_DOCS: {server_id} — server requires configuration before it can run.\n"
+                    f"  Error: {error}\n"
+                    f"  Use configure_server to set the required value(s), then retry get_server_docs."
+                )
+            return (
+                f"SERVER_DOCS: {server_id} — failed to start: {error}\n"
+                f"  The server may need to be uninstalled and reinstalled."
+            )
         return (
             f"SERVER_DOCS: {server_id} — no tools found (server may need reinstalling)."
         )
