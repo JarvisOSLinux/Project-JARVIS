@@ -113,21 +113,73 @@ async def _run_handle(
         )
         return
 
-    # Phase 2: hidden LLM dispatch call — produce concrete tasks
+    # Phase 2: hidden LLM dispatch call — produce concrete tasks (or install a candidate)
+    has_candidates = "CANDIDATE_SERVERS" in tool_results
     dispatch_context = build_root_context(app, logger)
     dispatch_context += f"\n{tool_results}"
-    dispatch_context += (
-        f"\nSYSTEM: Tools found for '{intent}'. "
-        "Output a dispatch action with concrete tasks now. "
-        "Use only tool names from MATCHED_TOOLS above. "
-        "Format: {{\"action\": \"dispatch\", \"tasks\": [{{\"server\": \"<id>\", "
-        "\"tool\": \"<name>\", \"params\": {{}}}}]}}"
-    )
+    if has_candidates:
+        dispatch_context += (
+            f"\nSYSTEM: Tools found for '{intent}'. "
+            "If a CANDIDATE_SERVER is a clearly better match for the intent than the "
+            "MATCHED_TOOLS (e.g. a dedicated web-search or API server vs a generic shell), "
+            "output an install action for it: "
+            "{\"action\": \"install\", \"server_id\": \"<candidate_id>\"}. "
+            "Otherwise dispatch from MATCHED_TOOLS: "
+            "{\"action\": \"dispatch\", \"tasks\": [{\"server\": \"<id>\", "
+            "\"tool\": \"<name>\", \"params\": {}}]}"
+        )
+    else:
+        dispatch_context += (
+            f"\nSYSTEM: Tools found for '{intent}'. "
+            "Output a dispatch action with concrete tasks now. "
+            "Use only tool names from MATCHED_TOOLS above. "
+            "Format: {\"action\": \"dispatch\", \"tasks\": [{\"server\": \"<id>\", "
+            "\"tool\": \"<name>\", \"params\": {}}]}"
+        )
     app.llm.switch_mode("root")
     dispatch_response = await ask_llm(
         app, logger, dispatch_context, tag="root-run-dispatch"
     )
     dispatch_parsed = app.task_parser.parse(dispatch_response)
+
+    # Phase 2b: LLM chose to install a better candidate before dispatching
+    if dispatch_parsed.get("action") == "install":
+        server_id = dispatch_parsed.get("server_id", "")
+        if server_id:
+            emit_activity(app, f"Installing {server_id}…", kind="dispatch")
+            install_result = await app.dispatch.install_server(server_id)
+            if "error" not in install_result:
+                logger.info(f"JARVIS: run — LLM-directed install of '{server_id}'")
+                await app.dispatch.auto_index_server(
+                    server_id=server_id,
+                    embeddings=get_embeddings(app),
+                )
+                tool_results = await _discover_tools(
+                    adapter=app.dispatch,
+                    logger=logger,
+                    tasks=[{"intent": intent}],
+                    embeddings=get_embeddings(app),
+                )
+            else:
+                logger.warning(
+                    f"JARVIS: run — LLM-directed install failed for '{server_id}': "
+                    f"{install_result.get('error')}"
+                )
+            dispatch_context2 = build_root_context(app, logger)
+            dispatch_context2 += f"\n{tool_results}"
+            dispatch_context2 += (
+                f"\nSYSTEM: Installation complete. Tools found for '{intent}'. "
+                "Output a dispatch action with concrete tasks now. "
+                "Use only tool names from MATCHED_TOOLS above. "
+                "Format: {\"action\": \"dispatch\", \"tasks\": [{\"server\": \"<id>\", "
+                "\"tool\": \"<name>\", \"params\": {}}]}"
+            )
+            app.llm.switch_mode("root")
+            dispatch_response = await ask_llm(
+                app, logger, dispatch_context2, tag="root-run-dispatch-after-install"
+            )
+            dispatch_parsed = app.task_parser.parse(dispatch_response)
+            dispatch_context = dispatch_context2
 
     tasks = (
         dispatch_parsed.get("tasks")

@@ -142,7 +142,7 @@ class Config:
         os.getenv("ENFORCE_EMBEDDING_SEARCH", "false").lower() == "true"
     )
     # Minimum visible servers before vector search auto-enables
-    EMBEDDING_SEARCH_THRESHOLD = int(os.getenv("EMBEDDING_SEARCH_THRESHOLD", "100"))
+    EMBEDDING_SEARCH_THRESHOLD = int(os.getenv("EMBEDDING_SEARCH_THRESHOLD", "3"))
 
     # Data directory — when set (e.g. systemd JARVIS_DATA_DIR=/var/lib/jarvis),
     # memory, goal archive, and default socket use this base path
@@ -240,14 +240,22 @@ recall — Recall stored facts by exact theme name.
 search_memory — Search all memories by meaning. Use when you need context.
 list_memory — List all stored memory themes.
 {data_consent_note}
-run — Execute a task using external tools (shell, files, web, etc.).
-      The system finds and runs the right tool automatically.
-      intent = SPECIFIC TASK, NOT the tool type.
-      WRONG:   {{"action": "run", "intent": "run shell command"}}
-      CORRECT: {{"action": "run", "intent": "check python version"}}
+run — Execute a task using any MCP server in the registry.
+      The registry contains specialized servers for every domain — web search, code
+      execution, email, calendar, music, GitHub, databases, smart home, and more.
+      It grows independently; you will never see the full catalog.
+      The system discovers and auto-installs the best match from your intent.
 
-Many MCP servers can exist in the registry (shell, filesystem, web APIs, databases, and more). Discovery matches from the task; you are not given a full catalog of names.
-If NO_TOOLS_FOUND or the wrong tools show up, retry run with a clearer or rephrased intent. After several real tries, respond honestly that no suitable installed tool is available — do not invent servers.
+      Write the intent as a CAPABILITY DESCRIPTION — what you need, not how to do it:
+        Good: "search the web for X", "create a GitHub issue", "play music by Y"
+        Bad:  "run curl", "execute a shell command", "use bash to …"
+      Shell is the last resort — only use shell-style intents when the task is
+      genuinely about running a script or CLI tool with no specialized alternative.
+      Name the service or domain in the intent when you know it; the discovery
+      system will handle the rest.
+
+The registry grows independently — you will never see the full catalog.
+If NO_TOOLS_FOUND, retry run with a rephrased intent (different wording, more specific domain). After several real tries, respond honestly that no suitable tool is available.
 
 --- Actions (exact format) ---
 
@@ -317,14 +325,22 @@ OS: {system} {release} ({machine}), Shell: {shell}
 
 respond — Direct reply. Use for chat, greetings, or after a result comes back.
 Memory is disabled. Do not use store, recall, search_memory, or list_memory.
-run — Execute a task using external tools (shell, files, web, etc.).
-      The system finds and runs the right tool automatically.
-      intent = SPECIFIC TASK, NOT the tool type.
-      WRONG:   {{"action": "run", "intent": "run shell command"}}
-      CORRECT: {{"action": "run", "intent": "check python version"}}
+run — Execute a task using any MCP server in the registry.
+      The registry contains specialized servers for every domain — web search, code
+      execution, email, calendar, music, GitHub, databases, smart home, and more.
+      It grows independently; you will never see the full catalog.
+      The system discovers and auto-installs the best match from your intent.
 
-Many MCP servers can exist in the registry (shell, filesystem, web APIs, databases, and more). Discovery matches from the task; you are not given a full catalog of names.
-If NO_TOOLS_FOUND or the wrong tools show up, retry run with a clearer or rephrased intent. After several real tries, respond honestly that no suitable installed tool is available — do not invent servers.
+      Write the intent as a CAPABILITY DESCRIPTION — what you need, not how to do it:
+        Good: "search the web for X", "create a GitHub issue", "play music by Y"
+        Bad:  "run curl", "execute a shell command", "use bash to …"
+      Shell is the last resort — only use shell-style intents when the task is
+      genuinely about running a script or CLI tool with no specialized alternative.
+      Name the service or domain in the intent when you know it; the discovery
+      system will handle the rest.
+
+The registry grows independently — you will never see the full catalog.
+If NO_TOOLS_FOUND, retry run with a rephrased intent (different wording, more specific domain). After several real tries, respond honestly that no suitable tool is available.
 
 --- Actions (exact format) ---
 
@@ -383,13 +399,13 @@ Plan sub-tasks (ALWAYS start with this):
 {{
     "action": "plan",
     "tasks": [
-        {{"intent": "get weather forecast for Berlin", "keywords": ["weather", "forecast"]}},
-        {{"intent": "convert 50 EUR to USD", "keywords": ["currency", "convert"]}}
+        {{"intent": "<capability description — what you need, not how to implement it>", "keywords": ["<domain>", "<service-type>"]}},
+        {{"intent": "<second sub-task if needed>", "keywords": ["<domain>", "<keyword>"]}}
     ]
 }}
 
 Search servers by keyword (use only if plan returned nothing useful):
-{{"action": "search", "keywords": ["calculator", "math"]}}
+{{"action": "search", "keywords": ["<domain>", "<capability>"]}}
 
 List tools on an installed server:
 {{"action": "list_tools", "server_id": "com.example.server"}}
@@ -438,6 +454,8 @@ Return to root with results:
 
 --- Rules ---
 - ALWAYS start with "plan" — even for a single task.
+- Write sub-task intents as capability descriptions (what you need), not implementations.
+  Shell execution is a last resort — only plan for it when nothing more specific exists.
 - If MATCHED_TOOLS is present, dispatch those. Never invent tool names.
 - If only CANDIDATE_SERVERS is present, install + list_tools first.
 - If nothing matched, re-plan or search with different wording/keywords before giving up; then done with a failure summary if still no fit.
@@ -472,8 +490,8 @@ Plan sub-tasks (ALWAYS start with this):
 {{
     "action": "plan",
     "tasks": [
-        {{"intent": "get weather forecast for Berlin"}},
-        {{"intent": "convert 50 EUR to USD"}}
+        {{"intent": "<capability description — what you need, not how to implement it>"}},
+        {{"intent": "<second sub-task if needed>"}}
     ]
 }}
 
@@ -523,6 +541,8 @@ Return to root with results:
 
 --- Rules ---
 - ALWAYS start with "plan" — even for a single task.
+- Write sub-task intents as capability descriptions (what you need), not implementations.
+  Shell execution is a last resort — only plan for it when nothing more specific exists.
 - If MATCHED_TOOLS is present, dispatch those. Never invent tool names.
 - If only CANDIDATE_SERVERS is present, install + list_tools first.
 - If nothing matched, re-plan with different sub-task wording before giving up; then done with a failure summary if still no fit.
