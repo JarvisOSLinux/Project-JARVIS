@@ -1,64 +1,91 @@
-# Memory Management — Update & Forget
+# Memory Management — Update, Forget & Memento
 
 ## Problem
 
-Contextor accumulates memories over time with no mechanism to correct or remove
-individual entries. Stale memories are worse than no memories — the LLM acts
-confidently on wrong information. Three failure modes:
+Stored memories become stale over time with no way to correct or remove them.
+Stale active memories are worse than none — the LLM acts confidently on wrong
+information. Three failure modes:
 
-- **Supersede**: user moves a project folder; old path memory persists alongside
-  new one, both retrieved, LLM can't tell which is current
+- **Supersede**: user moves a project folder; old path persists, LLM uses it
 - **Forget**: user asks JARVIS to stop remembering something; no action exists
-- **Conflict**: two memories contradict each other; no way to resolve without
-  deleting the whole theme
+- **Contaminated search**: vector search surfaces old entries alongside current
+  ones, LLM can't tell which is authoritative
 
 ## Design
 
-### Single action: `update_memory`
+### Two-tier memory model
 
-Rather than separate `update` and `delete` actions, one action covers both.
+| Tier | Description | Searched by RAG? |
+|---|---|---|
+| **Active** | One current entry per theme — the authoritative truth | Yes |
+| **Memento** | Archived history of previous entries for a theme, with timestamps | No — explicit only |
+
+`search_memory` and all RAG retrieval operate on **active entries only**. Mementos
+are never surfaced automatically — the LLM must explicitly request them. This
+keeps retrieval clean and current with no stale contamination.
+
+### Two LLM actions
+
+#### `update_memory`
 
 ```json
 {"action": "update_memory", "theme": "<theme>", "content": "<new content>"}
 ```
 
-- **Non-empty content** → embed new content, replace all entries under the theme
-  with a single new entry carrying the new vector. Old entries gone.
-- **Empty content** → theme is deleted entirely. Effectively a forget.
+- **Non-empty content** → current active entry moves to mementos table
+  (archived with timestamp), new entry becomes active
+- **Empty content** → current active entry moves to mementos, no new active
+  entry created. The theme is effectively forgotten. `search_memory` returns
+  nothing for it.
 
-Why empty = forget works: an embedding of an empty string has near-zero cosine
-similarity to any meaningful query. Even if the entry persists in storage, it
-will never surface in retrieval. Deleting is cleaner but not strictly necessary.
+One action covers both update and forget. No separate `forget_memory` needed.
 
-### Why not separate update + delete actions
+#### `peek_memento`
 
-The LLM's action surface should stay small. One action that handles both cases
-reduces prompt complexity and the chance the LLM picks the wrong one. The
-caller doesn't need to decide — empty content means forget.
+```json
+{"action": "peek_memento", "theme": "<theme>", "limit": 5}
+```
 
-### Granularity: theme-level, not entry-level
+Returns the last N archived entries for a theme, newest first, each with a
+timestamp. The LLM calls this explicitly when it wants to understand how
+something evolved or recover previous context. It is never called automatically.
 
-Contextor entries are identified internally by auto-generated IDs that the LLM
-never sees. The only identifier the LLM has is the `theme` name (visible via
-`list_memory`). Theme-level replacement is therefore the right granularity —
-it matches what the LLM can actually reason about.
+### Why not expose memento to RAG
 
-If fine-grained entry-level updates are needed in future, contextor can expose
-an `UpdateEntry { entry_id, content, vector }` command. That is out of scope
-here.
+If mementos were included in vector search, an old entry could score higher
+than the current one for certain queries, causing the LLM to act on outdated
+information without realising it. Keeping mementos out of the search index
+means active memory is always authoritative and RAG results are always clean.
+
+The LLM reaching for `peek_memento` is a deliberate signal that history is
+relevant to the current task — not an accident of retrieval scoring.
 
 ## Changes required
 
-### 1. Contextor — new `ReplaceTheme` command
+### 1. Contextor — new `mementos` table
 
-Current contextor has `Store` (add entry) and `Delete` (remove all entries for
-theme) but no atomic replace. Add:
+```sql
+CREATE TABLE IF NOT EXISTS mementos (
+    id          TEXT PRIMARY KEY,
+    theme       TEXT NOT NULL,
+    content     TEXT NOT NULL,
+    vector      BLOB NOT NULL,
+    stored_at   REAL NOT NULL,   -- when the entry was originally stored
+    archived_at REAL NOT NULL,   -- when it was moved to mementos
+    metadata    TEXT,
+    session_id  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_memento_theme_archived
+    ON mementos (theme, archived_at);
+```
+
+### 2. Contextor — `ReplaceActive` command
 
 ```rust
-ReplaceTheme {
+ReplaceActive {
     theme: String,
-    content: String,   // empty string = delete only, no new entry stored
-    vector: Vec<f32>,  // ignored when content is empty
+    content: String,        // empty = forget (no new active entry)
+    vector: Vec<f32>,       // ignored when content is empty
     #[serde(default)]
     metadata: Option<Value>,
     #[serde(default)]
@@ -66,102 +93,117 @@ ReplaceTheme {
 }
 ```
 
-Behaviour:
-1. Delete all existing entries for `theme` (+ optional `session_id` scope)
-2. If `content` is non-empty: store new entry with supplied vector
-3. Return `{ "ok": true, "replaced": true }` or `{ "ok": true, "deleted": true }`
+Behaviour (single SQLite transaction):
+1. Move current active entry for `theme` to `mementos` (set `archived_at = now`)
+2. Delete from `entries`
+3. If `content` is non-empty: insert new row into `entries`
+4. Update in-memory vector index accordingly
 
-This is atomic within a single SQLite transaction — no window where the theme
-is briefly empty while the new entry is being written.
+Returns `{ "ok": true, "archived": true|false, "forgotten": true|false }`.
 
-### 2. JARVIS — `jarvis/core/contextor.py` (or equivalent adapter)
+### 3. Contextor — `PeekMemento` command
 
-Add `update_memory(theme, content, session_id)` function:
-- If content is empty: send `Delete { theme }` to contextor
-- If content is non-empty: embed content via the embedding model, send
-  `ReplaceTheme { theme, content, vector }` to contextor
-
-### 3. JARVIS — `jarvis/core/command_parser.py`
-
-Add `update_memory` to `VALID_ACTIONS`. Parser:
-
-```python
-def _parse_update_memory(data: dict) -> dict:
-    return {
-        "action": "update_memory",
-        "theme": data.get("theme", ""),
-        "content": data.get("content", ""),
-    }
+```rust
+PeekMemento {
+    theme: String,
+    #[serde(default = "default_memento_limit")]
+    limit: usize,           // default 5
+    #[serde(default)]
+    session_id: Option<String>,
+}
 ```
 
-### 4. JARVIS — `jarvis/runtime/root_actions.py`
+Returns last N mementos for the theme, ordered `archived_at DESC`:
 
-Add handler:
-
-```python
-async def _handle_update_memory(parsed: dict, adapter, ...) -> str:
-    theme = parsed.get("theme", "").strip()
-    content = parsed.get("content", "").strip()
-    if not theme:
-        return "update_memory requires a theme"
-    await adapter.update_memory(theme, content)
-    if content:
-        return f"Memory updated: {theme}"
-    return f"Memory forgotten: {theme}"
+```json
+{
+  "ok": true,
+  "theme": "github_username",
+  "mementos": [
+    { "content": "yakupatahanov", "stored_at": "...", "archived_at": "..." },
+    { "content": "yakup",        "stored_at": "...", "archived_at": "..." }
+  ]
+}
 ```
 
-### 5. JARVIS — `jarvis/config.py` (root prompt)
+### 4. Contextor — `Search` scoped to active entries
+
+The existing `Search` command queries the in-memory vector index, which is
+loaded from `entries`. Since `ReplaceActive` removes old entries from `entries`
+before archiving them to `mementos`, the index never contains mementos.
+No change to `Search` needed — the separation is structural.
+
+### 5. JARVIS — `jarvis/core/contextor.py` (or equivalent adapter)
+
+Add:
+- `update_memory(theme, content, session_id)` — embeds content (if non-empty),
+  calls `ReplaceActive`
+- `peek_memento(theme, limit, session_id)` — calls `PeekMemento`, returns
+  formatted entries
+
+### 6. JARVIS — `jarvis/core/command_parser.py`
+
+Add `update_memory` and `peek_memento` to `VALID_ACTIONS` with parsers.
+
+### 7. JARVIS — `jarvis/runtime/root_actions.py`
+
+Add handlers for both actions.
+
+### 8. JARVIS — `jarvis/config.py` (root prompt)
 
 Add to the memory action block:
 
 ```
-update_memory — Rewrite an existing memory or forget it entirely.
-  Use when the user corrects outdated information or asks you to forget something.
-  Pass empty string for content to forget.
+update_memory — Correct or forget a memory. Old entry is archived as a memento.
+  Pass empty string for content to forget the theme entirely.
   {{"action": "update_memory", "theme": "<theme>", "content": "<new content or empty>"}}
+
+peek_memento — Look up the history of a theme (previous entries before current).
+  Use when you need to understand how something changed over time.
+  {{"action": "peek_memento", "theme": "<theme>", "limit": 5}}
 ```
 
 ## Example flows
 
-### Updating a stale location
+### Correcting a stale location
 
 ```
 User: I moved my projects to ~/Dev
 LLM:  {"action": "update_memory", "theme": "projects_location",
-        "content": "Projects are stored at /home/yakup/Dev"}
+        "content": "Projects are at /home/yakup/Dev"}
 ```
 
-Old memory gone. New memory embedded with fresh vector. Next time the user asks
-JARVIS to clone a repo, retrieval returns the correct path.
+Old entry ("Projects are at /home/yakup/Projects") moves to mementos.
+New active entry stored with fresh vector. RAG now returns the correct path.
 
-### Forgetting a project
+### Forgetting a topic
 
 ```
-User: Forget about the Game project
+User: Forget everything you know about the Game project
 LLM:  {"action": "update_memory", "theme": "project:Game", "content": ""}
 ```
 
-All entries under `project:Game` deleted. Subsequent searches return nothing
-for that theme.
+Active entry archived as memento. No new active entry. `search_memory` returns
+nothing for this theme going forward.
 
-### Resolving a conflict
+### Peeking at history
 
 ```
-User: My GitHub username is now yakupdev, not yakupatahanov
-LLM:  {"action": "update_memory", "theme": "github_username",
-        "content": "GitHub username is yakupdev"}
+User: What did you used to know about my GitHub username?
+LLM:  {"action": "peek_memento", "theme": "github_username", "limit": 5}
 ```
 
-Single replace removes both old entries, stores one authoritative entry.
+Returns archived entries with timestamps. LLM can report the history without
+any of it affecting active memory or future retrieval.
 
-## What this does not cover
+### Recovering from a mistake
 
-- **Automatic staleness detection**: JARVIS won't proactively notice that a
-  stored path no longer exists on disk. That's a future improvement (e.g. a
-  periodic `Prune`-style validation pass).
-- **Partial updates within a theme**: theme-level replace is all-or-nothing.
-  If a theme has 10 entries and you want to correct one, replace the whole
-  theme with the corrected content. Fine-grained entry updates require
-  exposing entry IDs to the LLM, which adds complexity with little benefit
-  for the current use cases.
-- **Undo**: replaced entries are gone. No soft-delete or history is kept.
+```
+User: Actually, keep the old project location — I moved it back
+LLM:  {"action": "peek_memento", "theme": "projects_location", "limit": 1}
+      → sees previous value was /home/yakup/Projects
+      {"action": "update_memory", "theme": "projects_location",
+        "content": "Projects are at /home/yakup/Projects"}
+```
+
+The memento acts as a natural undo — LLM reads history, restores the value.
