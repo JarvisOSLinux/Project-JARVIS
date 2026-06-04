@@ -106,16 +106,19 @@ entirely and go straight to install.
 LLM: {"action": "install_server", "server_id": "io.github.brave.brave-search-mcp-server"}
   │
   ▼
-1. Fetch manifest from dmcp/registry
-   → extract configurableProperties
-   → if empty → skip to step 5
+1. dmcp install --no_setup
+   Copies files, writes manifest — does NOT run the setup script yet.
   │
   ▼
-2. Read jarvis_params.toml
-   → find saved values for this server_id
+2. Read configurableProperties from installed manifest
+   → if empty → jump to step 5
   │
   ▼
-3. Open ServerConfigModal (Textual ModalScreen)
+3. Read jarvis_params.toml
+   → pre-fill any saved values for this server_id
+  │
+  ▼
+4. Open ServerConfigModal (Textual ModalScreen)
    → pre-fill fields from saved values + manifest defaults
    → user fills gaps, edits pre-filled values if desired
    → auto-save every keystroke to jarvis_params.toml
@@ -124,25 +127,48 @@ LLM: {"action": "install_server", "server_id": "io.github.brave.brave-search-mcp
   │                                                             ▼
   │                          LLM gets: INSTALL_CANCELLED        │
   │                          missing required: [BRAVE_API_KEY]  │
-  │                          LLM responds to user               │
-  │                          explaining what is needed          │
+  │                          LLM responds to user explaining    │
+  │                          what is needed                     │
   │                                                             │
-  ├─ User confirms (all required fields filled) ─────────────── ┤
+  └─ User confirms (all required fields filled) ────────────────┤
   │                                                             │
   ▼                                                             │
-4. Run dmcp install (bare) → dmcp config set for each value     │
-  │                                                             │
-  ├─ Install fails ─────────────────────────────────────────────┤
+5. dmcp config set KEY value  (one per field)
+   → stores values in manifest before setup runs
+   → jarvis_params.toml already written in step 4
+  │
+  ▼
+6. dmcp setup <server_id>
+   → dmcp reads manifest.config → injects as MCP_CONFIG_* env vars
+   → setup script receives collected config values and handles them
+     (install deps, authenticate, write config files, etc.)
+   → server developer owns all setup logic; JARVIS just injects
+  │
+  ├─ Setup fails ───────────────────────────────────────────────┤
   │     → Show error to user directly in TUI (not via LLM)      │
   │     → LLM gets: INSTALL_ERROR: <reason>                     │
   │     → LLM tells user install failed, no retry loop          │
   │                                                             │
-  └─ Install succeeds ──────────────────────────────────────────┘
+  └─ Setup succeeds ────────────────────────────────────────────┘
   │
   ▼
-5. auto_index_server → list_server_tools → format_server_docs
-   → LLM dispatches normally
+7. auto_index_server → get_server_docs → LLM dispatches
 ```
+
+### Separation of concerns
+
+JARVIS owns:
+- Collecting config values from the user (modal)
+- Persisting them locally (`jarvis_params.toml`)
+- Injecting them as `MCP_CONFIG_*` env vars when setup runs
+- Storing them in the manifest for runtime (`dmcp config set`)
+
+MCP server developer owns:
+- What the setup script does with the values it receives
+- Whether setup needs a value at all, or only at runtime
+- Any validation, authentication, or side effects during setup
+
+JARVIS is a conduit. It does not interpret what any config value means.
 
 ---
 
