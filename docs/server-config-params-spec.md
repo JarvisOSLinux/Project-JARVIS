@@ -18,12 +18,11 @@ never see or invent sensitive values like API keys.
 
 ## Goals
 
-- Surface *all* required and optional config fields to the user **before** install runs
+- Surface *all* required and optional config fields to the user **before** setup
+  runs, collected in a single form so the user has complete visibility
 - Pre-fill fields from a persistent local store (`jarvis_params.toml`) so users
   never re-enter the same key twice, even across server uninstall/reinstall cycles
 - Keep sensitive values (API keys, passwords) entirely out of the LLM conversation
-- Give the user complete visibility: what was auto-filled, what is required, what
-  is optional — all at once, in one place
 - Feed the LLM only a binary result: configured+installed, or cancelled+why
 
 ---
@@ -35,7 +34,6 @@ never see or invent sensitive values like API keys.
 `~/.config/jarvis/jarvis_params.toml`
 
 Outside the project directory — user-specific, never committed to git.
-Add to `.gitignore` if the file ends up adjacent to the project.
 
 ### Format
 
@@ -48,32 +46,32 @@ SUDO_PASSWORD = "hunter2"
 
 [com.example.some-server]
 API_TOKEN = ""          # saved empty — user started but didn't finish
-ENDPOINT = "https://api.example.com/v1"   # optional, provided
+ENDPOINT = "https://api.example.com/v1"
 ```
 
-- Sections keyed by server ID (matches `configurableProperties.key` in the manifest)
+- Sections keyed by server ID
 - Values are plain strings — no type coercion
 - Empty string = user acknowledged the field but left it blank
-- Absent key = field has never been seen/filled for this server
+- Absent key = field has never been seen for this server
 
 ### Access pattern
 
 - **Read** on modal open: pre-fill fields that have a saved value
-- **Write** on any field change (auto-save — no explicit save button needed)
-- **Read** on install: inject present values as environment variables for dmcp
+- **Write** on any field change: auto-save — no explicit save button needed
 - **Never** passed to the LLM — only the system layer reads/writes this file
 
 ### Sensitive values
 
-The TOML file stores values in plaintext for now. Future: encrypt at rest using
-the Linux kernel keyring (`jarvis_keys.c` in `linux-jarvisos`). The `sensitive`
-flag in the manifest controls masking in the UI, not storage format.
+Plaintext for v1 — same as `.netrc`, `~/.config/gh/hosts.yml`, etc.
+Future: encrypt at rest via `jarvis_keys.c` kernel keyring in `linux-jarvisos`.
+The `sensitive` flag controls UI masking only, not storage format.
 
 ---
 
 ## Manifest Schema: `configurableProperties`
 
-Already defined in the registry. Each entry:
+Defined in the registry and now properly typed in dmcp (`ConfigurableProperty`
+struct in `dmcp/src/models.rs`, serialized by `dmcp info --json`). Each entry:
 
 ```json
 {
@@ -100,7 +98,7 @@ entirely and go straight to install.
 
 ---
 
-## Install Flow (updated)
+## Install Flow
 
 ```
 LLM: {"action": "install_server", "server_id": "io.github.brave.brave-search-mcp-server"}
@@ -114,11 +112,10 @@ LLM: {"action": "install_server", "server_id": "io.github.brave.brave-search-mcp
    → if empty → jump to step 5
   │
   ▼
-3. Read jarvis_params.toml
-   → pre-fill any saved values for this server_id
+3. Read jarvis_params.toml → pre-fill any saved values for this server_id
   │
   ▼
-4. Open ServerConfigModal (Textual ModalScreen)
+4. Open ServerConfigModal
    → pre-fill fields from saved values + manifest defaults
    → user fills gaps, edits pre-filled values if desired
    → auto-save every keystroke to jarvis_params.toml
@@ -134,20 +131,17 @@ LLM: {"action": "install_server", "server_id": "io.github.brave.brave-search-mcp
   │                                                             │
   ▼                                                             │
 5. dmcp config set KEY value  (one per field)
-   → stores values in manifest before setup runs
-   → jarvis_params.toml already written in step 4
+   → stores values in manifest.config before setup runs
   │
   ▼
 6. dmcp setup <server_id>
-   → dmcp reads manifest.config → injects as MCP_CONFIG_* env vars
-   → setup script receives collected config values and handles them
-     (install deps, authenticate, write config files, etc.)
-   → server developer owns all setup logic; JARVIS just injects
+   → dmcp injects manifest.config as MCP_CONFIG_* env vars
+   → setup script handles them however it needs to
+   → server developer owns all setup logic; JARVIS is just the conduit
   │
   ├─ Setup fails ───────────────────────────────────────────────┤
   │     → Show error to user directly in TUI (not via LLM)      │
   │     → LLM gets: INSTALL_ERROR: <reason>                     │
-  │     → LLM tells user install failed, no retry loop          │
   │                                                             │
   └─ Setup succeeds ────────────────────────────────────────────┘
   │
@@ -157,18 +151,11 @@ LLM: {"action": "install_server", "server_id": "io.github.brave.brave-search-mcp
 
 ### Separation of concerns
 
-JARVIS owns:
-- Collecting config values from the user (modal)
-- Persisting them locally (`jarvis_params.toml`)
-- Injecting them as `MCP_CONFIG_*` env vars when setup runs
-- Storing them in the manifest for runtime (`dmcp config set`)
+JARVIS owns: collecting values, persisting to `jarvis_params.toml`, calling
+`dmcp config set`, triggering `dmcp setup`. It does not interpret config values.
 
-MCP server developer owns:
-- What the setup script does with the values it receives
-- Whether setup needs a value at all, or only at runtime
-- Any validation, authentication, or side effects during setup
-
-JARVIS is a conduit. It does not interpret what any config value means.
+MCP server developer owns: what the setup script does with the values it
+receives, whether setup needs them at all or only at runtime, any validation.
 
 ---
 
@@ -177,50 +164,49 @@ JARVIS is a conduit. It does not interpret what any config value means.
 When a server is already installed but a config value is wrong or expired:
 
 ```
-list_server_tools → stderr: "API key invalid" or "token expired"
+list_server_tools → stderr: "API key invalid"
   │
   ▼
 format_server_docs detects config-related keywords in error
-  → "SERVER_DOCS: brave-search — server requires configuration.
-     Error: API key invalid.
-     Use configure_server to update the value, then retry get_server_docs."
+  → "server requires configuration — use configure_server, then retry get_server_docs"
   │
   ▼
-LLM: {"action": "configure_server", "server_id": "...", "config": {"BRAVE_API_KEY": "???"}}
-
-  BUT — LLM does not know the new value.
-  LLM must respond: "Your Brave API key appears to be invalid. Please provide a new one."
+LLM does not know the new value → responds: "Your API key appears invalid.
+  Please provide a new one."
   │
   ▼
 User provides new key in chat
   │
   ▼
-LLM: configure_server with the new value
-  → system updates jarvis_params.toml
-  → dmcp config set injects new value
+LLM: configure_server → system writes to jarvis_params.toml + dmcp config set
   → LLM retries get_server_docs → tools appear → dispatch
 ```
-
-Note: for runtime errors the user types the value into the chat. The LLM passes
-it through to configure_server. This is acceptable for re-configuration flows
-(the key is already "known" to the user at this point). The modal is only used
-for the initial install.
 
 ---
 
 ## UI: ServerConfigModal
 
-### When it appears
+### Async bridge
 
-Triggered by the `install_server` action handler in `root_actions.py`, before
-dmcp runs. The LLM is paused — no further LLM calls until the modal resolves.
+`_handle_install_server` in `root_actions.py` is an async coroutine. The modal
+is a Textual `ModalScreen`. The backend pauses via a plain `asyncio.Future`:
+
+```python
+future = asyncio.get_event_loop().create_future()
+app.tui_callback("open_config_modal", fields=configurable_properties, future=future)
+result = await future   # coroutine suspends; Textual event loop stays free
+                        # modal calls future.set_result(ConfigModalResult(...)) on submit/cancel
+```
+
+`await future` does not block the event loop — Textual continues rendering and
+handling input. No new manager class or event type needed; just a registered
+TUI callback (same pattern already used in `lifecycle.py`).
 
 ### Layout
 
 ```
 ┌─ Configure: Brave Search MCP ─────────────────────────────────┐
 │  Search the web using the Brave Search API.                    │
-│  brave.com/search/api — free tier: 2000 req/month             │
 │                                                                │
 │  ── Saved ──────────────────────────────────────────────────── │
 │  Brave Search API Key                                          │
@@ -242,38 +228,31 @@ dmcp runs. The LLM is paused — no further LLM calls until the modal resolves.
 
 ### Sections (in order)
 
-1. **Saved** — fields that have a value in `jarvis_params.toml`. Always shown
-   at the top; user can review and edit before confirming.
-2. **Required** — fields with `required: true` and no saved value. Red border
-   until non-empty. If all required fields are already saved, this section
-   shows "(all required fields are filled)".
-3. **Optional** — fields with `required: false`. Shown with default pre-filled
-   if `default` is set. User can leave them or change them.
+1. **Saved** — fields with a value in `jarvis_params.toml`. Shown at top; editable.
+2. **Required** — `required: true` with no saved value. Red border until non-empty.
+   If all required fields are already saved, shows "(all required fields are filled)".
+3. **Optional** — `required: false`. Default pre-filled if `default` is set.
 
 ### Field rendering
 
-- Label: bold
-- Description: dim, italic, shown below the input
-- Sensitive field: `password=True` on the Textual `Input` widget + `[show]`
-  toggle button that switches between masked and revealed
-- Required + empty: red border on the Input widget
-- Required + filled: green border
-- Auto-filled from saved: neutral border + `✓ saved` badge on the right
+- Label: bold. Description: dim italic, below the input.
+- Sensitive: `password=True` on the Textual `Input` + `[show]` toggle.
+- Required + empty: red border. Required + filled: green border.
+- Auto-filled from saved: neutral border + `✓ saved` badge.
 
 ### Footer
 
 - Status: `N/M required ✓` or `N/M required — X missing`
-- `[Cancel]` — always enabled; closes modal, returns cancellation result
-- `[Install & Save]` — disabled until all required fields are non-empty
+- `[Cancel]` always enabled. `[Install & Save]` disabled until all required fields filled.
 
 ### Keyboard
 
 | Key | Action |
 |-----|--------|
 | `Tab` / `Shift+Tab` | Move between fields |
-| `Enter` | If `[Install & Save]` is enabled, submit |
-| `Escape` | Cancel (same as `[Cancel]`) |
-| `Ctrl+H` | Toggle show/hide on the focused sensitive field |
+| `Enter` | Submit (if `[Install & Save]` enabled) |
+| `Escape` | Cancel |
+| `Ctrl+H` | Toggle show/hide on focused sensitive field |
 
 ---
 
@@ -281,13 +260,14 @@ dmcp runs. The LLM is paused — no further LLM calls until the modal resolves.
 
 | File | Change |
 |------|--------|
-| `jarvis/core/params_store.py` | New — read/write `jarvis_params.toml`; get/set per server |
+| `jarvis/core/params_store.py` | New — read/write `jarvis_params.toml` per server |
 | `jarvis/tui/server_config_modal.py` | New — Textual `ModalScreen` with grouped field form |
-| `jarvis/runtime/root_actions.py` | `_handle_install_server`: fetch manifest config fields, open modal if any, inject values before dmcp call |
-| `jarvis/dispatch/dmcp_registry.py` | `install_server`: accept optional `env` dict; inject as env vars for the dmcp subprocess |
-| `jarvis/dispatch/adapter.py` | `install_server`: pass env through to dmcp_registry |
-| `jarvis/dispatch/dmcp_registry.py` | New fn `get_server_manifest(server_id)`: read `configurableProperties` from registry manifest file (pre-install) or `dmcp info --json` (post-install) |
-| `mcp-registry/servers/*/manifest.json` | Add `configurableProperties` to any server that requires config (Brave, etc.) |
+| `jarvis/runtime/root_actions.py` | `_handle_install_server`: read manifest, open modal, dmcp config set, dmcp setup |
+| `jarvis/dispatch/dmcp_registry.py` | New fn `get_server_manifest(server_id)`: read installed manifest; fall back to registry clone |
+| `jarvis/dispatch/dmcp_registry.py` | New fn `run_server_setup(server_id)`: call `dmcp setup <id>`, capture stderr |
+| `jarvis/tui/lifecycle.py` | Register `open_config_modal` TUI callback |
+| `mcp-registry/servers/*/manifest.json` | Add `configurableProperties` to servers that require config |
+| `dmcp/src/models.rs` | **Done** — `ConfigurableProperty` struct + field on `Manifest` |
 
 ### `params_store.py` interface
 
@@ -298,8 +278,7 @@ class ParamsStore:
     def set_many(self, server_id: str, values: dict[str, str]) -> None: ...
 ```
 
-Backed by `~/.config/jarvis/jarvis_params.toml`. Thread-safe writes via
-atomic replace (write temp file → rename).
+Atomic writes: write to temp file → rename.
 
 ### Modal result type
 
@@ -307,92 +286,15 @@ atomic replace (write temp file → rename).
 @dataclass
 class ConfigModalResult:
     confirmed: bool
-    values: dict[str, str]          # all field values at time of submit/cancel
-    missing_required: list[str]     # keys that were required but empty on cancel
+    values: dict[str, str]        # all field values at submit/cancel
+    missing_required: list[str]   # required keys that were empty on cancel
 ```
 
 ---
 
-## Resolved Design Questions
-
-### 1. dmcp env injection
-
-`dmcp install` does NOT accept env vars on the command line. Config is set
-*after* install via `dmcp config set <server_id> KEY value`, which writes
-`"config": {"KEY": "value"}` into the installed manifest JSON. When the server
-process is later spawned, dmcp's `config_to_env()` converts that map to actual
-environment variables passed to the process via `.envs()`.
-
-**Consequence for our flow**: The modal fires before the *first* `get_server_docs`
-call, not before `install`. Correct sequence:
-
-```
-install (bare, no config) → configure (dmcp config set per key) → get_server_docs
-```
-
-The existing `configure_server` action already calls `dmcp config set` correctly.
-The modal just needs to collect values and call `configure_server` before the
-server is first started.
-
-### 2. Manifest fetch for `configurableProperties`
-
-Two cases, both fully local — no internet required either way:
-
-1. **Server already installed**: read directly from the installed manifest at
-   `~/.local/share/mcp/installed/<server_id>/manifest.json`. No registry lookup
-   needed — the manifest was written there by dmcp at install time.
-
-2. **Server not yet installed**: read from the local registry clone at
-   `~/.local/share/mcp/registry/<server_id>/manifest.json`. dmcp syncs the
-   registry on first run and caches it locally; no live network call needed.
-
-`get_server_manifest()` checks installed path first, falls back to registry
-clone. If neither exists, returns empty `configurableProperties` and install
-proceeds without the modal (fail-safe — worst case is the server errors on
-first start, which we already handle via the runtime reconfigure path).
-
-### 3. `configurableProperties` is Python-owned, not dmcp-owned
-
-dmcp's `Manifest` struct has no `configurableProperties` field — the field exists
-in the JSON but dmcp silently ignores it. dmcp only knows about the flat `config`
-map (the values, not the schema). A comment in `dmcp/src/run.rs` notes that key
-names "must match `configurableProperties.key`" but dmcp does not enforce this.
-
-**This is a gap that needs to be fixed in dmcp.** The `Manifest` struct in
-`dmcp/src/models.rs` should include a properly typed `configurableProperties`
-field, and `dmcp info --json` should serialize it. This makes the schema
-machine-readable for any tool that wraps dmcp (not just JARVIS).
-
-Required dmcp changes:
-- Add `ConfigurableProperty` struct to `models.rs` with fields: `key`, `label`,
-  `description`, `sensitive`, `required`, `default`
-- Add `configurable_properties: Option<Vec<ConfigurableProperty>>` to `Manifest`
-- `dmcp info --json` then automatically includes the field via serde serialization
-- Optionally: add a dedicated `dmcp configurable-properties <server_id>` subcommand
-  that returns just the array (simpler for callers that only need this field)
-
-Until the dmcp change lands, Python reads the manifest JSON directly and parses
-`configurableProperties` itself. The two approaches are compatible — same JSON
-structure either way.
-
-### 4. Encryption at rest
-
-For v1, plaintext in `jarvis_params.toml` is acceptable — same as how most CLI
-tools store API keys in config files (`.netrc`, `~/.config/gh/hosts.yml`, etc.).
-Future: integrate with `jarvis_keys.c` kernel keyring already present in
-`linux-jarvisos`.
-
-4. **Re-entering values during reinstall**: If a server is uninstalled and
-   reinstalled, the modal should pre-fill from `jarvis_params.toml` without
-   asking the user to re-enter anything they already provided. This is the
-   primary motivation for the persistent store.
-
----
-
-## Out of Scope (for this iteration)
+## Out of Scope (this iteration)
 
 - Encrypting `jarvis_params.toml` at rest
-- A standalone "manage saved params" screen (edit/delete saved values outside
-  of the install flow)
+- Standalone "manage saved params" screen
 - Multi-user / per-session param scoping
-- Params validation beyond "non-empty required" (e.g. format checking an API key)
+- Format validation beyond "non-empty required"
