@@ -79,8 +79,17 @@ async def _handle_get_server_docs(
     tools_error = tools_result.get("error") if isinstance(tools_result, dict) else None
     logger.info(f"JARVIS: get_server_docs '{server_id}' → {len(tools)} tool(s)")
 
+    # When the server fails to start due to missing config, surface the exact
+    # env-var key names from configurableProperties so the LLM doesn't guess.
+    configurable_props = None
+    if not tools and tools_error:
+        manifest = await app.dispatch.get_server_manifest(server_id)
+        configurable_props = manifest.get("configurableProperties") or None
+
     context = build_root_context(app, logger)
-    context += "\n" + format_server_docs(server_id, tools, error=tools_error)
+    context += "\n" + format_server_docs(
+        server_id, tools, error=tools_error, configurable_props=configurable_props
+    )
     response = await ask_llm(app, logger, context, tag="root-get-server-docs")
     await app._act_on_root_response(response, depth + 1)
 
@@ -172,9 +181,15 @@ async def _handle_install_server(
     tools = tools_result.get("tools", []) if isinstance(tools_result, dict) else []
     tools_error = tools_result.get("error") if isinstance(tools_result, dict) else None
 
+    install_configurable_props = manifest.get("configurableProperties") or None
     context = build_root_context(app, logger)
     context += f"\nINSTALL_RESULT: {server_id} installed successfully."
-    context += "\n" + format_server_docs(server_id, tools, error=tools_error)
+    context += "\n" + format_server_docs(
+        server_id,
+        tools,
+        error=tools_error,
+        configurable_props=install_configurable_props,
+    )
     response = await ask_llm(app, logger, context, tag="root-install-result")
     await app._act_on_root_response(response, depth + 1)
 

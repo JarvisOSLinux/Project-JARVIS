@@ -145,6 +145,7 @@ def format_server_docs(
     server_id: str,
     tools: List[Dict[str, Any]],
     error: Optional[str] = None,
+    configurable_props: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     """Format a server's tool list into a SERVER_DOCS context block.
 
@@ -155,11 +156,27 @@ def format_server_docs(
         if error:
             err_lower = error.lower()
             if any(hint in err_lower for hint in _CONFIG_ERROR_HINTS):
-                return (
-                    f"SERVER_DOCS: {server_id} — server requires configuration before it can run.\n"
-                    f"  Error: {error}\n"
-                    f"  Use configure_server to set the required value(s), then retry get_server_docs."
-                )
+                lines = [
+                    f"SERVER_DOCS: {server_id} — server requires configuration before it can run.",
+                    f"  Error: {error}",
+                ]
+                if configurable_props:
+                    required_keys = [
+                        p["key"]
+                        for p in configurable_props
+                        if isinstance(p, dict) and p.get("key")
+                    ]
+                    if required_keys:
+                        key_list = ", ".join(required_keys)
+                        example = ", ".join(f'"{k}": "<value>"' for k in required_keys)
+                        lines.append(f"  Required config key(s): {key_list}")
+                        lines.append(
+                            f'  Call: {{"action": "configure_server", "server_id": "{server_id}", "config": {{{example}}}}}'
+                        )
+                else:
+                    lines.append("  Use configure_server to set the required value(s).")
+                lines.append("  Then retry get_server_docs to verify it starts.")
+                return "\n".join(lines)
             return (
                 f"SERVER_DOCS: {server_id} — failed to start: {error}\n"
                 f"  The server may need to be uninstalled and reinstalled."
