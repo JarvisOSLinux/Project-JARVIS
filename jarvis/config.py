@@ -48,6 +48,17 @@ class Config:
     # Default 0.7 gives a balance of consistency and variety.
     LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
 
+    # Ollama extended thinking mode. "true" keeps reasoning in the separate
+    # `thinking` field (prevents leaking into `content`). "false" disables
+    # thinking entirely. Unset = let the model decide. Ignored by models that
+    # don't support the option.
+    _llm_think_raw = os.getenv("LLM_THINK", "").lower()
+    LLM_THINK = (
+        True
+        if _llm_think_raw == "true"
+        else False if _llm_think_raw == "false" else None
+    )
+
     # Ollama strict JSON mode (format="json"). Default off because reasoning
     # models (qwen3, gpt-oss, deepseek-r1, ...) emit thinking tokens that
     # conflict with grammar-constrained decoding and return empty content.
@@ -213,7 +224,7 @@ Valid formats:
 
 {{"action": "respond", "output": "your message", "goal_updates": []}}
 
-{{"action": "search_tools", "capability": "execute shell commands", "goal_updates": []}}
+{{"action": "search_tools", "capability": "<domain or service — e.g. web search, github api, file access>", "goal_updates": []}}
 
 {{"action": "get_server_docs", "server_id": "some-server", "goal_updates": []}}
 
@@ -251,10 +262,17 @@ list_memory — List all stored memory themes.
 {data_consent_note}
 --- Tool use (multi-step) ---
 
-search_tools — Find MCP servers that can perform a task.
-  Think about WHAT CAPABILITY you need, not the user's literal words.
-  WRONG:   {{"action": "search_tools", "capability": "check python version"}}
-  CORRECT: {{"action": "search_tools", "capability": "execute shell commands"}}
+search_tools — Find MCP servers by the domain or service you need.
+  Describe WHAT YOU NEED (the domain/service), not HOW to implement it manually.
+  The registry contains servers for every domain — web search, GitHub, email,
+  music, databases, smart home, and more. It grows independently; never assume
+  only installed servers exist.
+  Shell is the last resort — only search for "shell commands" when the task is
+  genuinely about running a script with no specialized alternative available.
+  Good capability strings: "web search", "brave search", "github API",
+    "read and write files", "execute shell commands"
+  Bad:  "check python version"  ← too literal, not a domain
+  Bad:  "execute shell commands"  ← when you actually need web search or a specific API
 
 get_server_docs — Fetch full tool list for a server shown in SEARCH_RESULTS.
   Only use this on servers marked [INSTALLED].
@@ -264,8 +282,14 @@ install_server — Install a server shown in SEARCH_RESULTS as [available].
   After install, SERVER_DOCS are provided automatically — no extra step needed.
   {{"action": "install_server", "server_id": "<id>"}}
 
+uninstall_server — Remove an installed MCP server from the system.
+  Use when the user asks to uninstall, remove, or delete an installed server.
+  {{"action": "uninstall_server", "server_id": "<id>"}}
+
 configure_server — Set required config values on an installed server.
-  Use when SERVER_DOCS or install output indicates required configuration.
+  Use when SERVER_DOCS indicates "server requires configuration" (e.g. missing API key).
+  If you do not know the required value, use respond to ask the user for it first.
+  Never invent or guess API keys — always ask the user when the value is unknown.
   {{"action": "configure_server", "server_id": "<id>", "config": {{"KEY": "value"}}}}
 
 dispatch — Execute tool calls. Only after seeing SERVER_DOCS.
@@ -384,10 +408,17 @@ Memory is disabled. Do not use store, recall, search_memory, or list_memory.
 
 --- Tool use (multi-step) ---
 
-search_tools — Find MCP servers that can perform a task.
-  Think about WHAT CAPABILITY you need, not the user's literal words.
-  WRONG:   {{"action": "search_tools", "capability": "check python version"}}
-  CORRECT: {{"action": "search_tools", "capability": "execute shell commands"}}
+search_tools — Find MCP servers by the domain or service you need.
+  Describe WHAT YOU NEED (the domain/service), not HOW to implement it manually.
+  The registry contains servers for every domain — web search, GitHub, email,
+  music, databases, smart home, and more. It grows independently; never assume
+  only installed servers exist.
+  Shell is the last resort — only search for "shell commands" when the task is
+  genuinely about running a script with no specialized alternative available.
+  Good capability strings: "web search", "brave search", "github API",
+    "read and write files", "execute shell commands"
+  Bad:  "check python version"  ← too literal, not a domain
+  Bad:  "execute shell commands"  ← when you actually need web search or a specific API
 
 get_server_docs — Fetch full tool list for a server shown in SEARCH_RESULTS.
   Only use this on servers marked [INSTALLED].

@@ -22,12 +22,14 @@ class OllamaProvider(BaseLLMProvider):
         auto_pull: bool = False,
         temperature: Optional[float] = None,
         strict_json: bool = False,
+        think: Optional[bool] = None,
     ):
         super().__init__(model)
         self.base_url = base_url or "http://localhost:11434"
         self.auto_pull = auto_pull
         self.temperature = temperature
         self.strict_json = strict_json
+        self.think = think
 
         import os
 
@@ -64,6 +66,11 @@ class OllamaProvider(BaseLLMProvider):
             # Grammar-constrained JSON. Conflicts with thinking-mode models —
             # leave off unless the user explicitly opts in.
             kwargs["format"] = "json"
+        if self.think is not None:
+            # think=True keeps the reasoning chain in the separate `thinking`
+            # field rather than letting it leak into `content`. Silently ignored
+            # by models that don't support the option.
+            kwargs["think"] = self.think
 
         try:
             response = self._client.chat(**kwargs)
@@ -100,11 +107,25 @@ class OllamaProvider(BaseLLMProvider):
         reasoning in a separate ``thinking`` field and may leave ``content``
         empty for turns that require deep reasoning. Fall back to ``thinking``
         so those models still return parseable output.
+
+        Some models leak their reasoning chain into ``content`` using special
+        chat-template tokens (e.g. ``<|start|>assistant<|channel|>analysis``).
+        Strip those tokens so downstream JSON parsers see clean output.
         """
+        import re
+
         msg = response["message"]
         content = msg.get("content") or ""
         if content:
-            return content
+            # Strip chat-template channel tokens that some thinking models
+            # emit in-band: <|start|>, <|channel|>..., <|message|>, <|end|>
+            cleaned = re.sub(r"<\|[^|>]+\|>", "", content).strip()
+            if cleaned != content:
+                logger.debug(
+                    f"Ollama: stripped special tokens from content "
+                    f"({len(content)} → {len(cleaned)} chars)"
+                )
+            return cleaned
         thinking = msg.get("thinking") or ""
         if thinking:
             logger.debug(

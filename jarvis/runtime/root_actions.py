@@ -76,10 +76,20 @@ async def _handle_get_server_docs(
 
     tools_result = await app.dispatch.list_server_tools(server_id)
     tools = tools_result.get("tools", []) if isinstance(tools_result, dict) else []
+    tools_error = tools_result.get("error") if isinstance(tools_result, dict) else None
     logger.info(f"JARVIS: get_server_docs '{server_id}' → {len(tools)} tool(s)")
 
+    # When the server fails to start due to missing config, surface the exact
+    # env-var key names from configurableProperties so the LLM doesn't guess.
+    configurable_props = None
+    if not tools and tools_error:
+        manifest = await app.dispatch.get_server_manifest(server_id)
+        configurable_props = manifest.get("configurableProperties") or None
+
     context = build_root_context(app, logger)
-    context += "\n" + format_server_docs(server_id, tools)
+    context += "\n" + format_server_docs(
+        server_id, tools, error=tools_error, configurable_props=configurable_props
+    )
     response = await ask_llm(app, logger, context, tag="root-get-server-docs")
     await app._act_on_root_response(response, depth + 1)
 
@@ -91,9 +101,14 @@ async def _handle_install_server(
     depth: int,
     max_chain_depth: int,
 ) -> None:
+    import asyncio
+
+    from ..core.params_store import ParamsStore
+
     server_id = parsed["server_id"]
     emit_activity(app, f"Installing {server_id}…", kind="dispatch")
 
+    # Step 1: bare install (no setup script yet)
     install_result = await app.dispatch.install_server(server_id)
     if "error" in install_result:
         logger.warning(
@@ -105,18 +120,76 @@ async def _handle_install_server(
         await app._act_on_root_response(response, depth + 1)
         return
 
-    logger.info(f"JARVIS: install_server '{server_id}' succeeded")
+    # Step 2: check for configurable properties
+    manifest = await app.dispatch.get_server_manifest(server_id)
+    props = manifest.get("configurableProperties", [])
+
+    if props and app.config_modal_callback:
+        # Step 3: pre-fill from saved params
+        store = ParamsStore(server_id)
+        saved = store.get()
+        server_name = manifest.get("name") or server_id
+        server_desc = manifest.get("description") or manifest.get("summary") or ""
+
+        emit_activity(app, "Waiting for configuration…", kind="dispatch")
+
+        # Step 4: open modal and await result
+        future: asyncio.Future = asyncio.get_event_loop().create_future()
+        await app.config_modal_callback(
+            server_id, server_name, server_desc, props, saved, future
+        )
+        result = await future
+
+        if not result.confirmed:
+            missing = result.missing_required
+            logger.info(
+                f"JARVIS: install_server '{server_id}' cancelled by user"
+                + (f"; missing: {missing}" if missing else "")
+            )
+            context = build_root_context(app, logger)
+            cancelled_msg = f"INSTALL_CANCELLED: {server_id}"
+            if missing:
+                cancelled_msg += f" — user did not provide: {', '.join(missing)}"
+            context += f"\n{cancelled_msg}"
+            response = await ask_llm(app, logger, context, tag="root-install-cancelled")
+            await app._act_on_root_response(response, depth + 1)
+            return
+
+        # Step 5: persist config to manifest via dmcp config set
+        if result.values:
+            await app.dispatch.set_server_config(server_id, result.values)
+            store.set_many(result.values)
+
+    # Step 6: run setup script (receives MCP_CONFIG_* env vars from manifest.config)
+    emit_activity(app, f"Running setup for {server_id}…", kind="dispatch")
+    setup_result = await app.dispatch.run_server_setup(server_id)
+    if "error" in setup_result:
+        logger.warning(f"JARVIS: setup '{server_id}' failed: {setup_result['error']}")
+        context = build_root_context(app, logger)
+        context += f"\nINSTALL_ERROR: setup failed — {setup_result['error']}"
+        response = await ask_llm(app, logger, context, tag="root-setup-error")
+        await app._act_on_root_response(response, depth + 1)
+        return
+
+    logger.info(f"JARVIS: install_server '{server_id}' complete")
     await app.dispatch.auto_index_server(
         server_id=server_id, embeddings=get_embeddings(app)
     )
 
-    # Immediately fetch docs so the LLM can dispatch without an extra round-trip.
+    # Step 7: fetch docs so LLM can dispatch immediately
     tools_result = await app.dispatch.list_server_tools(server_id)
     tools = tools_result.get("tools", []) if isinstance(tools_result, dict) else []
+    tools_error = tools_result.get("error") if isinstance(tools_result, dict) else None
 
+    install_configurable_props = manifest.get("configurableProperties") or None
     context = build_root_context(app, logger)
     context += f"\nINSTALL_RESULT: {server_id} installed successfully."
-    context += "\n" + format_server_docs(server_id, tools)
+    context += "\n" + format_server_docs(
+        server_id,
+        tools,
+        error=tools_error,
+        configurable_props=install_configurable_props,
+    )
     response = await ask_llm(app, logger, context, tag="root-install-result")
     await app._act_on_root_response(response, depth + 1)
 
@@ -157,10 +230,45 @@ async def _handle_configure_server(
     config = parsed["config"]
     emit_activity(app, f"Configuring {server_id}…", kind="dispatch")
 
+    # Reject placeholder values — the LLM must ask the user for real secrets.
+    _PLACEHOLDERS = (
+        "your_",
+        "your-",
+        "<your",
+        "placeholder",
+        "api_key_here",
+        "insert_",
+    )
+    placeholder_keys = [
+        k
+        for k, v in config.items()
+        if any(p in str(v).lower() for p in _PLACEHOLDERS) or str(v).startswith("<")
+    ]
+    if placeholder_keys:
+        logger.warning(
+            f"JARVIS: configure_server '{server_id}' rejected placeholder value(s): {placeholder_keys}"
+        )
+        context = build_root_context(app, logger)
+        context += (
+            f"\nCONFIGURE_BLOCKED: The value(s) for {placeholder_keys} look like placeholders, "
+            "not real credentials. Use respond to ask the user for the actual value(s) before calling configure_server."
+        )
+        response = await ask_llm(app, logger, context, tag="root-configure-placeholder")
+        await app._act_on_root_response(response, depth + 1)
+        return
+
     try:
         await app.dispatch.set_server_config(server_id, config)
+        from ..core.params_store import ParamsStore
+
+        ParamsStore(server_id).set_many(
+            {app.dispatch._sanitize_config_key(k): v for k, v in config.items() if v}
+        )
         logger.info(f"JARVIS: configure_server '{server_id}' set {list(config.keys())}")
-        label = f"CONFIGURE_RESULT: set {len(config)} value(s) on {server_id}"
+        label = (
+            f"CONFIGURE_RESULT: set {len(config)} value(s) on {server_id}. "
+            f"Now call get_server_docs for {server_id} to verify the server starts correctly."
+        )
     except Exception as e:
         logger.warning(f"JARVIS: configure_server '{server_id}' failed: {e}")
         label = f"CONFIGURE_ERROR: {e}"
@@ -191,12 +299,19 @@ async def act_on_root_response(
     parsed = app.task_parser.parse(response)
 
     if "error" in parsed:
-        logger.warning(f"JARVIS: Root parse error: {parsed['error']}")
-        app.output_manager.handle_response(
-            {
-                "output": "I had trouble processing that. Could you try again?",
-            }
+        err = parsed["error"]
+        logger.warning(f"JARVIS: Root parse error: {err} — retrying with correction")
+        context = build_root_context(app, logger)
+        context += (
+            f"\nYour last response had a format error: {err}\n"
+            "Fix the JSON and try again. Reminder:\n"
+            '  {"action": "search_tools", "capability": "<domain or service needed>", "goal_updates": []}\n'
+            '  {"action": "get_server_docs", "server_id": "<id from SEARCH_RESULTS>", "goal_updates": []}\n'
+            '  {"action": "respond", "output": "<message>", "goal_updates": []}\n'
+            "Do NOT wrap fields in a 'params' object. Output exactly one JSON object."
         )
+        retry_response = await ask_llm(app, logger, context, tag="root-retry-parse")
+        await app._act_on_root_response(retry_response, depth + 1)
         return
 
     action = parsed["action"]
@@ -208,7 +323,11 @@ async def act_on_root_response(
     elif action in ("store", "recall", "search_memory", "list_memory"):
         emit_activity(app, f"Running memory action: {action}", kind="memory")
 
-    apply_goal_updates(app, parsed.get("goal_updates", []))
+    # For respond, defer goal_updates until we confirm the output is non-empty.
+    # Applying them on an empty respond dismisses goals before the user sees anything,
+    # leaving subsequent retries with no context.
+    if action != "respond":
+        apply_goal_updates(app, parsed.get("goal_updates", []))
 
     if action == "search_tools":
         await _handle_search_tools(app, logger, parsed, depth, max_chain_depth)
@@ -239,6 +358,7 @@ async def act_on_root_response(
             retry_response = await ask_llm(app, logger, context, tag="root-retry-empty")
             await app._act_on_root_response(retry_response, depth + 1)
             return
+        apply_goal_updates(app, parsed.get("goal_updates", []))
         app.output_manager.handle_response({"output": output})
         persist_assistant_turn(app, output)
         dismissed = app.goals.dismiss_completed()
