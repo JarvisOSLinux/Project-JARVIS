@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from logging import Logger
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..config import Config
@@ -142,9 +144,10 @@ async def search_servers(logger: Logger, keywords: List[str]) -> Dict[str, Any]:
     for ls in local_servers:
         if ls["id"] in registry_ids:
             continue
-        searchable = " ".join(
-            [ls["id"], ls["name"], ls["description"]] + ls["keywords"]
-        ).lower()
+        # Match against description and keywords only — not the server ID.
+        # Server IDs encode implementation details (e.g. "-py" suffix) that
+        # would cause false positives when users search by language intent.
+        searchable = " ".join([ls["name"], ls["description"]] + ls["keywords"]).lower()
         if any(kw in searchable for kw in kw_lower):
             servers.append(ls)
 
@@ -160,38 +163,52 @@ async def search_servers(logger: Logger, keywords: List[str]) -> Dict[str, Any]:
     return {"servers": sorted_servers}
 
 
-async def list_visible_servers(logger: Logger) -> Dict[str, Any]:
-    """Return all visible MCP servers via `dmcp browse --json` with no keyword filter."""
-    raw = await run_dmcp(logger, "browse", "--json")
-    if raw is None:
-        return {"error": "dmcp browse failed", "servers": []}
-    try:
-        servers = json.loads(raw)
-    except json.JSONDecodeError:
-        return {"error": "dmcp returned invalid JSON", "servers": []}
-    if not isinstance(servers, list):
-        servers = servers.get("servers", []) if isinstance(servers, dict) else []
-    installed = [s for s in servers if s.get("installed")]
-    available = [s for s in servers if not s.get("installed")]
-    return {"servers": installed + available}
-
-
 async def install_server(logger: Logger, server_id: str) -> Dict[str, Any]:
-    """Install an MCP server from registry via `dmcp install`."""
-    logger.info(f"Dispatch: Installing MCP server '{server_id}'")
-    raw = await run_dmcp(logger, "install", server_id)
+    """Install an MCP server without running its setup script (`dmcp install --no_setup`)."""
+    logger.info(f"Dispatch: Installing MCP server '{server_id}' (no setup)")
+    raw = await run_dmcp(logger, "install", "--no_setup", server_id)
     if raw is None:
         return {"error": f"Failed to install server '{server_id}'"}
     return {"installed": server_id, "output": raw.strip()}
 
 
+async def uninstall_server(logger: Logger, server_id: str) -> Dict[str, Any]:
+    """Uninstall an MCP server via `dmcp uninstall`."""
+    logger.info(f"Dispatch: Uninstalling MCP server '{server_id}'")
+    raw = await run_dmcp(logger, "uninstall", server_id)
+    if raw is None:
+        return {"error": f"Failed to uninstall server '{server_id}'"}
+    return {"uninstalled": server_id, "output": raw.strip()}
+
+
 async def list_server_tools(logger: Logger, server_id: str) -> Dict[str, Any]:
     """List tools available on an installed MCP server."""
     logger.info(f"Dispatch: Listing tools for server '{server_id}'")
-    raw = await run_dmcp(logger, "tools", server_id, "--json")
-    if raw is None:
-        return {"error": f"Failed to list tools for '{server_id}'", "tools": []}
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            Config.DMCP_BINARY,
+            "tools",
+            server_id,
+            "--json",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+    except FileNotFoundError:
+        return {"error": "dmcp binary not found", "tools": []}
+    except asyncio.TimeoutError:
+        return {"error": "dmcp tools timed out", "tools": []}
 
+    stderr_text = stderr.decode().strip()
+
+    if proc.returncode != 0:
+        logger.warning(f"Dispatch: dmcp tools {server_id} failed: {stderr_text}")
+        return {
+            "error": stderr_text or f"Failed to list tools for '{server_id}'",
+            "tools": [],
+        }
+
+    raw = stdout.decode()
     try:
         tools = json.loads(raw)
     except json.JSONDecodeError:
@@ -204,3 +221,58 @@ async def list_server_tools(logger: Logger, server_id: str) -> Dict[str, Any]:
 
     logger.info(f"Dispatch: Server '{server_id}' has {len(tools)} tool(s)")
     return {"server": server_id, "tools": tools}
+
+
+def _dmcp_base_dir() -> Path:
+    data_home = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+    return data_home / "mcp"
+
+
+async def get_server_manifest(logger: Logger, server_id: str) -> Dict[str, Any]:
+    """Return the manifest dict for a server, reading locally with no network call.
+
+    Checks the installed manifest first; falls back to the registry clone.
+    Returns an empty dict if neither exists.
+    """
+    base = _dmcp_base_dir()
+    candidates = [
+        base / "installed" / server_id / "manifest.json",
+        base / "registry" / server_id / "manifest.json",
+    ]
+    for path in candidates:
+        if path.exists():
+            try:
+                with open(path) as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.warning(f"Dispatch: failed to read manifest at {path}: {e}")
+    logger.debug(f"Dispatch: no local manifest found for '{server_id}'")
+    return {}
+
+
+async def run_server_setup(logger: Logger, server_id: str) -> Dict[str, Any]:
+    """Run the setup script for an installed server via `dmcp setup <id>`."""
+    logger.info(f"Dispatch: Running setup for '{server_id}'")
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            Config.DMCP_BINARY,
+            "setup",
+            server_id,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+    except FileNotFoundError:
+        return {"error": "dmcp binary not found"}
+    except asyncio.TimeoutError:
+        return {"error": f"dmcp setup '{server_id}' timed out"}
+
+    stderr_text = stderr.decode().strip()
+    stdout_text = stdout.decode().strip()
+
+    if proc.returncode != 0:
+        logger.warning(f"Dispatch: dmcp setup '{server_id}' failed: {stderr_text}")
+        return {"error": stderr_text or f"Setup failed for '{server_id}'"}
+
+    logger.info(f"Dispatch: Setup succeeded for '{server_id}'")
+    return {"ok": True, "output": stdout_text}

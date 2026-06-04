@@ -48,6 +48,17 @@ class Config:
     # Default 0.7 gives a balance of consistency and variety.
     LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
 
+    # Ollama extended thinking mode. "true" keeps reasoning in the separate
+    # `thinking` field (prevents leaking into `content`). "false" disables
+    # thinking entirely. Unset = let the model decide. Ignored by models that
+    # don't support the option.
+    _llm_think_raw = os.getenv("LLM_THINK", "").lower()
+    LLM_THINK = (
+        True
+        if _llm_think_raw == "true"
+        else False if _llm_think_raw == "false" else None
+    )
+
     # Ollama strict JSON mode (format="json"). Default off because reasoning
     # models (qwen3, gpt-oss, deepseek-r1, ...) emit thinking tokens that
     # conflict with grammar-constrained decoding and return empty content.
@@ -141,8 +152,9 @@ class Config:
     ENFORCE_EMBEDDING_SEARCH = (
         os.getenv("ENFORCE_EMBEDDING_SEARCH", "false").lower() == "true"
     )
-    # Minimum visible servers before vector search auto-enables
-    EMBEDDING_SEARCH_THRESHOLD = int(os.getenv("EMBEDDING_SEARCH_THRESHOLD", "100"))
+    # Minimum visible servers before vector search auto-enables.
+    # Default is 3 so embedding fires as soon as any servers are indexed.
+    EMBEDDING_SEARCH_THRESHOLD = int(os.getenv("EMBEDDING_SEARCH_THRESHOLD", "3"))
 
     # Data directory — when set (e.g. systemd JARVIS_DATA_DIR=/var/lib/jarvis),
     # memory, goal archive, and default socket use this base path
@@ -212,7 +224,15 @@ Valid formats:
 
 {{"action": "respond", "output": "your message", "goal_updates": []}}
 
-{{"action": "dispatch", "intent": "what to accomplish"}}
+{{"action": "search_tools", "capability": "<domain or service — e.g. web search, github api, file access>", "goal_updates": []}}
+
+{{"action": "get_server_docs", "server_id": "some-server", "goal_updates": []}}
+
+{{"action": "install_server", "server_id": "some-server", "goal_updates": []}}
+
+{{"action": "configure_server", "server_id": "some-server", "config": {{"KEY": "value"}}, "goal_updates": []}}
+
+{{"action": "dispatch", "tasks": [{{"server": "s", "tool": "t", "params": {{}}}}], "goal_updates": []}}
 
 {{"action": "store", "theme": "topic", "content": "fact", "goal_updates": []}}
 
@@ -240,14 +260,49 @@ recall — Recall stored facts by exact theme name.
 search_memory — Search all memories by meaning. Use when you need context.
 list_memory — List all stored memory themes.
 {data_consent_note}
-run — Execute a task using external tools (shell, files, web, etc.).
-      The system finds and runs the right tool automatically.
-      intent = SPECIFIC TASK, NOT the tool type.
-      WRONG:   {{"action": "run", "intent": "run shell command"}}
-      CORRECT: {{"action": "run", "intent": "check python version"}}
+--- Tool use (multi-step) ---
 
-Many MCP servers can exist in the registry (shell, filesystem, web APIs, databases, and more). Discovery matches from the task; you are not given a full catalog of names.
-If NO_TOOLS_FOUND or the wrong tools show up, retry run with a clearer or rephrased intent. After several real tries, respond honestly that no suitable installed tool is available — do not invent servers.
+search_tools — Find MCP servers by the domain or service you need.
+  Describe WHAT YOU NEED (the domain/service), not HOW to implement it manually.
+  The registry contains servers for every domain — web search, GitHub, email,
+  music, databases, smart home, and more. It grows independently; never assume
+  only installed servers exist.
+  Shell is the last resort — only search for "shell commands" when the task is
+  genuinely about running a script with no specialized alternative available.
+  Good capability strings: "web search", "brave search", "github API",
+    "read and write files", "execute shell commands"
+  Bad:  "check python version"  ← too literal, not a domain
+  Bad:  "execute shell commands"  ← when you actually need web search or a specific API
+
+get_server_docs — Fetch full tool list for a server shown in SEARCH_RESULTS.
+  Only use this on servers marked [INSTALLED].
+  {{"action": "get_server_docs", "server_id": "<id from SEARCH_RESULTS>"}}
+
+install_server — Install a server shown in SEARCH_RESULTS as [available].
+  After install, SERVER_DOCS are provided automatically — no extra step needed.
+  {{"action": "install_server", "server_id": "<id>"}}
+
+uninstall_server — Remove an installed MCP server from the system.
+  Use when the user asks to uninstall, remove, or delete an installed server.
+  {{"action": "uninstall_server", "server_id": "<id>"}}
+
+configure_server — Set required config values on an installed server.
+  Use when SERVER_DOCS indicates "server requires configuration" (e.g. missing API key).
+  If you do not know the required value, use respond to ask the user for it first.
+  Never invent or guess API keys — always ask the user when the value is unknown.
+  {{"action": "configure_server", "server_id": "<id>", "config": {{"KEY": "value"}}}}
+
+dispatch — Execute tool calls. Only after seeing SERVER_DOCS.
+  Use exact tool names and server id from SERVER_DOCS.
+  ⚠ RULE — PARALLEL EXECUTION: Every task in one dispatch call starts at the same instant.
+  Before batching two tasks, ask yourself: "Does task 2 need task 1 to finish first?"
+  If YES → two separate dispatch calls. Get DISPATCH_RESULT from the first, then send the second.
+  If NO → safe to batch.
+  Common failure — whitelist/setup before use:
+    WRONG (race): {{"action":"dispatch","tasks":[{{"tool":"add_to_whitelist",...}},{{"tool":"execute_command",...}}]}}
+      execute_command starts BEFORE add_to_whitelist writes the entry → fails every time.
+    CORRECT (sequential): dispatch [add_to_whitelist] → wait for success EXIT → dispatch [execute_command]
+  Other sequential patterns: install → configure, create_file → read_file, grant_permission → use_resource.
 
 --- Actions (exact format) ---
 
@@ -258,8 +313,33 @@ If NO_TOOLS_FOUND or the wrong tools show up, retry run with a clearer or rephra
 }}
 
 {{
-    "action": "run",
-    "intent": "<specific task to accomplish>",
+    "action": "search_tools",
+    "capability": "<capability needed, not user's words>",
+    "goal_updates": []
+}}
+
+{{
+    "action": "get_server_docs",
+    "server_id": "<server id from SEARCH_RESULTS>",
+    "goal_updates": []
+}}
+
+{{
+    "action": "install_server",
+    "server_id": "<server id from SEARCH_RESULTS>",
+    "goal_updates": []
+}}
+
+{{
+    "action": "configure_server",
+    "server_id": "<server id>",
+    "config": {{"KEY": "value"}},
+    "goal_updates": []
+}}
+
+{{
+    "action": "dispatch",
+    "tasks": [{{"server": "<server_id>", "tool": "<tool_name>", "params": {{}}}}],
     "goal_updates": []
 }}
 
@@ -291,11 +371,19 @@ If NO_TOOLS_FOUND or the wrong tools show up, retry run with a clearer or rephra
 }}
 
 --- Context ---
-You receive: GOALS (with IDs), NEW INPUT, and optionally WAIT_RESULT/DISPATCH_RESULT from tool execution.
-Memory operation results appear as STORE_RESULT, RECALL_RESULT, SEARCH_MEMORY_RESULT, LIST_MEMORY_RESULT.
-RELEVANT MEMORIES may be included automatically based on user input (RAG retrieval).
+You receive: GOALS (with IDs), NEW INPUT, SEARCH_RESULTS, SERVER_DOCS, DISPATCH_RESULT, WAIT_RESULT.
+Memory results: STORE_RESULT, RECALL_RESULT, SEARCH_MEMORY_RESULT, LIST_MEMORY_RESULT.
+RELEVANT MEMORIES may be included automatically (RAG).
 Include goal_updates in respond: "completed" or "failed" with result.
-NO_TOOLS_FOUND means retry run with a more specific or rephrased intent — MUST retry at least twice before giving up. If still no match, tell the user the right tool is unavailable.
+DISPATCH_RESULT shows only the signals for YOUR CURRENT BATCH. EXIT signals in it confirm
+success or failure. No EXIT yet means tasks are still running — dispatch again to re-check or
+proceed only when you have a success EXIT.
+
+--- Tool search rules ---
+- SEARCH_RESULTS empty → retry search_tools with a different capability description.
+- Make at least 2 genuinely different attempts before telling the user you cannot help.
+- No installed server fits → use install_server, then dispatch using SERVER_DOCS.
+- You may search for multiple servers in sequence for complex multi-tool tasks.
 
 --- Memory guidelines ---
 - Choose descriptive theme names (e.g. "user_preferences", "school_schedule")
@@ -317,14 +405,42 @@ OS: {system} {release} ({machine}), Shell: {shell}
 
 respond — Direct reply. Use for chat, greetings, or after a result comes back.
 Memory is disabled. Do not use store, recall, search_memory, or list_memory.
-run — Execute a task using external tools (shell, files, web, etc.).
-      The system finds and runs the right tool automatically.
-      intent = SPECIFIC TASK, NOT the tool type.
-      WRONG:   {{"action": "run", "intent": "run shell command"}}
-      CORRECT: {{"action": "run", "intent": "check python version"}}
 
-Many MCP servers can exist in the registry (shell, filesystem, web APIs, databases, and more). Discovery matches from the task; you are not given a full catalog of names.
-If NO_TOOLS_FOUND or the wrong tools show up, retry run with a clearer or rephrased intent. After several real tries, respond honestly that no suitable installed tool is available — do not invent servers.
+--- Tool use (multi-step) ---
+
+search_tools — Find MCP servers by the domain or service you need.
+  Describe WHAT YOU NEED (the domain/service), not HOW to implement it manually.
+  The registry contains servers for every domain — web search, GitHub, email,
+  music, databases, smart home, and more. It grows independently; never assume
+  only installed servers exist.
+  Shell is the last resort — only search for "shell commands" when the task is
+  genuinely about running a script with no specialized alternative available.
+  Good capability strings: "web search", "brave search", "github API",
+    "read and write files", "execute shell commands"
+  Bad:  "check python version"  ← too literal, not a domain
+  Bad:  "execute shell commands"  ← when you actually need web search or a specific API
+
+get_server_docs — Fetch full tool list for a server shown in SEARCH_RESULTS.
+  Only use this on servers marked [INSTALLED].
+  {{"action": "get_server_docs", "server_id": "<id from SEARCH_RESULTS>"}}
+
+install_server — Install a server shown in SEARCH_RESULTS as [available].
+  After install, SERVER_DOCS are provided automatically — no extra step needed.
+  {{"action": "install_server", "server_id": "<id>"}}
+
+configure_server — Set required config values on an installed server.
+  {{"action": "configure_server", "server_id": "<id>", "config": {{"KEY": "value"}}}}
+
+dispatch — Execute tool calls. Only after seeing SERVER_DOCS.
+  ⚠ RULE — PARALLEL EXECUTION: Every task in one dispatch call starts at the same instant.
+  Before batching two tasks, ask yourself: "Does task 2 need task 1 to finish first?"
+  If YES → two separate dispatch calls. Get DISPATCH_RESULT from the first, then send the second.
+  If NO → safe to batch.
+  Common failure — whitelist/setup before use:
+    WRONG (race): {{"action":"dispatch","tasks":[{{"tool":"add_to_whitelist",...}},{{"tool":"execute_command",...}}]}}
+      execute_command starts BEFORE add_to_whitelist writes the entry → fails every time.
+    CORRECT (sequential): dispatch [add_to_whitelist] → wait for success EXIT → dispatch [execute_command]
+  Other sequential patterns: install → configure, create_file → read_file, grant_permission → use_resource.
 
 --- Actions (exact format) ---
 
@@ -335,15 +451,46 @@ If NO_TOOLS_FOUND or the wrong tools show up, retry run with a clearer or rephra
 }}
 
 {{
-    "action": "run",
-    "intent": "<specific task to accomplish>",
+    "action": "search_tools",
+    "capability": "<capability needed, not user's words>",
+    "goal_updates": []
+}}
+
+{{
+    "action": "get_server_docs",
+    "server_id": "<server id from SEARCH_RESULTS>",
+    "goal_updates": []
+}}
+
+{{
+    "action": "install_server",
+    "server_id": "<server id from SEARCH_RESULTS>",
+    "goal_updates": []
+}}
+
+{{
+    "action": "configure_server",
+    "server_id": "<server id>",
+    "config": {{"KEY": "value"}},
+    "goal_updates": []
+}}
+
+{{
+    "action": "dispatch",
+    "tasks": [{{"server": "<server_id>", "tool": "<tool_name>", "params": {{}}}}],
     "goal_updates": []
 }}
 
 --- Context ---
-You receive: GOALS (with IDs), NEW INPUT, and optionally WAIT_RESULT/DISPATCH_RESULT from tool execution.
+You receive: GOALS (with IDs), NEW INPUT, SEARCH_RESULTS, SERVER_DOCS, DISPATCH_RESULT, WAIT_RESULT.
 Include goal_updates in respond: "completed" or "failed" with result.
-NO_TOOLS_FOUND means retry run with a more specific or rephrased intent — MUST retry at least twice before giving up. If still no match, tell the user the right tool is unavailable.
+DISPATCH_RESULT shows only the signals for YOUR CURRENT BATCH. EXIT signals in it confirm
+success or failure. No EXIT yet means tasks are still running.
+
+--- Tool search rules ---
+- SEARCH_RESULTS empty → retry search_tools with a different capability description.
+- Make at least 2 genuinely different attempts before telling the user you cannot help.
+- No installed server fits → use install_server, then dispatch using SERVER_DOCS.
 
 Output exactly one JSON object. First char {{, last char }}.
 """
@@ -364,8 +511,6 @@ You are operating in DISPATCH mode. Your job is to find and execute MCP server t
 
 CRITICAL: Your ENTIRE response must be a single valid JSON object.
 
-The registry can contain many kinds of servers; only installed ones appear as MATCHED_TOOLS. If discovery is weak, re-plan with different wording, search with different keywords, or install from CANDIDATE_SERVERS. If nothing fits after real attempts, use done with an honest failure summary — do not invent servers.
-
 --- Workflow ---
 1. plan: ALWAYS start here. Break the intent into sub-tasks. For each sub-task,
    give a short intent and a few keywords the system can look up.
@@ -374,7 +519,7 @@ The registry can contain many kinds of servers; only installed ones appear as MA
 3. If MATCHED_TOOLS is present → dispatch those tools with correct params.
 4. If only CANDIDATE_SERVERS is present → install a promising one,
    then list_tools, then dispatch.
-5. If nothing matched → re-plan, search with different keywords, or done with a failure summary.
+5. If nothing matched → search with different keywords, or done with a failure summary.
 6. done: Return a concise summary to root.
 
 --- Actions ---
@@ -440,7 +585,7 @@ Return to root with results:
 - ALWAYS start with "plan" — even for a single task.
 - If MATCHED_TOOLS is present, dispatch those. Never invent tool names.
 - If only CANDIDATE_SERVERS is present, install + list_tools first.
-- If nothing matched, re-plan or search with different wording/keywords before giving up; then done with a failure summary if still no fit.
+- If nothing matched, try search with different keywords, or done with a failure summary.
 - You can dispatch multiple tasks in one action for parallelism.
 - Output exactly one JSON object — no preamble, no trailing text.
 
@@ -452,8 +597,6 @@ You are operating in DISPATCH mode. Your job is to find and execute MCP server t
 
 CRITICAL: Your ENTIRE response must be a single valid JSON object.
 
-The registry can contain many kinds of servers; only installed ones appear as MATCHED_TOOLS. If discovery is weak, re-plan with different sub-task wording or install from CANDIDATE_SERVERS. If nothing fits after real attempts, use done with an honest failure summary — do not invent servers.
-
 --- Workflow ---
 1. plan: ALWAYS start here. Break the intent into sub-tasks. For each sub-task,
    describe in natural language what it needs. Be specific — the clearer the
@@ -463,7 +606,8 @@ The registry can contain many kinds of servers; only installed ones appear as MA
 3. If MATCHED_TOOLS is present → dispatch those tools with correct params.
 4. If only CANDIDATE_SERVERS is present → install a promising one,
    then list_tools, then dispatch.
-5. If nothing matched → re-plan with different sub-task wording, or done with a failure summary.
+5. If nothing matched → re-plan with more specific sub-task intents,
+   or done with a failure summary.
 6. done: Return a concise summary to root.
 
 --- Actions ---
@@ -525,7 +669,8 @@ Return to root with results:
 - ALWAYS start with "plan" — even for a single task.
 - If MATCHED_TOOLS is present, dispatch those. Never invent tool names.
 - If only CANDIDATE_SERVERS is present, install + list_tools first.
-- If nothing matched, re-plan with different sub-task wording before giving up; then done with a failure summary if still no fit.
+- If nothing matched, re-plan with more specific sub-task intents,
+  or done with a failure summary.
 - You can dispatch multiple tasks in one action for parallelism.
 - Output exactly one JSON object — no preamble, no trailing text.
 

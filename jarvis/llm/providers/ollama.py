@@ -22,12 +22,14 @@ class OllamaProvider(BaseLLMProvider):
         auto_pull: bool = False,
         temperature: Optional[float] = None,
         strict_json: bool = False,
+        think: Optional[bool] = None,
     ):
         super().__init__(model)
         self.base_url = base_url or "http://localhost:11434"
         self.auto_pull = auto_pull
         self.temperature = temperature
         self.strict_json = strict_json
+        self.think = think
 
         import os
 
@@ -64,10 +66,15 @@ class OllamaProvider(BaseLLMProvider):
             # Grammar-constrained JSON. Conflicts with thinking-mode models —
             # leave off unless the user explicitly opts in.
             kwargs["format"] = "json"
+        if self.think is not None:
+            # think=True keeps the reasoning chain in the separate `thinking`
+            # field rather than letting it leak into `content`. Silently ignored
+            # by models that don't support the option.
+            kwargs["think"] = self.think
 
         try:
             response = self._client.chat(**kwargs)
-            return response["message"]["content"]
+            return self._extract_content(response)
         except Exception as e:
             error_str = str(e).lower()
             if "model" in error_str and (
@@ -79,7 +86,7 @@ class OllamaProvider(BaseLLMProvider):
                 if self.ensure_model():
                     try:
                         response = self._client.chat(**kwargs)
-                        return response["message"]["content"]
+                        return self._extract_content(response)
                     except Exception as retry_error:
                         logger.error(
                             f"Ollama chat error after model pull: {retry_error}"
@@ -91,6 +98,42 @@ class OllamaProvider(BaseLLMProvider):
                     )
             logger.error(f"Ollama chat error: {e}")
             raise
+
+    @staticmethod
+    def _extract_content(response) -> str:
+        """Return the text content from an Ollama chat response.
+
+        Thinking/reasoning models (e.g. qwq, deepseek-r1) place their
+        reasoning in a separate ``thinking`` field and may leave ``content``
+        empty for turns that require deep reasoning. Fall back to ``thinking``
+        so those models still return parseable output.
+
+        Some models leak their reasoning chain into ``content`` using special
+        chat-template tokens (e.g. ``<|start|>assistant<|channel|>analysis``).
+        Strip those tokens so downstream JSON parsers see clean output.
+        """
+        import re
+
+        msg = response["message"]
+        content = msg.get("content") or ""
+        if content:
+            # Strip chat-template channel tokens that some thinking models
+            # emit in-band: <|start|>, <|channel|>..., <|message|>, <|end|>
+            cleaned = re.sub(r"<\|[^|>]+\|>", "", content).strip()
+            if cleaned != content:
+                logger.debug(
+                    f"Ollama: stripped special tokens from content "
+                    f"({len(content)} → {len(cleaned)} chars)"
+                )
+            return cleaned
+        thinking = msg.get("thinking") or ""
+        if thinking:
+            logger.debug(
+                "Ollama: content empty, falling back to thinking field "
+                f"({len(thinking)} chars)"
+            )
+            return thinking
+        return content
 
     def is_available(self) -> bool:
         try:

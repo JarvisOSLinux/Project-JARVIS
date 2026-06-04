@@ -56,9 +56,9 @@ def _show_dialog(props: List[Dict[str, Any]]) -> Optional[Dict[str, str]]:
         )
         var = tk.StringVar()
         entries[key] = var
-        ttk.Entry(frame, textvariable=var, width=45, show="•" if sensitive else "").grid(
-            row=row, column=1, sticky="ew", pady=(4, 0)
-        )
+        ttk.Entry(
+            frame, textvariable=var, width=45, show="•" if sensitive else ""
+        ).grid(row=row, column=1, sticky="ew", pady=(4, 0))
         row += 1
 
         if description:

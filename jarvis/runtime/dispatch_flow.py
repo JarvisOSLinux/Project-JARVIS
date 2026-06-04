@@ -18,6 +18,9 @@ from .root_context import build_root_context, compact_payload_for_llm
 
 # Signal window text line: "[14:11:04] PID 2 INIT server tool {...}"
 _PID_INIT_RE = re.compile(r"PID (\d+) INIT")
+_PID_ANY_RE = re.compile(r"PID (\d+)")
+# Signal lines always start with a timestamp bracket "[HH:MM:SS]"
+_SIGNAL_LINE_RE = re.compile(r"^\[")
 
 
 def _extract_pids_from_result(result: Any) -> list[int]:
@@ -80,6 +83,80 @@ def _find_exits_for_pids(window: list[dict], pids: list[int]) -> list[dict]:
     ]
 
 
+def _trim_to_current_batch(result: Any, num_tasks: int) -> Any:
+    """Return a version of result whose signal window shows only current-batch signals.
+
+    The dispatch binary accumulates signals since startup. This trims the window
+    to only the N current-batch PIDs (allocated monotonically — highest PIDs are
+    newest), preserving each signal's full multi-line EXIT body.
+
+    Signal lines start with a timestamp "[HH:MM:SS] PID N …". Body lines that
+    carry error details (e.g. a JSON enum list) have no timestamp and belong to
+    the immediately preceding signal line. We group by timestamp boundary so body
+    lines are never stripped.
+
+    Old EXIT signals from previous batches (whose INIT may have already scrolled
+    off the window) are excluded even when their EXIT line appears after the
+    current batch's INIT lines — the previous slice-from-first-INIT approach
+    incorrectly included those.
+    """
+    if not isinstance(result, dict) or num_tasks <= 0:
+        return result
+    output = result.get("output", "")
+    if not isinstance(output, str) or "Signal window" not in output:
+        return result
+
+    lines = output.splitlines()
+
+    # Collect all INIT PIDs to determine the current-batch set.
+    init_pids: list[int] = []
+    for line in lines:
+        m = _PID_INIT_RE.search(line)
+        if m:
+            init_pids.append(int(m.group(1)))
+
+    if not init_pids:
+        return result
+
+    # Current batch = the num_tasks highest PIDs (dispatch allocates PIDs monotonically).
+    current_pid_set: set[int] = set(sorted(init_pids)[-num_tasks:])
+
+    # Group lines into signal blocks. A new block begins at each timestamp line
+    # ("[HH:MM:SS] …"). Non-timestamp lines are the body of the current block.
+    # Lines before the first timestamp are the header ("Signal window (last N):").
+    blocks: list[tuple[int | None, list[str]]] = []
+    current_pid: int | None = None
+    current_block: list[str] = []
+    in_signals = False
+
+    for line in lines:
+        if _SIGNAL_LINE_RE.match(line):
+            # Flush previous block
+            if current_block:
+                blocks.append((current_pid, current_block))
+            m = _PID_ANY_RE.search(line)
+            current_pid = int(m.group(1)) if m else None
+            current_block = [line]
+            in_signals = True
+        elif not in_signals:
+            # Pre-signal header — skip (we replace it with our own header)
+            pass
+        else:
+            # Body line belonging to the current signal block
+            current_block.append(line)
+
+    if current_block:
+        blocks.append((current_pid, current_block))
+
+    # Keep only blocks whose PID is in the current batch.
+    kept = [f"Signal window (current batch, {num_tasks} task(s)):"]
+    for pid, block_lines in blocks:
+        if pid in current_pid_set:
+            kept.extend(block_lines)
+
+    return {"output": "\n".join(kept)}
+
+
 async def run_dispatch_subchain(
     app: Any,
     logger: Logger,
@@ -87,9 +164,22 @@ async def run_dispatch_subchain(
     max_chain_depth: int,
     goal_id: Optional[str] = None,
 ) -> str:
+    """Kept for compatibility; ROOT now uses search_tools/get_server_docs/dispatch directly."""
+    return f"Direct dispatch unavailable — use search_tools to find tools for: {intent}"
+
+
+async def _run_dispatch_subchain_legacy(
+    app: Any,
+    logger: Logger,
+    intent: str,
+    max_chain_depth: int,
+    goal_id: Optional[str] = None,
+) -> str:
     """
-    Enter dispatch mode, give it the intent, and loop until the LLM
-    calls 'done' with a summary.
+    Legacy DISPATCH sub-chain. No longer reachable from ROOT since the new
+    prompt generates search_tools → get_server_docs → dispatch instead of
+    intent-only dispatch. Preserved for reference; will be deleted once the
+    new flow is confirmed stable.
 
     goal_id: if provided, the sub-chain operates on behalf of this Goal
     node — linking PIDs, creating subgoals, writing output on completion,
@@ -389,7 +479,9 @@ async def _collect_server_config(app: Any, logger: Logger, server_id: str) -> No
     values = {k: v for k, v in collected.items() if v}
     if values:
         await app.dispatch.set_server_config(server_id, values)
-        logger.info(f"JARVIS: Stored config for {server_id}: keys={list(values.keys())}")
+        logger.info(
+            f"JARVIS: Stored config for {server_id}: keys={list(values.keys())}"
+        )
 
 
 async def dispatch_send(
@@ -412,11 +504,15 @@ async def dispatch_send(
         server = task.get("server")
         if isinstance(tool, str) and "/" in tool:
             fused_server, fused_tool = tool.split("/", 1)
-            if fused_server and fused_tool and (
-                not isinstance(server, str)
-                or not server
-                or server == "local"
-                or server != fused_server
+            if (
+                fused_server
+                and fused_tool
+                and (
+                    not isinstance(server, str)
+                    or not server
+                    or server == "local"
+                    or server != fused_server
+                )
             ):
                 task["server"] = fused_server
                 task["tool"] = fused_tool
@@ -516,6 +612,21 @@ async def get_tool_metadata(
     return {}
 
 
+_AUTH_ERROR_PATTERNS = (
+    "subscription_token_invalid",
+    "invalid_api_key",
+    "invalid_token",
+    "token_invalid",
+    "unauthorized",
+    "authentication",
+)
+
+
+def _contains_auth_error(text: str) -> bool:
+    text_lower = text.lower()
+    return any(p in text_lower for p in _AUTH_ERROR_PATTERNS)
+
+
 async def dispatch_execute_tasks(
     app: Any,
     logger: Logger,
@@ -543,7 +654,33 @@ async def dispatch_execute_tasks(
     if isinstance(result, dict) and "error" in result:
         context += f"\nDISPATCH_ERROR: {compact_payload_for_llm(result)}"
     else:
-        context += f"\nDISPATCH_RESULT: {compact_payload_for_llm(result)}"
+        trimmed = _trim_to_current_batch(result, len(tasks))
+        result_text = compact_payload_for_llm(trimmed)
+        context += f"\nDISPATCH_RESULT: {result_text}"
+
+        # When the exit payload contains auth/token errors, surface the exact
+        # env-var key names from each server's configurableProperties. Without
+        # this the LLM guesses the key from the error wording (e.g.
+        # "subscription_token" instead of "BRAVE_API_KEY").
+        if _contains_auth_error(result_text):
+            server_ids = {
+                t["server"] for t in tasks if isinstance(t, dict) and t.get("server")
+            }
+            for sid in server_ids:
+                manifest = await app.dispatch.get_server_manifest(sid)
+                props = manifest.get("configurableProperties") or []
+                if props:
+                    required_keys = [
+                        p["key"] for p in props if isinstance(p, dict) and p.get("key")
+                    ]
+                    if required_keys:
+                        key_list = ", ".join(required_keys)
+                        example = ", ".join(f'"{k}": "<value>"' for k in required_keys)
+                        context += (
+                            f"\nCONFIG_HINT: {sid} requires configuration."
+                            f"\n  Required key(s): {key_list}"
+                            f'\n  Call: {{"action": "configure_server", "server_id": "{sid}", "config": {{{example}}}}}'
+                        )
 
     response = await ask_llm(app, logger, context, tag="root-dispatch-result")
     await app._act_on_root_response(response, depth + 1)
