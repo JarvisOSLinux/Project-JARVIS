@@ -259,15 +259,31 @@ class DispatchAdapter:
         """Run the setup script for an installed server via `dmcp setup <id>`."""
         return await registry_run_server_setup(logger, server_id)
 
+    @staticmethod
+    def _sanitize_config_key(key: str) -> str:
+        """Normalise an LLM-supplied config key to an env-var name.
+
+        The LLM may copy flag names from error messages (e.g. --brave-api-key).
+        dmcp config set expects the bare env-var form (BRAVE_API_KEY).
+        """
+        key = key.lstrip("-")
+        return key.replace("-", "_").upper()
+
     async def set_server_config(self, server_id: str, config: Dict[str, str]) -> None:
         """Persist config key-value pairs for a server via `dmcp config <id> set`.
 
         Each key is stored in the server's installed manifest config section and
         will be injected as an environment variable when the server is next run.
         """
-        for key, value in config.items():
-            if value:
-                await self._run_dmcp("config", server_id, "set", key, value)
+        for raw_key, value in config.items():
+            if not value:
+                continue
+            key = self._sanitize_config_key(raw_key)
+            result = await self._run_dmcp("config", server_id, "set", key, value)
+            if result is None:
+                raise RuntimeError(
+                    f"dmcp config set failed for '{key}' on '{server_id}' — check dmcp logs"
+                )
 
     # ------------------------------------------------------------------
     # Semantic tool discovery (vector-based via dispatch → dmcp)
