@@ -612,6 +612,21 @@ async def get_tool_metadata(
     return {}
 
 
+_AUTH_ERROR_PATTERNS = (
+    "subscription_token_invalid",
+    "invalid_api_key",
+    "invalid_token",
+    "token_invalid",
+    "unauthorized",
+    "authentication",
+)
+
+
+def _contains_auth_error(text: str) -> bool:
+    text_lower = text.lower()
+    return any(p in text_lower for p in _AUTH_ERROR_PATTERNS)
+
+
 async def dispatch_execute_tasks(
     app: Any,
     logger: Logger,
@@ -640,7 +655,32 @@ async def dispatch_execute_tasks(
         context += f"\nDISPATCH_ERROR: {compact_payload_for_llm(result)}"
     else:
         trimmed = _trim_to_current_batch(result, len(tasks))
-        context += f"\nDISPATCH_RESULT: {compact_payload_for_llm(trimmed)}"
+        result_text = compact_payload_for_llm(trimmed)
+        context += f"\nDISPATCH_RESULT: {result_text}"
+
+        # When the exit payload contains auth/token errors, surface the exact
+        # env-var key names from each server's configurableProperties. Without
+        # this the LLM guesses the key from the error wording (e.g.
+        # "subscription_token" instead of "BRAVE_API_KEY").
+        if _contains_auth_error(result_text):
+            server_ids = {
+                t["server"] for t in tasks if isinstance(t, dict) and t.get("server")
+            }
+            for sid in server_ids:
+                manifest = await app.dispatch.get_server_manifest(sid)
+                props = manifest.get("configurableProperties") or []
+                if props:
+                    required_keys = [
+                        p["key"] for p in props if isinstance(p, dict) and p.get("key")
+                    ]
+                    if required_keys:
+                        key_list = ", ".join(required_keys)
+                        example = ", ".join(f'"{k}": "<value>"' for k in required_keys)
+                        context += (
+                            f"\nCONFIG_HINT: {sid} requires configuration."
+                            f"\n  Required key(s): {key_list}"
+                            f'\n  Call: {{"action": "configure_server", "server_id": "{sid}", "config": {{{example}}}}}'
+                        )
 
     response = await ask_llm(app, logger, context, tag="root-dispatch-result")
     await app._act_on_root_response(response, depth + 1)
