@@ -48,6 +48,17 @@ class Config:
     # Default 0.7 gives a balance of consistency and variety.
     LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
 
+    # Ollama extended thinking mode. "true" keeps reasoning in the separate
+    # `thinking` field (prevents leaking into `content`). "false" disables
+    # thinking entirely. Unset = let the model decide. Ignored by models that
+    # don't support the option.
+    _llm_think_raw = os.getenv("LLM_THINK", "").lower()
+    LLM_THINK = (
+        True
+        if _llm_think_raw == "true"
+        else False if _llm_think_raw == "false" else None
+    )
+
     # Ollama strict JSON mode (format="json"). Default off because reasoning
     # models (qwen3, gpt-oss, deepseek-r1, ...) emit thinking tokens that
     # conflict with grammar-constrained decoding and return empty content.
