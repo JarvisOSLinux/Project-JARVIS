@@ -31,9 +31,11 @@ from .discovery import index_server as discovery_index_server
 from .discovery import normalize_count as discovery_normalize_count
 from .discovery import server_count as discovery_server_count
 from .discovery import sync_index as discovery_sync_index
+from .dmcp_registry import get_server_manifest as registry_get_server_manifest
 from .dmcp_registry import install_server as registry_install_server
 from .dmcp_registry import list_server_tools as registry_list_server_tools
 from .dmcp_registry import run_dmcp as registry_run_dmcp
+from .dmcp_registry import run_server_setup as registry_run_server_setup
 from .dmcp_registry import search_servers as registry_search_servers
 from .dmcp_registry import uninstall_server as registry_uninstall_server
 from .transport import call_tool as transport_call_tool
@@ -246,18 +248,16 @@ class DispatchAdapter:
         """List tools available on an installed MCP server."""
         return await registry_list_server_tools(logger, server_id)
 
-    async def get_server_manifest(self, server_id: str) -> Optional[Dict[str, Any]]:
-        """Return the installed manifest for a server via `dmcp info <id> --json`.
+    async def get_server_manifest(self, server_id: str) -> Dict[str, Any]:
+        """Return the manifest for a server, reading locally with no network call.
 
-        Returns None if the server is not installed or the output cannot be parsed.
+        Checks installed path first, falls back to registry clone.
         """
-        output = await self._run_dmcp("info", server_id, "--json")
-        if output:
-            try:
-                return json.loads(output)
-            except json.JSONDecodeError:
-                pass
-        return None
+        return await registry_get_server_manifest(logger, server_id)
+
+    async def run_server_setup(self, server_id: str) -> Dict[str, Any]:
+        """Run the setup script for an installed server via `dmcp setup <id>`."""
+        return await registry_run_server_setup(logger, server_id)
 
     async def set_server_config(self, server_id: str, config: Dict[str, str]) -> None:
         """Persist config key-value pairs for a server via `dmcp config <id> set`.

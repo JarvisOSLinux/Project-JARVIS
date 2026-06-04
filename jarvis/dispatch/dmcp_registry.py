@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from logging import Logger
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..config import Config
@@ -162,9 +164,9 @@ async def search_servers(logger: Logger, keywords: List[str]) -> Dict[str, Any]:
 
 
 async def install_server(logger: Logger, server_id: str) -> Dict[str, Any]:
-    """Install an MCP server from registry via `dmcp install`."""
-    logger.info(f"Dispatch: Installing MCP server '{server_id}'")
-    raw = await run_dmcp(logger, "install", server_id)
+    """Install an MCP server without running its setup script (`dmcp install --no_setup`)."""
+    logger.info(f"Dispatch: Installing MCP server '{server_id}' (no setup)")
+    raw = await run_dmcp(logger, "install", "--no_setup", server_id)
     if raw is None:
         return {"error": f"Failed to install server '{server_id}'"}
     return {"installed": server_id, "output": raw.strip()}
@@ -214,3 +216,57 @@ async def list_server_tools(logger: Logger, server_id: str) -> Dict[str, Any]:
 
     logger.info(f"Dispatch: Server '{server_id}' has {len(tools)} tool(s)")
     return {"server": server_id, "tools": tools}
+
+
+def _dmcp_base_dir() -> Path:
+    data_home = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+    return data_home / "mcp"
+
+
+async def get_server_manifest(logger: Logger, server_id: str) -> Dict[str, Any]:
+    """Return the manifest dict for a server, reading locally with no network call.
+
+    Checks the installed manifest first; falls back to the registry clone.
+    Returns an empty dict if neither exists.
+    """
+    base = _dmcp_base_dir()
+    candidates = [
+        base / "installed" / server_id / "manifest.json",
+        base / "registry" / server_id / "manifest.json",
+    ]
+    for path in candidates:
+        if path.exists():
+            try:
+                with open(path) as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.warning(f"Dispatch: failed to read manifest at {path}: {e}")
+    logger.debug(f"Dispatch: no local manifest found for '{server_id}'")
+    return {}
+
+
+async def run_server_setup(logger: Logger, server_id: str) -> Dict[str, Any]:
+    """Run the setup script for an installed server via `dmcp setup <id>`."""
+    logger.info(f"Dispatch: Running setup for '{server_id}'")
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            Config.DMCP_BINARY,
+            "setup", server_id,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+    except FileNotFoundError:
+        return {"error": "dmcp binary not found"}
+    except asyncio.TimeoutError:
+        return {"error": f"dmcp setup '{server_id}' timed out"}
+
+    stderr_text = stderr.decode().strip()
+    stdout_text = stdout.decode().strip()
+
+    if proc.returncode != 0:
+        logger.warning(f"Dispatch: dmcp setup '{server_id}' failed: {stderr_text}")
+        return {"error": stderr_text or f"Setup failed for '{server_id}'"}
+
+    logger.info(f"Dispatch: Setup succeeded for '{server_id}'")
+    return {"ok": True, "output": stdout_text}
