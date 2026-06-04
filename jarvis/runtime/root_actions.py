@@ -219,6 +219,10 @@ async def _handle_configure_server(
 
     try:
         await app.dispatch.set_server_config(server_id, config)
+        from ..core.params_store import ParamsStore
+        ParamsStore(server_id).set_many(
+            {app.dispatch._sanitize_config_key(k): v for k, v in config.items() if v}
+        )
         logger.info(f"JARVIS: configure_server '{server_id}' set {list(config.keys())}")
         label = f"CONFIGURE_RESULT: set {len(config)} value(s) on {server_id}"
     except Exception as e:
