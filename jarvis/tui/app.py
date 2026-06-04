@@ -245,6 +245,21 @@ class JarvisTUI(App):
         """Internal runtime narrative (LLM/dispatch status), not chat content."""
         tui_output.on_jarvis_activity(self, event)
 
+    async def _open_config_modal(
+        self,
+        server_id: str,
+        server_name: str,
+        server_desc: str,
+        props: List[Dict[str, Any]],
+        saved: Dict[str, Any],
+        future: "asyncio.Future",
+    ) -> None:
+        """Push the server config modal and resolve *future* when the user submits."""
+        from .server_config_modal import ServerConfigModal
+        await self.push_screen(
+            ServerConfigModal(server_id, server_name, server_desc, props, saved, future)
+        )
+
     def _append_log(self, markup: str) -> None:
         tui_output.append_log(self, markup)
 

@@ -37,6 +37,7 @@ async def start_jarvis(app: Any, logger: Any) -> None:
     app._activity_cb = app._on_jarvis_activity
     jarvis.output_manager.add_output_callback(app._output_cb)
     jarvis.output_manager.add_activity_callback(app._activity_cb)
+    jarvis.config_modal_callback = app._open_config_modal
 
     # Kick off the engine's event loop as an async task.
     app._jarvis_task = asyncio.create_task(app._run_engine(), name="jarvis-run")
