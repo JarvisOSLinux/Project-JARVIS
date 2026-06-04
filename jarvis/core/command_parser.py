@@ -148,7 +148,8 @@ class TaskParser:
 
 @_parser("respond")
 def _parse_respond(response: Dict[str, Any]) -> Dict[str, Any]:
-    output = response.get("output", "")
+    # LLM sometimes uses "content" instead of "output" — tolerate both.
+    output = response.get("output") or response.get("content") or ""
     return {
         "action": "respond",
         "output": str(output),

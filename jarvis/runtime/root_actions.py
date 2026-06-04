@@ -215,6 +215,33 @@ async def _handle_configure_server(
     config = parsed["config"]
     emit_activity(app, f"Configuring {server_id}…", kind="dispatch")
 
+    # Reject placeholder values — the LLM must ask the user for real secrets.
+    _PLACEHOLDERS = (
+        "your_",
+        "your-",
+        "<your",
+        "placeholder",
+        "api_key_here",
+        "insert_",
+    )
+    placeholder_keys = [
+        k
+        for k, v in config.items()
+        if any(p in str(v).lower() for p in _PLACEHOLDERS) or str(v).startswith("<")
+    ]
+    if placeholder_keys:
+        logger.warning(
+            f"JARVIS: configure_server '{server_id}' rejected placeholder value(s): {placeholder_keys}"
+        )
+        context = build_root_context(app, logger)
+        context += (
+            f"\nCONFIGURE_BLOCKED: The value(s) for {placeholder_keys} look like placeholders, "
+            "not real credentials. Use respond to ask the user for the actual value(s) before calling configure_server."
+        )
+        response = await ask_llm(app, logger, context, tag="root-configure-placeholder")
+        await app._act_on_root_response(response, depth + 1)
+        return
+
     try:
         await app.dispatch.set_server_config(server_id, config)
         from ..core.params_store import ParamsStore
@@ -223,7 +250,10 @@ async def _handle_configure_server(
             {app.dispatch._sanitize_config_key(k): v for k, v in config.items() if v}
         )
         logger.info(f"JARVIS: configure_server '{server_id}' set {list(config.keys())}")
-        label = f"CONFIGURE_RESULT: set {len(config)} value(s) on {server_id}"
+        label = (
+            f"CONFIGURE_RESULT: set {len(config)} value(s) on {server_id}. "
+            f"Now call get_server_docs for {server_id} to verify the server starts correctly."
+        )
     except Exception as e:
         logger.warning(f"JARVIS: configure_server '{server_id}' failed: {e}")
         label = f"CONFIGURE_ERROR: {e}"
@@ -278,7 +308,11 @@ async def act_on_root_response(
     elif action in ("store", "recall", "search_memory", "list_memory"):
         emit_activity(app, f"Running memory action: {action}", kind="memory")
 
-    apply_goal_updates(app, parsed.get("goal_updates", []))
+    # For respond, defer goal_updates until we confirm the output is non-empty.
+    # Applying them on an empty respond dismisses goals before the user sees anything,
+    # leaving subsequent retries with no context.
+    if action != "respond":
+        apply_goal_updates(app, parsed.get("goal_updates", []))
 
     if action == "search_tools":
         await _handle_search_tools(app, logger, parsed, depth, max_chain_depth)
@@ -309,6 +343,7 @@ async def act_on_root_response(
             retry_response = await ask_llm(app, logger, context, tag="root-retry-empty")
             await app._act_on_root_response(retry_response, depth + 1)
             return
+        apply_goal_updates(app, parsed.get("goal_updates", []))
         app.output_manager.handle_response({"output": output})
         persist_assistant_turn(app, output)
         dismissed = app.goals.dismiss_completed()
