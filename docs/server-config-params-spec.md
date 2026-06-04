@@ -130,7 +130,7 @@ LLM: {"action": "install_server", "server_id": "io.github.brave.brave-search-mcp
   ├─ User confirms (all required fields filled) ─────────────── ┤
   │                                                             │
   ▼                                                             │
-4. Inject config values as env vars → run dmcp install          │
+4. Run dmcp install (bare) → dmcp config set for each value     │
   │                                                             │
   ├─ Install fails ─────────────────────────────────────────────┤
   │     → Show error to user directly in TUI (not via LLM)      │
@@ -260,7 +260,7 @@ dmcp runs. The LLM is paused — no further LLM calls until the modal resolves.
 | `jarvis/runtime/root_actions.py` | `_handle_install_server`: fetch manifest config fields, open modal if any, inject values before dmcp call |
 | `jarvis/dispatch/dmcp_registry.py` | `install_server`: accept optional `env` dict; inject as env vars for the dmcp subprocess |
 | `jarvis/dispatch/adapter.py` | `install_server`: pass env through to dmcp_registry |
-| `jarvis/dispatch/dmcp_registry.py` | New fn `get_server_manifest(server_id)`: fetch manifest JSON and return `configurableProperties` |
+| `jarvis/dispatch/dmcp_registry.py` | New fn `get_server_manifest(server_id)`: read `configurableProperties` from registry manifest file (pre-install) or `dmcp info --json` (post-install) |
 | `mcp-registry/servers/*/manifest.json` | Add `configurableProperties` to any server that requires config (Brave, etc.) |
 
 ### `params_store.py` interface
@@ -287,20 +287,60 @@ class ConfigModalResult:
 
 ---
 
-## Open Questions
+## Resolved Design Questions
 
-1. **dmcp env injection**: Does `dmcp install` accept env vars on the command
-   line, or does the server manifest need the values baked in? Check dmcp docs.
-   Alternative: write a `.env` file adjacent to the installed server that dmcp
-   reads at startup.
+### 1. dmcp env injection
 
-2. **Manifest fetch**: Does `dmcp info <server-id>` return the full manifest
-   JSON including `configurableProperties`? Or do we need to read the manifest
-   file directly from the install path / registry clone?
+`dmcp install` does NOT accept env vars on the command line. Config is set
+*after* install via `dmcp config set <server_id> KEY value`, which writes
+`"config": {"KEY": "value"}` into the installed manifest JSON. When the server
+process is later spawned, dmcp's `config_to_env()` converts that map to actual
+environment variables passed to the process via `.envs()`.
 
-3. **Encryption at rest**: For v1, plaintext in `jarvis_params.toml` is
-   acceptable (same as how most CLI tools store API keys in config files).
-   Future: integrate with `jarvis_keys.c` kernel keyring or OS keychain.
+**Consequence for our flow**: The modal fires before the *first* `get_server_docs`
+call, not before `install`. Correct sequence:
+
+```
+install (bare, no config) → configure (dmcp config set per key) → get_server_docs
+```
+
+The existing `configure_server` action already calls `dmcp config set` correctly.
+The modal just needs to collect values and call `configure_server` before the
+server is first started.
+
+### 2. Manifest fetch for `configurableProperties`
+
+`dmcp info <server_id> --json` exists and returns the full manifest JSON.
+However, it only works for *installed* servers. For servers not yet installed
+(the common case — user is about to install), we read `configurableProperties`
+directly from the registry manifest file.
+
+Two sources, in priority order:
+1. Registry clone: `~/.local/share/mcp/registry/<server_id>/manifest.json`
+   (available before install)
+2. `dmcp info <server_id> --json` (available after install, for re-configuration)
+
+`get_server_manifest()` in `dmcp_registry.py` should try the registry path first,
+fall back to `dmcp info --json`.
+
+### 3. `configurableProperties` is Python-owned, not dmcp-owned
+
+dmcp's `Manifest` struct has no `configurableProperties` field — the field exists
+in the JSON but dmcp silently ignores it. dmcp only knows about the flat `config`
+map (the values, not the schema). A comment in `dmcp/src/run.rs` notes that key
+names "must match `configurableProperties.key`" but dmcp does not enforce this.
+
+**Consequence**: We read `configurableProperties` ourselves in Python (from the
+manifest JSON), build the modal form from it, collect values, then call
+`dmcp config set` with matching key names. The schema interpretation is entirely
+our responsibility.
+
+### 4. Encryption at rest
+
+For v1, plaintext in `jarvis_params.toml` is acceptable — same as how most CLI
+tools store API keys in config files (`.netrc`, `~/.config/gh/hosts.yml`, etc.).
+Future: integrate with `jarvis_keys.c` kernel keyring already present in
+`linux-jarvisos`.
 
 4. **Re-entering values during reinstall**: If a server is uninstalled and
    reinstalled, the modal should pre-fill from `jarvis_params.toml` without
