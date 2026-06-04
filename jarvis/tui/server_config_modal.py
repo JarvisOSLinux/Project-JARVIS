@@ -116,6 +116,7 @@ class _FieldRow(Vertical):
 
 class _FieldChanged(asyncio.Event.__class__):
     """Internal message posted when a field value changes."""
+
     # Using Textual's message system instead
     pass
 
@@ -220,18 +221,17 @@ class ServerConfigModal(ModalScreen[ConfigModalResult]):
         self._saved = saved
         self._future = future
         self._values: Dict[str, str] = {
-            p["key"]: (saved.get(p["key"]) or p.get("default") or "")
-            for p in props
+            p["key"]: (saved.get(p["key"]) or p.get("default") or "") for p in props
         }
 
     def compose(self) -> ComposeResult:
         saved_props = [p for p in self._props if p["key"] in self._saved]
         required_props = [
-            p for p in self._props
-            if p.get("required") and p["key"] not in self._saved
+            p for p in self._props if p.get("required") and p["key"] not in self._saved
         ]
         optional_props = [
-            p for p in self._props
+            p
+            for p in self._props
             if not p.get("required") and p["key"] not in self._saved
         ]
 
@@ -295,9 +295,12 @@ class ServerConfigModal(ModalScreen[ConfigModalResult]):
     def on__field_changed(self, event: _FieldChanged) -> None:
         self._values[event.key] = event.value
         self.query_one("#status-label", Static).update(self._status_text())
-        self.query_one("#btn-install", Button).disabled = not self._all_required_filled()
+        self.query_one("#btn-install", Button).disabled = (
+            not self._all_required_filled()
+        )
         # Auto-save every keystroke
         from ..core.params_store import ParamsStore
+
         ParamsStore(self._server_id).set(event.key, event.value)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:

@@ -256,6 +256,7 @@ class JarvisTUI(App):
     ) -> None:
         """Push the server config modal and resolve *future* when the user submits."""
         from .server_config_modal import ServerConfigModal
+
         await self.push_screen(
             ServerConfigModal(server_id, server_name, server_desc, props, saved, future)
         )

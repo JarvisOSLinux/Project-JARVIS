@@ -187,7 +187,9 @@ async def list_server_tools(logger: Logger, server_id: str) -> Dict[str, Any]:
     try:
         proc = await asyncio.create_subprocess_exec(
             Config.DMCP_BINARY,
-            "tools", server_id, "--json",
+            "tools",
+            server_id,
+            "--json",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -201,7 +203,10 @@ async def list_server_tools(logger: Logger, server_id: str) -> Dict[str, Any]:
 
     if proc.returncode != 0:
         logger.warning(f"Dispatch: dmcp tools {server_id} failed: {stderr_text}")
-        return {"error": stderr_text or f"Failed to list tools for '{server_id}'", "tools": []}
+        return {
+            "error": stderr_text or f"Failed to list tools for '{server_id}'",
+            "tools": [],
+        }
 
     raw = stdout.decode()
     try:
@@ -251,7 +256,8 @@ async def run_server_setup(logger: Logger, server_id: str) -> Dict[str, Any]:
     try:
         proc = await asyncio.create_subprocess_exec(
             Config.DMCP_BINARY,
-            "setup", server_id,
+            "setup",
+            server_id,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

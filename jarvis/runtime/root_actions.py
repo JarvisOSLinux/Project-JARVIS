@@ -155,9 +155,7 @@ async def _handle_install_server(
     emit_activity(app, f"Running setup for {server_id}…", kind="dispatch")
     setup_result = await app.dispatch.run_server_setup(server_id)
     if "error" in setup_result:
-        logger.warning(
-            f"JARVIS: setup '{server_id}' failed: {setup_result['error']}"
-        )
+        logger.warning(f"JARVIS: setup '{server_id}' failed: {setup_result['error']}")
         context = build_root_context(app, logger)
         context += f"\nINSTALL_ERROR: setup failed — {setup_result['error']}"
         response = await ask_llm(app, logger, context, tag="root-setup-error")
@@ -220,6 +218,7 @@ async def _handle_configure_server(
     try:
         await app.dispatch.set_server_config(server_id, config)
         from ..core.params_store import ParamsStore
+
         ParamsStore(server_id).set_many(
             {app.dispatch._sanitize_config_key(k): v for k, v in config.items() if v}
         )

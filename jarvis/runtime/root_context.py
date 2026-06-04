@@ -129,8 +129,15 @@ def format_search_results(capability: str, results: List[Dict[str, Any]]) -> str
 
 
 _CONFIG_ERROR_HINTS = (
-    "api-key", "api_key", "apikey", "required", "configuration",
-    "token", "credentials", "secret", "auth",
+    "api-key",
+    "api_key",
+    "apikey",
+    "required",
+    "configuration",
+    "token",
+    "credentials",
+    "secret",
+    "auth",
 )
 
 
