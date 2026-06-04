@@ -92,9 +92,14 @@ async def _handle_install_server(
     depth: int,
     max_chain_depth: int,
 ) -> None:
+    import asyncio
+
+    from ..core.params_store import ParamsStore
+
     server_id = parsed["server_id"]
     emit_activity(app, f"Installing {server_id}…", kind="dispatch")
 
+    # Step 1: bare install (no setup script yet)
     install_result = await app.dispatch.install_server(server_id)
     if "error" in install_result:
         logger.warning(
@@ -106,12 +111,65 @@ async def _handle_install_server(
         await app._act_on_root_response(response, depth + 1)
         return
 
-    logger.info(f"JARVIS: install_server '{server_id}' succeeded")
+    # Step 2: check for configurable properties
+    manifest = await app.dispatch.get_server_manifest(server_id)
+    props = manifest.get("configurableProperties", [])
+
+    if props and app.config_modal_callback:
+        # Step 3: pre-fill from saved params
+        store = ParamsStore(server_id)
+        saved = store.get()
+        server_name = manifest.get("name") or server_id
+        server_desc = manifest.get("description") or manifest.get("summary") or ""
+
+        emit_activity(app, "Waiting for configuration…", kind="dispatch")
+
+        # Step 4: open modal and await result
+        future: asyncio.Future = asyncio.get_event_loop().create_future()
+        await app.config_modal_callback(
+            server_id, server_name, server_desc, props, saved, future
+        )
+        result = await future
+
+        if not result.confirmed:
+            missing = result.missing_required
+            logger.info(
+                f"JARVIS: install_server '{server_id}' cancelled by user"
+                + (f"; missing: {missing}" if missing else "")
+            )
+            context = build_root_context(app, logger)
+            cancelled_msg = f"INSTALL_CANCELLED: {server_id}"
+            if missing:
+                cancelled_msg += f" — user did not provide: {', '.join(missing)}"
+            context += f"\n{cancelled_msg}"
+            response = await ask_llm(app, logger, context, tag="root-install-cancelled")
+            await app._act_on_root_response(response, depth + 1)
+            return
+
+        # Step 5: persist config to manifest via dmcp config set
+        if result.values:
+            await app.dispatch.set_server_config(server_id, result.values)
+            store.set_many(result.values)
+
+    # Step 6: run setup script (receives MCP_CONFIG_* env vars from manifest.config)
+    emit_activity(app, f"Running setup for {server_id}…", kind="dispatch")
+    setup_result = await app.dispatch.run_server_setup(server_id)
+    if "error" in setup_result:
+        logger.warning(
+            f"JARVIS: setup '{server_id}' failed: {setup_result['error']}"
+        )
+        context = build_root_context(app, logger)
+        context += f"\nINSTALL_ERROR: setup failed — {setup_result['error']}"
+        response = await ask_llm(app, logger, context, tag="root-setup-error")
+        await app._act_on_root_response(response, depth + 1)
+        return
+
+    logger.info(f"JARVIS: install_server '{server_id}' complete")
     await app.dispatch.auto_index_server(
         server_id=server_id, embeddings=get_embeddings(app)
     )
 
-    # Immediately fetch docs so the LLM can dispatch without an extra round-trip.
+    # Step 7: fetch docs so LLM can dispatch immediately
     tools_result = await app.dispatch.list_server_tools(server_id)
     tools = tools_result.get("tools", []) if isinstance(tools_result, dict) else []
     tools_error = tools_result.get("error") if isinstance(tools_result, dict) else None
