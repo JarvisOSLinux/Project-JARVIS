@@ -255,12 +255,19 @@ async def act_on_root_response(
     parsed = app.task_parser.parse(response)
 
     if "error" in parsed:
-        logger.warning(f"JARVIS: Root parse error: {parsed['error']}")
-        app.output_manager.handle_response(
-            {
-                "output": "I had trouble processing that. Could you try again?",
-            }
+        err = parsed["error"]
+        logger.warning(f"JARVIS: Root parse error: {err} — retrying with correction")
+        context = build_root_context(app, logger)
+        context += (
+            f"\nYour last response had a format error: {err}\n"
+            "Fix the JSON and try again. Reminder:\n"
+            '  {"action": "search_tools", "capability": "<domain or service needed>", "goal_updates": []}\n'
+            '  {"action": "get_server_docs", "server_id": "<id from SEARCH_RESULTS>", "goal_updates": []}\n'
+            '  {"action": "respond", "output": "<message>", "goal_updates": []}\n'
+            "Do NOT wrap fields in a 'params' object. Output exactly one JSON object."
         )
+        retry_response = await ask_llm(app, logger, context, tag="root-retry-parse")
+        await app._act_on_root_response(retry_response, depth + 1)
         return
 
     action = parsed["action"]

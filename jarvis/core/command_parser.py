@@ -158,7 +158,15 @@ def _parse_respond(response: Dict[str, Any]) -> Dict[str, Any]:
 
 @_parser("search_tools")
 def _parse_search_tools(response: Dict[str, Any]) -> Dict[str, Any]:
-    capability = response.get("capability", "")
+    # LLM sometimes wraps fields in a "params" sub-object (confusing dispatch format)
+    # or uses "query" instead of "capability" — tolerate both.
+    params = response.get("params") if isinstance(response.get("params"), dict) else {}
+    capability = (
+        response.get("capability")
+        or params.get("capability")
+        or params.get("query")
+        or ""
+    )
     if not capability:
         return {"error": "search_tools requires 'capability'", "raw": response}
     return {
