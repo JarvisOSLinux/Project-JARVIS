@@ -310,18 +310,20 @@ server is first started.
 
 ### 2. Manifest fetch for `configurableProperties`
 
-`dmcp info <server_id> --json` exists and returns the full manifest JSON.
-However, it only works for *installed* servers. For servers not yet installed
-(the common case — user is about to install), we read `configurableProperties`
-directly from the registry manifest file.
+Two cases, both fully local — no internet required either way:
 
-Two sources, in priority order:
-1. Registry clone: `~/.local/share/mcp/registry/<server_id>/manifest.json`
-   (available before install)
-2. `dmcp info <server_id> --json` (available after install, for re-configuration)
+1. **Server already installed**: read directly from the installed manifest at
+   `~/.local/share/mcp/installed/<server_id>/manifest.json`. No registry lookup
+   needed — the manifest was written there by dmcp at install time.
 
-`get_server_manifest()` in `dmcp_registry.py` should try the registry path first,
-fall back to `dmcp info --json`.
+2. **Server not yet installed**: read from the local registry clone at
+   `~/.local/share/mcp/registry/<server_id>/manifest.json`. dmcp syncs the
+   registry on first run and caches it locally; no live network call needed.
+
+`get_server_manifest()` checks installed path first, falls back to registry
+clone. If neither exists, returns empty `configurableProperties` and install
+proceeds without the modal (fail-safe — worst case is the server errors on
+first start, which we already handle via the runtime reconfigure path).
 
 ### 3. `configurableProperties` is Python-owned, not dmcp-owned
 
@@ -330,10 +332,22 @@ in the JSON but dmcp silently ignores it. dmcp only knows about the flat `config
 map (the values, not the schema). A comment in `dmcp/src/run.rs` notes that key
 names "must match `configurableProperties.key`" but dmcp does not enforce this.
 
-**Consequence**: We read `configurableProperties` ourselves in Python (from the
-manifest JSON), build the modal form from it, collect values, then call
-`dmcp config set` with matching key names. The schema interpretation is entirely
-our responsibility.
+**This is a gap that needs to be fixed in dmcp.** The `Manifest` struct in
+`dmcp/src/models.rs` should include a properly typed `configurableProperties`
+field, and `dmcp info --json` should serialize it. This makes the schema
+machine-readable for any tool that wraps dmcp (not just JARVIS).
+
+Required dmcp changes:
+- Add `ConfigurableProperty` struct to `models.rs` with fields: `key`, `label`,
+  `description`, `sensitive`, `required`, `default`
+- Add `configurable_properties: Option<Vec<ConfigurableProperty>>` to `Manifest`
+- `dmcp info --json` then automatically includes the field via serde serialization
+- Optionally: add a dedicated `dmcp configurable-properties <server_id>` subcommand
+  that returns just the array (simpler for callers that only need this field)
+
+Until the dmcp change lands, Python reads the manifest JSON directly and parses
+`configurableProperties` itself. The two approaches are compatible — same JSON
+structure either way.
 
 ### 4. Encryption at rest
 
