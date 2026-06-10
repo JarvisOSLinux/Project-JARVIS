@@ -1,9 +1,9 @@
-[submodule "dispatch"]
-	path = dispatch
-	url = git@github.com:YakupAtahanov/dispatch.git
-[submodule "dmcp"]
-	path = dmcp
-	url = git@github.com:YakupAtahanov/dmcp.git
-[submodule "contextor"]
-	path = contextor
-	url = git@github.com:YakupAtahanov/contextor.git
+[submodule "deps/rust/dispatch"]
+	path = deps/rust/dispatch
+	url = https://github.com/JarvisOSLinux/dispatch.git
+[submodule "deps/rust/dmcp"]
+	path = deps/rust/dmcp
+	url = https://github.com/JarvisOSLinux/dmcp.git
+[submodule "deps/rust/contextor"]
+	path = deps/rust/contextor
+	url = https://github.com/JarvisOSLinux/contextor.git
