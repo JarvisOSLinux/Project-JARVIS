@@ -256,9 +256,7 @@ class ConfirmationManager:
 
         # 1. TUI modal — highest priority when Textual is running.
         if self._tui_callback is not None:
-            asyncio.create_task(
-                self._notify_tui(request_id, tool_names)
-            )
+            asyncio.create_task(self._notify_tui(request_id, tool_names))
             return
 
         # 2. Desktop notification (unless silent).
