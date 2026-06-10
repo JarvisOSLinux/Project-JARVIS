@@ -39,6 +39,9 @@ async def start_jarvis(app: Any, logger: Any) -> None:
     jarvis.output_manager.add_activity_callback(app._activity_cb)
     jarvis.config_modal_callback = app._open_config_modal
 
+    if hasattr(jarvis, "confirmation"):
+        jarvis.confirmation.set_tui_callback(app._tui_confirm)
+
     # Kick off the engine's event loop as an async task.
     app._jarvis_task = asyncio.create_task(app._run_engine(), name="jarvis-run")
 

@@ -75,6 +75,8 @@ class ConfirmationManager:
         self._inject_confirmation: Optional[Callable[[Dict[str, Any]], None]] = None
         # Timeout tasks keyed by request id (so we can cancel on response).
         self._timeout_tasks: Dict[str, asyncio.Task] = {}
+        # TUI callback — async callable that pushes ConfirmModal and returns bool.
+        self._tui_callback: Optional[Callable[[str, List[str]], Any]] = None
 
     # ------------------------------------------------------------------
     # Setup
@@ -88,6 +90,18 @@ class ConfirmationManager:
         """Register the output socket broadcast callback."""
         self._output_callback = callback
         self._has_socket_clients = has_clients
+
+    def set_tui_callback(
+        self,
+        callback: Callable[[str, List[str]], Any],
+    ) -> None:
+        """Register the TUI confirmation callback.
+
+        The callback receives (request_id, tool_names) and must return a
+        bool (True = allow, False = deny).  It is awaited, so it can use
+        Textual's ``push_screen_wait``.
+        """
+        self._tui_callback = callback
 
     def set_event_injector(
         self,
@@ -240,7 +254,12 @@ class ConfirmationManager:
 
         tool_summary = ", ".join(tool_names)
 
-        # 1. Desktop notification (unless silent).
+        # 1. TUI modal — highest priority when Textual is running.
+        if self._tui_callback is not None:
+            asyncio.create_task(self._notify_tui(request_id, tool_names))
+            return
+
+        # 2. Desktop notification (unless silent).
         if not notification_silent and self._has_desktop_notifications():
             asyncio.create_task(self._notify_desktop(request_id, tool_summary, timeout))
             return
@@ -267,6 +286,24 @@ class ConfirmationManager:
                     "type": "confirmation_response",
                     "id": request_id,
                     "approved": False,
+                }
+            )
+
+    # -- TUI (ConfirmModal) --------------------------------------------
+
+    async def _notify_tui(self, request_id: str, tool_names: List[str]) -> None:
+        try:
+            approved = await self._tui_callback(request_id, tool_names)
+        except Exception as e:
+            logger.warning(f"TUI confirmation callback failed: {e}")
+            approved = False
+
+        if self._inject_confirmation:
+            self._inject_confirmation(
+                {
+                    "type": "confirmation_response",
+                    "id": request_id,
+                    "approved": bool(approved),
                 }
             )
 
