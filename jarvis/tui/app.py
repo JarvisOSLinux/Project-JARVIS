@@ -64,16 +64,16 @@ from textual.widgets import (
 
 from ..core.logger import JarvisLogger, get_logger
 from ..sessions.model import Session
-from .confirm_modal import ConfirmModal
-from .settings_modal import SettingsModal
 from . import actions as tui_actions
 from . import lifecycle as tui_lifecycle
 from . import output as tui_output
 from . import status_bar as tui_status_bar
+from .confirm_modal import ConfirmModal
 from .local_input import export_transcript_to_disk, handle_local_input
 from .session_sidebar import on_session_selected as handle_session_selected
 from .session_sidebar import refresh_sidebar
 from .session_sidebar import schedule_sidebar_refresh as queue_sidebar_refresh
+from .settings_modal import SettingsModal
 
 logger = get_logger(__name__)
 
