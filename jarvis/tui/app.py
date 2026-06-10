@@ -18,6 +18,7 @@ Layout:
 Keybindings:
     Ctrl+N  — new session
     Ctrl+Q  — quit
+    Ctrl+,  — settings (read-only config viewer)
     Ctrl+L  — focus chat log (scroll with arrows / PgUp)
     Ctrl+I  — focus message input
     Ctrl+Shift+C — clear on-screen transcript (export buffer only; not memory)
@@ -63,6 +64,8 @@ from textual.widgets import (
 
 from ..core.logger import JarvisLogger, get_logger
 from ..sessions.model import Session
+from .confirm_modal import ConfirmModal
+from .settings_modal import SettingsModal
 from . import actions as tui_actions
 from . import lifecycle as tui_lifecycle
 from . import output as tui_output
@@ -153,6 +156,7 @@ class JarvisTUI(App):
         Binding("ctrl+l", "focus_chat", "Log", show=True),
         Binding("ctrl+i", "focus_input", "Input", show=True),
         Binding("f1", "help", "Help", show=True),
+        Binding("ctrl+comma", "settings", "Settings", show=True),
         Binding("ctrl+shift+c", "clear_transcript", "Clear log", show=False),
         Binding("ctrl+shift+e", "export_transcript", "Export", show=False),
     ]
@@ -304,6 +308,12 @@ class JarvisTUI(App):
     def action_export_transcript(self) -> None:
         """Write ``_export_lines`` to ``JARVIS_DATA_DIR/transcripts/``."""
         tui_actions.export_transcript(self)
+
+    def action_settings(self) -> None:
+        self.push_screen(SettingsModal())
+
+    async def _tui_confirm(self, request_id: str, tool_names: list[str]) -> bool:
+        return await self.push_screen_wait(ConfirmModal(request_id, tool_names))
 
     def _export_transcript_to_disk(self, filename: Optional[str]) -> None:
         """Save plain transcript as Markdown under ``JARVIS_DATA_DIR/transcripts``."""
