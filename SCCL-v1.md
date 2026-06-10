@@ -8,49 +8,47 @@
 
 ## Preamble
 
-This license exists because the commons should not be exploited without accountability. Free and open-source software is built by communities, for communities. When commercial entities benefit from that labor, the community — not only the original author — retains the right to demand alignment with the values that built the software.
+This license exists because the commons should not be exploited without accountability. Free and open-source software is built by communities, for communities. When commercial entities benefit from that labor, the Organization that stewards the software retains the right to demand alignment with the values that built it.
 
 This License also exists because **unpaid maintainers are a security vulnerability.** Critical open-source infrastructure — software that underpins the internet, financial systems, and national security — is routinely maintained by unpaid volunteers working alone, without resources for security audits, code review, or sustainable development practices. The 2024 XZ Utils backdoor (CVE-2024-3094) demonstrated the consequences: a state-level actor spent years social-engineering a burned-out solo maintainer into handing over commit access, nearly compromising SSH authentication on every Linux server worldwide. The attack did not exploit a technical weakness — it exploited the fact that a critical piece of global infrastructure had no funding, no support structure, and a single point of human failure. This License addresses that structural weakness by making contributor compensation mandatory, not optional. Funded maintainers are resilient maintainers. A sustainable commons is a secure commons.
 
 This License offers commercial entities an alternative to the GNU Affero General Public License, Version 3 ("AGPLv3"), under which the Software is also made available. Entities that do not wish to comply with AGPLv3's source disclosure requirements may instead operate under this License, subject to the conditions herein.
 
-The defining feature of this License is the **Community Revocation Mechanism**: the community of contributors and stakeholders retains the collective right to revoke any commercial license granted hereunder, in cases of material misalignment with the Project's values, ethics, or ecosystem. This mechanism creates accountability that no individual licensor alone can sustain.
+The defining feature of this License is **Board-governed commercial access**: the Organization's Governing Board retains unilateral authority to grant, condition, and revoke commercial licenses, ensuring that every commercial use of the Software remains aligned with the Project's values, ethics, and ecosystem.
 
 ---
 
 ## Article 1 — Definitions
 
-**1.1 "Licensor"** means the individual(s) or entity holding copyright in the Software and authorized to grant licenses under this Agreement.
+**1.1 "Organization"** means the legal entity (foundation, non-profit, LLC, or equivalent) that owns or stewards the Software and its ecosystem. The Organization acts as Licensor under this Agreement.
 
-**1.2 "Licensee"** means the legal entity (company, organization, or individual acting in a commercial capacity) entering into this Agreement with the Licensor.
+**1.2 "Governing Board"** (or "Board") means the decision-making body of the Organization, responsible for issuing, conditioning, and revoking commercial licenses under this Agreement. The Board's composition and procedures are defined in the Organization's charter or bylaws.
 
-**1.3 "Software"** means the original work of authorship made available under this License, including all source code, object code, documentation, and associated files, as identified at the time of licensing.
+**1.3 "Licensee"** means the legal entity (company, organization, or individual acting in a commercial capacity) entering into this Agreement with the Organization.
 
-**1.4 "Derivative Work"** means any work that is based on, incorporates, modifies, or is derived from the Software, whether in whole or in part.
+**1.4 "Software"** means the original work of authorship made available under this License, including all source code, object code, documentation, and associated files, as identified at the time of licensing.
 
-**1.5 "Contribution"** means any modification, improvement, addition, or Derivative Work submitted by the Licensee for inclusion in the Software.
+**1.5 "Derivative Work"** means any work that is based on, incorporates, modifies, or is derived from the Software, whether in whole or in part.
 
-**1.6 "Community"** means the body of individuals and entities formally recognized as participants in the Project's governance, as defined in the Governance Charter (Appendix B). Community membership criteria and registration are maintained publicly by the Licensor.
+**1.6 "Contribution"** means any modification, improvement, addition, or Derivative Work submitted by the Licensee for inclusion in the Software.
 
-**1.7 "Governed Community Body (GCB)"** means the recognized decision-making body of the Community, responsible for administering Revocation Votes. The GCB's composition and procedures are defined in the Governance Charter (Appendix B).
+**1.7 "Ecosystem Alignment"** means the Licensee's ongoing adherence to the behavioral and ethical standards set out in Article 3 of this License.
 
-**1.8 "Ecosystem Alignment"** means the Licensee's ongoing adherence to the behavioral and ethical standards set out in Article 3 of this License.
+**1.8 "Annual License Fee"** means the fee payable by the Licensee each year, calculated in accordance with the Fee Formula (Appendix A).
 
-**1.9 "Annual License Fee"** means the fee payable by the Licensee each year, calculated in accordance with the Fee Formula (Appendix A).
+**1.9 "Effective Date"** means the date on which the Licensee executes this Agreement or first exercises rights granted hereunder, whichever is earlier.
 
-**1.10 "Revocation Vote"** means a formal vote initiated and conducted by the Governed Community Body pursuant to Article 6, determining whether a Licensee's commercial license shall be revoked.
-
-**1.11 "Effective Date"** means the date on which the Licensee executes this Agreement or first exercises rights granted hereunder, whichever is earlier.
-
-**1.12 "Cure Period"** means the period granted to a Licensee to remedy a breach or misalignment before further action is taken, as specified in the relevant Article.
+**1.10 "Cure Period"** means the period granted to a Licensee to remedy a breach or misalignment before further action is taken, as specified in the relevant Article.
 
 ---
 
 ## Article 2 — Grant of Commercial License
 
-**2.1 Activation Threshold.** This License may not be issued to any Licensee until the Project has at least **[N] registered Community members**, of which no single legal entity (including its subsidiaries and affiliates) accounts for more than **[X]%** of the total membership. This threshold is verified by the Licensor at the time of license issuance.
+**2.1 Activation Threshold.** This License may not be issued to any Licensee until the Project has at least **[N] independent contributors**, of which no single legal entity (including its subsidiaries and affiliates) accounts for more than **[X]%** of the total. This threshold is verified by the Board at the time of license issuance.
 
-**2.2 Grant.** Subject to the Licensee's continuous compliance with all terms of this License, the Licensor hereby grants the Licensee a limited, non-exclusive, non-transferable, non-sublicensable license to:
+**2.2 Board Approval.** Commercial licenses are granted at the sole discretion of the Governing Board. The Board may accept, reject, or condition any application for a commercial license, and is not required to provide reasons for rejection.
+
+**2.3 Grant.** Subject to the Licensee's continuous compliance with all terms of this License, the Organization hereby grants the Licensee a limited, non-exclusive, non-transferable, non-sublicensable license to:
 
   (a) Use, copy, and internally deploy the Software for commercial purposes;
 
@@ -58,7 +56,7 @@ The defining feature of this License is the **Community Revocation Mechanism**: 
 
   (c) Distribute the Software as part of a commercial product or service, provided all conditions of this License are met.
 
-**2.3 Limitations.** This License does not grant the Licensee the right to:
+**2.4 Limitations.** This License does not grant the Licensee the right to:
 
   (a) Sublicense or transfer rights to third parties;
 
@@ -68,27 +66,27 @@ The defining feature of this License is the **Community Revocation Mechanism**: 
 
   (d) Claim ownership of the Software or misrepresent its origin.
 
-**2.4 Relationship to AGPLv3.** This License is an alternative to AGPLv3, not a supplement to it. The Licensee operates under either AGPLv3 or this License, not both simultaneously. Upon termination of this License for any reason, the Licensee must either comply with AGPLv3 or cease use of the Software in accordance with Article 7.
+**2.5 Relationship to AGPLv3.** This License is an alternative to AGPLv3, not a supplement to it. The Licensee operates under either AGPLv3 or this License, not both simultaneously. Upon termination of this License for any reason, the Licensee must either comply with AGPLv3 or cease use of the Software in accordance with Article 7.
 
 ---
 
 ## Article 3 — Ecosystem Alignment Obligations
 
-**3.1 Code of Conduct.** The Licensee must adhere to the Project's published Code of Conduct at all times during the term of this License. The current Code of Conduct is published at [Project URL] and may be updated by the Licensor with thirty (30) days' written notice to the Licensee.
+**3.1 Code of Conduct.** The Licensee must adhere to the Project's published Code of Conduct at all times during the term of this License. The current Code of Conduct is published at [Project URL] and may be updated by the Organization with thirty (30) days' written notice to the Licensee.
 
 **3.2 Cooperative Conduct.** The Licensee shall:
 
-  (a) Cooperate in good faith with the Licensor and Community on matters affecting the Software, including security disclosures, compatibility, and integration concerns;
+  (a) Cooperate in good faith with the Organization and its contributors on matters affecting the Software, including security disclosures, compatibility, and integration concerns;
 
-  (b) Respond to reasonable communications from the Licensor within fifteen (15) business days;
+  (b) Respond to reasonable communications from the Organization within fifteen (15) business days;
 
-  (c) Maintain accurate, current contact information registered with the Licensor for governance and compliance purposes;
+  (c) Maintain accurate, current contact information registered with the Organization for governance and compliance purposes;
 
-  (d) Publicly attribute the Software in any product or service incorporating it, using the form: *"Built with [Software Name] — [Project URL]"*, or an equivalent form approved in writing by the Licensor.
+  (d) Publicly attribute the Software in any product or service incorporating it, using the form: *"Built with [Software Name] — [Project URL]"*, or an equivalent form approved in writing by the Organization.
 
 **3.3 Non-Aggression.** The Licensee shall not:
 
-  (a) Initiate or financially support patent, copyright, or trade secret litigation against the Licensor, any contributor to the Software, or any other Licensee under this License, where such litigation relates to the Software;
+  (a) Initiate or financially support patent, copyright, or trade secret litigation against the Organization, any contributor to the Software, or any other Licensee under this License, where such litigation relates to the Software;
 
   (b) Engage in competitive actions specifically designed to harm the Project, including but not limited to: funding hostile forks, filing malicious DMCA notices, or coordinating efforts to undermine the Project's community or reputation;
 
@@ -110,19 +108,19 @@ The defining feature of this License is the **Community Revocation Mechanism**: 
 
 ## Article 4 — Annual License Fee
 
-**4.1 Fee Obligation.** The Licensee shall pay the Annual License Fee to the Licensor on or before the anniversary of the Effective Date each year.
+**4.1 Fee Obligation.** The Licensee shall pay the Annual License Fee to the Organization on or before the anniversary of the Effective Date each year.
 
-**4.2 Fee Calculation.** The Annual License Fee is calculated in accordance with the Fee Formula set out in Appendix A to this License. The Licensor may update the Fee Formula with ninety (90) days' written notice, provided that no increase shall take effect mid-term of any paid year.
+**4.2 Fee Calculation.** The Annual License Fee is calculated in accordance with the Fee Formula set out in Appendix A to this License. The Organization may update the Fee Formula with ninety (90) days' written notice, provided that no increase shall take effect mid-term of any paid year.
 
-**4.3 Payment Process.** The Licensor shall issue an invoice or fee statement no fewer than thirty (30) days before each payment is due. Payment terms and accepted methods are as specified in the invoice.
+**4.3 Payment Process.** The Organization shall issue an invoice or fee statement no fewer than thirty (30) days before each payment is due. Payment terms and accepted methods are as specified in the invoice.
 
-**4.4 Self-Reporting.** The Licensee shall provide to the Licensor, on an annual basis, an honest declaration of the figures required to calculate the Fee (e.g., revenue, headcount, deployment scale), signed by an authorized officer of the Licensee.
+**4.4 Self-Reporting.** The Licensee shall provide to the Organization, on an annual basis, an honest declaration of the figures required to calculate the Fee (e.g., annual revenue, ecosystem inclusion factors), signed by an authorized officer of the Licensee.
 
-**4.5 Audit Right.** The Licensor reserves the right to audit the Licensee's records relevant to Fee calculation, upon thirty (30) days' written notice, no more than once per year. The cost of the audit is borne by the Licensor unless the audit reveals an underpayment of more than fifteen percent (15%), in which case the Licensee bears the audit cost.
+**4.5 Audit Right.** The Organization reserves the right to audit the Licensee's records relevant to Fee calculation, upon thirty (30) days' written notice, no more than once per year. The cost of the audit is borne by the Organization unless the audit reveals an underpayment of more than fifteen percent (15%), in which case the Licensee bears the audit cost.
 
-**4.6 Non-Payment.** Failure to pay the Annual License Fee by the due date constitutes a breach. The Licensor shall provide written notice of non-payment, after which the Licensee has thirty (30) days to cure. Failure to cure results in automatic suspension of this License pending payment. Suspension exceeding sixty (60) days results in termination under Article 7.
+**4.6 Non-Payment.** Failure to pay the Annual License Fee by the due date constitutes a breach. The Organization shall provide written notice of non-payment, after which the Licensee has thirty (30) days to cure. Failure to cure results in automatic suspension of this License pending payment. Suspension exceeding sixty (60) days results in termination under Article 7.
 
-**4.7 Fund Allocation.** All fees collected under this License shall be allocated transparently in accordance with the compensation structure defined in the Governance Charter (Appendix B). The recommended allocation is:
+**4.7 Fund Allocation.** All fees collected under this License shall be allocated transparently in accordance with the compensation structure defined in the Organization's charter. The recommended allocation is:
 
   (a) **60–70%** to contributor compensation;
 
@@ -130,19 +128,19 @@ The defining feature of this License is the **Community Revocation Mechanism**: 
 
   (c) **10–15%** to a reserve fund (legal defense, sustainability buffer);
 
-  (d) **Up to 5%** to foundation operations and administration.
+  (d) **Up to 5%** to Organization operations and administration.
 
-  The exact percentages are set and may be adjusted by Community vote as described in Appendix B.
+  The exact percentages are set by the Governing Board and published publicly. Adjustments require thirty (30) days' advance notice.
 
 ---
 
 ## Article 5 — Contribution Back Requirement
 
-**5.1 Mandatory Contribution.** Any Contribution developed by or on behalf of the Licensee — including modifications, patches, improvements, or Derivative Works — must be submitted to the Licensor within ninety (90) days of internal deployment or use, whichever is earlier.
+**5.1 Mandatory Contribution.** Any Contribution developed by or on behalf of the Licensee — including modifications, patches, improvements, or Derivative Works — must be submitted to the Organization within ninety (90) days of internal deployment or use, whichever is earlier.
 
-**5.2 Submission Method.** Contributions shall be submitted in accordance with the Project's Contributor License Agreement (CLA) for commercial licensees, or via Developer Certificate of Origin (DCO) where specified by the Licensor. The applicable method and terms are published at [CLA/DCO URL].
+**5.2 Submission Method.** Contributions shall be submitted in accordance with the Project's Contributor License Agreement (CLA) for commercial licensees, or via Developer Certificate of Origin (DCO) where specified by the Organization. The applicable method and terms are published at [CLA/DCO URL].
 
-**5.3 Licensor's Rights Over Contributions.** The Licensor may, at its sole discretion:
+**5.3 Organization's Rights Over Contributions.** The Organization may, at its sole discretion:
 
   (a) Merge the Contribution into the publicly available Software;
 
@@ -154,11 +152,11 @@ The defining feature of this License is the **Community Revocation Mechanism**: 
 
 ---
 
-## Article 6 — Community Revocation Mechanism
+## Article 6 — License Revocation
 
-**6.1 Principle.** The Community retains collective authority to revoke any commercial license granted under this License where the Licensee has materially and persistently violated the spirit or terms of this License, and where the Licensor has failed or been unable to address the violation. This Mechanism is a last resort, not a first response.
+**6.1 Board Authority.** The Governing Board retains unilateral authority to revoke any commercial license granted under this Agreement. Revocation is a measure of last resort, exercised when a Licensee has materially violated the terms or spirit of this License and lesser remedies have proven insufficient.
 
-**6.2 Grounds for Revocation.** A Revocation Vote may be initiated on the basis of any of the following:
+**6.2 Grounds for Revocation.** The Board may initiate revocation proceedings on the basis of any of the following:
 
   (a) Material breach of Ecosystem Alignment obligations (Article 3) that has not been cured within the applicable Cure Period;
 
@@ -168,47 +166,35 @@ The defining feature of this License is the **Community Revocation Mechanism**: 
 
   (d) Material misrepresentation in Fee self-reporting under Article 4.4;
 
-  (e) Bad-faith conduct in any dispute with the Licensor or Community.
+  (e) Bad-faith conduct in any dispute with the Organization or its contributors.
 
-**6.3 Initiation of a Revocation Vote.**
+**6.3 Due Process.**
 
-  (a) A Revocation Vote may be initiated by petition of at least **fifteen percent (15%)** of registered Community members, or by the Licensor directly.
+  (a) Before revoking a license, the Board shall notify the Licensee in writing of the specific grounds for the proposed revocation, including documentary evidence where available.
 
-  (b) The petition must specify in writing: the identity of the Licensee; the specific grounds for revocation; and documentary evidence supporting the claim.
+  (b) The Licensee shall be granted a **Cure Period of sixty (60) days** during which it may remedy the conduct complained of.
 
-  (c) Prior to a vote being called, the GCB shall notify the Licensee in writing of the petition and its grounds, granting a **Cure Period of sixty (60) days** during which the Licensee may remedy the conduct complained of.
+  (c) The Licensee shall be permitted to submit a written response to the Board within the Cure Period.
 
-  (d) If the Licensee remedies the conduct to the satisfaction of the GCB within the Cure Period, the petition is dismissed and the Licensee enters a **twelve (12) month Probationary Period**.
+  (d) If the Licensee remedies the conduct to the satisfaction of the Board within the Cure Period, the revocation proceedings are dismissed and the Licensee enters a **twelve (12) month Probationary Period**.
 
 **6.4 Probation and Escalation.**
 
-  (a) During a Probationary Period, if a new petition is filed (on the same or different grounds), the Cure Period is reduced to **thirty (30) days** and the cooldown restriction in Article 6.4(c) does not apply.
+  (a) During a Probationary Period, if the Board identifies a new breach (same or different grounds), the Cure Period is reduced to **thirty (30) days**.
 
-  (b) If the Licensee requires a third cure within any rolling **twenty-four (24) month** window, the GCB may call a Revocation Vote immediately with no Cure Period.
+  (b) If the Licensee requires a third cure within any rolling **twenty-four (24) month** window, the Board may revoke the license immediately with no Cure Period.
 
-  (c) A dismissed petition on the same grounds may not be re-filed within twelve (12) months, except during a Probationary Period as described in 6.4(a).
+  (c) Where the Board determines that a Licensee has engaged in a pattern of repeated violations followed by tactical remediation designed to exploit the Cure Period, the Board may waive the Cure Period entirely.
 
-  (d) Where the GCB determines by simple majority that a Licensee has engaged in a pattern of repeated violations followed by tactical remediation designed to exploit the Cure Period, the GCB may waive the cooldown and Cure Period entirely.
+**6.5 Revocation Decision.**
 
-**6.5 Conduct of the Vote.**
+  (a) If the Cure Period expires without satisfactory remedy, or if the Board exercises immediate revocation under Article 6.4(b) or 6.4(c), the Board shall issue a formal Revocation Notice to the Licensee within fifteen (15) business days of the decision.
 
-  (a) If the Cure Period expires without satisfactory remedy, the GCB shall schedule a Revocation Vote within thirty (30) days.
+  (b) The Revocation Notice shall state the grounds, summarize the evidence, and reference the Licensee's response (if any).
 
-  (b) The vote shall be open to all registered Community members for a period of no fewer than fourteen (14) days.
+  (c) All revocation decisions and their stated grounds shall be published in the Organization's public license registry for transparency and accountability.
 
-  (c) The Licensee shall be permitted to submit a written response, published to the Community alongside the petition, prior to the vote.
-
-  (d) The vote shall be administered by the GCB in accordance with the voting procedures in the Governance Charter (Appendix B), which shall ensure anonymity, integrity, and accessibility of the vote.
-
-**6.6 Outcome.**
-
-  (a) Revocation requires a **supermajority of two-thirds (2/3) of votes cast**, with a minimum quorum of **twenty-five percent (25%) of registered Community members** participating.
-
-  (b) If the supermajority is reached, the GCB issues a Revocation Notice to the Licensee and the Licensor within five (5) business days.
-
-  (c) If the supermajority is not reached, the License continues in force, and no new Revocation Vote on the same grounds may be initiated within twelve (12) months, subject to the probation escalation rules in Article 6.4.
-
-**6.7 Effect of Revocation.** Upon receipt of a Revocation Notice:
+**6.6 Effect of Revocation.** Upon receipt of a Revocation Notice:
 
   (a) This License is terminated effective ninety (90) days from the date of the Revocation Notice (the "Transition Period");
 
@@ -218,7 +204,7 @@ The defining feature of this License is the **Community Revocation Mechanism**: 
 
   (d) Failure to comply by the end of the Transition Period exposes the Licensee to enforcement under AGPLv3 and applicable copyright law, including claims for damages for the period of unauthorized commercial use.
 
-**6.8 No Retroactive Fee Refund.** Revocation does not entitle the Licensee to a refund of any fees paid.
+**6.7 No Retroactive Fee Refund.** Revocation does not entitle the Licensee to a refund of any fees paid.
 
 ---
 
@@ -228,19 +214,19 @@ The defining feature of this License is the **Community Revocation Mechanism**: 
 
   (a) Failure to cure non-payment within the period specified in Article 4.6;
 
-  (b) Material breach of any term of this License not cured within sixty (60) days of written notice from the Licensor;
+  (b) Material breach of any term of this License not cured within sixty (60) days of written notice from the Organization;
 
-  (c) A valid Community Revocation under Article 6.
+  (c) A revocation decision by the Board under Article 6.
 
 **7.2 Effect of Termination.** Upon termination:
 
-  (a) All rights granted under this License immediately cease (subject to the Transition Period in Article 6.7 where applicable);
+  (a) All rights granted under this License immediately cease (subject to the Transition Period in Article 6.6 where applicable);
 
   (b) The Licensee must, within ninety (90) days: comply with AGPLv3 for any continued use, or remove all copies of the Software from its systems;
 
-  (c) Obligations that by their nature survive termination (including Article 5 for Contributions already developed, Article 6.8, and this Article 7.2) shall survive.
+  (c) Obligations that by their nature survive termination (including Article 5 for Contributions already developed, Article 6.7, and this Article 7.2) shall survive.
 
-**7.3 Reinstatement.** A terminated Licensee may apply for a new license at the Licensor's sole discretion, subject to any restrictions imposed by a Community Revocation.
+**7.3 Reinstatement.** A terminated Licensee may apply for a new license at the Board's sole discretion.
 
 ---
 
@@ -248,7 +234,7 @@ The defining feature of this License is the **Community Revocation Mechanism**: 
 
 **8.1 No Warranty.** THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, OR NON-INFRINGEMENT.
 
-**8.2 Limitation of Liability.** TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL THE LICENSOR OR CONTRIBUTORS BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES ARISING OUT OF OR IN CONNECTION WITH THIS LICENSE OR THE SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES. THE LICENSOR'S AGGREGATE LIABILITY SHALL NOT EXCEED THE TOTAL FEES PAID BY THE LICENSEE IN THE TWELVE (12) MONTHS PRECEDING THE CLAIM.
+**8.2 Limitation of Liability.** TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL THE ORGANIZATION OR CONTRIBUTORS BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES ARISING OUT OF OR IN CONNECTION WITH THIS LICENSE OR THE SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES. THE ORGANIZATION'S AGGREGATE LIABILITY SHALL NOT EXCEED THE TOTAL FEES PAID BY THE LICENSEE IN THE TWELVE (12) MONTHS PRECEDING THE CLAIM.
 
 **8.3 Governing Law and Jurisdiction.** This License shall be governed by and construed in accordance with the laws of **[JURISDICTION TO BE SPECIFIED]**. Any disputes shall be subject to the exclusive jurisdiction of the courts of **[JURISDICTION]**.
 
@@ -256,9 +242,9 @@ The defining feature of this License is the **Community Revocation Mechanism**: 
 
 **8.5 Severability.** If any provision of this License is found invalid or unenforceable, it shall be modified to the minimum extent necessary to make it enforceable. The remaining provisions shall continue in full force.
 
-**8.6 No Waiver.** Failure by the Licensor to enforce any provision of this License shall not constitute a waiver of the right to enforce it in the future.
+**8.6 No Waiver.** Failure by the Organization to enforce any provision of this License shall not constitute a waiver of the right to enforce it in the future.
 
-**8.7 Amendments.** The Licensor may publish revised versions of this License. Licensees operating under a specific version are not automatically subject to a new version; continued use after the transition date specified in any revision notice constitutes acceptance.
+**8.7 Amendments.** The Organization may publish revised versions of this License. Licensees operating under a specific version are not automatically subject to a new version; continued use after the transition date specified in any revision notice constitutes acceptance.
 
 **8.8 Notices.** All notices under this License shall be in writing and delivered to the registered contact addresses of each party.
 
@@ -266,23 +252,36 @@ The defining feature of this License is the **Community Revocation Mechanism**: 
 
 ## Appendix A — Fee Formula
 
-> *To be completed. The formula should specify the inputs (e.g., annual revenue, number of active users, number of deployments), the calculation method, the minimum fee, and the payment currency.*
+> *To be completed. The current working formula is:*
+>
+> ```
+> Annual Fee = annual_revenue × K₁ × (1 + K₂ × inclusion_index) × inflation_factor
+> ```
+>
+> Where:
+> - `annual_revenue` — Licensee's total annual revenue
+> - `K₁` — rate constant (percentage of revenue)
+> - `K₂` — ecosystem lock-in penalty multiplier
+> - `inclusion_index` — 0.0 (fully open) to 1.0 (fully locked-in), assessed by the Board
+> - `inflation_factor` — `(1 + CPI_change + buffer%)`, adjusted annually
+>
+> Constants and assessment methodology to be finalized.
 >
 > **Current status:** Under development. See project governance discussions.
 
 ---
 
-## Appendix B — Governance Charter
+## Appendix B — Organization Charter
 
 > *To be completed. Must specify:*
-> - *Who qualifies as a Community member and how membership is verified*
-> - *Minimum community size and diversity thresholds for License activation (Article 2.1)*
-> - *Composition and election/appointment of the Governed Community Body (GCB)*
-> - *GCB's term, quorum, and decision-making procedures*
-> - *Vote administration procedures (platform, anonymity guarantees, audit trail)*
+> - *Legal structure of the Organization (foundation, non-profit, LLC)*
+> - *Composition, election/appointment, and term of the Governing Board*
+> - *Board decision-making procedures (quorum, voting, minutes)*
+> - *Minimum contributor threshold and diversity requirements for license activation (Article 2.1)*
 > - *Fund allocation percentages and process for adjusting them*
 > - *Contributor compensation methodology and distribution schedule*
-> - *Process for updating the Governance Charter itself*
+> - *Public license registry maintenance and transparency obligations*
+> - *Process for updating this Charter*
 >
 > **Current status:** Under development. See project governance discussions.
 
