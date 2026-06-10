@@ -19,9 +19,9 @@ Project-JARVIS (Python)     — daemon, LLM orchestration, interfaces
   jarvis/sessions/          — session persistence
   jarvis/runtime/           — event loop, action handlers
 
-dispatch (Rust)             — signal-driven MCP task orchestrator
-dmcp (Rust)                 — MCP server manager (package manager for MCP)
-contextor (Rust)            — vector-based long-term memory store
+deps/rust/dispatch          — Rust signal-driven MCP task orchestrator
+deps/rust/dmcp              — Rust MCP server manager (package manager for MCP)
+deps/rust/contextor         — Rust vector-based long-term memory store
 mcp-registry                — JSON registry of installable MCP servers
 jarvisos-app                — Desktop GUI (Rust + CXX-Qt + Qt6/QML)
 jarvisos                    — AI-native Linux distro (Arch base + custom kernel)
@@ -100,20 +100,24 @@ Auto-denies after 30 seconds if no response.
 
 ---
 
+## Packaging
+
+### Install Extras
+
+| Extra | What it adds |
+|-------|-------------|
+| `jarvis-ai` | Core daemon (text I/O, LLM, dispatch) |
+| `jarvis-ai[tui]` | Textual TUI (`jarvis tui`) |
+| `jarvis-ai[voice]` | Vosk STT + Piper TTS |
+| `jarvis-ai[dev]` | pytest, black, isort, flake8, mypy, pre-commit |
+| `jarvis-ai[all]` | Everything above |
+
+### Rust Dependencies
+
+Submodules under `deps/rust/` — dispatch, dmcp, contextor. Build with
+`cargo build --release` in each directory. Binaries must be on PATH.
+
 ## Planned Work
-
-### Modular Packaging (#76)
-
-Split into optional extras:
-- `jarvis-ai` — core daemon (text I/O, LLM, dispatch)
-- `jarvis-ai[tui]` — Textual TUI
-- `jarvis-ai[voice]` — Vosk STT + Piper TTS
-- `jarvis-ai[all]` — everything
-
-### Rust Submodules (#75)
-
-Move dispatch, dmcp, contextor under `deps/rust/` as git submodules.
-Add `jarvis-ai[tools]` extra to build Rust binaries via cargo.
 
 ### API Recycling (#78)
 
