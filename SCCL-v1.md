@@ -38,7 +38,9 @@ The defining feature of this License is **Board-governed commercial access**: th
 
 **1.9 "Effective Date"** means the date on which the Licensee executes this Agreement or first exercises rights granted hereunder, whichever is earlier.
 
-**1.10 "Cure Period"** means the period granted to a Licensee to remedy a breach or misalignment before further action is taken, as specified in the relevant Article.
+**1.10 "Cure Period"** means the period granted to a Licensee to remedy a breach or misalignment before further action is taken, as determined by the Board in accordance with Article 6.3.
+
+**1.11 "Licensee Relationship Index"** means the Board's internal, qualitative assessment of a Licensee's cumulative conduct, compliance history, and relationship with the Organization and its ecosystem. The Index is maintained by the Board as a governance instrument and may inform the Board's exercise of discretion under this License, including but not limited to licensing decisions, Cure Period duration, and reinstatement applications.
 
 ---
 
@@ -172,7 +174,7 @@ The defining feature of this License is **Board-governed commercial access**: th
 
   (a) Before revoking a license, the Board shall notify the Licensee in writing of the specific grounds for the proposed revocation, including documentary evidence where available.
 
-  (b) The Licensee shall be granted a **Cure Period of sixty (60) days** during which it may remedy the conduct complained of.
+  (b) The Board shall grant the Licensee a Cure Period whose duration is determined by the Board at its discretion, taking into account the severity of the breach, the Licensee's Relationship Index, and any prior compliance history. The Cure Period shall be no fewer than **fifteen (15) days**.
 
   (c) The Licensee shall be permitted to submit a written response to the Board within the Cure Period.
 
@@ -180,7 +182,7 @@ The defining feature of this License is **Board-governed commercial access**: th
 
 **6.4 Probation and Escalation.**
 
-  (a) During a Probationary Period, if the Board identifies a new breach (same or different grounds), the Cure Period is reduced to **thirty (30) days**.
+  (a) During a Probationary Period, if the Board identifies a new breach (same or different grounds), the Board may set a shorter Cure Period, subject to the fifteen (15) day minimum.
 
   (b) If the Licensee requires a third cure within any rolling **twenty-four (24) month** window, the Board may revoke the license immediately with no Cure Period.
 
@@ -214,7 +216,7 @@ The defining feature of this License is **Board-governed commercial access**: th
 
   (a) Failure to cure non-payment within the period specified in Article 4.6;
 
-  (b) Material breach of any term of this License not cured within sixty (60) days of written notice from the Organization;
+  (b) Material breach of any term of this License not cured within the Cure Period set by the Board in accordance with Article 6.3;
 
   (c) A revocation decision by the Board under Article 6.
 
@@ -226,7 +228,7 @@ The defining feature of this License is **Board-governed commercial access**: th
 
   (c) Obligations that by their nature survive termination (including Article 5 for Contributions already developed, Article 6.7, and this Article 7.2) shall survive.
 
-**7.3 Reinstatement.** A terminated Licensee may apply for a new license at the Board's sole discretion.
+**7.3 Reinstatement.** A terminated Licensee may apply for a new license at the Board's sole discretion. The Board may consider the Licensee's Relationship Index, prior compliance history, and the circumstances of termination in evaluating any reinstatement application.
 
 ---
 
@@ -281,6 +283,7 @@ The defining feature of this License is **Board-governed commercial access**: th
 > - *Fund allocation percentages and process for adjusting them*
 > - *Contributor compensation methodology and distribution schedule*
 > - *Public license registry maintenance and transparency obligations*
+> - *Licensee Relationship Index: maintenance procedures, assessment criteria, and internal access controls*
 > - *Process for updating this Charter*
 >
 > **Current status:** Under development. See project governance discussions.
