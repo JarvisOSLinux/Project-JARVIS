@@ -118,7 +118,7 @@ The defining feature of this License is **Board-governed commercial access**: th
 
 **4.4 Self-Reporting.** The Licensee shall provide to the Organization, on an annual basis, an honest declaration of the figures required to calculate the Fee (e.g., annual revenue, ecosystem inclusion factors), signed by an authorized officer of the Licensee.
 
-**4.5 Audit Right.** The Organization reserves the right to audit the Licensee's records relevant to Fee calculation, upon thirty (30) days' written notice, no more than once per year. The cost of the audit is borne by the Organization unless the audit reveals an underpayment of more than fifteen percent (15%), in which case the Licensee bears the audit cost.
+**4.5 Audit Right.** The Organization reserves the right to audit the Licensee's records relevant to Fee calculation, upon thirty (30) days' written notice, no more than once per year. The cost of the audit is borne by the Organization unless the audit reveals an underpayment exceeding the **Audit Tolerance Threshold**, in which case the Licensee bears the audit cost. The Audit Tolerance Threshold is set by the Board within a range of **ten percent (10%) to fifteen percent (15%)**, and may be adjusted per Licensee based on the Licensee's Relationship Index and prior reporting accuracy.
 
 **4.6 Non-Payment.** Failure to pay the Annual License Fee by the due date constitutes a breach. The Organization shall provide written notice of non-payment, after which the Licensee has thirty (30) days to cure. Failure to cure results in automatic suspension of this License pending payment. Suspension exceeding sixty (60) days results in termination under Article 7.
 
