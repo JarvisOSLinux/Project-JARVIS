@@ -124,13 +124,15 @@ The defining feature of this License is **Board-governed commercial access**: th
 
 **4.7 Fund Allocation.** All fees collected under this License shall be allocated transparently in accordance with the compensation structure defined in the Organization's charter. The recommended allocation is:
 
-  (a) **60–70%** to contributor compensation;
+  (a) **50–60%** to contributor compensation;
 
   (b) **15–20%** to project infrastructure (hosting, CI/CD, security audits, tooling);
 
   (c) **10–15%** to a reserve fund (legal defense, sustainability buffer);
 
-  (d) **Up to 5%** to Organization operations and administration.
+  (d) **5–10%** to an emergency fund (incident response, operational contingencies);
+
+  (e) **Up to 5%** to Organization operations and administration.
 
   The exact percentages are set by the Governing Board and published publicly. Adjustments require thirty (30) days' advance notice.
 
