@@ -1,3 +1,4 @@
+import json
 import os
 from typing import Optional
 
@@ -6,6 +7,7 @@ from ..contextor import ContextorAdapter
 from ..dispatch import DispatchAdapter, EventMerger, GoalManager
 from ..kernel_client import KernelClient, provider_from_config
 from ..llm import LLM
+from ..llm.provider_pool import ProviderEntry, ProviderPool
 from ..llm.providers import create_provider as create_llm_provider
 from ..voice.audio import (
     AudioUnavailableError,
@@ -23,55 +25,107 @@ logger = get_logger(__name__)
 
 class ComponentFactory:
     @staticmethod
-    def create_llm() -> LLM:
-        """Create LLM with provider selected by ``Config.LLM_PROVIDER``."""
-        import json as _json
+    def _build_provider_pool() -> ProviderPool:
+        """Build a ProviderPool from providers.json or legacy env vars."""
+        providers_file = Config.PROVIDERS_FILE
 
-        logger.info("Getting system information...")
-        system_info = SystemInfo.get_system_info()
+        if os.path.isfile(providers_file):
+            logger.info(f"Loading provider pool from {providers_file}")
+            with open(providers_file) as f:
+                data = json.load(f)
 
-        logger.info(f"Initiating LLM (provider: {Config.LLM_PROVIDER})...")
+            entries = []
+            for spec in data.get("providers", []):
+                name = spec.get("name", f"provider-{len(entries)}")
+                ptype = spec.get("type", "ollama")
+                model = spec.get("model", "")
+                if not model:
+                    logger.warning(f"Provider '{name}' has no model, skipping")
+                    continue
 
-        # Build provider-specific kwargs
-        provider_kwargs = {}
+                kwargs = {}
+                if ptype == "ollama":
+                    kwargs["base_url"] = spec.get("url", "http://localhost:11434")
+                    if spec.get("api_key"):
+                        kwargs["api_key"] = spec["api_key"]
+                    kwargs["auto_pull"] = spec.get("auto_pull", False)
+                    kwargs["temperature"] = spec.get(
+                        "temperature",
+                        getattr(Config, "LLM_TEMPERATURE", 0.7),
+                    )
+                    kwargs["strict_json"] = spec.get("strict_json", False)
+                elif ptype == "api":
+                    kwargs["api_url"] = spec.get("url", "")
+                    kwargs["api_key"] = spec.get("api_key", "")
+                    if spec.get("headers"):
+                        kwargs["headers"] = spec["headers"]
+
+                try:
+                    provider = create_llm_provider(
+                        provider=ptype, model=model, **kwargs
+                    )
+                    entries.append(ProviderEntry(provider=provider, name=name))
+                    logger.info(f"  [{len(entries)}] {name}: {ptype}/{model}")
+                except Exception as e:
+                    logger.warning(f"Failed to create provider '{name}': {e}")
+
+            if entries:
+                return ProviderPool(entries)
+            logger.warning("No valid providers in providers.json, falling back to env")
+
         provider_type = Config.LLM_PROVIDER.lower()
-
+        kwargs = {}
         if provider_type == "ollama":
-            provider_kwargs["base_url"] = Config.LLM_URL
-            provider_kwargs["api_key"] = Config.LLM_API_KEY
-            provider_kwargs["auto_pull"] = getattr(Config, "LLM_AUTO_PULL", False)
-            provider_kwargs["temperature"] = getattr(Config, "LLM_TEMPERATURE", 0.7)
-            provider_kwargs["strict_json"] = getattr(Config, "LLM_STRICT_JSON", False)
+            kwargs["base_url"] = Config.LLM_URL
+            kwargs["api_key"] = Config.LLM_API_KEY
+            kwargs["auto_pull"] = getattr(Config, "LLM_AUTO_PULL", False)
+            kwargs["temperature"] = getattr(Config, "LLM_TEMPERATURE", 0.7)
+            kwargs["strict_json"] = getattr(Config, "LLM_STRICT_JSON", False)
         elif provider_type == "api":
             if not Config.LLM_URL:
                 raise ValueError("LLM_URL must be set when using API provider")
             if not Config.LLM_API_KEY:
                 raise ValueError("LLM_API_KEY must be set when using API provider")
-            provider_kwargs["api_url"] = Config.LLM_URL
-            provider_kwargs["api_key"] = Config.LLM_API_KEY
+            kwargs["api_url"] = Config.LLM_URL
+            kwargs["api_key"] = Config.LLM_API_KEY
             if Config.LLM_API_HEADERS:
                 try:
-                    provider_kwargs["headers"] = _json.loads(Config.LLM_API_HEADERS)
-                except _json.JSONDecodeError:
-                    logger.warning(f"Invalid LLM_API_HEADERS JSON, ignoring")
+                    kwargs["headers"] = json.loads(Config.LLM_API_HEADERS)
+                except json.JSONDecodeError:
+                    logger.warning("Invalid LLM_API_HEADERS JSON, ignoring")
 
-        llm_provider = create_llm_provider(
+        provider = create_llm_provider(
             provider=provider_type,
             model=Config.LLM_MODEL,
-            **provider_kwargs,
+            **kwargs,
         )
 
-        # For Ollama, ensure model is available
         if provider_type == "ollama":
-            if not llm_provider.is_available():
+            if not provider.is_available():
                 logger.warning("Ollama provider configured but not available.")
             else:
                 logger.info(f"Checking if model '{Config.LLM_MODEL}' is available...")
-                if not llm_provider.ensure_model():
+                if not provider.ensure_model():
                     raise RuntimeError(
                         f"Model '{Config.LLM_MODEL}' is not available. "
                         "Please install it or enable auto-pull."
                     )
+
+        return ProviderPool(
+            [ProviderEntry(provider=provider, name=provider_type)]
+        )
+
+    @staticmethod
+    def create_llm() -> LLM:
+        """Create LLM with provider pool (failover-capable)."""
+        logger.info("Getting system information...")
+        system_info = SystemInfo.get_system_info()
+
+        pool = ComponentFactory._build_provider_pool()
+        logger.info(
+            f"Provider pool ready: {len(pool.entries)} provider(s), "
+            f"active: {pool.active_provider_name}"
+        )
 
         fmt = dict(
             system=system_info["system"],
@@ -102,7 +156,7 @@ class ComponentFactory:
         }
 
         return LLM(
-            provider=llm_provider,
+            provider=pool,
             prompts=prompts,
             wrong_json_message=Config.LLM_WRONG_JSON_FORMAT_MESSAGE,
         )
