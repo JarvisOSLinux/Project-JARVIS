@@ -283,6 +283,138 @@ def _check_capabilities() -> dict:
     return capabilities
 
 
+def _load_providers_file() -> dict:
+    """Load providers.json, returning empty structure if absent."""
+    providers_file = Config.PROVIDERS_FILE
+    if os.path.isfile(providers_file):
+        import json
+
+        with open(providers_file) as f:
+            return json.load(f)
+    return {"providers": []}
+
+
+def _save_providers_file(data: dict) -> None:
+    """Write providers.json, creating parent dirs if needed."""
+    import json
+
+    providers_file = Config.PROVIDERS_FILE
+    os.makedirs(os.path.dirname(providers_file), exist_ok=True)
+    with open(providers_file, "w") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+
+
+def _cmd_providers() -> None:
+    """Manage the provider failover pool."""
+    if len(sys.argv) == 2:
+        data = _load_providers_file()
+        providers = data.get("providers", [])
+        if not providers:
+            print("No providers configured in providers.json.")
+            print(f"  Using legacy config: {Config.LLM_PROVIDER} / {Config.LLM_MODEL}")
+            print()
+            print("Add one with:")
+            print("  jarvis providers add <name> ollama <model>")
+            print("  jarvis providers add <name> api <model> <url> <api_key>")
+            return
+
+        print(f"Provider pool ({len(providers)} providers):")
+        print()
+        for i, p in enumerate(providers):
+            name = p.get("name", f"provider-{i}")
+            ptype = p.get("type", "?")
+            model = p.get("model", "?")
+            url = p.get("url", "")
+            has_key = "yes" if p.get("api_key") else "no"
+            priority = f"[{i + 1}]"
+            print(f"  {priority} {name}")
+            print(f"      type: {ptype}  model: {model}")
+            if url:
+                print(f"      url: {url}")
+            if ptype == "api":
+                print(f"      api_key: {'set' if p.get('api_key') else '(not set)'}")
+            print()
+        print(f"  File: {Config.PROVIDERS_FILE}")
+        return
+
+    subcmd = sys.argv[2]
+
+    if subcmd == "add":
+        if len(sys.argv) < 5:
+            print("Usage:")
+            print("  jarvis providers add <name> ollama <model> [url]")
+            print("  jarvis providers add <name> api <model> <url> <api_key>")
+            sys.exit(1)
+
+        name = sys.argv[3]
+        ptype = sys.argv[4].lower()
+
+        data = _load_providers_file()
+        existing_names = [p.get("name") for p in data.get("providers", [])]
+        if name in existing_names:
+            print(f"Error: Provider '{name}' already exists. Remove it first.")
+            sys.exit(1)
+
+        if ptype == "ollama":
+            if len(sys.argv) < 6:
+                print("Usage: jarvis providers add <name> ollama <model> [url]")
+                sys.exit(1)
+            model = sys.argv[5]
+            entry = {"name": name, "type": "ollama", "model": model}
+            if len(sys.argv) >= 7:
+                entry["url"] = sys.argv[6]
+        elif ptype == "api":
+            if len(sys.argv) < 8:
+                print("Usage: jarvis providers add <name> api <model> <url> <api_key>")
+                sys.exit(1)
+            model = sys.argv[5]
+            url = sys.argv[6]
+            api_key = sys.argv[7]
+            entry = {
+                "name": name,
+                "type": "api",
+                "model": model,
+                "url": url,
+                "api_key": api_key,
+            }
+        else:
+            print(f"Error: Unknown provider type '{ptype}'. Use 'ollama' or 'api'.")
+            sys.exit(1)
+
+        data.setdefault("providers", []).append(entry)
+        _save_providers_file(data)
+        position = len(data["providers"])
+        print(f"Added provider '{name}' ({ptype}/{model}) at position {position}")
+
+    elif subcmd == "remove":
+        if len(sys.argv) < 4:
+            print("Usage: jarvis providers remove <name>")
+            sys.exit(1)
+
+        name = sys.argv[3]
+        data = _load_providers_file()
+        providers = data.get("providers", [])
+        before = len(providers)
+        data["providers"] = [p for p in providers if p.get("name") != name]
+
+        if len(data["providers"]) == before:
+            print(f"Error: Provider '{name}' not found.")
+            sys.exit(1)
+
+        _save_providers_file(data)
+        print(f"Removed provider '{name}'")
+
+    else:
+        print(f"Error: Unknown subcommand '{subcmd}'")
+        print("Usage:")
+        print("  jarvis providers                              # List all")
+        print("  jarvis providers add <name> ollama <model>    # Add Ollama")
+        print("  jarvis providers add <name> api <model> <url> <api_key>  # Add API")
+        print("  jarvis providers remove <name>                # Remove by name")
+        sys.exit(1)
+
+
 def show_usage() -> None:
     """Display usage information."""
     print("JARVIS AI Assistant - CLI Interface")
@@ -310,6 +442,12 @@ def show_usage() -> None:
     print("  jarvis api-key <key>          # Set API key")
     print("  jarvis auto-pull on/off       # Enable/disable auto-pull missing models")
     print("  jarvis llm-config             # Show current LLM configuration")
+    print()
+    print("Provider Pool (failover):")
+    print("  jarvis providers                                    # List providers")
+    print("  jarvis providers add <name> ollama <model> [url]    # Add Ollama provider")
+    print("  jarvis providers add <name> api <model> <url> <key> # Add API provider")
+    print("  jarvis providers remove <name>                      # Remove provider")
 
 
 def main() -> None:
@@ -484,6 +622,9 @@ def main() -> None:
 
     elif command == "llm-config":
         show_llm_config()
+
+    elif command == "providers":
+        _cmd_providers()
 
     elif command == "auto-pull":
         if len(sys.argv) == 2:
