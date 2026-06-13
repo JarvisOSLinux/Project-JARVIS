@@ -67,6 +67,15 @@ class Config:
     # when using a non-reasoning model that benefits from strict mode.
     LLM_STRICT_JSON = os.getenv("LLM_STRICT_JSON", "false").lower() == "true"
 
+    _DEFAULT_CONFIG_DIR = os.getenv(
+        "JARVIS_CONFIG_DIR",
+        os.path.join(os.path.expanduser("~"), ".config", "jarvis"),
+    )
+    PROVIDERS_FILE = os.getenv(
+        "PROVIDERS_FILE",
+        os.path.join(_DEFAULT_CONFIG_DIR, "providers.json"),
+    )
+
     TTS_MODEL_ONNX = os.getenv("TTS_MODEL_ONNX")
     TTS_MODEL_JSON = os.getenv("TTS_MODEL_JSON")
 
