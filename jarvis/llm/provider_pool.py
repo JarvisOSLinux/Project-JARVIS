@@ -130,9 +130,7 @@ class ProviderPool(BaseLLMProvider):
         for entry in self._entries:
             if entry.status in ("cooldown", "exhausted") and entry.cooldown_until:
                 if now >= entry.cooldown_until:
-                    logger.info(
-                        f"Provider '{entry.name}' cooldown expired, restoring"
-                    )
+                    logger.info(f"Provider '{entry.name}' cooldown expired, restoring")
                     entry.status = "active"
                     entry.cooldown_until = None
 
