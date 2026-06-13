@@ -81,6 +81,9 @@ class ComponentFactory:
             kwargs["auto_pull"] = getattr(Config, "LLM_AUTO_PULL", False)
             kwargs["temperature"] = getattr(Config, "LLM_TEMPERATURE", 0.7)
             kwargs["strict_json"] = getattr(Config, "LLM_STRICT_JSON", False)
+            llm_think = getattr(Config, "LLM_THINK", None)
+            if llm_think is not None:
+                kwargs["think"] = llm_think
         elif provider_type == "api":
             if not Config.LLM_URL:
                 raise ValueError("LLM_URL must be set when using API provider")
@@ -111,9 +114,7 @@ class ComponentFactory:
                         "Please install it or enable auto-pull."
                     )
 
-        return ProviderPool(
-            [ProviderEntry(provider=provider, name=provider_type)]
-        )
+        return ProviderPool([ProviderEntry(provider=provider, name=provider_type)])
 
     @staticmethod
     def create_llm() -> LLM:

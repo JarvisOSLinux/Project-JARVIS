@@ -1,0 +1,17 @@
+name: Notify Parent Repo
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify jarvisos of new commit
+        run: |
+          curl -s -X POST \
+            -H "Authorization: token ${{ secrets.ORG_PAT }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/JarvisOSLinux/jarvisos/dispatches \
+            -d "{\"event_type\":\"subsystem-update\",\"client_payload\":{\"repo\":\"Project-JARVIS\",\"sha\":\"${{ github.sha }}\",\"ref\":\"${{ github.ref }}\"}}"
