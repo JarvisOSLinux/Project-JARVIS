@@ -21,6 +21,14 @@ from pathlib import Path
 
 from .config import Config
 from .core.logger import JarvisLogger, get_logger
+from .core.providers import (
+    add_provider,
+    edit_provider,
+    list_providers,
+    move_provider,
+    parse_flags,
+    remove_provider,
+)
 
 # Initialise logging from config before any get_logger() call so that the
 # file handler (LOG_FILE) and level (LOG_LEVEL) are applied from the start.
@@ -283,61 +291,10 @@ def _check_capabilities() -> dict:
     return capabilities
 
 
-def _load_providers_file() -> dict:
-    """Load providers.json, returning empty structure if absent."""
-    providers_file = Config.PROVIDERS_FILE
-    if os.path.isfile(providers_file):
-        import json
-
-        with open(providers_file) as f:
-            return json.load(f)
-    return {"providers": []}
-
-
-def _save_providers_file(data: dict) -> None:
-    """Write providers.json, creating parent dirs if needed."""
-    import json
-
-    providers_file = Config.PROVIDERS_FILE
-    os.makedirs(os.path.dirname(providers_file), exist_ok=True)
-    with open(providers_file, "w") as f:
-        json.dump(data, f, indent=2)
-        f.write("\n")
-
-
-def _parse_provider_flags(args: list) -> dict:
-    """Parse --flag value pairs from an argument list."""
-    flags: dict = {}
-    i = 0
-    while i < len(args):
-        if args[i].startswith("--") and i + 1 < len(args):
-            key = args[i][2:]
-            flags[key] = args[i + 1]
-            i += 2
-        else:
-            i += 1
-    return flags
-
-
-def _generate_provider_name(ptype: str, model: str, existing: list) -> str:
-    """Auto-generate a unique provider name from type and model."""
-    import re
-
-    base = f"{ptype}-{re.sub(r'[^a-zA-Z0-9]', '-', model)}"
-    base = re.sub(r"-+", "-", base).strip("-").lower()
-    if base not in existing:
-        return base
-    n = 2
-    while f"{base}-{n}" in existing:
-        n += 1
-    return f"{base}-{n}"
-
-
 def _cmd_providers() -> None:
     """Manage the provider failover pool."""
     if len(sys.argv) == 2:
-        data = _load_providers_file()
-        providers = data.get("providers", [])
+        providers = list_providers()
         if not providers:
             print("No providers configured in providers.json.")
             print(f"  Using legacy config: {Config.LLM_PROVIDER} / {Config.LLM_MODEL}")
@@ -371,137 +328,69 @@ def _cmd_providers() -> None:
     subcmd = sys.argv[2]
 
     if subcmd == "add":
-        flags = _parse_provider_flags(sys.argv[3:])
-        ptype = flags.get("type", "").lower()
+        flags = parse_flags(sys.argv[3:])
+        ptype = flags.get("type", "")
         model = flags.get("model", "")
-
         if not ptype or not model:
             print("Usage: jarvis providers add --type <ollama|api> --model <model>")
             print("  Optional: --name <label> --url <url> --key <api_key>")
             sys.exit(1)
-
-        if ptype not in ("ollama", "api"):
-            print(f"Error: Unknown provider type '{ptype}'. Use 'ollama' or 'api'.")
+        try:
+            name, position = add_provider(
+                ptype,
+                model,
+                name=flags.get("name"),
+                url=flags.get("url"),
+                api_key=flags.get("key"),
+            )
+            print(f"Added provider '{name}' ({ptype}/{model}) at position {position}")
+        except ValueError as e:
+            print(f"Error: {e}")
             sys.exit(1)
-
-        if ptype == "api" and (not flags.get("url") or not flags.get("key")):
-            print("Error: API providers require --url and --key")
-            sys.exit(1)
-
-        data = _load_providers_file()
-        existing_names = [p.get("name") for p in data.get("providers", [])]
-
-        name = flags.get("name") or _generate_provider_name(
-            ptype, model, existing_names
-        )
-        if name in existing_names:
-            print(f"Error: Provider '{name}' already exists. Remove it first.")
-            sys.exit(1)
-
-        entry: dict = {"name": name, "type": ptype, "model": model}
-        if flags.get("url"):
-            entry["url"] = flags["url"]
-        if flags.get("key"):
-            entry["api_key"] = flags["key"]
-
-        data.setdefault("providers", []).append(entry)
-        _save_providers_file(data)
-        position = len(data["providers"])
-        print(f"Added provider '{name}' ({ptype}/{model}) at position {position}")
 
     elif subcmd == "remove":
         if len(sys.argv) < 4:
             print("Usage: jarvis providers remove <name>")
             sys.exit(1)
-
-        name = sys.argv[3]
-        data = _load_providers_file()
-        providers = data.get("providers", [])
-        before = len(providers)
-        data["providers"] = [p for p in providers if p.get("name") != name]
-
-        if len(data["providers"]) == before:
-            print(f"Error: Provider '{name}' not found.")
+        try:
+            remove_provider(sys.argv[3])
+            print(f"Removed provider '{sys.argv[3]}'")
+        except ValueError as e:
+            print(f"Error: {e}")
             sys.exit(1)
-
-        _save_providers_file(data)
-        print(f"Removed provider '{name}'")
 
     elif subcmd == "move":
         if len(sys.argv) < 5:
             print("Usage: jarvis providers move <name> <position>")
             print("  Position is 1-based (1 = highest priority)")
             sys.exit(1)
-
-        name = sys.argv[3]
         try:
             target_pos = int(sys.argv[4])
         except ValueError:
             print(f"Error: Position must be a number, got '{sys.argv[4]}'")
             sys.exit(1)
-
-        data = _load_providers_file()
-        providers = data.get("providers", [])
-
-        idx = None
-        for i, p in enumerate(providers):
-            if p.get("name") == name:
-                idx = i
-                break
-
-        if idx is None:
-            print(f"Error: Provider '{name}' not found.")
+        try:
+            move_provider(sys.argv[3], target_pos)
+            print(f"Moved provider '{sys.argv[3]}' to position {target_pos}")
+        except ValueError as e:
+            print(f"Error: {e}")
             sys.exit(1)
-
-        if target_pos < 1 or target_pos > len(providers):
-            print(f"Error: Position must be between 1 and {len(providers)}")
-            sys.exit(1)
-
-        entry = providers.pop(idx)
-        providers.insert(target_pos - 1, entry)
-        data["providers"] = providers
-        _save_providers_file(data)
-        print(f"Moved provider '{name}' to position {target_pos}")
 
     elif subcmd == "edit":
         if len(sys.argv) < 4:
             print("Usage: jarvis providers edit <name> --field <value>")
             print("  Fields: --model, --url, --key, --type")
             sys.exit(1)
-
-        name = sys.argv[3]
-        flags = _parse_provider_flags(sys.argv[4:])
-
+        flags = parse_flags(sys.argv[4:])
         if not flags:
             print("Error: No fields to update. Use --model, --url, --key, or --type")
             sys.exit(1)
-
-        data = _load_providers_file()
-        providers = data.get("providers", [])
-
-        target = None
-        for p in providers:
-            if p.get("name") == name:
-                target = p
-                break
-
-        if target is None:
-            print(f"Error: Provider '{name}' not found.")
+        try:
+            updated = edit_provider(sys.argv[3], **flags)
+            print(f"Updated provider '{sys.argv[3]}': {', '.join(updated)}")
+        except ValueError as e:
+            print(f"Error: {e}")
             sys.exit(1)
-
-        field_map = {"model": "model", "url": "url", "key": "api_key", "type": "type"}
-        updated = []
-        for flag_key, json_key in field_map.items():
-            if flag_key in flags:
-                target[json_key] = flags[flag_key]
-                updated.append(flag_key)
-
-        if not updated:
-            print("Error: No recognized fields. Use --model, --url, --key, or --type")
-            sys.exit(1)
-
-        _save_providers_file(data)
-        print(f"Updated provider '{name}': {', '.join(updated)}")
 
     else:
         print(f"Error: Unknown subcommand '{subcmd}'")

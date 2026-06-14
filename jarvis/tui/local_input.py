@@ -1,4 +1,4 @@
-"""TUI-local input handlers (/help, /export) and transcript export helper."""
+"""TUI-local input handlers and transcript export helper."""
 
 from __future__ import annotations
 
@@ -9,13 +9,14 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ..config import Config
+from ..core.providers import list_providers
 from .help_screen import HelpScreen
 from .slash_commands_doc import build_help_markdown
 
 
 def handle_local_input(app: Any, text: str, bindings: Any) -> bool:
     """Handle TUI-only slash commands. Return True when handled."""
-    low = text.lower()
+    low = text.lower().strip()
     if low in ("/help", "/?"):
         app.push_screen(HelpScreen(build_help_markdown(bindings)))
         return True
@@ -26,7 +27,91 @@ def handle_local_input(app: Any, text: str, bindings: Any) -> bool:
         export_transcript_to_disk(app, name_arg)
         return True
 
+    if low == "/clear":
+        from .actions import clear_transcript
+
+        clear_transcript(app)
+        return True
+
+    if low in ("/quit", "/exit"):
+        app.exit()
+        return True
+
+    if low == "/status":
+        _show_status(app)
+        return True
+
+    if low == "/providers":
+        _show_providers(app)
+        return True
+
     return False
+
+
+def _show_status(app: Any) -> None:
+    """Display current provider, model, and session info."""
+    model = getattr(Config, "LLM_MODEL", None) or "(unset)"
+    provider_name = getattr(Config, "LLM_PROVIDER", "?")
+
+    pool = None
+    if app.jarvis is not None and hasattr(app.jarvis, "llm"):
+        pool = getattr(app.jarvis.llm, "provider", None)
+
+    if pool is not None and hasattr(pool, "active_provider_name"):
+        provider_name = pool.active_provider_name or provider_name
+        model = getattr(pool, "model", model)
+
+    session_id = "(none)"
+    if app.jarvis is not None and app.jarvis.sessions.current:
+        session_id = app.jarvis.sessions.current.short_id()
+
+    lines = [
+        "[bold cyan]Status[/bold cyan]",
+        f"  provider: {provider_name}",
+        f"  model: {model}",
+        f"  session: {session_id}",
+    ]
+    app._append_log("\n".join(lines))
+
+
+def _show_providers(app: Any) -> None:
+    """Display configured providers with live pool status if available."""
+    pool_status = {}
+    if app.jarvis is not None and hasattr(app.jarvis, "llm"):
+        pool = getattr(app.jarvis.llm, "provider", None)
+        if pool is not None and hasattr(pool, "get_status"):
+            for info in pool.get_status():
+                pool_status[info["name"]] = info
+
+    providers = list_providers()
+    if not providers:
+        app._append_log(
+            "[dim]No providers configured. "
+            f"Using legacy: {Config.LLM_PROVIDER} / {Config.LLM_MODEL}[/dim]"
+        )
+        return
+
+    lines = [f"[bold cyan]Provider pool[/bold cyan] ({len(providers)} providers)"]
+    for i, p in enumerate(providers):
+        name = p.get("name", f"provider-{i}")
+        ptype = p.get("type", "?")
+        model = p.get("model", "?")
+
+        status_str = ""
+        live = pool_status.get(name)
+        if live:
+            s = live["status"]
+            if s == "active":
+                status_str = " [green]active[/green]"
+            elif s in ("cooldown", "exhausted"):
+                remaining = live.get("cooldown_remaining", "?")
+                status_str = f" [yellow]{s} ({remaining}s)[/yellow]"
+            elif s == "error":
+                status_str = " [red]error[/red]"
+
+        lines.append(f"  [{i + 1}] {name} — {ptype}/{model}{status_str}")
+
+    app._append_log("\n".join(lines))
 
 
 def export_transcript_to_disk(app: Any, filename: Optional[str]) -> None:
