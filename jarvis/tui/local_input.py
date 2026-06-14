@@ -9,7 +9,14 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ..config import Config
-from ..core.providers import list_providers
+from ..core.providers import (
+    add_provider,
+    edit_provider,
+    list_providers,
+    move_provider,
+    parse_flags,
+    remove_provider,
+)
 from .help_screen import HelpScreen
 from .slash_commands_doc import build_help_markdown
 
@@ -41,8 +48,12 @@ def handle_local_input(app: Any, text: str, bindings: Any) -> bool:
         _show_status(app)
         return True
 
-    if low == "/providers":
-        _show_providers(app)
+    if low == "/providers" or low.startswith("/providers "):
+        _handle_providers(app, text)
+        return True
+
+    if low == "/model" or low.startswith("/model "):
+        _handle_model(app, text)
         return True
 
     return False
@@ -112,6 +123,126 @@ def _show_providers(app: Any) -> None:
         lines.append(f"  [{i + 1}] {name} — {ptype}/{model}{status_str}")
 
     app._append_log("\n".join(lines))
+
+
+def _handle_providers(app: Any, text: str) -> None:
+    """Route /providers subcommands."""
+    parts = text.strip().split(maxsplit=1)
+    if len(parts) == 1:
+        _show_providers(app)
+        return
+
+    rest = parts[1].strip()
+    tokens = rest.split()
+    subcmd = tokens[0].lower()
+
+    if subcmd == "add":
+        flags = parse_flags(tokens[1:])
+        ptype = flags.get("type", "")
+        model = flags.get("model", "")
+        if not ptype or not model:
+            app._append_log(
+                "[yellow]Usage: /providers add --type <ollama|api> "
+                "--model <model> [--name <n>] [--url <u>] [--key <k>][/yellow]"
+            )
+            return
+        try:
+            name, position = add_provider(
+                ptype,
+                model,
+                name=flags.get("name"),
+                url=flags.get("url"),
+                api_key=flags.get("key"),
+            )
+            app._append_log(
+                f"[green]Added provider '{name}' ({ptype}/{model}) "
+                f"at position {position}[/green]"
+            )
+        except ValueError as e:
+            app._append_log(f"[red]Error: {e}[/red]")
+
+    elif subcmd == "remove":
+        if len(tokens) < 2:
+            app._append_log("[yellow]Usage: /providers remove <name>[/yellow]")
+            return
+        try:
+            remove_provider(tokens[1])
+            app._append_log(f"[green]Removed provider '{tokens[1]}'[/green]")
+        except ValueError as e:
+            app._append_log(f"[red]Error: {e}[/red]")
+
+    elif subcmd == "move":
+        if len(tokens) < 3:
+            app._append_log("[yellow]Usage: /providers move <name> <position>[/yellow]")
+            return
+        try:
+            pos = int(tokens[2])
+        except ValueError:
+            app._append_log(f"[red]Error: Position must be a number[/red]")
+            return
+        try:
+            move_provider(tokens[1], pos)
+            app._append_log(
+                f"[green]Moved provider '{tokens[1]}' to position {pos}[/green]"
+            )
+        except ValueError as e:
+            app._append_log(f"[red]Error: {e}[/red]")
+
+    elif subcmd == "edit":
+        if len(tokens) < 2:
+            app._append_log(
+                "[yellow]Usage: /providers edit <name> "
+                "--model <m> --url <u> --key <k>[/yellow]"
+            )
+            return
+        name = tokens[1]
+        flags = parse_flags(tokens[2:])
+        if not flags:
+            app._append_log(
+                "[yellow]No fields to update. "
+                "Use --model, --url, --key, or --type[/yellow]"
+            )
+            return
+        try:
+            updated = edit_provider(name, **flags)
+            app._append_log(
+                f"[green]Updated provider '{name}': {', '.join(updated)}[/green]"
+            )
+        except ValueError as e:
+            app._append_log(f"[red]Error: {e}[/red]")
+
+    else:
+        app._append_log(
+            f"[yellow]Unknown subcommand '{subcmd}'. "
+            "Use: add, remove, move, edit[/yellow]"
+        )
+
+
+def _handle_model(app: Any, text: str) -> None:
+    """Show or switch the current model."""
+    parts = text.strip().split(maxsplit=1)
+    if len(parts) == 1:
+        model = getattr(Config, "LLM_MODEL", None) or "(unset)"
+        pool = None
+        if app.jarvis is not None and hasattr(app.jarvis, "llm"):
+            pool = getattr(app.jarvis.llm, "provider", None)
+        if pool is not None:
+            model = getattr(pool, "model", model)
+        app._append_log(f"[bold cyan]Model:[/bold cyan] {model}")
+        return
+
+    new_model = parts[1].strip()
+    from .status_bar import update_status
+
+    try:
+        from ..cli import _update_env_setting
+
+        _update_env_setting("LLM_MODEL", new_model)
+        app._append_log(f"[green]Model set to: {new_model}[/green]")
+        app._append_log("[dim]Note: takes effect on next LLM request or restart.[/dim]")
+        update_status(app)
+    except Exception as e:
+        app._append_log(f"[red]Error setting model: {e}[/red]")
 
 
 def export_transcript_to_disk(app: Any, filename: Optional[str]) -> None:

@@ -37,6 +37,11 @@ TUI_LOCAL_SLASH_HELP: tuple[tuple[str, str], ...] = (
     ("/quit, /exit", "Exit the TUI."),
     ("/status", "Show current provider, model, and session."),
     ("/providers", "List configured providers with live pool status."),
+    ("/providers add --type ... --model ...", "Add a provider to the pool."),
+    ("/providers remove <name>", "Remove a provider by name."),
+    ("/providers move <name> <pos>", "Reorder provider priority (1 = highest)."),
+    ("/providers edit <name> --field <val>", "Update a field on a provider."),
+    ("/model [name]", "Show or switch the current LLM model."),
 )
 
 # Keys that are not represented as App BINDINGS but belong in the cheat sheet.
