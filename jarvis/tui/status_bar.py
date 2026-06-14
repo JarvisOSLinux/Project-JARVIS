@@ -18,6 +18,13 @@ def update_status(app: Any) -> None:
 
     model = getattr(Config, "LLM_MODEL", None) or "(unset)"
     provider = getattr(Config, "LLM_PROVIDER", "?")
+
+    if app.jarvis is not None and hasattr(app.jarvis, "llm"):
+        pool = getattr(app.jarvis.llm, "provider", None)
+        if pool is not None and hasattr(pool, "active_provider_name"):
+            provider = pool.active_provider_name or provider
+            model = getattr(pool, "model", model)
+
     parts.append(f"model: {model}")
     parts.append(f"provider: {provider}")
     parts.append(

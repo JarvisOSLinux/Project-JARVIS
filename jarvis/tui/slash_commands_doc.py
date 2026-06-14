@@ -31,8 +31,12 @@ TUI_LOCAL_SLASH_HELP: tuple[tuple[str, str], ...] = (
     ("/help, /?", "Open help (TUI only; not sent to the LLM)."),
     (
         "/export [file]",
-        "Save plain transcript (Markdown) under `transcripts/`; optional basename only (TUI only).",
+        "Save plain transcript (Markdown) under `transcripts/`; optional basename only.",
     ),
+    ("/clear", "Clear the chat view (on-screen only; session memory unchanged)."),
+    ("/quit, /exit", "Exit the TUI."),
+    ("/status", "Show current provider, model, and session."),
+    ("/providers", "List configured providers with live pool status."),
 )
 
 # Keys that are not represented as App BINDINGS but belong in the cheat sheet.
