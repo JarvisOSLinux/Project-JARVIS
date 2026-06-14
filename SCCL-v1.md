@@ -42,13 +42,23 @@ The defining feature of this License is **Board-governed commercial access**: th
 
 **1.11 "Licensee Relationship Index"** means the Board's internal, qualitative assessment of a Licensee's cumulative conduct, compliance history, and relationship with the Organization and its ecosystem. The Index is maintained by the Board as a governance instrument and may inform the Board's exercise of discretion under this License, including but not limited to licensing decisions, Cure Period duration, Revenue Basis, and reinstatement applications.
 
-**1.12 "Revenue Basis"** means the financial figure used to calculate the Annual License Fee under Appendix A. The Revenue Basis is determined by the Board for each Licensee based on the Licensee's Relationship Index, and falls within the following spectrum:
+**1.12 "Revenue Basis"** means the financial figure used to calculate the Annual License Fee under Appendix A. The Revenue Basis is determined by the Board for each Licensee based on the Licensee's Relationship Index, and falls within the following spectrum, ordered by severity of the Board's stance:
 
-  (a) **Net profit from the Software** — profit attributable to products or services incorporating the Software, after directly attributable expenses (most lenient);
+  (a) **Profit on the Software** — net profit attributable to products or services incorporating the Software, after directly attributable expenses (most lenient);
 
-  (b) **Revenue from the Software** — gross revenue attributable to products or services incorporating the Software (standard);
+  (b) **Profit on the Company** — the Licensee's total net income across all business lines;
 
-  (c) **Total company revenue** — the Licensee's total annual revenue across all business lines (most restrictive).
+  (c) **Profit on the Ecosystem** — combined net income of the Licensee and all affiliated entities (subsidiaries, parent companies, and entities under common control);
+
+  (d) **Revenue on the Software** — gross revenue attributable to products or services incorporating the Software;
+
+  (e) **Revenue on the Company** — the Licensee's total annual gross revenue across all business lines;
+
+  (f) **Revenue on the Ecosystem** — combined total gross revenue of the Licensee and all affiliated entities (most restrictive).
+
+**Note:** The tiers above are ordered by the severity of the Board's intent, not by guaranteed monetary value. In practice, a narrower-scope revenue figure (e.g., Revenue on the Software) may be smaller than a broader-scope profit figure (e.g., Profit on the Ecosystem) depending on the Licensee's business structure. The Board should consider the actual financial impact when selecting a tier, ensuring the chosen basis reflects the appropriate level of accountability rather than simply maximizing the fee.
+
+"Affiliated entities" means any entity that directly or indirectly controls, is controlled by, or is under common control with the Licensee, where "control" means ownership of more than fifty percent (50%) of the voting securities or equivalent ownership interest.
 
 The Board shall communicate the applicable Revenue Basis to the Licensee in writing at the time of license issuance and at each annual renewal.
 
@@ -273,7 +283,7 @@ The Board shall communicate the applicable Revenue Basis to the Licensee in writ
 > ```
 >
 > Where:
-> - `revenue_basis` — Determined by the Board per Licensee based on the Licensee's Relationship Index (see Definition 1.12). Ranges from net profit on the Software (most lenient) to total company revenue (most restrictive).
+> - `revenue_basis` — Determined by the Board per Licensee based on the Licensee's Relationship Index (see Definition 1.12). Six tiers from Profit on the Software (most lenient) to Revenue on the Ecosystem (most restrictive). Tiers are ordered by severity of intent, not guaranteed monetary value — see the note in Definition 1.12.
 > - `K₁` — rate constant (percentage of revenue basis)
 > - `K₂` — ecosystem lock-in penalty multiplier
 > - `inclusion_index` — 0.0 (fully open) to 1.0 (fully locked-in), assessed by the Board
