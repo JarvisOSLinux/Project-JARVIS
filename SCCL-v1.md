@@ -66,7 +66,7 @@ The Board shall communicate the applicable Revenue Basis to the Licensee in writ
 
 ## Article 2 — Grant of Commercial License
 
-**2.1 Activation Threshold.** This License may not be issued to any Licensee until the Project has at least **[N] independent contributors**, of which no single legal entity (including its subsidiaries and affiliates) accounts for more than **[X]%** of the total. This threshold is verified by the Board at the time of license issuance.
+**2.1 Activation Threshold.** This License may not be issued to any Licensee until the Project has at least **fifteen (15) Active Contributors** (as defined in Appendix B, Section B.2.2, excluding corporate contributions per B.2.3), of which no single legal entity (including its subsidiaries and affiliates) accounts for more than **twenty-five percent (25%)** of total contributions measured by commit authorship over the preceding twelve (12) months. This threshold is verified by the Board at the time of license issuance.
 
 **2.2 Board Approval.** Commercial licenses are granted at the sole discretion of the Governing Board. The Board may accept, reject, or condition any application for a commercial license, and is not required to provide reasons for rejection.
 
@@ -319,17 +319,21 @@ The Board shall communicate the applicable Revenue Basis to the Licensee in writ
 
 **B.1.1** The Organization exists to steward the Software and its ecosystem for the benefit of contributors and users, not corporations or investors. It is a **non-profit foundation** structured to resist capture by any single entity, corporate or individual.
 
-**B.1.2** The Organization is not a democracy where commercial licensees vote on their own obligations. It is not a dictatorship where one person governs unchecked. It is a **constrained authority** — the Board has real power, but that power is bounded by this Charter, and contributors hold the ultimate lever of recall.
+**B.1.2** The Organization's governance evolves with its community. In its early stages, the Board governs with full authority — because a nascent project cannot afford governance paralysis. As the community grows, contributors earn progressively more governance power, until the Board serves at the community's pleasure. This progression is formalized in B.9 (Governance Stages).
 
 **B.1.3** The Organization shall be incorporated as a **501(c)(3) public charity** or equivalent non-profit legal structure in the applicable jurisdiction. The 501(c)(3) structure ensures: (a) donations are tax-deductible for individual supporters; (b) the Organization cannot primarily serve corporate interests; (c) no individual or entity may profit from the Organization's dissolution.
 
 ### B.2 — Membership
 
-**B.2.1 Contributors.** Any individual who has authored at least one merged contribution to the Software (as evidenced by the project's version control history) is a Contributor. Contributors are the primary stakeholders of the Organization.
+**B.2.1 Contributors.** Any individual who has authored at least one merged contribution to the Software (as evidenced by the project's version control history and signed off via DCO) is a Contributor. Contributors are the primary stakeholders of the Organization.
 
-**B.2.2 Active Contributors.** A Contributor is "Active" if they have authored at least one merged contribution within the preceding twenty-four (24) months. Only Active Contributors may vote in elections, recalls, and Charter amendments.
+**B.2.2 Active Contributors.** A Contributor is "Active" if they have authored at least one merged contribution within the preceding twenty-four (24) months. Only Active Contributors may exercise governance rights available at the current Governance Stage.
 
-**B.2.3 No Corporate Membership Tiers.** The Organization does not sell board seats, governance influence, or voting rights. Commercial licensees fund the ecosystem through the Annual License Fee (Article 4); this entitles them to use the Software commercially — not to govern it.
+**B.2.3 Corporate Contribution Exclusion.** Contributions submitted on behalf of a commercial licensee — including those fulfilling the contribution-back obligation under SCCL Article 5, signed under the CLA, or authored in the scope of employment with a licensee — do **not** count toward an individual's Active Contributor status for governance purposes. Such contributions satisfy the licensee's contractual obligations but confer no governance rights.
+
+**B.2.4 Individual Contributions by Licensee Employees.** An individual employed by a commercial licensee may qualify as an Active Contributor if and only if: (a) the contribution is signed off via DCO (not CLA); (b) the contribution is made outside the scope of their employment; and (c) the contribution is not fulfilling any part of their employer's SCCL Article 5 obligations. The individual's governance rights are personal and may not be directed or influenced by their employer.
+
+**B.2.5 No Corporate Membership Tiers.** The Organization does not sell board seats, governance influence, or voting rights. Commercial licensees fund the ecosystem through the Annual License Fee (Article 4); this entitles them to use the Software commercially — not to govern it.
 
 ### B.3 — Governing Board
 
@@ -337,13 +341,13 @@ The Board shall communicate the applicable Revenue Basis to the Licensee in writ
 
   (a) **Founder Seats (up to 2)** — Appointed by the founding members of the Organization. Founder seats convert to Contributor-Elected seats when the founder steps down or after a maximum of **ten (10) years** from the Organization's incorporation, whichever comes first.
 
-  (b) **Contributor-Elected Seats (majority)** — Elected by Active Contributors. At all times, Contributor-Elected seats must constitute a **strict majority** of the Board (more than 50%).
+  (b) **Contributor-Elected Seats** — Elected by Active Contributors. Activated at Governance Stage 3 (see B.9). At Stage 4, Contributor-Elected seats must constitute a **strict majority** of the Board (more than 50%).
 
   (c) **Independent Seat (1)** — An external advisor with relevant expertise (legal, financial, nonprofit governance) appointed by the Board. Must have no employment or financial relationship with any commercial licensee.
 
 **B.3.2 Terms.** Board members serve **three (3) year terms**, staggered so that no more than one-third of seats are up for election in any given year. No individual may serve more than **two (2) consecutive terms**. After a mandatory one-term gap, a former member may stand for re-election.
 
-**B.3.3 Elections.** Contributor-Elected seats are filled by ranked-choice vote among Active Contributors. Each Active Contributor has one vote per seat. Candidates must be Active Contributors themselves. Self-nominations are permitted. Elections are conducted annually within thirty (30) days of the Board's anniversary.
+**B.3.3 Elections.** Once Contributor-Elected seats are activated (Stage 3+), they are filled by ranked-choice vote among Active Contributors. Each Active Contributor has one vote per seat. Candidates must be Active Contributors themselves. Self-nominations are permitted. Elections are conducted annually within thirty (30) days of the Board's anniversary.
 
 **B.3.4 Chair.** The Board elects a Chair from among its members. The Chair serves a **two (2) year term** as Chair. No individual may serve as Chair for more than **four (4) consecutive years**.
 
@@ -351,33 +355,33 @@ The Board shall communicate the applicable Revenue Basis to the Licensee in writ
 
 ### B.4 — Constraints on Board Power
 
-**B.4.1 Published Principles.** The Board must publish and maintain a **Decision Principles Document** that articulates the criteria used for discretionary decisions (licensing approvals, Revenue Basis selection, cure period duration, Relationship Index assessment). Decisions must be consistent with these published principles.
+**B.4.1 Published Principles.** The Board must publish and maintain a **Decision Principles Document** that articulates the criteria used for discretionary decisions (licensing approvals, Revenue Basis selection, cure period duration, Relationship Index assessment). Decisions must be consistent with these published principles. This obligation applies at all Governance Stages.
 
 **B.4.2 Consistency Requirement.** Similar cases must be treated similarly. If a Licensee can demonstrate that its situation is materially indistinguishable from a prior case that was decided differently, it may appeal to the Board citing the inconsistency. Selective enforcement is a Charter violation.
 
-**B.4.3 Conflict of Interest.** A Board member must recuse themselves from any decision involving a Licensee that employs them, contracts with them, or in which they hold a financial interest. Failure to recuse is grounds for recall. No Board member may simultaneously hold a governance role in a commercial licensee.
+**B.4.3 Conflict of Interest.** A Board member must recuse themselves from any decision involving a Licensee that employs them, contracts with them, or in which they hold a financial interest. Failure to recuse is grounds for recall (at stages where recall is active). No Board member may simultaneously hold a governance role in a commercial licensee.
 
-**B.4.4 Contributor Recall.** If **twenty-five percent (25%)** of Active Contributors petition for the recall of a Board member (citing specific grounds), a recall vote is triggered. The recall passes with a **simple majority** of participating Active Contributors. The recalled member is immediately removed and the seat is treated as a vacancy under B.3.5.
+**B.4.4 Contributor Recall.** Activated at **Governance Stage 4 only.** If **twenty-five percent (25%)** of Active Contributors petition for the recall of a Board member (citing specific grounds), a recall vote is triggered. The recall passes with a **simple majority** of participating Active Contributors. The recalled member is immediately removed and the seat is treated as a vacancy under B.3.5.
 
-**B.4.5 Anti-Entrenchment.** No single individual may occupy a Board seat (including non-consecutive terms) for more than **twelve (12) years** total. This lifetime cap prevents institutional knowledge from becoming institutional power.
+**B.4.5 Anti-Entrenchment.** No single individual may occupy a Board seat (including non-consecutive terms) for more than **twelve (12) years** total. This lifetime cap prevents institutional knowledge from becoming institutional power. Applies at all Governance Stages.
 
-**B.4.6 Charter Amendment.** This Charter may only be amended by a vote of **two-thirds (⅔) of the Board** AND **a simple majority of Active Contributors** voting in a ratification poll conducted over no fewer than fourteen (14) days. Neither the Board alone nor Contributors alone may unilaterally change this Charter.
+**B.4.6 Charter Amendment.** At Stages 1–3, the Charter may be amended by a **unanimous Board vote**. At Stage 4, amendment requires a vote of **two-thirds (⅔) of the Board** AND **a simple majority of Active Contributors** voting in a ratification poll conducted over no fewer than fourteen (14) days. Neither the Board alone nor Contributors alone may unilaterally change this Charter at Stage 4.
 
-**B.4.7 Immutable Provisions.** The following provisions may not be amended or removed by any process short of dissolution and reconstitution:
+**B.4.7 Immutable Provisions.** The following provisions may not be amended or removed at ANY Governance Stage, by any process short of dissolution and reconstitution:
 
-  (a) B.2.3 — No corporate membership tiers (money cannot buy governance);
+  (a) B.2.3 — Corporate Contribution Exclusion (corporate work ≠ governance rights);
 
-  (b) B.3.1(b) — Contributor-Elected seats must be a strict Board majority;
+  (b) B.2.5 — No corporate membership tiers (money cannot buy governance);
 
-  (c) B.4.4 — Contributor recall right;
+  (c) B.5.1 — Contributor compensation minimum (50% of fees);
 
-  (d) B.4.6 — Dual-approval amendment requirement;
+  (d) B.7.3 — Dissolution asset protection (no distribution to licensees or Board);
 
-  (e) B.5.1 — Contributor compensation minimum (50% of fees).
+  (e) B.9 — Governance Stage advancement triggers (Board cannot prevent stage progression).
 
 ### B.5 — Financial Governance
 
-**B.5.1 Contributor Compensation Floor.** No less than **fifty percent (50%)** of all fees collected under the SCCL shall be allocated to contributor compensation. This floor is immutable under B.4.7(e).
+**B.5.1 Contributor Compensation Floor.** No less than **fifty percent (50%)** of all fees collected under the SCCL shall be allocated to contributor compensation. This floor is immutable under B.4.7(c).
 
 **B.5.2 Allocation Ranges.** Subject to the floor in B.5.1, the Board sets annual allocation percentages within the ranges specified in SCCL Article 4.7. Adjustments require thirty (30) days' advance notice and a published rationale.
 
@@ -405,7 +409,7 @@ The Board shall communicate the applicable Revenue Basis to the Licensee in writ
 
 ### B.7 — Succession and Continuity
 
-**B.7.1 No Single Point of Failure.** The Organization must ensure that no single individual's departure — whether sudden or planned — can paralyze governance. The staggered terms (B.3.2), majority contributor-elected seats (B.3.1b), and vacancy procedures (B.3.5) provide structural continuity.
+**B.7.1 No Single Point of Failure.** The Organization must ensure that no single individual's departure — whether sudden or planned — can paralyze governance. The staggered terms (B.3.2), vacancy procedures (B.3.5), and emergency succession (B.7.2) provide structural continuity.
 
 **B.7.2 Emergency Succession.** If the Board falls below quorum (defined as a simple majority of filled seats) and cannot fill vacancies through normal procedures, the **five (5) most recent Active Contributors by contribution date** shall convene within fourteen (14) days to appoint interim Board members until a proper election can be held.
 
@@ -413,9 +417,66 @@ The Board shall communicate the applicable Revenue Basis to the Licensee in writ
 
 ### B.8 — Activation Threshold
 
-**B.8.1** Per SCCL Article 2.1, no commercial license may be issued until the Project has at least **[N] Active Contributors**, of which no single legal entity (including subsidiaries and affiliates) accounts for more than **[X]%** of total contributions measured by commit authorship over the preceding twelve (12) months.
+**B.8.1** Per SCCL Article 2.1, no commercial license may be issued until the Project has at least **fifteen (15) Active Contributors** (as defined in B.2.2, excluding corporate contributions per B.2.3), of which no single legal entity (including subsidiaries and affiliates) accounts for more than **twenty-five percent (25%)** of total contributions measured by commit authorship over the preceding twelve (12) months.
 
-**B.8.2** The Board verifies the threshold at the time of each license issuance. The threshold values [N] and [X]% are set by the Board and published in the Decision Principles Document. Suggested initial values: N = 20, X = 25%.
+**B.8.2** The Board verifies the threshold at the time of each license issuance.
+
+### B.9 — Governance Stages
+
+The Organization's governance evolves through four stages. Stage advancement is triggered by **objective, measurable criteria** and is **automatic** — the Board cannot prevent or delay stage progression when the criteria are met. Stage regression occurs if the criteria for the current stage are no longer met for twelve (12) consecutive months.
+
+**B.9.1 Stage 1 — Founding (Autocratic)**
+
+  *Trigger:* Default state from incorporation.
+
+  *Governance:*
+  - The Board governs with full authority.
+  - No contributor elections, no recall, no community veto.
+  - The Board makes all decisions regarding licensing, fees, and ecosystem management.
+  - Immutable provisions (B.4.7) still apply. Published Principles (B.4.1) still apply.
+  - No commercial licenses may be issued (activation threshold not met).
+
+  *Exits when:* The project reaches **15 Active Contributors** (per B.2.2, excluding corporate contributions).
+
+**B.9.2 Stage 2 — Growth (Consultative)**
+
+  *Trigger:* 15+ Active Contributors.
+
+  *Governance:*
+  - The Board retains full decision-making authority.
+  - The Board must **publish all licensing decisions** and their rationale.
+  - The Board must conduct a **quarterly community consultation** — a public forum where Active Contributors may comment on licensee relationships, fee decisions, and ecosystem direction. The Board must publish written responses to community input within thirty (30) days.
+  - Community input is **advisory and non-binding** — the Board decides.
+  - SCCL commercial licenses may now be issued (activation threshold met).
+
+  *Exits when:* The project reaches **30 Active Contributors** AND at least **one (1) active SCCL commercial license** has been issued.
+
+**B.9.3 Stage 3 — Traction (Participatory)**
+
+  *Trigger:* 30+ Active Contributors AND 1+ active commercial licensee.
+
+  *Governance:*
+  - **Contributor-Elected Board seats activated.** At least one (1) seat on the Board must be filled by contributor election. Additional Contributor-Elected seats are added as the Board grows (maintaining a path toward majority).
+  - The Board must **formally consider and respond to** community positions on licensee relationships. If a majority of Active Contributors express a position on a licensing decision (via public poll or petition), the Board must address it in writing with specific reasons if it disagrees.
+  - Active Contributors may **petition the Board** on any matter with fifteen percent (15%) of Active Contributors signing. The Board must respond within thirty (30) days.
+  - The Board must publish an **annual governance report** reviewing its own performance, decisions made, and community feedback received.
+
+  *Exits when:* The project reaches **100 Active Contributors** AND at least **three (3) active SCCL commercial licensees**.
+
+**B.9.4 Stage 4 — Maturity (Contributor-Governed)**
+
+  *Trigger:* 100+ Active Contributors AND 3+ active commercial licensees.
+
+  *Governance:*
+  - **Contributor-Elected seats become a strict Board majority** (more than 50%).
+  - **Contributor Recall activated** (B.4.4) — 25% petition triggers a recall vote.
+  - **Dual-approval Charter amendments** (B.4.6) — Board ⅔ + contributor majority required.
+  - The Board may not override a **supermajority (⅔) community resolution** on any matter within the Organization's scope without publishing a detailed written justification and surviving a subsequent no-confidence vote (simple majority of Active Contributors). If the no-confidence vote passes, the Board must comply with the community resolution.
+  - Active Contributors elect the Board Chair directly (rather than Board self-selection).
+
+  *Stage 4 cannot regress* below Stage 3 once it has been maintained for twenty-four (24) consecutive months. This prevents a temporary dip in contributor count from stripping established governance rights.
+
+**B.9.5 Stage Verification.** The Board must verify and publicly declare the current Governance Stage annually. Any Active Contributor may challenge the declared stage by demonstrating that the objective criteria for a different stage are met. Disputes are resolved by an independent count of Active Contributors as recorded in the project's version control history.
 
 ---
 
