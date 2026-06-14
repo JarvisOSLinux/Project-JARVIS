@@ -313,18 +313,109 @@ The Board shall communicate the applicable Revenue Basis to the Licensee in writ
 
 ## Appendix B — Organization Charter
 
-> *To be completed. Must specify:*
-> - *Legal structure of the Organization (foundation, non-profit, LLC)*
-> - *Composition, election/appointment, and term of the Governing Board*
-> - *Board decision-making procedures (quorum, voting, minutes)*
-> - *Minimum contributor threshold and diversity requirements for license activation (Article 2.1)*
-> - *Fund allocation percentages and process for adjusting them*
-> - *Contributor compensation methodology and distribution schedule*
-> - *Public license registry maintenance and transparency obligations*
-> - *Licensee Relationship Index: maintenance procedures, assessment criteria, and internal access controls*
-> - *Process for updating this Charter*
->
-> **Current status:** Under development. See project governance discussions.
+> **Status:** Working draft. Subject to legal review and community feedback.
+
+### B.1 — Purpose and Identity
+
+**B.1.1** The Organization exists to steward the Software and its ecosystem for the benefit of contributors and users, not corporations or investors. It is a **non-profit foundation** structured to resist capture by any single entity, corporate or individual.
+
+**B.1.2** The Organization is not a democracy where commercial licensees vote on their own obligations. It is not a dictatorship where one person governs unchecked. It is a **constrained authority** — the Board has real power, but that power is bounded by this Charter, and contributors hold the ultimate lever of recall.
+
+**B.1.3** The Organization shall be incorporated as a **501(c)(3) public charity** or equivalent non-profit legal structure in the applicable jurisdiction. The 501(c)(3) structure ensures: (a) donations are tax-deductible for individual supporters; (b) the Organization cannot primarily serve corporate interests; (c) no individual or entity may profit from the Organization's dissolution.
+
+### B.2 — Membership
+
+**B.2.1 Contributors.** Any individual who has authored at least one merged contribution to the Software (as evidenced by the project's version control history) is a Contributor. Contributors are the primary stakeholders of the Organization.
+
+**B.2.2 Active Contributors.** A Contributor is "Active" if they have authored at least one merged contribution within the preceding twenty-four (24) months. Only Active Contributors may vote in elections, recalls, and Charter amendments.
+
+**B.2.3 No Corporate Membership Tiers.** The Organization does not sell board seats, governance influence, or voting rights. Commercial licensees fund the ecosystem through the Annual License Fee (Article 4); this entitles them to use the Software commercially — not to govern it.
+
+### B.3 — Governing Board
+
+**B.3.1 Composition.** The Board shall consist of **five (5) to nine (9) members**, with the exact number set by Board resolution. The Board is composed as follows:
+
+  (a) **Founder Seats (up to 2)** — Appointed by the founding members of the Organization. Founder seats convert to Contributor-Elected seats when the founder steps down or after a maximum of **ten (10) years** from the Organization's incorporation, whichever comes first.
+
+  (b) **Contributor-Elected Seats (majority)** — Elected by Active Contributors. At all times, Contributor-Elected seats must constitute a **strict majority** of the Board (more than 50%).
+
+  (c) **Independent Seat (1)** — An external advisor with relevant expertise (legal, financial, nonprofit governance) appointed by the Board. Must have no employment or financial relationship with any commercial licensee.
+
+**B.3.2 Terms.** Board members serve **three (3) year terms**, staggered so that no more than one-third of seats are up for election in any given year. No individual may serve more than **two (2) consecutive terms**. After a mandatory one-term gap, a former member may stand for re-election.
+
+**B.3.3 Elections.** Contributor-Elected seats are filled by ranked-choice vote among Active Contributors. Each Active Contributor has one vote per seat. Candidates must be Active Contributors themselves. Self-nominations are permitted. Elections are conducted annually within thirty (30) days of the Board's anniversary.
+
+**B.3.4 Chair.** The Board elects a Chair from among its members. The Chair serves a **two (2) year term** as Chair. No individual may serve as Chair for more than **four (4) consecutive years**.
+
+**B.3.5 Vacancy.** If a Contributor-Elected seat is vacated mid-term, the Board appoints an interim replacement from among Active Contributors. The interim member serves until the next regular election.
+
+### B.4 — Constraints on Board Power
+
+**B.4.1 Published Principles.** The Board must publish and maintain a **Decision Principles Document** that articulates the criteria used for discretionary decisions (licensing approvals, Revenue Basis selection, cure period duration, Relationship Index assessment). Decisions must be consistent with these published principles.
+
+**B.4.2 Consistency Requirement.** Similar cases must be treated similarly. If a Licensee can demonstrate that its situation is materially indistinguishable from a prior case that was decided differently, it may appeal to the Board citing the inconsistency. Selective enforcement is a Charter violation.
+
+**B.4.3 Conflict of Interest.** A Board member must recuse themselves from any decision involving a Licensee that employs them, contracts with them, or in which they hold a financial interest. Failure to recuse is grounds for recall. No Board member may simultaneously hold a governance role in a commercial licensee.
+
+**B.4.4 Contributor Recall.** If **twenty-five percent (25%)** of Active Contributors petition for the recall of a Board member (citing specific grounds), a recall vote is triggered. The recall passes with a **simple majority** of participating Active Contributors. The recalled member is immediately removed and the seat is treated as a vacancy under B.3.5.
+
+**B.4.5 Anti-Entrenchment.** No single individual may occupy a Board seat (including non-consecutive terms) for more than **twelve (12) years** total. This lifetime cap prevents institutional knowledge from becoming institutional power.
+
+**B.4.6 Charter Amendment.** This Charter may only be amended by a vote of **two-thirds (⅔) of the Board** AND **a simple majority of Active Contributors** voting in a ratification poll conducted over no fewer than fourteen (14) days. Neither the Board alone nor Contributors alone may unilaterally change this Charter.
+
+**B.4.7 Immutable Provisions.** The following provisions may not be amended or removed by any process short of dissolution and reconstitution:
+
+  (a) B.2.3 — No corporate membership tiers (money cannot buy governance);
+
+  (b) B.3.1(b) — Contributor-Elected seats must be a strict Board majority;
+
+  (c) B.4.4 — Contributor recall right;
+
+  (d) B.4.6 — Dual-approval amendment requirement;
+
+  (e) B.5.1 — Contributor compensation minimum (50% of fees).
+
+### B.5 — Financial Governance
+
+**B.5.1 Contributor Compensation Floor.** No less than **fifty percent (50%)** of all fees collected under the SCCL shall be allocated to contributor compensation. This floor is immutable under B.4.7(e).
+
+**B.5.2 Allocation Ranges.** Subject to the floor in B.5.1, the Board sets annual allocation percentages within the ranges specified in SCCL Article 4.7. Adjustments require thirty (30) days' advance notice and a published rationale.
+
+**B.5.3 Compensation Methodology.** The Board shall publish the methodology used to determine individual contributor compensation. The methodology may consider: volume of contributions, maintenance burden assumed, security-critical work, review labor, mentorship, and community leadership. The specific formula or rubric is set by the Board and published annually.
+
+**B.5.4 Transparency.** The Organization shall publish an annual financial report within ninety (90) days of each fiscal year end, including: (a) total fees collected, by licensee (anonymized if the Licensee requests confidentiality, but aggregate amounts must be disclosed); (b) allocation by category; (c) individual compensation amounts (with contributor consent) or anonymized distribution statistics; (d) reserve fund balance; (e) Board member compensation (if any — see B.5.5).
+
+**B.5.5 Board Compensation.** Board members may receive reasonable compensation for their service, not to exceed the median contributor compensation in any given year. Board compensation is disclosed publicly in the annual financial report.
+
+**B.5.6 Independent Audit.** The Organization shall engage an independent auditor to review its financial statements at least once every **three (3) years**, or annually once total fees collected exceed **$1,000,000** per year. Audit results are published.
+
+### B.6 — Licensee Relations
+
+**B.6.1 Relationship Index Procedures.** The Licensee Relationship Index (Definition 1.11) is maintained by the Board as an internal governance tool. The Board shall:
+
+  (a) Document the factors considered in assessing the Index (compliance history, reporting accuracy, cure periods used, cooperative conduct, ecosystem contribution);
+
+  (b) Review each Licensee's Index at least annually;
+
+  (c) Not disclose a Licensee's Index score to other Licensees or the public;
+
+  (d) Upon written request from a Licensee, provide that Licensee with a summary of its own Index standing and the factors contributing to it.
+
+**B.6.2 License Registry.** The Organization shall maintain a public registry of: (a) all active commercial licenses (Licensee name and effective date); (b) all revocation decisions (grounds and summary, per SCCL Article 6.5c); (c) all terminations. The registry does not disclose fee amounts or Relationship Index scores.
+
+### B.7 — Succession and Continuity
+
+**B.7.1 No Single Point of Failure.** The Organization must ensure that no single individual's departure — whether sudden or planned — can paralyze governance. The staggered terms (B.3.2), majority contributor-elected seats (B.3.1b), and vacancy procedures (B.3.5) provide structural continuity.
+
+**B.7.2 Emergency Succession.** If the Board falls below quorum (defined as a simple majority of filled seats) and cannot fill vacancies through normal procedures, the **five (5) most recent Active Contributors by contribution date** shall convene within fourteen (14) days to appoint interim Board members until a proper election can be held.
+
+**B.7.3 Dissolution.** If the Organization dissolves, all assets (after settling liabilities) shall be transferred to a 501(c)(3) organization with a compatible mission, as selected by a majority vote of Active Contributors. The Software remains available under AGPLv3 regardless of the Organization's status. Under no circumstances may assets be distributed to any commercial licensee, Board member, or their affiliates.
+
+### B.8 — Activation Threshold
+
+**B.8.1** Per SCCL Article 2.1, no commercial license may be issued until the Project has at least **[N] Active Contributors**, of which no single legal entity (including subsidiaries and affiliates) accounts for more than **[X]%** of total contributions measured by commit authorship over the preceding twelve (12) months.
+
+**B.8.2** The Board verifies the threshold at the time of each license issuance. The threshold values [N] and [X]% are set by the Board and published in the Decision Principles Document. Suggested initial values: N = 20, X = 25%.
 
 ---
 
