@@ -40,7 +40,17 @@ The defining feature of this License is **Board-governed commercial access**: th
 
 **1.10 "Cure Period"** means the period granted to a Licensee to remedy a breach or misalignment before further action is taken, as determined by the Board in accordance with Article 6.3.
 
-**1.11 "Licensee Relationship Index"** means the Board's internal, qualitative assessment of a Licensee's cumulative conduct, compliance history, and relationship with the Organization and its ecosystem. The Index is maintained by the Board as a governance instrument and may inform the Board's exercise of discretion under this License, including but not limited to licensing decisions, Cure Period duration, and reinstatement applications.
+**1.11 "Licensee Relationship Index"** means the Board's internal, qualitative assessment of a Licensee's cumulative conduct, compliance history, and relationship with the Organization and its ecosystem. The Index is maintained by the Board as a governance instrument and may inform the Board's exercise of discretion under this License, including but not limited to licensing decisions, Cure Period duration, Revenue Basis, and reinstatement applications.
+
+**1.12 "Revenue Basis"** means the financial figure used to calculate the Annual License Fee under Appendix A. The Revenue Basis is determined by the Board for each Licensee based on the Licensee's Relationship Index, and falls within the following spectrum:
+
+  (a) **Net profit from the Software** — profit attributable to products or services incorporating the Software, after directly attributable expenses (most lenient);
+
+  (b) **Revenue from the Software** — gross revenue attributable to products or services incorporating the Software (standard);
+
+  (c) **Total company revenue** — the Licensee's total annual revenue across all business lines (most restrictive).
+
+The Board shall communicate the applicable Revenue Basis to the Licensee in writing at the time of license issuance and at each annual renewal.
 
 ---
 
@@ -112,11 +122,11 @@ The defining feature of this License is **Board-governed commercial access**: th
 
 **4.1 Fee Obligation.** The Licensee shall pay the Annual License Fee to the Organization on or before the anniversary of the Effective Date each year.
 
-**4.2 Fee Calculation.** The Annual License Fee is calculated in accordance with the Fee Formula set out in Appendix A to this License. The Organization may update the Fee Formula with ninety (90) days' written notice, provided that no increase shall take effect mid-term of any paid year.
+**4.2 Fee Calculation.** The Annual License Fee is calculated in accordance with the Fee Formula set out in Appendix A to this License, using the Revenue Basis determined by the Board for the Licensee (Definition 1.12). The Organization may update the Fee Formula with ninety (90) days' written notice, provided that no increase shall take effect mid-term of any paid year. Changes to the Licensee's Revenue Basis take effect at the next annual renewal.
 
 **4.3 Payment Process.** The Organization shall issue an invoice or fee statement no fewer than thirty (30) days before each payment is due. Payment terms and accepted methods are as specified in the invoice.
 
-**4.4 Self-Reporting.** The Licensee shall provide to the Organization, on an annual basis, an honest declaration of the figures required to calculate the Fee (e.g., annual revenue, ecosystem inclusion factors), signed by an authorized officer of the Licensee.
+**4.4 Self-Reporting.** The Licensee shall provide to the Organization, on an annual basis, an honest declaration of the figures required to calculate the Fee (including the applicable Revenue Basis figure, ecosystem inclusion factors, and any other data the Board reasonably requires), signed by an authorized officer of the Licensee.
 
 **4.5 Audit Right.** The Organization reserves the right to audit the Licensee's records relevant to Fee calculation, upon thirty (30) days' written notice, no more than once per year. The cost of the audit is borne by the Organization unless the audit reveals an underpayment exceeding the **Audit Tolerance Threshold**, in which case the Licensee bears the audit cost. The Audit Tolerance Threshold is set by the Board within a range of **ten percent (10%) to fifteen percent (15%)**, and may be adjusted per Licensee based on the Licensee's Relationship Index and prior reporting accuracy.
 
@@ -256,22 +266,38 @@ The defining feature of this License is **Board-governed commercial access**: th
 
 ## Appendix A — Fee Formula
 
-> *To be completed. The current working formula is:*
+> ### Formula
 >
 > ```
-> Annual Fee = annual_revenue × K₁ × (1 + K₂ × inclusion_index) × inflation_factor
+> Annual Fee = revenue_basis × K₁ × (1 + K₂ × inclusion_index) × inflation_factor
 > ```
 >
 > Where:
-> - `annual_revenue` — Licensee's total annual revenue
-> - `K₁` — rate constant (percentage of revenue)
+> - `revenue_basis` — Determined by the Board per Licensee based on the Licensee's Relationship Index (see Definition 1.12). Ranges from net profit on the Software (most lenient) to total company revenue (most restrictive).
+> - `K₁` — rate constant (percentage of revenue basis)
 > - `K₂` — ecosystem lock-in penalty multiplier
 > - `inclusion_index` — 0.0 (fully open) to 1.0 (fully locked-in), assessed by the Board
 > - `inflation_factor` — `(1 + CPI_change + buffer%)`, adjusted annually
 >
 > Constants and assessment methodology to be finalized.
 >
-> **Current status:** Under development. See project governance discussions.
+> ### Dynamic Nature of the Fee
+>
+> The Annual License Fee is **hyper-dynamic by design**. Multiple variables in the formula — including the Revenue Basis, inclusion index, and applicable constants — are subject to Board discretion and may change between annual terms based on the Licensee's conduct, Relationship Index, and ecosystem alignment.
+>
+> The Licensee acknowledges that the Fee is not a fixed or purely formulaic calculation, but a Board-governed assessment informed by the formula above and the Licensee's overall relationship with the Organization.
+>
+> ### Negotiation
+>
+> If the Licensee considers the Fee proposed by the Board to be unreasonable or misaligned with the Licensee's actual use of the Software, the Licensee may request a negotiation with the Board before the annual payment is due. The Board shall consider such requests in good faith but is not obligated to adjust the Fee. If no agreement is reached, the Licensee may:
+>
+>   (a) Pay the Fee as proposed by the Board to maintain the commercial license;
+>
+>   (b) Decline the Fee and transition to AGPLv3 compliance in accordance with Article 2.5; or
+>
+>   (c) Cease use of the Software in accordance with Article 7.
+>
+> **Current status:** Constants and assessment methodology under development. See project governance discussions.
 
 ---
 
