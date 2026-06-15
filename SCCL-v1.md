@@ -377,7 +377,9 @@ The Board shall communicate the applicable Revenue Basis to the Licensee in writ
 
   (d) B.7.3 — Dissolution asset protection (no distribution to licensees or Board);
 
-  (e) B.9 — Governance Stage advancement triggers (Board cannot prevent stage progression).
+  (e) B.9 — Governance Stage advancement triggers (Board cannot prevent stage progression);
+
+  (f) B.9.4(e) — Stage 4 irreversibility (once ratified, contributor governance is permanent).
 
 ### B.5 — Financial Governance
 
@@ -423,7 +425,7 @@ The Board shall communicate the applicable Revenue Basis to the Licensee in writ
 
 ### B.9 — Governance Stages
 
-The Organization's governance evolves through four stages. Stage advancement is triggered by **objective, measurable criteria** and is **automatic** — the Board cannot prevent or delay stage progression when the criteria are met. Stage regression occurs if the criteria for the current stage are no longer met for twelve (12) consecutive months.
+The Organization's governance evolves through four stages. Stage advancement from Stage 1 through Stage 3 is triggered by **objective, measurable criteria** and is **automatic** — the Board cannot prevent or delay stage progression when the criteria are met. Stage 4 requires a **community vote** (see B.9.4). Stage regression may occur between Stages 1–3 if the criteria for the current stage are no longer met for twelve (12) consecutive months. **Stage 4 is permanent and irreversible.**
 
 **B.9.1 Stage 1 — Founding (Autocratic)**
 
@@ -461,20 +463,43 @@ The Organization's governance evolves through four stages. Stage advancement is 
   - Active Contributors may **petition the Board** on any matter with fifteen percent (15%) of Active Contributors signing. The Board must respond within thirty (30) days.
   - The Board must publish an **annual governance report** reviewing its own performance, decisions made, and community feedback received.
 
-  *Exits when:* The project reaches **100 Active Contributors** AND at least **three (3) active SCCL commercial licensees**.
+  *Exits when:* The project reaches **500 Active Contributors** AND at least **three (3) active SCCL commercial licensees**, triggering Stage 4 eligibility (see B.9.4).
 
 **B.9.4 Stage 4 — Maturity (Contributor-Governed)**
 
-  *Trigger:* 100+ Active Contributors AND 3+ active commercial licensees.
+  Stage 4 represents a fundamental and **permanent** shift in governance: the Board transitions from decision-maker to executive, and the contributor community becomes the legislative body. There is no turning back from Stage 4.
 
-  *Governance:*
-  - **Contributor-Elected seats become a strict Board majority** (more than 50%).
+  *Eligibility Trigger:* 500+ Active Contributors AND 3+ active commercial licensees.
+
+  *Activation Process:*
+
+  (a) When the eligibility criteria are met, the Board must publicly announce Stage 4 eligibility within **thirty (30) days**. If the Board fails to announce, any Active Contributor may initiate the process directly by publishing the eligibility verification.
+
+  (b) A **Stage 4 Ratification Vote** is opened for all Active Contributors, lasting **thirty (30) days**.
+
+  (c) Stage 4 activates if a **simple majority** of participating voters approve.
+
+  (d) If the vote fails, the project remains at Stage 3. A new ratification vote may be triggered after **twelve (12) months**, provided the eligibility criteria are still met.
+
+  (e) Once Stage 4 is ratified, **it cannot be reversed** by any mechanism. The community has chosen self-governance; that choice is permanent.
+
+  *Governance — The Board as Executive:*
+
+  - The Board's role transitions to **executive and operational**: managing day-to-day operations, licensee relationships, fee collection, compliance enforcement, financial administration, and serving as the public face of the Organization.
+  - **Active Contributors are the legislative body.** Contributors may initiate binding votes on any matter within the Organization's scope, including licensing policy, fee principles, ecosystem direction, Code of Conduct changes, and fund allocation within the ranges of SCCL Article 4.7.
+  - The Board may also initiate votes, on equal footing with any Active Contributor.
+  - Binding community votes require a **simple majority** of participating voters, with a minimum participation threshold of **fifteen percent (15%)** of Active Contributors to ensure legitimacy.
+  - **Board Final Say (Veto).** The Board retains a veto on community resolutions. To exercise a veto, the Board must publish a **detailed written justification** within fifteen (15) days of the vote result. A vetoed resolution may be overridden by a **two-thirds (⅔) supermajority** of Active Contributors in a subsequent override vote. If the override passes, the Board must implement the resolution.
   - **Contributor Recall activated** (B.4.4) — 25% petition triggers a recall vote.
   - **Dual-approval Charter amendments** (B.4.6) — Board ⅔ + contributor majority required.
-  - The Board may not override a **supermajority (⅔) community resolution** on any matter within the Organization's scope without publishing a detailed written justification and surviving a subsequent no-confidence vote (simple majority of Active Contributors). If the no-confidence vote passes, the Board must comply with the community resolution.
-  - Active Contributors elect the Board Chair directly (rather than Board self-selection).
+  - **All Board seats are Contributor-Elected.** Founder Seats have expired or converted (per B.3.1a). Board members are elected by and from the Active Contributor pool. The Board may not self-appoint members. The Independent Seat (B.3.1c) is the sole exception and remains Board-appointed.
+  - **Active Contributors elect the Board Chair** directly (rather than Board self-selection).
 
-  *Stage 4 cannot regress* below Stage 3 once it has been maintained for twenty-four (24) consecutive months. This prevents a temporary dip in contributor count from stripping established governance rights.
+  *Governance — Board Succession at Stage 4:*
+
+  - When a Board member's term ends, steps down, or is recalled, the seat is filled by **contributor election** within sixty (60) days.
+  - The Board cannot appoint its own successors. All succession flows through the contributor pool.
+  - Emergency Succession (B.7.2) remains available as a last resort if the Board falls below quorum and elections cannot be held in time.
 
 **B.9.5 Stage Verification.** The Board must verify and publicly declare the current Governance Stage annually. Any Active Contributor may challenge the declared stage by demonstrating that the objective criteria for a different stage are met. Disputes are resolved by an independent count of Active Contributors as recorded in the project's version control history.
 
