@@ -74,6 +74,12 @@ class OllamaProvider(BaseLLMProvider):
 
         try:
             response = self._client.chat(**kwargs)
+            logger.debug(
+                f"Ollama chat raw: type={type(response).__name__}, "
+                f"model={response.get('model', '?') if hasattr(response, 'get') else '?'}, "
+                f"done={response.get('done', '?') if hasattr(response, 'get') else '?'}, "
+                f"done_reason={response.get('done_reason', '?') if hasattr(response, 'get') else '?'}"
+            )
             return self._extract_content(response)
         except Exception as e:
             error_str = str(e).lower()
@@ -116,6 +122,14 @@ class OllamaProvider(BaseLLMProvider):
 
         msg = response["message"]
         content = msg.get("content") or ""
+
+        msg_keys = list(msg.keys()) if hasattr(msg, "keys") else dir(msg)
+        logger.debug(
+            f"Ollama raw response: content={repr(content[:200])}, "
+            f"thinking={repr((msg.get('thinking') or '')[:200])}, "
+            f"keys={msg_keys}"
+        )
+
         if content:
             cleaned = re.sub(r"<\|[^|>]+\|>", "", content).strip()
             if cleaned != content:
