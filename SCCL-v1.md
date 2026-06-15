@@ -471,25 +471,27 @@ The Organization's governance evolves through four stages. Stage advancement fro
 
   *Eligibility Trigger:* 500+ Active Contributors AND 3+ active commercial licensees.
 
-  *Activation Process:*
+  *Activation Process — Rolling Vote:*
 
-  (a) When the eligibility criteria are met, the Board must publicly announce Stage 4 eligibility within **thirty (30) days**. If the Board fails to announce, any Active Contributor may initiate the process directly by publishing the eligibility verification.
+  (a) When the eligibility criteria are met, the Board must publicly announce Stage 4 eligibility within **thirty (30) days** and open the **Stage 4 Rolling Vote**. If the Board fails to announce, any Active Contributor may initiate the process directly by publishing the eligibility verification and opening the vote.
 
-  (b) A **Stage 4 Ratification Vote** is opened for all Active Contributors, lasting **thirty (30) days**.
+  (b) The Rolling Vote is **permanent and continuous** — it does not close. Once opened, it remains open for as long as the project is at Stage 3. Active Contributors may cast, change, or withdraw their vote at any time.
 
-  (c) The vote outcome is classified as follows:
+  (c) Only votes from current **Active Contributors** (per B.2.2) are counted in the tally. If a Contributor's Active status lapses (no merged contribution in the preceding 24 months), their vote is automatically removed from the tally. If they later regain Active status through a new contribution, they may vote again.
 
-  - **Positive**: More than 52.5% of participating voters approve, AND at least **fifteen percent (15%)** of Active Contributors participated.
-  - **Negative**: More than 52.5% of participating voters reject, AND at least **fifteen percent (15%)** of Active Contributors participated.
-  - **Neutral**: Turnout is below 15%, OR the result falls within **five (5) percentage points of 50%** (i.e., 47.5%–52.5%).
+  (d) The live tally is classified continuously as follows:
 
-  (d) **Positive outcome** — Stage 4 activates immediately, regardless of contributor count. The community has chosen self-governance.
+  - **Positive**: More than 52.5% of cast votes are in favor, AND votes have been cast by at least **fifteen percent (15%)** of current Active Contributors.
+  - **Negative**: More than 52.5% of cast votes are against, AND votes have been cast by at least **fifteen percent (15%)** of current Active Contributors.
+  - **Neutral**: Fewer than 15% of Active Contributors have cast votes, OR the tally falls within **five (5) percentage points of 50%** (i.e., 47.5%–52.5%).
 
-  (e) **Neutral outcome** — The project remains at Stage 3. A new ratification vote may be triggered after **twelve (12) months**, provided the eligibility criteria are still met. However, if the project reaches **one thousand (1000) Active Contributors** while the most recent vote outcome was Neutral (or no vote has been held), Stage 4 activates **automatically**. At this scale, the absence of opposition is treated as consent.
+  (e) **Positive tally** — Stage 4 activates immediately, regardless of contributor count. The community has chosen self-governance.
 
-  (f) **Negative outcome** — The project remains at Stage 3. A new ratification vote may be triggered after **twelve (12) months**. The community's explicit rejection is respected regardless of contributor count — even at 1000+ contributors, Stage 4 does **not** auto-activate while the most recent vote outcome is Negative. Stage 4 can only activate after a subsequent vote produces a Positive or Neutral outcome.
+  (f) **Neutral tally at 1000+ Active Contributors** — Stage 4 activates automatically. At this scale, the absence of opposition is treated as consent.
 
-  (g) Once Stage 4 is activated — whether by Positive vote or Neutral auto-transition — **it cannot be reversed** by any mechanism. The community's self-governance is permanent.
+  (g) **Negative tally** — The project remains at Stage 3 regardless of contributor count. The community's explicit rejection is respected — even at 1000+ contributors, Stage 4 does **not** auto-activate while the tally is Negative. Stage 4 can only activate when the live tally shifts to Positive or when it becomes Neutral at 1000+ contributors.
+
+  (h) Once Stage 4 is activated — whether by Positive tally or Neutral auto-transition — **it cannot be reversed** by any mechanism. The community's self-governance is permanent.
 
   *Governance — The Board as Executive:*
 
