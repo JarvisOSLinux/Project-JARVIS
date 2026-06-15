@@ -117,15 +117,19 @@ class OllamaProvider(BaseLLMProvider):
         msg = response["message"]
         content = msg.get("content") or ""
         if content:
-            # Strip chat-template channel tokens that some thinking models
-            # emit in-band: <|start|>, <|channel|>..., <|message|>, <|end|>
             cleaned = re.sub(r"<\|[^|>]+\|>", "", content).strip()
             if cleaned != content:
                 logger.debug(
                     f"Ollama: stripped special tokens from content "
                     f"({len(content)} → {len(cleaned)} chars)"
                 )
-            return cleaned
+            if cleaned:
+                return cleaned
+            # Stripping removed everything — fall through to thinking/raw
+            logger.warning(
+                "Ollama: content was non-empty but stripping removed all text, "
+                "falling through to thinking field / raw content"
+            )
         thinking = msg.get("thinking") or ""
         if thinking:
             logger.debug(
@@ -133,7 +137,13 @@ class OllamaProvider(BaseLLMProvider):
                 f"({len(thinking)} chars)"
             )
             return thinking
-        return content
+        if content:
+            logger.warning(
+                "Ollama: returning raw content (before stripping) as last resort "
+                f"({len(content)} chars)"
+            )
+            return content
+        return ""
 
     def is_available(self) -> bool:
         try:
