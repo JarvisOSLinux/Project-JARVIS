@@ -333,9 +333,11 @@ The Board shall communicate the applicable Revenue Basis to the Licensee in writ
 
 **B.2.4 Individual Contributions by Licensee Employees.** An individual employed by a commercial licensee may qualify as an Active Contributor if and only if: (a) the contribution is signed off via DCO (not CLA); (b) the contribution is made outside the scope of their employment; and (c) the contribution is not fulfilling any part of their employer's SCCL Article 5 obligations. The individual's governance rights are personal and may not be directed or influenced by their employer.
 
-**B.2.5 Governance Pool.** At Governance Stage 4, the governance body consists of the **Governance Pool**: the top **one thousand (1000)** Active Contributors, ranked by number of merged contributions (excluding corporate contributions per B.2.3) within the preceding twenty-four (24) months. Only members of the Governance Pool may initiate votes, cast votes, and nominate or stand as candidates for Board seats at Stage 4. The Pool is recalculated continuously as contributions are merged and Active status changes. At Stages 1–3, all Active Contributors hold whatever governance rights the current stage provides (the 1000-member cap applies only at Stage 4).
+**B.2.5 Contribution Points (C-Points).** Each Active Contributor accumulates **Contribution Points (C-points)** — a weighted composite score reflecting the quality, scope, and nature of their contributions. C-points are used to rank contributors for Governance Pool membership (B.2.6) and other governance purposes. The methodology for calculating C-points — including the variables considered and their respective weights — is defined in Appendix D. C-points are recalculated continuously as contributions are merged.
 
-**B.2.6 No Corporate Membership Tiers.** The Organization does not sell board seats, governance influence, or voting rights. Commercial licensees fund the ecosystem through the Annual License Fee (Article 4); this entitles them to use the Software commercially — not to govern it.
+**B.2.6 Governance Pool.** At Governance Stage 4, the governance body consists of the **Governance Pool**: the top **one thousand (1000)** Active Contributors, ranked by C-points (B.2.5), excluding corporate contributions per B.2.3. Only members of the Governance Pool may initiate votes, cast votes, and nominate or stand as candidates for Board seats at Stage 4. The Pool is recalculated continuously as C-points change and Active status changes. At Stages 1–3, all Active Contributors hold whatever governance rights the current stage provides (the 1000-member cap applies only at Stage 4).
+
+**B.2.7 No Corporate Membership Tiers.** The Organization does not sell board seats, governance influence, or voting rights. Commercial licensees fund the ecosystem through the Annual License Fee (Article 4); this entitles them to use the Software commercially — not to govern it.
 
 ### B.3 — Governing Board
 
@@ -353,21 +355,27 @@ The Board shall communicate the applicable Revenue Basis to the Licensee in writ
 
   (b) They are replaced through the Continuous Confidence Vote (B.3.3).
 
-  A Board member who has been replaced may be nominated and elected to the Board again in the future — there is no restriction on re-election. Board members retain their standing in the Governance Pool based on their contribution history; serving on the Board does not diminish their Pool rank.
+  A Board member who has been replaced may be nominated and elected to the Board again in the future — there is no restriction on re-election. Board members retain their standing in the Governance Pool based on their C-points (B.2.5); serving on the Board does not diminish their Pool rank.
 
-**B.3.3 Continuous Confidence Vote.** At Stage 4, each Board member has an **auto-generated, always-open confidence vote** maintained by the Organization. This vote exists from the moment a member joins the Board and remains open for the duration of their tenure. The mechanics are:
+**B.3.3 Continuous Confidence Vote.** At Stage 4, each Board member has an **auto-generated, always-open confidence vote** maintained by the Organization. This vote exists from the moment a member joins the Board and remains open for the duration of their tenure. It functions as a **health bar** — Board members start at full confidence and remain until the community actively erodes it. The mechanics are:
 
-  (a) **Standing vote**: Every Governance Pool member may, at any time, cast a vote of **"keep"** or **"replace"** for each Board member. Votes may be changed or withdrawn at any time. Only current Pool members' votes are counted.
+  (a) **Auto-seed**: When a Board member takes their seat, every current Governance Pool member is automatically set to **"keep"** for that member. New members joining the Pool after that point also default to "keep" for all sitting Board members. The Board member begins at full health.
 
-  (b) **Replacement nomination**: A Pool member who votes "replace" must nominate a replacement candidate from the Governance Pool, identified by handle or email. **Self-nomination is not permitted** — a Pool member cannot nominate themselves as a replacement when voting to replace a Board member.
+  (b) **Three states**: Every Pool member holds one of three positions for each Board member, changeable at any time:
 
-  (c) **Activation threshold**: A Board member is replaced when **more than fifty percent (50%)** of cast votes are "replace" AND votes have been cast by at least **ten percent (10%)** of the Governance Pool.
+  - **"Keep"** (default) — supports the Board member's continued service;
+  - **"Neutral"** — withdraws active support without calling for replacement. Counted toward participation but does not count toward the keep/replace ratio;
+  - **"Replace"** — calls for the Board member's removal. Must include a **nominee** from the Governance Pool, identified by handle or email. **Self-nomination is not permitted.**
+
+  (c) **Activation threshold**: A Board member is replaced when **more than fifty percent (50%)** of non-neutral cast votes are "replace" AND at least **ten percent (10%)** of the Governance Pool has cast a vote (of any kind, including neutral). Neutral votes raise participation without tipping the balance — as neutrals accumulate, fewer active "replace" votes are needed to cross the 50% line among non-neutral votes.
 
   (d) **Replacement selection**: When the activation threshold is met, the nominee with the most "replace" votes naming them as replacement fills the seat. In the event of a tie, a **seven (7) day** ranked-choice runoff election is held among the tied candidates.
 
-  (e) **Post-replacement reset**: After a replacement occurs, the new Board member's confidence vote resets — all votes start fresh. The replaced member returns to the Governance Pool as a regular member and may be nominated for any future Board vacancy.
+  (e) **Post-replacement reset**: After a replacement occurs, the new Board member's confidence vote resets — all Pool members are auto-seeded to "keep" for the new member (full health). The replaced member returns to the Governance Pool as a regular member and may be nominated for any future Board vacancy.
 
-  (f) **Transparency**: The live tally for each Board member (percentage of "keep" vs. "replace" and current participation rate) is **publicly visible** to all Pool members at all times. Board members can see how the community feels about their performance in real time.
+  (f) **Lapsed members**: If a Pool member loses their Active status (no merged contribution in the preceding 24 months), their vote is removed from the tally entirely. If they later regain Pool membership, they are re-seeded to "keep" for all sitting Board members.
+
+  (g) **Transparency**: The live tally for each Board member — percentage of "keep," "neutral," and "replace," along with the current participation rate — is **publicly visible** to all Pool members at all times.
 
 **B.3.4 Chair.** At Stages 1–3, the Board elects a Chair from among its members. At Stage 4, the Chair is selected via the same continuous confidence mechanism — Pool members may additionally indicate their preferred Chair among current Board members, and the Board member with the highest Chair preference among Pool voters serves as Chair.
 
@@ -389,7 +397,7 @@ The Board shall communicate the applicable Revenue Basis to the Licensee in writ
 
   (a) B.2.3 — Corporate Contribution Exclusion (corporate work ≠ governance rights);
 
-  (b) B.2.6 — No corporate membership tiers (money cannot buy governance);
+  (b) B.2.7 — No corporate membership tiers (money cannot buy governance);
 
   (c) B.3.3 — Continuous Confidence Vote (Board members are always accountable to the Pool);
 
@@ -439,7 +447,7 @@ The Board shall communicate the applicable Revenue Basis to the Licensee in writ
 
 ### B.8 — Activation Threshold
 
-**B.8.1** Per SCCL Article 2.1, no commercial license may be issued until the Project has at least **fifteen (15) Active Contributors** (as defined in B.2.2, excluding corporate contributions per B.2.3), of which no single legal entity (including subsidiaries and affiliates) accounts for more than **twenty-five percent (25%)** of total contributions measured by commit authorship over the preceding twelve (12) months.
+**B.8.1** Per SCCL Article 2.1, no commercial license may be issued until the Project has at least **fifteen (15) Active Contributors** (as defined in B.2.2, excluding corporate contributions per B.2.3), of which no single legal entity (including subsidiaries and affiliates) accounts for more than **twenty-five percent (25%)** of total C-points (B.2.5) over the preceding twelve (12) months.
 
 **B.8.2** The Board verifies the threshold at the time of each license issuance.
 
@@ -515,7 +523,7 @@ The Organization's governance evolves through four stages. Stage advancement fro
 
   *Governance — The Governance Pool as Legislature:*
 
-  - The **Governance Pool** (B.2.5) — the top 1000 Active Contributors by merged contribution count — becomes the legislative body of the Organization.
+  - The **Governance Pool** (B.2.6) — the top 1000 Active Contributors by C-points (B.2.5) — becomes the legislative body of the Organization.
   - The Board's role transitions to **executive and operational**: managing day-to-day operations, licensee relationships, fee collection, compliance enforcement, financial administration, and serving as the public face of the Organization.
   - **Pool members may initiate binding votes** on any matter within the Organization's scope, including licensing policy, fee principles, ecosystem direction, Code of Conduct changes, and fund allocation within the ranges of SCCL Article 4.7.
   - The Board may also initiate votes, on equal footing with any Pool member.
@@ -527,7 +535,7 @@ The Organization's governance evolves through four stages. Stage advancement fro
 
   - **All Board seats are Pool-Elected** (except the Independent Seat per B.3.1c). Founder Seats have expired or converted (per B.3.1a). The Board may not self-appoint members.
   - Board members serve **indefinitely** on a rolling basis (B.3.2) — no terms, no scheduled elections, no lifetime caps. They serve until replaced by the Continuous Confidence Vote (B.3.3) or voluntary resignation. Board members retain their Governance Pool standing.
-  - Every Board member is subject to an **always-open Continuous Confidence Vote** (B.3.3) — Pool members may vote "keep" or "replace" at any time. Replaced members return to the Pool and may be re-elected.
+  - Every Board member is subject to an **always-open Continuous Confidence Vote** (B.3.3) — Pool members start at "keep" and may shift to "neutral" or "replace" at any time. Replaced members return to the Pool and may be re-elected.
   - The Governance Pool selects the **Chair** directly (B.3.4).
   - Emergency Succession (B.7.2) remains available as a last resort if the Board falls below quorum.
 
@@ -542,6 +550,24 @@ The Organization's governance evolves through four stages. Stage advancement fro
 > **Current CLA:** [TO BE PUBLISHED]
 >
 > **DCO reference:** [developercertificate.org](https://developercertificate.org/)
+
+---
+
+## Appendix D — Contribution Points (C-Points) Methodology
+
+> **Status:** Formula under development. This appendix will define the weighted scoring system used to calculate C-points (B.2.5).
+
+**D.1 Purpose.** C-points provide a composite measure of a contributor's impact on the Software. Unlike a raw count of merged commits, C-points weigh multiple dimensions of contribution to produce a fairer and more representative ranking for Governance Pool membership and other governance purposes.
+
+**D.2 Variables.** The C-points formula considers (but is not limited to) the following variables, each with a Board-published weight:
+
+> *Specific variables, weights, and calculation methodology to be defined. Examples of candidate variables include: merged contribution volume, lines of code changed, review labor, maintenance burden, security-critical work, documentation contributions, mentorship, and community leadership. The Board shall publish the complete formula and update it through the Charter amendment process (B.4.5).*
+
+**D.3 Recalculation.** C-points are recalculated continuously as contributions are merged and reviewer actions are recorded. The Organization shall provide tooling that allows any Active Contributor to view their current C-point score and its breakdown by variable.
+
+**D.4 Transparency.** The C-points formula, all variable weights, and the raw data used for calculation must be publicly available. No hidden variables or undisclosed adjustments are permitted.
+
+**D.5 Amendment.** Changes to the C-points formula follow the Charter amendment process (B.4.5). At Stage 4, this requires Board ⅔ + Pool majority approval.
 
 ---
 
