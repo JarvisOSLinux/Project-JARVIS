@@ -471,21 +471,25 @@ The Organization's governance evolves through four stages. Stage advancement fro
 
   *Eligibility Trigger:* 500+ Active Contributors AND 3+ active commercial licensees.
 
-  *Activation Process — Early Transition (500+ Contributors):*
+  *Activation Process:*
 
   (a) When the eligibility criteria are met, the Board must publicly announce Stage 4 eligibility within **thirty (30) days**. If the Board fails to announce, any Active Contributor may initiate the process directly by publishing the eligibility verification.
 
   (b) A **Stage 4 Ratification Vote** is opened for all Active Contributors, lasting **thirty (30) days**.
 
-  (c) Stage 4 activates if a **simple majority** of participating voters approve, provided at least **fifteen percent (15%)** of Active Contributors participate (minimum turnout for legitimacy).
+  (c) The vote outcome is classified as follows:
 
-  (d) If the vote fails — whether by majority rejection or insufficient turnout — the project remains at Stage 3. A new ratification vote may be triggered after **twelve (12) months**, provided the eligibility criteria are still met.
+  - **Positive**: More than 52.5% of participating voters approve, AND at least **fifteen percent (15%)** of Active Contributors participated.
+  - **Negative**: More than 52.5% of participating voters reject, AND at least **fifteen percent (15%)** of Active Contributors participated.
+  - **Neutral**: Turnout is below 15%, OR the result falls within **five (5) percentage points of 50%** (i.e., 47.5%–52.5%).
 
-  *Activation Process — Inevitable Transition (1000+ Contributors):*
+  (d) **Positive outcome** — Stage 4 activates immediately, regardless of contributor count. The community has chosen self-governance.
 
-  (e) If the project reaches **one thousand (1000) Active Contributors**, Stage 4 activates **automatically and unconditionally**. No vote is required. No prior vote outcome — whether rejection, low turnout, or failure to trigger — can prevent activation at this threshold. The transition is inevitable at this scale.
+  (e) **Neutral outcome** — The project remains at Stage 3. A new ratification vote may be triggered after **twelve (12) months**, provided the eligibility criteria are still met. However, if the project reaches **one thousand (1000) Active Contributors** while the most recent vote outcome was Neutral (or no vote has been held), Stage 4 activates **automatically**. At this scale, the absence of opposition is treated as consent.
 
-  (f) Once Stage 4 is activated — whether by ratification vote or automatic transition — **it cannot be reversed** by any mechanism. The community's self-governance is permanent.
+  (f) **Negative outcome** — The project remains at Stage 3. A new ratification vote may be triggered after **twelve (12) months**. The community's explicit rejection is respected regardless of contributor count — even at 1000+ contributors, Stage 4 does **not** auto-activate while the most recent vote outcome is Negative. Stage 4 can only activate after a subsequent vote produces a Positive or Neutral outcome.
+
+  (g) Once Stage 4 is activated — whether by Positive vote or Neutral auto-transition — **it cannot be reversed** by any mechanism. The community's self-governance is permanent.
 
   *Governance — The Board as Executive:*
 
