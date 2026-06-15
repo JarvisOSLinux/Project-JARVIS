@@ -333,25 +333,43 @@ The Board shall communicate the applicable Revenue Basis to the Licensee in writ
 
 **B.2.4 Individual Contributions by Licensee Employees.** An individual employed by a commercial licensee may qualify as an Active Contributor if and only if: (a) the contribution is signed off via DCO (not CLA); (b) the contribution is made outside the scope of their employment; and (c) the contribution is not fulfilling any part of their employer's SCCL Article 5 obligations. The individual's governance rights are personal and may not be directed or influenced by their employer.
 
-**B.2.5 No Corporate Membership Tiers.** The Organization does not sell board seats, governance influence, or voting rights. Commercial licensees fund the ecosystem through the Annual License Fee (Article 4); this entitles them to use the Software commercially — not to govern it.
+**B.2.5 Governance Pool.** At Governance Stage 4, the governance body consists of the **Governance Pool**: the top **one thousand (1000)** Active Contributors, ranked by number of merged contributions (excluding corporate contributions per B.2.3) within the preceding twenty-four (24) months. Only members of the Governance Pool may initiate votes, cast votes, and nominate or stand as candidates for Board seats at Stage 4. The Pool is recalculated continuously as contributions are merged and Active status changes. At Stages 1–3, all Active Contributors hold whatever governance rights the current stage provides (the 1000-member cap applies only at Stage 4).
+
+**B.2.6 No Corporate Membership Tiers.** The Organization does not sell board seats, governance influence, or voting rights. Commercial licensees fund the ecosystem through the Annual License Fee (Article 4); this entitles them to use the Software commercially — not to govern it.
 
 ### B.3 — Governing Board
 
 **B.3.1 Composition.** The Board shall consist of **five (5) to nine (9) members**, with the exact number set by Board resolution. The Board is composed as follows:
 
-  (a) **Founder Seats (up to 2)** — Appointed by the founding members of the Organization. Founder seats convert to Contributor-Elected seats when the founder steps down or after a maximum of **ten (10) years** from the Organization's incorporation, whichever comes first.
+  (a) **Founder Seats (up to 2)** — Appointed by the founding members of the Organization. Founder seats convert to Pool-Elected seats when the founder steps down, is removed by Pool vote, or after a maximum of **ten (10) years** from the Organization's incorporation, whichever comes first.
 
-  (b) **Contributor-Elected Seats** — Elected by Active Contributors. Activated at Governance Stage 3 (see B.9). At Stage 4, Contributor-Elected seats must constitute a **strict majority** of the Board (more than 50%).
+  (b) **Pool-Elected Seats** — Elected by the Governance Pool at Stage 4. At Stage 3, at least one seat must be filled by Active Contributor election. At Stage 4, all seats (except the Independent Seat) are Pool-Elected.
 
   (c) **Independent Seat (1)** — An external advisor with relevant expertise (legal, financial, nonprofit governance) appointed by the Board. Must have no employment or financial relationship with any commercial licensee.
 
-**B.3.2 Terms.** Board members serve **three (3) year terms**, staggered so that no more than one-third of seats are up for election in any given year. No individual may serve more than **two (2) consecutive terms**. After a mandatory one-term gap, a former member may stand for re-election.
+**B.3.2 Rolling Tenure.** Board members serve **indefinitely** — there are no fixed terms, scheduled elections, or re-election cycles. A Board member's tenure continues until:
 
-**B.3.3 Elections.** Once Contributor-Elected seats are activated (Stage 3+), they are filled by ranked-choice vote among Active Contributors. Each Active Contributor has one vote per seat. Candidates must be Active Contributors themselves. Self-nominations are permitted. Elections are conducted annually within thirty (30) days of the Board's anniversary.
+  (a) They voluntarily step down;
 
-**B.3.4 Chair.** The Board elects a Chair from among its members. The Chair serves a **two (2) year term** as Chair. No individual may serve as Chair for more than **four (4) consecutive years**.
+  (b) They are removed by a Pool vote (see B.3.3);
 
-**B.3.5 Vacancy.** If a Contributor-Elected seat is vacated mid-term, the Board appoints an interim replacement from among Active Contributors. The interim member serves until the next regular election.
+  (c) They lose Active Contributor status (at Stage 4, Board members must remain in the Governance Pool); or
+
+  (d) They reach the lifetime cap under B.4.5.
+
+**B.3.3 Rolling Board Changes.** At Stage 4, any member of the Governance Pool may initiate a vote to replace a specific Board member at any time, for any reason. The process is:
+
+  (a) **Initiation**: A Pool member publishes a named replacement proposal, identifying the Board member to be replaced and (optionally) nominating a candidate.
+
+  (b) **Voting**: All Governance Pool members may vote over a **fourteen (14) day** window. The replacement passes with a **simple majority** of participating voters, provided at least **ten percent (10%)** of the Governance Pool participates.
+
+  (c) **Replacement**: If the vote passes, the Board member is immediately removed. If a replacement candidate was named in the proposal and received majority support, they fill the seat. If no candidate was named or no candidate received majority support, a **fourteen (14) day** nomination and election period follows, where Pool members nominate candidates and vote by ranked choice.
+
+  (d) **Cooldown**: A replacement vote targeting the same Board member may not be initiated more than once every **six (6) months**, unless the Board member is subject to a conflict of interest finding under B.4.3.
+
+**B.3.4 Chair.** At Stages 1–3, the Board elects a Chair from among its members. At Stage 4, the Governance Pool elects the Chair directly. The Chair serves until replaced by a new Pool vote under the same rolling mechanism as B.3.3.
+
+**B.3.5 Vacancy.** If a seat is vacated (resignation, removal, loss of Pool membership), the Governance Pool fills it through a **fourteen (14) day** nomination and election. If the Pool cannot fill the seat within thirty (30) days, Emergency Succession (B.7.2) applies.
 
 ### B.4 — Constraints on Board Power
 
@@ -361,9 +379,9 @@ The Board shall communicate the applicable Revenue Basis to the Licensee in writ
 
 **B.4.3 Conflict of Interest.** A Board member must recuse themselves from any decision involving a Licensee that employs them, contracts with them, or in which they hold a financial interest. Failure to recuse is grounds for recall (at stages where recall is active). No Board member may simultaneously hold a governance role in a commercial licensee.
 
-**B.4.4 Contributor Recall.** Activated at **Governance Stage 4 only.** If **twenty-five percent (25%)** of Active Contributors petition for the recall of a Board member (citing specific grounds), a recall vote is triggered. The recall passes with a **simple majority** of participating Active Contributors. The recalled member is immediately removed and the seat is treated as a vacancy under B.3.5.
+**B.4.4 Board Replacement.** At Stage 4, any Governance Pool member may initiate a rolling replacement vote per B.3.3. This is the primary mechanism for Board accountability — no separate recall process is needed because the rolling replacement mechanism is always available.
 
-**B.4.5 Anti-Entrenchment.** No single individual may occupy a Board seat (including non-consecutive terms) for more than **twelve (12) years** total. This lifetime cap prevents institutional knowledge from becoming institutional power. Applies at all Governance Stages.
+**B.4.5 Anti-Entrenchment.** No single individual may occupy a Board seat (including non-consecutive terms) for more than **twelve (12) years** total. This lifetime cap applies at all Governance Stages and cannot be waived. When a Board member reaches this cap, they must step down and the seat is filled per B.3.3 (Stage 4) or B.3.5 (Stages 1–3).
 
 **B.4.6 Charter Amendment.** At Stages 1–3, the Charter may be amended by a **unanimous Board vote**. At Stage 4, amendment requires a vote of **two-thirds (⅔) of the Board** AND **a simple majority of Active Contributors** voting in a ratification poll conducted over no fewer than fourteen (14) days. Neither the Board alone nor Contributors alone may unilaterally change this Charter at Stage 4.
 
@@ -371,7 +389,7 @@ The Board shall communicate the applicable Revenue Basis to the Licensee in writ
 
   (a) B.2.3 — Corporate Contribution Exclusion (corporate work ≠ governance rights);
 
-  (b) B.2.5 — No corporate membership tiers (money cannot buy governance);
+  (b) B.2.6 — No corporate membership tiers (money cannot buy governance);
 
   (c) B.5.1 — Contributor compensation minimum (50% of fees);
 
@@ -493,23 +511,23 @@ The Organization's governance evolves through four stages. Stage advancement fro
 
   (h) Once Stage 4 is activated — whether by Positive tally or Neutral auto-transition — **it cannot be reversed** by any mechanism. The community's self-governance is permanent.
 
-  *Governance — The Board as Executive:*
+  *Governance — The Governance Pool as Legislature:*
 
+  - The **Governance Pool** (B.2.5) — the top 1000 Active Contributors by merged contribution count — becomes the legislative body of the Organization.
   - The Board's role transitions to **executive and operational**: managing day-to-day operations, licensee relationships, fee collection, compliance enforcement, financial administration, and serving as the public face of the Organization.
-  - **Active Contributors are the legislative body.** Contributors may initiate binding votes on any matter within the Organization's scope, including licensing policy, fee principles, ecosystem direction, Code of Conduct changes, and fund allocation within the ranges of SCCL Article 4.7.
-  - The Board may also initiate votes, on equal footing with any Active Contributor.
-  - Binding community votes require a **simple majority** of participating voters, with a minimum participation threshold of **fifteen percent (15%)** of Active Contributors to ensure legitimacy.
-  - **Board Final Say (Veto).** The Board retains a veto on community resolutions. To exercise a veto, the Board must publish a **detailed written justification** within fifteen (15) days of the vote result. A vetoed resolution may be overridden by a **two-thirds (⅔) supermajority** of Active Contributors in a subsequent override vote. If the override passes, the Board must implement the resolution.
-  - **Contributor Recall activated** (B.4.4) — 25% petition triggers a recall vote.
-  - **Dual-approval Charter amendments** (B.4.6) — Board ⅔ + contributor majority required.
-  - **All Board seats are Contributor-Elected.** Founder Seats have expired or converted (per B.3.1a). Board members are elected by and from the Active Contributor pool. The Board may not self-appoint members. The Independent Seat (B.3.1c) is the sole exception and remains Board-appointed.
-  - **Active Contributors elect the Board Chair** directly (rather than Board self-selection).
+  - **Pool members may initiate binding votes** on any matter within the Organization's scope, including licensing policy, fee principles, ecosystem direction, Code of Conduct changes, and fund allocation within the ranges of SCCL Article 4.7.
+  - The Board may also initiate votes, on equal footing with any Pool member.
+  - Binding votes require a **simple majority** of participating Pool members, with a minimum participation threshold of **ten percent (10%)** of the Governance Pool to ensure legitimacy.
+  - **Board Final Say (Veto).** The Board retains a veto on community resolutions. To exercise a veto, the Board must publish a **detailed written justification** within fifteen (15) days of the vote result. A vetoed resolution may be overridden by a **two-thirds (⅔) supermajority** of the Governance Pool in a subsequent override vote. If the override passes, the Board must implement the resolution.
+  - **Dual-approval Charter amendments** (B.4.6) — Board ⅔ + Pool majority required.
 
-  *Governance — Board Succession at Stage 4:*
+  *Governance — Board at Stage 4:*
 
-  - When a Board member's term ends, steps down, or is recalled, the seat is filled by **contributor election** within sixty (60) days.
-  - The Board cannot appoint its own successors. All succession flows through the contributor pool.
-  - Emergency Succession (B.7.2) remains available as a last resort if the Board falls below quorum and elections cannot be held in time.
+  - **All Board seats are Pool-Elected** (except the Independent Seat per B.3.1c). Founder Seats have expired or converted (per B.3.1a). The Board may not self-appoint members.
+  - Board members serve on a **rolling basis** (B.3.2) — no terms, no scheduled elections. They serve until replaced by Pool vote (B.3.3), voluntary resignation, loss of Pool membership, or lifetime cap (B.4.5).
+  - Any Pool member may initiate a **replacement vote** for any Board member at any time (B.3.3).
+  - The Governance Pool elects the **Chair** directly (B.3.4).
+  - Emergency Succession (B.7.2) remains available as a last resort if the Board falls below quorum.
 
 **B.9.5 Stage Verification.** The Board must verify and publicly declare the current Governance Stage annually. Any Active Contributor may challenge the declared stage by demonstrating that the objective criteria for a different stage are met. Disputes are resolved by an independent count of Active Contributors as recorded in the project's version control history.
 
