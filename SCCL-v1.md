@@ -347,29 +347,31 @@ The Board shall communicate the applicable Revenue Basis to the Licensee in writ
 
   (c) **Independent Seat (1)** — An external advisor with relevant expertise (legal, financial, nonprofit governance) appointed by the Board. Must have no employment or financial relationship with any commercial licensee.
 
-**B.3.2 Rolling Tenure.** Board members serve **indefinitely** — there are no fixed terms, scheduled elections, or re-election cycles. A Board member's tenure continues until:
+**B.3.2 Rolling Tenure.** Board members serve **indefinitely** — there are no fixed terms, scheduled elections, re-election cycles, or lifetime caps. A Board member's tenure continues until:
 
-  (a) They voluntarily step down;
+  (a) They voluntarily step down; or
 
-  (b) They are removed by a Pool vote (see B.3.3);
+  (b) They are replaced through the Continuous Confidence Vote (B.3.3).
 
-  (c) They lose Active Contributor status (at Stage 4, Board members must remain in the Governance Pool); or
+  A Board member who has been replaced may be nominated and elected to the Board again in the future — there is no restriction on re-election. Board members retain their standing in the Governance Pool based on their contribution history; serving on the Board does not diminish their Pool rank.
 
-  (d) They reach the lifetime cap under B.4.5.
+**B.3.3 Continuous Confidence Vote.** At Stage 4, each Board member has an **auto-generated, always-open confidence vote** maintained by the Organization. This vote exists from the moment a member joins the Board and remains open for the duration of their tenure. The mechanics are:
 
-**B.3.3 Rolling Board Changes.** At Stage 4, any member of the Governance Pool may initiate a vote to replace a specific Board member at any time, for any reason. The process is:
+  (a) **Standing vote**: Every Governance Pool member may, at any time, cast a vote of **"keep"** or **"replace"** for each Board member. Votes may be changed or withdrawn at any time. Only current Pool members' votes are counted.
 
-  (a) **Initiation**: A Pool member publishes a named replacement proposal, identifying the Board member to be replaced and (optionally) nominating a candidate.
+  (b) **Replacement nomination**: A Pool member who votes "replace" must nominate a replacement candidate from the Governance Pool, identified by handle or email. **Self-nomination is not permitted** — a Pool member cannot nominate themselves as a replacement when voting to replace a Board member.
 
-  (b) **Voting**: All Governance Pool members may vote over a **fourteen (14) day** window. The replacement passes with a **simple majority** of participating voters, provided at least **ten percent (10%)** of the Governance Pool participates.
+  (c) **Activation threshold**: A Board member is replaced when **more than fifty percent (50%)** of cast votes are "replace" AND votes have been cast by at least **ten percent (10%)** of the Governance Pool.
 
-  (c) **Replacement**: If the vote passes, the Board member is immediately removed. If a replacement candidate was named in the proposal and received majority support, they fill the seat. If no candidate was named or no candidate received majority support, a **fourteen (14) day** nomination and election period follows, where Pool members nominate candidates and vote by ranked choice.
+  (d) **Replacement selection**: When the activation threshold is met, the nominee with the most "replace" votes naming them as replacement fills the seat. In the event of a tie, a **seven (7) day** ranked-choice runoff election is held among the tied candidates.
 
-  (d) **Cooldown**: A replacement vote targeting the same Board member may not be initiated more than once every **six (6) months**, unless the Board member is subject to a conflict of interest finding under B.4.3.
+  (e) **Post-replacement reset**: After a replacement occurs, the new Board member's confidence vote resets — all votes start fresh. The replaced member returns to the Governance Pool as a regular member and may be nominated for any future Board vacancy.
 
-**B.3.4 Chair.** At Stages 1–3, the Board elects a Chair from among its members. At Stage 4, the Governance Pool elects the Chair directly. The Chair serves until replaced by a new Pool vote under the same rolling mechanism as B.3.3.
+  (f) **Transparency**: The live tally for each Board member (percentage of "keep" vs. "replace" and current participation rate) is **publicly visible** to all Pool members at all times. Board members can see how the community feels about their performance in real time.
 
-**B.3.5 Vacancy.** If a seat is vacated (resignation, removal, loss of Pool membership), the Governance Pool fills it through a **fourteen (14) day** nomination and election. If the Pool cannot fill the seat within thirty (30) days, Emergency Succession (B.7.2) applies.
+**B.3.4 Chair.** At Stages 1–3, the Board elects a Chair from among its members. At Stage 4, the Chair is selected via the same continuous confidence mechanism — Pool members may additionally indicate their preferred Chair among current Board members, and the Board member with the highest Chair preference among Pool voters serves as Chair.
+
+**B.3.5 Vacancy.** If a seat is vacated by resignation, the Governance Pool fills it through a **fourteen (14) day** nomination and election (ranked choice, no self-nomination). If the Pool cannot fill the seat within thirty (30) days, Emergency Succession (B.7.2) applies.
 
 ### B.4 — Constraints on Board Power
 
@@ -379,29 +381,29 @@ The Board shall communicate the applicable Revenue Basis to the Licensee in writ
 
 **B.4.3 Conflict of Interest.** A Board member must recuse themselves from any decision involving a Licensee that employs them, contracts with them, or in which they hold a financial interest. Failure to recuse is grounds for recall (at stages where recall is active). No Board member may simultaneously hold a governance role in a commercial licensee.
 
-**B.4.4 Board Replacement.** At Stage 4, any Governance Pool member may initiate a rolling replacement vote per B.3.3. This is the primary mechanism for Board accountability — no separate recall process is needed because the rolling replacement mechanism is always available.
+**B.4.4 Board Accountability.** At Stage 4, every Board member is subject to the Continuous Confidence Vote (B.3.3). This always-open mechanism is the primary instrument of Board accountability — no separate recall or election process is needed. There is no lifetime cap on Board service; members who have been replaced may be re-elected to any future vacancy.
 
-**B.4.5 Anti-Entrenchment.** No single individual may occupy a Board seat (including non-consecutive terms) for more than **twelve (12) years** total. This lifetime cap applies at all Governance Stages and cannot be waived. When a Board member reaches this cap, they must step down and the seat is filled per B.3.3 (Stage 4) or B.3.5 (Stages 1–3).
+**B.4.5 Charter Amendment.** At Stages 1–3, the Charter may be amended by a **unanimous Board vote**. At Stage 4, amendment requires a vote of **two-thirds (⅔) of the Board** AND **a simple majority of Active Contributors** voting in a ratification poll conducted over no fewer than fourteen (14) days. Neither the Board alone nor Contributors alone may unilaterally change this Charter at Stage 4.
 
-**B.4.6 Charter Amendment.** At Stages 1–3, the Charter may be amended by a **unanimous Board vote**. At Stage 4, amendment requires a vote of **two-thirds (⅔) of the Board** AND **a simple majority of Active Contributors** voting in a ratification poll conducted over no fewer than fourteen (14) days. Neither the Board alone nor Contributors alone may unilaterally change this Charter at Stage 4.
-
-**B.4.7 Immutable Provisions.** The following provisions may not be amended or removed at ANY Governance Stage, by any process short of dissolution and reconstitution:
+**B.4.6 Immutable Provisions.** The following provisions may not be amended or removed at ANY Governance Stage, by any process short of dissolution and reconstitution:
 
   (a) B.2.3 — Corporate Contribution Exclusion (corporate work ≠ governance rights);
 
   (b) B.2.6 — No corporate membership tiers (money cannot buy governance);
 
-  (c) B.5.1 — Contributor compensation minimum (50% of fees);
+  (c) B.3.3 — Continuous Confidence Vote (Board members are always accountable to the Pool);
 
-  (d) B.7.3 — Dissolution asset protection (no distribution to licensees or Board);
+  (d) B.5.1 — Contributor compensation minimum (50% of fees);
 
-  (e) B.9 — Governance Stage advancement triggers (Board cannot prevent stage progression);
+  (e) B.7.3 — Dissolution asset protection (no distribution to licensees or Board);
 
-  (f) B.9.4(e) — Stage 4 irreversibility (once ratified, contributor governance is permanent).
+  (f) B.9 — Governance Stage advancement triggers (Board cannot prevent stage progression);
+
+  (g) B.9.4(e) — Stage 4 irreversibility (once ratified, contributor governance is permanent).
 
 ### B.5 — Financial Governance
 
-**B.5.1 Contributor Compensation Floor.** No less than **fifty percent (50%)** of all fees collected under the SCCL shall be allocated to contributor compensation. This floor is immutable under B.4.7(c).
+**B.5.1 Contributor Compensation Floor.** No less than **fifty percent (50%)** of all fees collected under the SCCL shall be allocated to contributor compensation. This floor is immutable under B.4.6(d).
 
 **B.5.2 Allocation Ranges.** Subject to the floor in B.5.1, the Board sets annual allocation percentages within the ranges specified in SCCL Article 4.7. Adjustments require thirty (30) days' advance notice and a published rationale.
 
@@ -429,7 +431,7 @@ The Board shall communicate the applicable Revenue Basis to the Licensee in writ
 
 ### B.7 — Succession and Continuity
 
-**B.7.1 No Single Point of Failure.** The Organization must ensure that no single individual's departure — whether sudden or planned — can paralyze governance. The staggered terms (B.3.2), vacancy procedures (B.3.5), and emergency succession (B.7.2) provide structural continuity.
+**B.7.1 No Single Point of Failure.** The Organization must ensure that no single individual's departure — whether sudden or planned — can paralyze governance. The rolling tenure model (B.3.2), Continuous Confidence Vote (B.3.3), vacancy procedures (B.3.5), and emergency succession (B.7.2) provide structural continuity.
 
 **B.7.2 Emergency Succession.** If the Board falls below quorum (defined as a simple majority of filled seats) and cannot fill vacancies through normal procedures, the **five (5) most recent Active Contributors by contribution date** shall convene within fourteen (14) days to appoint interim Board members until a proper election can be held.
 
@@ -453,7 +455,7 @@ The Organization's governance evolves through four stages. Stage advancement fro
   - The Board governs with full authority.
   - No contributor elections, no recall, no community veto.
   - The Board makes all decisions regarding licensing, fees, and ecosystem management.
-  - Immutable provisions (B.4.7) still apply. Published Principles (B.4.1) still apply.
+  - Immutable provisions (B.4.6) still apply. Published Principles (B.4.1) still apply.
   - No commercial licenses may be issued (activation threshold not met).
 
   *Exits when:* The project reaches **15 Active Contributors** (per B.2.2, excluding corporate contributions).
@@ -519,14 +521,14 @@ The Organization's governance evolves through four stages. Stage advancement fro
   - The Board may also initiate votes, on equal footing with any Pool member.
   - Binding votes require a **simple majority** of participating Pool members, with a minimum participation threshold of **ten percent (10%)** of the Governance Pool to ensure legitimacy.
   - **Board Final Say (Veto).** The Board retains a veto on community resolutions. To exercise a veto, the Board must publish a **detailed written justification** within fifteen (15) days of the vote result. A vetoed resolution may be overridden by a **two-thirds (⅔) supermajority** of the Governance Pool in a subsequent override vote. If the override passes, the Board must implement the resolution.
-  - **Dual-approval Charter amendments** (B.4.6) — Board ⅔ + Pool majority required.
+  - **Dual-approval Charter amendments** (B.4.5) — Board ⅔ + Pool majority required.
 
   *Governance — Board at Stage 4:*
 
   - **All Board seats are Pool-Elected** (except the Independent Seat per B.3.1c). Founder Seats have expired or converted (per B.3.1a). The Board may not self-appoint members.
-  - Board members serve on a **rolling basis** (B.3.2) — no terms, no scheduled elections. They serve until replaced by Pool vote (B.3.3), voluntary resignation, loss of Pool membership, or lifetime cap (B.4.5).
-  - Any Pool member may initiate a **replacement vote** for any Board member at any time (B.3.3).
-  - The Governance Pool elects the **Chair** directly (B.3.4).
+  - Board members serve **indefinitely** on a rolling basis (B.3.2) — no terms, no scheduled elections, no lifetime caps. They serve until replaced by the Continuous Confidence Vote (B.3.3) or voluntary resignation. Board members retain their Governance Pool standing.
+  - Every Board member is subject to an **always-open Continuous Confidence Vote** (B.3.3) — Pool members may vote "keep" or "replace" at any time. Replaced members return to the Pool and may be re-elected.
+  - The Governance Pool selects the **Chair** directly (B.3.4).
   - Emergency Succession (B.7.2) remains available as a last resort if the Board falls below quorum.
 
 **B.9.5 Stage Verification.** The Board must verify and publicly declare the current Governance Stage annually. Any Active Contributor may challenge the declared stage by demonstrating that the objective criteria for a different stage are met. Disputes are resolved by an independent count of Active Contributors as recorded in the project's version control history.
