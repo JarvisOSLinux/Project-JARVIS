@@ -471,17 +471,21 @@ The Organization's governance evolves through four stages. Stage advancement fro
 
   *Eligibility Trigger:* 500+ Active Contributors AND 3+ active commercial licensees.
 
-  *Activation Process:*
+  *Activation Process — Early Transition (500+ Contributors):*
 
   (a) When the eligibility criteria are met, the Board must publicly announce Stage 4 eligibility within **thirty (30) days**. If the Board fails to announce, any Active Contributor may initiate the process directly by publishing the eligibility verification.
 
   (b) A **Stage 4 Ratification Vote** is opened for all Active Contributors, lasting **thirty (30) days**.
 
-  (c) Stage 4 activates if a **simple majority** of participating voters approve.
+  (c) Stage 4 activates if a **simple majority** of participating voters approve, provided at least **fifteen percent (15%)** of Active Contributors participate (minimum turnout for legitimacy).
 
-  (d) If the vote fails, the project remains at Stage 3. A new ratification vote may be triggered after **twelve (12) months**, provided the eligibility criteria are still met.
+  (d) If the vote fails — whether by majority rejection or insufficient turnout — the project remains at Stage 3. A new ratification vote may be triggered after **twelve (12) months**, provided the eligibility criteria are still met.
 
-  (e) Once Stage 4 is ratified, **it cannot be reversed** by any mechanism. The community has chosen self-governance; that choice is permanent.
+  *Activation Process — Inevitable Transition (1000+ Contributors):*
+
+  (e) If the project reaches **one thousand (1000) Active Contributors**, Stage 4 activates **automatically and unconditionally**. No vote is required. No prior vote outcome — whether rejection, low turnout, or failure to trigger — can prevent activation at this threshold. The transition is inevitable at this scale.
+
+  (f) Once Stage 4 is activated — whether by ratification vote or automatic transition — **it cannot be reversed** by any mechanism. The community's self-governance is permanent.
 
   *Governance — The Board as Executive:*
 
