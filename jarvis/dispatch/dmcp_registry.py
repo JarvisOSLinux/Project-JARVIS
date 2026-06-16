@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import json
 import os
@@ -181,6 +182,96 @@ async def uninstall_server(logger: Logger, server_id: str) -> Dict[str, Any]:
     return {"uninstalled": server_id, "output": raw.strip()}
 
 
+def _extract_mcp_docstrings(source_file: Path) -> Dict[str, str]:
+    """Return {tool_name: first_docstring_line} for @mcp.tool-decorated fns."""
+    try:
+        tree = ast.parse(source_file.read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        return {}
+
+    result: Dict[str, str] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+
+        is_tool = False
+        explicit_name: Optional[str] = None
+        for dec in node.decorator_list:
+            # @tool, @mcp.tool, @server.tool, @app.tool
+            bare = None
+            call_func = None
+            call_kwargs: Dict[str, Any] = {}
+            if isinstance(dec, ast.Attribute) and dec.attr == "tool":
+                is_tool = True
+                bare = dec.attr
+            elif isinstance(dec, ast.Name) and dec.id == "tool":
+                is_tool = True
+                bare = dec.id
+            elif isinstance(dec, ast.Call):
+                f = dec.func
+                if (isinstance(f, ast.Attribute) and f.attr == "tool") or (
+                    isinstance(f, ast.Name) and f.id == "tool"
+                ):
+                    is_tool = True
+                    # Look for name= kwarg
+                    for kw in dec.keywords:
+                        if kw.arg == "name" and isinstance(kw.value, ast.Constant):
+                            explicit_name = str(kw.value.value)
+
+        if not is_tool:
+            continue
+
+        docstring = ast.get_docstring(node)
+        if not docstring:
+            continue
+
+        first_line = docstring.split("\n")[0].strip()
+        name = explicit_name or node.name
+        result[name] = first_line
+
+    return result
+
+
+def _find_python_source(manifest: Dict[str, Any]) -> Optional[Path]:
+    """Locate the main Python source file referenced by a server manifest."""
+    transports = manifest.get("transports") or []
+    if not transports:
+        return None
+
+    primary = transports[0]
+    if primary.get("type") != "stdio":
+        return None
+
+    install_dir = manifest.get("installDir") or manifest.get("install_dir")
+    if not install_dir:
+        return None
+    base = Path(install_dir)
+    if not base.is_dir():
+        return None
+
+    # Try each arg for a .py file
+    for arg in primary.get("args") or []:
+        p = Path(arg)
+        if p.suffix != ".py":
+            continue
+        candidate = base / p if not p.is_absolute() else p
+        if candidate.exists():
+            return candidate
+
+    # Fallback: well-known entry-point names
+    for name in ("server.py", "main.py", "app.py", "__main__.py"):
+        f = base / name
+        if f.exists():
+            return f
+
+    # Last resort: single .py file in install dir
+    py_files = list(base.glob("*.py"))
+    if len(py_files) == 1:
+        return py_files[0]
+
+    return None
+
+
 async def list_server_tools(logger: Logger, server_id: str) -> Dict[str, Any]:
     """List tools available on an installed MCP server."""
     logger.info(f"Dispatch: Listing tools for server '{server_id}'")
@@ -220,6 +311,32 @@ async def list_server_tools(logger: Logger, server_id: str) -> Dict[str, Any]:
         tools = []
 
     logger.info(f"Dispatch: Server '{server_id}' has {len(tools)} tool(s)")
+
+    # Docstring fallback: if any tools lack descriptions, parse Python source.
+    if any(not t.get("description") for t in tools if isinstance(t, dict)):
+        base = _dmcp_base_dir()
+        manifest_path = base / "installed" / server_id / "manifest.json"
+        if manifest_path.exists():
+            try:
+                manifest = json.loads(manifest_path.read_text())
+                src = _find_python_source(manifest)
+                if src:
+                    docstrings = _extract_mcp_docstrings(src)
+                    if docstrings:
+                        for tool in tools:
+                            if not isinstance(tool, dict):
+                                continue
+                            if not tool.get("description"):
+                                name = tool.get("name", "")
+                                if name in docstrings:
+                                    tool["description"] = docstrings[name]
+                        logger.debug(
+                            f"Dispatch: applied docstring fallback for {server_id}"
+                            f" ({len(docstrings)} found)"
+                        )
+            except Exception as e:
+                logger.debug(f"Dispatch: docstring fallback error for {server_id}: {e}")
+
     return {"server": server_id, "tools": tools}
 
 

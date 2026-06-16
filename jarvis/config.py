@@ -152,6 +152,16 @@ class Config:
     # Minimum cosine similarity for RAG results (0.0-1.0)
     RAG_MIN_SCORE = float(os.getenv("RAG_MIN_SCORE", "0.3"))
 
+    # --- Token Tracking ---
+    # Model context window size (tokens). Used for ctx: X/Y display in the TUI.
+    # 0 = unknown (shows raw token count without a denominator).
+    LLM_CONTEXT_WINDOW = int(os.getenv("LLM_CONTEXT_WINDOW", "0"))
+
+    # --- MCP Server Buffer ---
+    # Number of recently-used server doc blocks to keep in the system context.
+    # Frequency-based eviction: lowest-use server is dropped when buffer is full.
+    MCP_BUFFER_SIZE = int(os.getenv("MCP_BUFFER_SIZE", "5"))
+
     # --- Semantic Tool Discovery ---
     # Master switch for vector-based tool search via dispatch/dmcp
     ALLOW_EMBEDDING_SEARCH = (

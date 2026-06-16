@@ -1,8 +1,10 @@
-"""Session management slash-commands (/new, /sessions, /switch, /rename, /delete)."""
+"""Session management slash-commands (/new, /sessions, /switch, /rename, /delete, /context)."""
 
 from __future__ import annotations
 
 from typing import Any
+
+from ..config import Config
 
 
 def session_reply(app: Any, message: str) -> None:
@@ -97,6 +99,32 @@ def handle_slash_command(app: Any, text: str) -> bool:
             session_reply(app, f"Deleted session {matches[0].short_id()}.")
         else:
             session_reply(app, "Delete failed.")
+        return True
+
+    if cmd == "/context":
+        lines = ["Context usage (last LLM call):"]
+        jarvis = getattr(app, "jarvis", app)
+        raw_provider = None
+        if hasattr(jarvis, "llm"):
+            raw_provider = getattr(jarvis.llm, "provider", None)
+        prompt_toks = getattr(raw_provider, "last_prompt_tokens", 0) or 0
+        completion_toks = getattr(raw_provider, "last_completion_tokens", 0) or 0
+        if prompt_toks == 0 and completion_toks == 0:
+            lines.append("  No LLM calls made yet in this session.")
+        else:
+            window = getattr(Config, "LLM_CONTEXT_WINDOW", 0)
+            lines.append(f"  Prompt tokens:     {prompt_toks}")
+            lines.append(f"  Completion tokens: {completion_toks}")
+            lines.append(f"  Total:             {prompt_toks + completion_toks}")
+            if window > 0:
+                pct = int(prompt_toks / window * 100)
+                lines.append(f"  Context window:    {window} ({pct}% used)")
+        buf = getattr(jarvis, "mcp_buffer", {})
+        if buf:
+            lines.append(f"  MCP buffer:        {len(buf)} server(s) cached")
+            for sid, entry in buf.items():
+                lines.append(f"    {sid}  (used {entry['count']}x)")
+        session_reply(app, "\n".join(lines))
         return True
 
     # Unknown slash-command — let it through to the LLM so the user
