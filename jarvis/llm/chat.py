@@ -189,8 +189,12 @@ class LLM:
         try:
             response_text = self.provider.chat(messages)
         except Exception as e:
+            # Provider-level failure (timeout, network, Ollama down). Don't
+            # burn through all JSON retries waiting — each retry would hit
+            # the same dead endpoint and waste LLM_TIMEOUT seconds per attempt.
             logger.error(f"LLM [{self._mode}] provider error: {e}")
-            response_text = ""
+            self.chat_history.pop()
+            return self._fallback_response()
 
         logger.debug(
             f"LLM [{self._mode}] attempt={attempt} responded "

@@ -19,6 +19,9 @@ def handle_slash_command(app: Any, text: str) -> bool:
     parts = text.strip().split(maxsplit=1)
     cmd = parts[0].lower()
     arg = parts[1].strip() if len(parts) > 1 else ""
+    # Strip surrounding quote pairs so `/rename 'Hello World'` works naturally.
+    if len(arg) >= 2 and arg[0] == arg[-1] and arg[0] in ('"', "'"):
+        arg = arg[1:-1]
 
     if cmd == "/new":
         if not app.sessions.available:
