@@ -54,6 +54,11 @@ class ComponentFactory:
                         getattr(Config, "LLM_TEMPERATURE", 0.7),
                     )
                     kwargs["strict_json"] = spec.get("strict_json", False)
+                    llm_think = getattr(Config, "LLM_THINK", None)
+                    if spec.get("think") is not None:
+                        kwargs["think"] = spec["think"]
+                    elif llm_think is not None:
+                        kwargs["think"] = llm_think
                 elif ptype == "api":
                     kwargs["api_url"] = spec.get("url", "")
                     kwargs["api_key"] = spec.get("api_key", "")

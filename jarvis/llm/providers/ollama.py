@@ -163,9 +163,13 @@ class OllamaProvider(BaseLLMProvider):
             return content
         return ""
 
+    @property
+    def _is_remote(self) -> bool:
+        return self.base_url != "http://localhost:11434"
+
     def is_available(self) -> bool:
         try:
-            self._ollama.list()
+            self._client.list()
             return True
         except Exception as e:
             logger.debug(f"Ollama not available: {e}")
@@ -174,9 +178,16 @@ class OllamaProvider(BaseLLMProvider):
     # -- Ollama-specific -----------------------------------------------------
 
     def ensure_model(self) -> bool:
-        """Ensure the model exists locally, pulling it if necessary."""
+        """Ensure the model exists, pulling it if necessary."""
         if self._model_exists():
             logger.debug(f"Model '{self.model}' is already available")
+            return True
+
+        if self._is_remote:
+            logger.info(
+                f"Model '{self.model}' not in remote list at {self.base_url} "
+                "— proceeding anyway (cloud models may not appear in list)"
+            )
             return True
 
         logger.warning(f"Model '{self.model}' is not installed locally")
@@ -207,7 +218,7 @@ class OllamaProvider(BaseLLMProvider):
 
     def _model_exists(self) -> bool:
         try:
-            models_response = self._ollama.list()
+            models_response = self._client.list()
             if hasattr(models_response, "models"):
                 models = models_response.models
                 model_names = [m.model for m in models if hasattr(m, "model")]
