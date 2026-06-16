@@ -40,7 +40,10 @@ class OllamaProvider(BaseLLMProvider):
         try:
             from ollama import Client
 
-            self._client = Client(host=self.base_url, timeout=LLM_TIMEOUT)
+            client_kwargs = {"timeout": LLM_TIMEOUT}
+            if api_key:
+                client_kwargs["headers"] = {"Authorization": f"Bearer {api_key}"}
+            self._client = Client(host=self.base_url, **client_kwargs)
             import ollama as _ollama
 
             self._ollama = _ollama
@@ -74,8 +77,6 @@ class OllamaProvider(BaseLLMProvider):
         log_kwargs = {k: v for k, v in kwargs.items() if k != "messages"}
         log_kwargs["num_messages"] = len(kwargs.get("messages", []))
         logger.debug(f"Ollama chat request: {log_kwargs}")
-
-        self._apply_api_key()
 
         try:
             response = self._client.chat(**kwargs)
@@ -167,17 +168,8 @@ class OllamaProvider(BaseLLMProvider):
     def _is_remote(self) -> bool:
         return self.base_url != "http://localhost:11434"
 
-    def _apply_api_key(self) -> None:
-        import os
-
-        if self._api_key:
-            os.environ["OLLAMA_API_KEY"] = self._api_key
-        elif "OLLAMA_API_KEY" in os.environ:
-            del os.environ["OLLAMA_API_KEY"]
-
     def is_available(self) -> bool:
         try:
-            self._apply_api_key()
             self._client.list()
             return True
         except Exception as e:
@@ -227,7 +219,6 @@ class OllamaProvider(BaseLLMProvider):
 
     def _model_exists(self) -> bool:
         try:
-            self._apply_api_key()
             models_response = self._client.list()
             if hasattr(models_response, "models"):
                 models = models_response.models
