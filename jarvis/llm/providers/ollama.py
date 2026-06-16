@@ -30,13 +30,12 @@ class OllamaProvider(BaseLLMProvider):
         self.temperature = temperature
         self.strict_json = strict_json
         self.think = think
+        self._api_key = api_key
 
         import os
 
         if base_url and base_url != "http://localhost:11434":
             os.environ["OLLAMA_HOST"] = base_url
-        if api_key:
-            os.environ["OLLAMA_API_KEY"] = api_key
 
         try:
             from ollama import Client
@@ -75,6 +74,8 @@ class OllamaProvider(BaseLLMProvider):
         log_kwargs = {k: v for k, v in kwargs.items() if k != "messages"}
         log_kwargs["num_messages"] = len(kwargs.get("messages", []))
         logger.debug(f"Ollama chat request: {log_kwargs}")
+
+        self._apply_api_key()
 
         try:
             response = self._client.chat(**kwargs)
@@ -166,8 +167,17 @@ class OllamaProvider(BaseLLMProvider):
     def _is_remote(self) -> bool:
         return self.base_url != "http://localhost:11434"
 
+    def _apply_api_key(self) -> None:
+        import os
+
+        if self._api_key:
+            os.environ["OLLAMA_API_KEY"] = self._api_key
+        elif "OLLAMA_API_KEY" in os.environ:
+            del os.environ["OLLAMA_API_KEY"]
+
     def is_available(self) -> bool:
         try:
+            self._apply_api_key()
             self._client.list()
             return True
         except Exception as e:
@@ -217,6 +227,7 @@ class OllamaProvider(BaseLLMProvider):
 
     def _model_exists(self) -> bool:
         try:
+            self._apply_api_key()
             models_response = self._client.list()
             if hasattr(models_response, "models"):
                 models = models_response.models
