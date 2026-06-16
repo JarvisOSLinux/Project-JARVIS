@@ -86,10 +86,26 @@ async def _handle_get_server_docs(
         manifest = await app.dispatch.get_server_manifest(server_id)
         configurable_props = manifest.get("configurableProperties") or None
 
-    context = build_root_context(app, logger)
-    context += "\n" + format_server_docs(
+    docs_block = format_server_docs(
         server_id, tools, error=tools_error, configurable_props=configurable_props
     )
+
+    # Cache successful server docs in the MCP buffer for future turns.
+    if tools and hasattr(app, "mcp_buffer"):
+        buf = app.mcp_buffer
+        if server_id in buf:
+            buf[server_id]["count"] += 1
+            buf[server_id]["docs"] = docs_block
+        else:
+            max_size = getattr(Config, "MCP_BUFFER_SIZE", 5)
+            if len(buf) >= max_size:
+                # Evict lowest-frequency entry.
+                evict = min(buf, key=lambda k: buf[k]["count"])
+                del buf[evict]
+            buf[server_id] = {"docs": docs_block, "count": 1}
+
+    context = build_root_context(app, logger)
+    context += "\n" + docs_block
     response = await ask_llm(app, logger, context, tag="root-get-server-docs")
     await app._act_on_root_response(response, depth + 1)
 

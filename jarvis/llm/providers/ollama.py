@@ -74,7 +74,10 @@ class OllamaProvider(BaseLLMProvider):
 
         try:
             response = self._client.chat(**kwargs)
-            return self._extract_content(response)
+            text = self._extract_content(response)
+            self.last_prompt_tokens = getattr(response, "prompt_eval_count", 0) or 0
+            self.last_completion_tokens = getattr(response, "eval_count", 0) or 0
+            return text
         except Exception as e:
             error_str = str(e).lower()
             if "model" in error_str and (
@@ -86,7 +89,10 @@ class OllamaProvider(BaseLLMProvider):
                 if self.ensure_model():
                     try:
                         response = self._client.chat(**kwargs)
-                        return self._extract_content(response)
+                        text = self._extract_content(response)
+                        self.last_prompt_tokens = getattr(response, "prompt_eval_count", 0) or 0
+                        self.last_completion_tokens = getattr(response, "eval_count", 0) or 0
+                        return text
                     except Exception as retry_error:
                         logger.error(
                             f"Ollama chat error after model pull: {retry_error}"
