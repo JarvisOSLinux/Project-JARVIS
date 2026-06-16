@@ -90,22 +90,18 @@ class OllamaProvider(BaseLLMProvider):
             if "model" in error_str and (
                 "not found" in error_str or "does not exist" in error_str
             ):
-                logger.warning(
-                    "Model not found during chat, attempting to ensure model is available..."
-                )
-                if self.ensure_model():
-                    try:
-                        response = self._client.chat(**kwargs)
-                        return self._extract_content(response)
-                    except Exception as retry_error:
-                        logger.error(
-                            f"Ollama chat error after model pull: {retry_error}"
-                        )
-                        raise
-                else:
-                    raise RuntimeError(
-                        f"Model '{self.model}' is not available and could not be pulled"
-                    )
+                if self.auto_pull and not self._is_remote:
+                    logger.warning("Model not found, auto-pulling...")
+                    if self._pull_model():
+                        try:
+                            response = self._client.chat(**kwargs)
+                            return self._extract_content(response)
+                        except Exception as retry_error:
+                            logger.error(
+                                f"Ollama chat error after model pull: {retry_error}"
+                            )
+                            raise
+                raise RuntimeError(f"model '{self.model}' not found (status code: 404)")
             logger.error(f"Ollama chat error: {e}")
             raise
 
@@ -126,13 +122,17 @@ class OllamaProvider(BaseLLMProvider):
 
         msg = response["message"]
         content = msg.get("content") or ""
+        thinking = msg.get("thinking") or ""
 
-        msg_keys = list(msg.keys()) if hasattr(msg, "keys") else dir(msg)
-        logger.debug(
-            f"Ollama raw response: content={repr(content[:200])}, "
-            f"thinking={repr((msg.get('thinking') or '')[:200])}, "
-            f"keys={msg_keys}"
-        )
+        if not content and not thinking:
+            eval_count = None
+            if hasattr(response, "get"):
+                eval_count = response.get("eval_count")
+            if eval_count and eval_count > 0:
+                logger.warning(
+                    f"Ollama: model generated {eval_count} tokens but returned "
+                    "empty content — possible cloud proxy issue"
+                )
 
         if content:
             cleaned = re.sub(r"<\|[^|>]+\|>", "", content).strip()
@@ -148,7 +148,6 @@ class OllamaProvider(BaseLLMProvider):
                 "Ollama: content was non-empty but stripping removed all text, "
                 "falling through to thinking field / raw content"
             )
-        thinking = msg.get("thinking") or ""
         if thinking:
             logger.debug(
                 "Ollama: content empty, falling back to thinking field "
