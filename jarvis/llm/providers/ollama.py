@@ -72,6 +72,10 @@ class OllamaProvider(BaseLLMProvider):
             # by models that don't support the option.
             kwargs["think"] = self.think
 
+        log_kwargs = {k: v for k, v in kwargs.items() if k != "messages"}
+        log_kwargs["num_messages"] = len(kwargs.get("messages", []))
+        logger.debug(f"Ollama chat request: {log_kwargs}")
+
         try:
             response = self._client.chat(**kwargs)
             logger.debug(
