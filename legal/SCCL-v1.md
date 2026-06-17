@@ -343,7 +343,7 @@ The Board assesses a Licensee's `inclusion_index` annually using the following s
 **Assessment process:**
 1. The Licensee submits a self-assessment alongside the annual revenue declaration (Article 4.4).
 2. The Board reviews the self-assessment and may request supporting evidence.
-3. The Board issues a final score. Disputes are resolved under Article 7 (Dispute Resolution).
+3. The Board issues a final score. Disputes regarding the score may be raised with the Board in writing; the Board shall respond within thirty (30) days.
 
 **Example scores:**
 - A fully open-source product with standard APIs and free data export: `inclusion_index ≈ 0.05`
