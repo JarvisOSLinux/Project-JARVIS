@@ -321,6 +321,8 @@ def _cmd_providers() -> None:
                 print(f"      url: {url}")
             if ptype == "api":
                 print(f"      api_key: {'set' if p.get('api_key') else '(not set)'}")
+            if p.get("temperature") is not None:
+                print(f"      temperature: {p['temperature']}")
             print()
         print(f"  File: {Config.PROVIDERS_FILE}")
         return
@@ -333,8 +335,19 @@ def _cmd_providers() -> None:
         model = flags.get("model", "")
         if not ptype or not model:
             print("Usage: jarvis providers add --type <ollama|api> --model <model>")
-            print("  Optional: --name <label> --url <url> --key <api_key>")
+            print(
+                "  Optional: --name <label> --url <url> --key <api_key> --temperature <0.0-2.0>"
+            )
             sys.exit(1)
+        temp = None
+        if flags.get("temperature"):
+            try:
+                temp = float(flags["temperature"])
+            except ValueError:
+                print(
+                    f"Error: Temperature must be a number, got '{flags['temperature']}'"
+                )
+                sys.exit(1)
         try:
             name, position = add_provider(
                 ptype,
@@ -342,6 +355,7 @@ def _cmd_providers() -> None:
                 name=flags.get("name"),
                 url=flags.get("url"),
                 api_key=flags.get("key"),
+                temperature=temp,
             )
             print(f"Added provider '{name}' ({ptype}/{model}) at position {position}")
         except ValueError as e:

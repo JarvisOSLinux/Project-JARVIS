@@ -121,7 +121,9 @@ def _show_providers(app: Any) -> None:
             elif s == "error":
                 status_str = " [red]error[/red]"
 
-        lines.append(f"  [{i + 1}] {name} — {ptype}/{model}{status_str}")
+        temp = p.get("temperature")
+        temp_str = f" (temp={temp})" if temp is not None else ""
+        lines.append(f"  [{i + 1}] {name} — {ptype}/{model}{temp_str}{status_str}")
 
     app._append_log("\n".join(lines))
 
@@ -153,6 +155,7 @@ def _handle_providers(app: Any, text: str) -> None:
                         name=result.name or None,
                         url=result.url or None,
                         api_key=result.api_key or None,
+                        temperature=result.temperature,
                     )
                     app._append_log(
                         f"[green]Added provider '{pname}' ({result.ptype}/{result.model}) "
@@ -235,6 +238,8 @@ def _handle_providers(app: Any, text: str) -> None:
                     fields["key"] = result.api_key
                 if result.ptype:
                     fields["type"] = result.ptype
+                if result.temperature is not None:
+                    fields["temperature"] = result.temperature
                 if not fields:
                     return
                 try:
