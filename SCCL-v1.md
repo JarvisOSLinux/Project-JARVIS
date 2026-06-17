@@ -256,22 +256,79 @@ The defining feature of this License is **Board-governed commercial access**: th
 
 ## Appendix A — Fee Formula
 
-> *To be completed. The current working formula is:*
->
-> ```
-> Annual Fee = annual_revenue × K₁ × (1 + K₂ × inclusion_index) × inflation_factor
-> ```
->
-> Where:
-> - `annual_revenue` — Licensee's total annual revenue
-> - `K₁` — rate constant (percentage of revenue)
-> - `K₂` — ecosystem lock-in penalty multiplier
-> - `inclusion_index` — 0.0 (fully open) to 1.0 (fully locked-in), assessed by the Board
-> - `inflation_factor` — `(1 + CPI_change + buffer%)`, adjusted annually
->
-> Constants and assessment methodology to be finalized.
->
-> **Current status:** Under development. See project governance discussions.
+### A.1 Formula
+
+```
+Annual Fee = annual_revenue × K₁ × (1 + K₂ × inclusion_index) × inflation_factor
+```
+
+### A.2 Variables
+
+| Variable | Definition |
+|----------|-----------|
+| `annual_revenue` | Licensee's total annual gross revenue for the most recently completed fiscal year, as declared under Article 4.4. |
+| `K₁` | Rate constant — the base percentage of revenue charged as a license fee. |
+| `K₂` | Ecosystem lock-in penalty multiplier — scales the surcharge applied to closed-ecosystem business models. |
+| `inclusion_index` | A score from 0.0 (fully open) to 1.0 (fully locked-in), assessed annually by the Board using the methodology in A.4. |
+| `inflation_factor` | Annual CPI adjustment. Calculated as `1 + CPI_change + buffer`, where `buffer` is a fixed percentage above inflation to account for project growth costs. |
+
+### A.3 Constants and Guidance
+
+#### K₁ — Rate Constant
+
+K₁ represents the percentage of the Licensee's annual revenue paid as a base license fee. The Board sets K₁ at the time of license activation (Article 2.1) and may adjust it with ninety (90) days' written notice (Article 4.2).
+
+**Reasonable range:** 1–5%. Software royalties in comparable open-core and dual-licensing arrangements typically fall in this range. A K₁ of 2% on a $10M revenue company yields a $200,000 annual fee before ecosystem adjustments.
+
+**Board guidance for setting K₁:**
+- Project maturity: early-stage projects may set K₁ at the lower end to encourage commercial adoption.
+- Licensee size: the Board may apply tiered K₁ values by revenue bracket (e.g., lower rate for companies under $1M ARR).
+- Market context: the Board should reference comparable dual-license and open-core arrangements in the software industry when setting K₁.
+
+#### K₂ — Ecosystem Lock-In Penalty Multiplier
+
+K₂ controls how much additional fee a Licensee pays for operating a walled-garden business model that restricts users from switching away. It amplifies the `inclusion_index` score.
+
+**Interpretation:**
+- `K₂ = 0`: No ecosystem penalty — the fee is the base rate regardless of lock-in.
+- `K₂ = 1.0`: A Licensee with `inclusion_index = 1.0` (fully locked-in) pays **double** the base rate.
+- `K₂ = 0.5`: A fully locked-in Licensee pays 1.5× the base rate.
+
+**Reasonable range:** 0.5–1.5. The Board sets K₂ alongside K₁. Higher values create stronger incentives for interoperability and data portability.
+
+#### Inflation Factor
+
+The inflation factor is recalculated annually by the Board and applied to the following year's fee.
+
+```
+inflation_factor = 1 + CPI_change + buffer
+```
+
+- **CPI index**: The Board selects a widely recognized national or regional consumer price index relevant to the jurisdiction where the Organization is incorporated (see Article 8.3). The same index is used consistently year over year; changes require a Charter amendment.
+- **Buffer above CPI**: A fixed percentage above CPI, in the range of **2–5%**, to account for project infrastructure growth, maintainer compensation, and reserve fund requirements. The buffer is set in the Charter (Appendix B) and is subject to the Charter amendment process.
+- **Floor**: `inflation_factor` shall not be less than 1.0 — the fee may not decrease due to deflation.
+
+### A.4 Inclusion Index Assessment Methodology
+
+The Board assesses a Licensee's `inclusion_index` annually using the following scoring criteria. Each criterion is scored 0.0–1.0; the inclusion index is the weighted average.
+
+| Criterion | Weight | 0.0 (fully open) | 1.0 (fully closed) |
+|-----------|--------|-------------------|---------------------|
+| **Data portability** | 25% | Users can export all their data in standard formats at any time. | No export capability; data is locked to the platform. |
+| **API openness** | 20% | Public API with standard protocols; third-party integrations fully supported. | Proprietary APIs; third-party integrations blocked or heavily restricted. |
+| **Interoperability** | 20% | Product interoperates with competing products and open standards. | Product deliberately prevents interoperability with alternatives. |
+| **Switching cost** | 20% | No contractual lock-in; users can migrate to alternatives with minimal friction. | Long-term contracts, migration fees, or technical barriers that prevent switching. |
+| **Platform dependency** | 15% | No dependency on Licensee-controlled infrastructure for core functionality. | Core functionality requires Licensee-controlled proprietary infrastructure. |
+
+**Assessment process:**
+1. The Licensee submits a self-assessment alongside the annual revenue declaration (Article 4.4).
+2. The Board reviews the self-assessment and may request supporting evidence.
+3. The Board issues a final score. Disputes are resolved under Article 7 (Dispute Resolution).
+
+**Example scores:**
+- A fully open-source product with standard APIs and free data export: `inclusion_index ≈ 0.05`
+- A SaaS product with export features but proprietary APIs: `inclusion_index ≈ 0.40`
+- A walled-garden platform with no export, proprietary APIs, and vendor lock-in contracts: `inclusion_index ≈ 0.90`
 
 ---
 
@@ -294,11 +351,23 @@ The defining feature of this License is **Board-governed commercial access**: th
 
 ## Appendix C — Contributor Agreement Reference
 
-> *Commercial licensees contributing back under Article 5 must sign the Project's Contributor License Agreement (CLA). Community contributors may use the Developer Certificate of Origin (DCO) — a `Signed-off-by` line in each commit.*
->
-> **Current CLA:** [TO BE PUBLISHED]
->
-> **DCO reference:** [developercertificate.org](https://developercertificate.org/)
+Commercial licensees contributing back under Article 5 must sign the Project's **Contributor License Agreement (CLA)**. Community contributors use the **Developer Certificate of Origin (DCO)** — a `Signed-off-by` line in each commit.
+
+**CLA document:** [`legal/cla.md`](legal/cla.md)
+
+**DCO reference:** [developercertificate.org](https://developercertificate.org/)
+
+The CLA covers IP license grant, scope of Article 5 contributions, representations and warranties, and the per-entity signing process. See `legal/cla.md` for the full text.
+
+---
+
+## Appendix D — Contribution Points (C-points) Methodology
+
+C-points are the weighted composite score used to rank contributors for **Governance Pool** membership (top 1000 contributors). The Governance Pool determines voting rights and eligibility for the contributor compensation pool.
+
+**Methodology document:** [`legal/c-points.md`](legal/c-points.md)
+
+The methodology covers: variables and weights (merge volume, code scope, review labor, security work, maintenance, docs, mentorship, leadership), calculation mechanics (rolling 24-month window, daily recalculation, normalization), anti-gaming measures, and tooling requirements.
 
 ---
 
