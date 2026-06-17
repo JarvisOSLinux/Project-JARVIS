@@ -192,7 +192,25 @@ class LLM:
             # Provider-level failure (timeout, network, Ollama down). Don't
             # burn through all JSON retries waiting — each retry would hit
             # the same dead endpoint and waste LLM_TIMEOUT seconds per attempt.
-            logger.error(f"LLM [{self._mode}] provider error: {e}")
+            error_str = str(e).lower()
+            if any(
+                kw in error_str
+                for kw in (
+                    "connection refused",
+                    "connect error",
+                    "connectionerror",
+                    "failed to connect",
+                    "cannot connect",
+                )
+            ):
+                logger.error(
+                    "LLM: Cannot reach Ollama — is it running?\n"
+                    f"  Expected at: {getattr(self.provider, 'base_url', 'http://localhost:11434')}\n"
+                    "  Start Ollama with: ollama serve\n"
+                    "  Or set LLM_URL in ~/.config/jarvis/jarvis.conf"
+                )
+            else:
+                logger.error(f"LLM [{self._mode}] provider error: {e}")
             self.chat_history.pop()
             return self._fallback_response()
 

@@ -29,6 +29,17 @@ async def connect(adapter: Any, logger: Logger) -> None:
         await adapter.session.initialize()
         adapter._connected = True
         logger.info("Dispatch: Connected successfully")
+    except FileNotFoundError:
+        msg = (
+            f"Dispatch: binary '{Config.DISPATCH_BINARY}' not found in PATH.\n"
+            "  Build the Rust binaries first:\n"
+            "    cd deps/rust/dispatch && cargo build --release\n"
+            "    cp target/release/dispatch ~/.local/bin/\n"
+            "  Or set DISPATCH_BINARY=/path/to/dispatch in ~/.config/jarvis/jarvis.conf\n"
+            "  JARVIS will run in conversation-only mode without dispatch."
+        )
+        logger.warning(msg)
+        raise FileNotFoundError(msg)
     except Exception as e:
         logger.error(
             f"Dispatch: Connection failed (binary='{Config.DISPATCH_BINARY}'): {e}"
