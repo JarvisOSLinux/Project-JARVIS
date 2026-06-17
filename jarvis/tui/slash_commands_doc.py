@@ -31,8 +31,19 @@ TUI_LOCAL_SLASH_HELP: tuple[tuple[str, str], ...] = (
     ("/help, /?", "Open help (TUI only; not sent to the LLM)."),
     (
         "/export [file]",
-        "Save plain transcript (Markdown) under `transcripts/`; optional basename only (TUI only).",
+        "Save plain transcript (Markdown) under `transcripts/`; optional basename only.",
     ),
+    ("/clear", "Clear the chat view (on-screen only; session memory unchanged)."),
+    ("/quit, /exit", "Exit the TUI."),
+    ("/status", "Show current provider, model, and session."),
+    ("/providers", "List configured providers with live pool status."),
+    ("/providers add", "Open guided modal to add a provider."),
+    ("/providers add --type ... --model ...", "Add a provider directly (power-user flags)."),
+    ("/providers remove <name>", "Remove a provider by name."),
+    ("/providers move <name> <pos>", "Reorder provider priority (1 = highest)."),
+    ("/providers edit <name>", "Open pre-filled modal to edit a provider."),
+    ("/providers edit <name> --field <val>", "Update a provider field directly (power-user flags)."),
+    ("/model [name]", "Show or switch the current LLM model."),
 )
 
 # Keys that are not represented as App BINDINGS but belong in the cheat sheet.

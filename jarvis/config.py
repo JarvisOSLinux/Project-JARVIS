@@ -67,6 +67,15 @@ class Config:
     # when using a non-reasoning model that benefits from strict mode.
     LLM_STRICT_JSON = os.getenv("LLM_STRICT_JSON", "false").lower() == "true"
 
+    _DEFAULT_CONFIG_DIR = os.getenv(
+        "JARVIS_CONFIG_DIR",
+        os.path.join(os.path.expanduser("~"), ".config", "jarvis"),
+    )
+    PROVIDERS_FILE = os.getenv(
+        "PROVIDERS_FILE",
+        os.path.join(_DEFAULT_CONFIG_DIR, "providers.json"),
+    )
+
     TTS_MODEL_ONNX = os.getenv("TTS_MODEL_ONNX")
     TTS_MODEL_JSON = os.getenv("TTS_MODEL_JSON")
 
@@ -142,6 +151,16 @@ class Config:
     RAG_TOP_K = int(os.getenv("RAG_TOP_K", "5"))
     # Minimum cosine similarity for RAG results (0.0-1.0)
     RAG_MIN_SCORE = float(os.getenv("RAG_MIN_SCORE", "0.3"))
+
+    # --- Token Tracking ---
+    # Model context window size (tokens). Used for ctx: X/Y display in the TUI.
+    # 0 = unknown (shows raw token count without a denominator).
+    LLM_CONTEXT_WINDOW = int(os.getenv("LLM_CONTEXT_WINDOW", "0"))
+
+    # --- MCP Server Buffer ---
+    # Number of recently-used server doc blocks to keep in the system context.
+    # Frequency-based eviction: lowest-use server is dropped when buffer is full.
+    MCP_BUFFER_SIZE = int(os.getenv("MCP_BUFFER_SIZE", "5"))
 
     # --- Semantic Tool Discovery ---
     # Master switch for vector-based tool search via dispatch/dmcp

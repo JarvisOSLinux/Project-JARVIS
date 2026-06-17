@@ -276,38 +276,95 @@ The Board shall communicate the applicable Revenue Basis to the Licensee in writ
 
 ## Appendix A — Fee Formula
 
-> ### Formula
->
-> ```
-> Annual Fee = revenue_basis × K₁ × (1 + K₂ × inclusion_index) × inflation_factor
-> ```
->
-> Where:
-> - `revenue_basis` — Determined by the Board per Licensee based on the Licensee's Relationship Index (see Definition 1.12). Six tiers from Profit on the Software (most lenient) to Revenue on the Ecosystem (most restrictive). Tiers are ordered by severity of intent, not guaranteed monetary value — see the note in Definition 1.12.
-> - `K₁` — rate constant (percentage of revenue basis)
-> - `K₂` — ecosystem lock-in penalty multiplier
-> - `inclusion_index` — 0.0 (fully open) to 1.0 (fully locked-in), assessed by the Board
-> - `inflation_factor` — `(1 + CPI_change + buffer%)`, adjusted annually
->
-> Constants and assessment methodology to be finalized.
->
-> ### Dynamic Nature of the Fee
->
-> The Annual License Fee is **hyper-dynamic by design**. Multiple variables in the formula — including the Revenue Basis, inclusion index, and applicable constants — are subject to Board discretion and may change between annual terms based on the Licensee's conduct, Relationship Index, and ecosystem alignment.
->
-> The Licensee acknowledges that the Fee is not a fixed or purely formulaic calculation, but a Board-governed assessment informed by the formula above and the Licensee's overall relationship with the Organization.
->
-> ### Negotiation
->
-> If the Licensee considers the Fee proposed by the Board to be unreasonable or misaligned with the Licensee's actual use of the Software, the Licensee may request a negotiation with the Board before the annual payment is due. The Board shall consider such requests in good faith but is not obligated to adjust the Fee. If no agreement is reached, the Licensee may:
->
->   (a) Pay the Fee as proposed by the Board to maintain the commercial license;
->
->   (b) Decline the Fee and transition to AGPLv3 compliance in accordance with Article 2.5; or
->
->   (c) Cease use of the Software in accordance with Article 7.
->
-> **Current status:** Constants and assessment methodology under development. See project governance discussions.
+### A.1 Formula
+
+```
+Annual Fee = revenue_basis × K₁ × (1 + K₂ × inclusion_index) × inflation_factor
+```
+
+### A.2 Variables
+
+| Variable | Definition |
+|----------|-----------|
+| `revenue_basis` | The financial figure determined by the Board per Licensee based on the Licensee's Relationship Index (see Definition 1.12). Six tiers from Profit on the Software (most lenient) to Revenue on the Ecosystem (most restrictive). |
+| `K₁` | Rate constant — the base percentage of revenue basis charged as a license fee. |
+| `K₂` | Ecosystem lock-in penalty multiplier — scales the surcharge applied to closed-ecosystem business models. |
+| `inclusion_index` | A score from 0.0 (fully open) to 1.0 (fully locked-in), assessed annually by the Board using the methodology in A.4. |
+| `inflation_factor` | Annual CPI adjustment. Calculated as `1 + CPI_change + buffer`, where `buffer` is a fixed percentage above inflation to account for project growth costs. |
+
+### A.3 Constants and Guidance
+
+#### K₁ — Rate Constant
+
+K₁ represents the percentage of the Licensee's revenue basis paid as a base license fee. The Board sets K₁ at the time of license activation (Article 2.1) and may adjust it with ninety (90) days' written notice (Article 4.2).
+
+**Reasonable range:** 1–5%. Software royalties in comparable open-core and dual-licensing arrangements typically fall in this range. A K₁ of 2% on a $10M revenue basis yields a $200,000 annual fee before ecosystem adjustments.
+
+**Board guidance for setting K₁:**
+- Project maturity: early-stage projects may set K₁ at the lower end to encourage commercial adoption.
+- Licensee size: the Board may apply tiered K₁ values by revenue bracket (e.g., lower rate for companies under $1M ARR).
+- Market context: the Board should reference comparable dual-license and open-core arrangements in the software industry when setting K₁.
+
+#### K₂ — Ecosystem Lock-In Penalty Multiplier
+
+K₂ controls how much additional fee a Licensee pays for operating a walled-garden business model that restricts users from switching away. It amplifies the `inclusion_index` score.
+
+**Interpretation:**
+- `K₂ = 0`: No ecosystem penalty — the fee is the base rate regardless of lock-in.
+- `K₂ = 1.0`: A Licensee with `inclusion_index = 1.0` (fully locked-in) pays **double** the base rate.
+- `K₂ = 0.5`: A fully locked-in Licensee pays 1.5× the base rate.
+
+**Reasonable range:** 0.5–1.5. The Board sets K₂ alongside K₁. Higher values create stronger incentives for interoperability and data portability.
+
+#### Inflation Factor
+
+The inflation factor is recalculated annually by the Board and applied to the following year's fee.
+
+```
+inflation_factor = 1 + CPI_change + buffer
+```
+
+- **CPI index**: The Board selects a widely recognized national or regional consumer price index relevant to the jurisdiction where the Organization is incorporated (see Article 8.3). The same index is used consistently year over year; changes require a Charter amendment.
+- **Buffer above CPI**: A fixed percentage above CPI, in the range of **2–5%**, to account for project infrastructure growth, maintainer compensation, and reserve fund requirements. The buffer is set in the Charter (Appendix B) and is subject to the Charter amendment process.
+- **Floor**: `inflation_factor` shall not be less than 1.0 — the fee may not decrease due to deflation.
+
+### A.4 Inclusion Index Assessment Methodology
+
+The Board assesses a Licensee's `inclusion_index` annually using the following scoring criteria. Each criterion is scored 0.0–1.0; the inclusion index is the weighted average.
+
+| Criterion | Weight | 0.0 (fully open) | 1.0 (fully closed) |
+|-----------|--------|-------------------|---------------------|
+| **Data portability** | 25% | Users can export all their data in standard formats at any time. | No export capability; data is locked to the platform. |
+| **API openness** | 20% | Public API with standard protocols; third-party integrations fully supported. | Proprietary APIs; third-party integrations blocked or heavily restricted. |
+| **Interoperability** | 20% | Product interoperates with competing products and open standards. | Product deliberately prevents interoperability with alternatives. |
+| **Switching cost** | 20% | No contractual lock-in; users can migrate to alternatives with minimal friction. | Long-term contracts, migration fees, or technical barriers that prevent switching. |
+| **Platform dependency** | 15% | No dependency on Licensee-controlled infrastructure for core functionality. | Core functionality requires Licensee-controlled proprietary infrastructure. |
+
+**Assessment process:**
+1. The Licensee submits a self-assessment alongside the annual revenue declaration (Article 4.4).
+2. The Board reviews the self-assessment and may request supporting evidence.
+3. The Board issues a final score. Disputes are resolved under Article 7 (Dispute Resolution).
+
+**Example scores:**
+- A fully open-source product with standard APIs and free data export: `inclusion_index ≈ 0.05`
+- A SaaS product with export features but proprietary APIs: `inclusion_index ≈ 0.40`
+- A walled-garden platform with no export, proprietary APIs, and vendor lock-in contracts: `inclusion_index ≈ 0.90`
+
+### A.5 Dynamic Nature of the Fee
+
+The Annual License Fee is **hyper-dynamic by design**. Multiple variables in the formula — including the Revenue Basis, inclusion index, and applicable constants — are subject to Board discretion and may change between annual terms based on the Licensee's conduct, Relationship Index, and ecosystem alignment.
+
+The Licensee acknowledges that the Fee is not a fixed or purely formulaic calculation, but a Board-governed assessment informed by the formula above and the Licensee's overall relationship with the Organization.
+
+### A.6 Negotiation
+
+If the Licensee considers the Fee proposed by the Board to be unreasonable or misaligned with the Licensee's actual use of the Software, the Licensee may request a negotiation with the Board before the annual payment is due. The Board shall consider such requests in good faith but is not obligated to adjust the Fee. If no agreement is reached, the Licensee may:
+
+  (a) Pay the Fee as proposed by the Board to maintain the commercial license;
+
+  (b) Decline the Fee and transition to AGPLv3 compliance in accordance with Article 2.5; or
+
+  (c) Cease use of the Software in accordance with Article 7.
 
 ---
 
@@ -318,8 +375,8 @@ The following documents are part of this License and incorporated by reference:
 | Document | Description |
 |---|---|
 | [Organization Charter](organization-charter.md) | Governance structure, Board composition, membership, staged governance (B.1–B.9) |
-| [Contributor License Agreement](cla.md) | CLA for commercial licensee contributions; DCO reference for community contributions |
-| [C-Points Methodology](c-points.md) | Weighted scoring system for contributor ranking and Governance Pool membership |
+| [Contributor License Agreement](cla.md) | IP license grant, scope of Article 5 contributions, representations and warranties, per-entity signing process |
+| [C-Points Methodology](c-points.md) | Variables and weights (8 dimensions), calculation mechanics (rolling 24-month, daily recalculation), anti-gaming measures, tooling |
 
 ---
 

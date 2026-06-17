@@ -67,6 +67,9 @@ class APIProvider(BaseLLMProvider):
                 result = response.json()
 
                 if "choices" in result and len(result["choices"]) > 0:
+                    usage = result.get("usage", {})
+                    self.last_prompt_tokens = usage.get("prompt_tokens", 0) or 0
+                    self.last_completion_tokens = usage.get("completion_tokens", 0) or 0
                     return result["choices"][0]["message"]["content"]
                 raise ValueError(f"Unexpected API response format: {result}")
 

@@ -30,18 +30,20 @@ class OllamaProvider(BaseLLMProvider):
         self.temperature = temperature
         self.strict_json = strict_json
         self.think = think
+        self._api_key = api_key
 
         import os
 
         if base_url and base_url != "http://localhost:11434":
             os.environ["OLLAMA_HOST"] = base_url
-        if api_key:
-            os.environ["OLLAMA_API_KEY"] = api_key
 
         try:
             from ollama import Client
 
-            self._client = Client(host=self.base_url, timeout=LLM_TIMEOUT)
+            client_kwargs = {"timeout": LLM_TIMEOUT}
+            if api_key:
+                client_kwargs["headers"] = {"Authorization": f"Bearer {api_key}"}
+            self._client = Client(host=self.base_url, **client_kwargs)
             import ollama as _ollama
 
             self._ollama = _ollama
@@ -72,30 +74,40 @@ class OllamaProvider(BaseLLMProvider):
             # by models that don't support the option.
             kwargs["think"] = self.think
 
+        log_kwargs = {k: v for k, v in kwargs.items() if k != "messages"}
+        log_kwargs["num_messages"] = len(kwargs.get("messages", []))
+        logger.debug(f"Ollama chat request: {log_kwargs}")
+
         try:
             response = self._client.chat(**kwargs)
-            return self._extract_content(response)
+            text = self._extract_content(response)
+            self.last_prompt_tokens = getattr(response, "prompt_eval_count", 0) or 0
+            self.last_completion_tokens = getattr(response, "eval_count", 0) or 0
+            return text
         except Exception as e:
             error_str = str(e).lower()
             if "model" in error_str and (
                 "not found" in error_str or "does not exist" in error_str
             ):
-                logger.warning(
-                    "Model not found during chat, attempting to ensure model is available..."
-                )
-                if self.ensure_model():
-                    try:
-                        response = self._client.chat(**kwargs)
-                        return self._extract_content(response)
-                    except Exception as retry_error:
-                        logger.error(
-                            f"Ollama chat error after model pull: {retry_error}"
-                        )
-                        raise
-                else:
-                    raise RuntimeError(
-                        f"Model '{self.model}' is not available and could not be pulled"
-                    )
+                if self.auto_pull and not self._is_remote:
+                    logger.warning("Model not found, auto-pulling...")
+                    if self._pull_model():
+                        try:
+                            response = self._client.chat(**kwargs)
+                            text = self._extract_content(response)
+                            self.last_prompt_tokens = (
+                                getattr(response, "prompt_eval_count", 0) or 0
+                            )
+                            self.last_completion_tokens = (
+                                getattr(response, "eval_count", 0) or 0
+                            )
+                            return text
+                        except Exception as retry_error:
+                            logger.error(
+                                f"Ollama chat error after model pull: {retry_error}"
+                            )
+                            raise
+                raise RuntimeError(f"model '{self.model}' not found (status code: 404)")
             logger.error(f"Ollama chat error: {e}")
             raise
 
@@ -116,28 +128,53 @@ class OllamaProvider(BaseLLMProvider):
 
         msg = response["message"]
         content = msg.get("content") or ""
+        thinking = msg.get("thinking") or ""
+
+        if not content and not thinking:
+            eval_count = None
+            if hasattr(response, "get"):
+                eval_count = response.get("eval_count")
+            if eval_count and eval_count > 0:
+                logger.warning(
+                    f"Ollama: model generated {eval_count} tokens but returned "
+                    "empty content — possible cloud proxy issue"
+                )
+
         if content:
-            # Strip chat-template channel tokens that some thinking models
-            # emit in-band: <|start|>, <|channel|>..., <|message|>, <|end|>
             cleaned = re.sub(r"<\|[^|>]+\|>", "", content).strip()
             if cleaned != content:
                 logger.debug(
                     f"Ollama: stripped special tokens from content "
                     f"({len(content)} → {len(cleaned)} chars)"
                 )
-            return cleaned
-        thinking = msg.get("thinking") or ""
+            if cleaned:
+                return cleaned
+            # Stripping removed everything — fall through to thinking/raw
+            logger.warning(
+                "Ollama: content was non-empty but stripping removed all text, "
+                "falling through to thinking field / raw content"
+            )
         if thinking:
             logger.debug(
                 "Ollama: content empty, falling back to thinking field "
                 f"({len(thinking)} chars)"
             )
             return thinking
-        return content
+        if content:
+            logger.warning(
+                "Ollama: returning raw content (before stripping) as last resort "
+                f"({len(content)} chars)"
+            )
+            return content
+        return ""
+
+    @property
+    def _is_remote(self) -> bool:
+        return self.base_url != "http://localhost:11434"
 
     def is_available(self) -> bool:
         try:
-            self._ollama.list()
+            self._client.list()
             return True
         except Exception as e:
             logger.debug(f"Ollama not available: {e}")
@@ -146,9 +183,16 @@ class OllamaProvider(BaseLLMProvider):
     # -- Ollama-specific -----------------------------------------------------
 
     def ensure_model(self) -> bool:
-        """Ensure the model exists locally, pulling it if necessary."""
+        """Ensure the model exists, pulling it if necessary."""
         if self._model_exists():
             logger.debug(f"Model '{self.model}' is already available")
+            return True
+
+        if self._is_remote:
+            logger.info(
+                f"Model '{self.model}' not in remote list at {self.base_url} "
+                "— proceeding anyway (cloud models may not appear in list)"
+            )
             return True
 
         logger.warning(f"Model '{self.model}' is not installed locally")
@@ -179,7 +223,7 @@ class OllamaProvider(BaseLLMProvider):
 
     def _model_exists(self) -> bool:
         try:
-            models_response = self._ollama.list()
+            models_response = self._client.list()
             if hasattr(models_response, "models"):
                 models = models_response.models
                 model_names = [m.model for m in models if hasattr(m, "model")]

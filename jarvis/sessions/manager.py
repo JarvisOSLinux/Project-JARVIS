@@ -149,7 +149,12 @@ class SessionManager:
 
         # Refresh cached current session if that's what we renamed.
         if self._current and self._current.id == sid:
-            self._current = Session.from_dict(result["session"])
+            session_data = result.get("session", {})
+            if session_data.get("id"):
+                self._current = Session.from_dict(session_data)
+            else:
+                # Contextor didn't echo back the full session; patch locally.
+                self._current.title = title
         return True
 
     def delete(self, session_id: str, delete_entries: bool = True) -> bool:

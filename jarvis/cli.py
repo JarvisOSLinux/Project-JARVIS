@@ -21,6 +21,14 @@ from pathlib import Path
 
 from .config import Config
 from .core.logger import JarvisLogger, get_logger
+from .core.providers import (
+    add_provider,
+    edit_provider,
+    list_providers,
+    move_provider,
+    parse_flags,
+    remove_provider,
+)
 
 # Initialise logging from config before any get_logger() call so that the
 # file handler (LOG_FILE) and level (LOG_LEVEL) are applied from the start.
@@ -283,6 +291,122 @@ def _check_capabilities() -> dict:
     return capabilities
 
 
+def _cmd_providers() -> None:
+    """Manage the provider failover pool."""
+    if len(sys.argv) == 2:
+        providers = list_providers()
+        if not providers:
+            print("No providers configured in providers.json.")
+            print(f"  Using legacy config: {Config.LLM_PROVIDER} / {Config.LLM_MODEL}")
+            print()
+            print("Add one with:")
+            print("  jarvis providers add --type ollama --model qwen3:4b")
+            print(
+                "  jarvis providers add --type api --model gpt-4 "
+                "--url https://api.example.com --key sk-xxx"
+            )
+            return
+
+        print(f"Provider pool ({len(providers)} providers):")
+        print()
+        for i, p in enumerate(providers):
+            name = p.get("name", f"provider-{i}")
+            ptype = p.get("type", "?")
+            model = p.get("model", "?")
+            url = p.get("url", "")
+            priority = f"[{i + 1}]"
+            print(f"  {priority} {name}")
+            print(f"      type: {ptype}  model: {model}")
+            if url:
+                print(f"      url: {url}")
+            if ptype == "api":
+                print(f"      api_key: {'set' if p.get('api_key') else '(not set)'}")
+            print()
+        print(f"  File: {Config.PROVIDERS_FILE}")
+        return
+
+    subcmd = sys.argv[2]
+
+    if subcmd == "add":
+        flags = parse_flags(sys.argv[3:])
+        ptype = flags.get("type", "")
+        model = flags.get("model", "")
+        if not ptype or not model:
+            print("Usage: jarvis providers add --type <ollama|api> --model <model>")
+            print("  Optional: --name <label> --url <url> --key <api_key>")
+            sys.exit(1)
+        try:
+            name, position = add_provider(
+                ptype,
+                model,
+                name=flags.get("name"),
+                url=flags.get("url"),
+                api_key=flags.get("key"),
+            )
+            print(f"Added provider '{name}' ({ptype}/{model}) at position {position}")
+        except ValueError as e:
+            print(f"Error: {e}")
+            sys.exit(1)
+
+    elif subcmd == "remove":
+        if len(sys.argv) < 4:
+            print("Usage: jarvis providers remove <name>")
+            sys.exit(1)
+        try:
+            remove_provider(sys.argv[3])
+            print(f"Removed provider '{sys.argv[3]}'")
+        except ValueError as e:
+            print(f"Error: {e}")
+            sys.exit(1)
+
+    elif subcmd == "move":
+        if len(sys.argv) < 5:
+            print("Usage: jarvis providers move <name> <position>")
+            print("  Position is 1-based (1 = highest priority)")
+            sys.exit(1)
+        try:
+            target_pos = int(sys.argv[4])
+        except ValueError:
+            print(f"Error: Position must be a number, got '{sys.argv[4]}'")
+            sys.exit(1)
+        try:
+            move_provider(sys.argv[3], target_pos)
+            print(f"Moved provider '{sys.argv[3]}' to position {target_pos}")
+        except ValueError as e:
+            print(f"Error: {e}")
+            sys.exit(1)
+
+    elif subcmd == "edit":
+        if len(sys.argv) < 4:
+            print("Usage: jarvis providers edit <name> --field <value>")
+            print("  Fields: --model, --url, --key, --type")
+            sys.exit(1)
+        flags = parse_flags(sys.argv[4:])
+        if not flags:
+            print("Error: No fields to update. Use --model, --url, --key, or --type")
+            sys.exit(1)
+        try:
+            updated = edit_provider(sys.argv[3], **flags)
+            print(f"Updated provider '{sys.argv[3]}': {', '.join(updated)}")
+        except ValueError as e:
+            print(f"Error: {e}")
+            sys.exit(1)
+
+    else:
+        print(f"Error: Unknown subcommand '{subcmd}'")
+        _show_providers_usage()
+        sys.exit(1)
+
+
+def _show_providers_usage() -> None:
+    print("Usage:")
+    print("  jarvis providers                                  # List all")
+    print("  jarvis providers add --type ollama --model <model> # Add provider")
+    print("  jarvis providers remove <name>                    # Remove by name")
+    print("  jarvis providers move <name> <position>           # Reorder priority")
+    print("  jarvis providers edit <name> --model <model>      # Update a field")
+
+
 def show_usage() -> None:
     """Display usage information."""
     print("JARVIS AI Assistant - CLI Interface")
@@ -302,7 +426,15 @@ def show_usage() -> None:
     print("  jarvis sudo disable       # Disable sudo access (requires root)")
     print("  jarvis sudo               # Show current sudo access status")
     print()
-    print("LLM Configuration:")
+    print("Provider Pool:")
+    print("  jarvis providers                                    # List providers")
+    print("  jarvis providers add --type ollama --model <model>  # Add Ollama")
+    print("  jarvis providers add --type api --model <m> --url <u> --key <k>")
+    print("  jarvis providers remove <name>                      # Remove provider")
+    print("  jarvis providers move <name> <position>             # Reorder priority")
+    print("  jarvis providers edit <name> --model <model>        # Update a field")
+    print()
+    print("LLM Configuration (legacy — prefer 'jarvis providers'):")
     print("  jarvis provider <ollama|api>  # Set LLM provider")
     print("  jarvis model                  # Show current LLM model")
     print("  jarvis model <model_name>     # Set LLM model")
@@ -484,6 +616,9 @@ def main() -> None:
 
     elif command == "llm-config":
         show_llm_config()
+
+    elif command == "providers":
+        _cmd_providers()
 
     elif command == "auto-pull":
         if len(sys.argv) == 2:
