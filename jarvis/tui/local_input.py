@@ -18,6 +18,7 @@ from ..core.providers import (
     remove_provider,
 )
 from .help_screen import HelpScreen
+from .provider_modal import ProviderModal
 from .slash_commands_doc import build_help_markdown
 
 
@@ -141,10 +142,26 @@ def _handle_providers(app: Any, text: str) -> None:
         ptype = flags.get("type", "")
         model = flags.get("model", "")
         if not ptype or not model:
-            app._append_log(
-                "[yellow]Usage: /providers add --type <ollama|api> "
-                "--model <model> [--name <n>] [--url <u>] [--key <k>][/yellow]"
-            )
+            # No flags — open the modal form
+            def _on_add(result) -> None:
+                if not result or not result.confirmed:
+                    return
+                try:
+                    pname, position = add_provider(
+                        result.ptype,
+                        result.model,
+                        name=result.name or None,
+                        url=result.url or None,
+                        api_key=result.api_key or None,
+                    )
+                    app._append_log(
+                        f"[green]Added provider '{pname}' ({result.ptype}/{result.model}) "
+                        f"at position {position}[/green]"
+                    )
+                except ValueError as e:
+                    app._append_log(f"[red]Error: {e}[/red]")
+
+            app.push_screen(ProviderModal(mode="add"), _on_add)
             return
         try:
             name, position = add_provider(
@@ -192,16 +209,43 @@ def _handle_providers(app: Any, text: str) -> None:
         if len(tokens) < 2:
             app._append_log(
                 "[yellow]Usage: /providers edit <name> "
-                "--model <m> --url <u> --key <k>[/yellow]"
+                "[--model <m>] [--url <u>] [--key <k>][/yellow]"
             )
             return
         name = tokens[1]
         flags = parse_flags(tokens[2:])
         if not flags:
-            app._append_log(
-                "[yellow]No fields to update. "
-                "Use --model, --url, --key, or --type[/yellow]"
+            # No flags — open pre-filled modal
+            existing = next(
+                (p for p in list_providers() if p.get("name") == name), None
             )
+            if existing is None:
+                app._append_log(f"[red]Error: Provider '{name}' not found[/red]")
+                return
+
+            def _on_edit(result) -> None:
+                if not result or not result.confirmed:
+                    return
+                fields: dict = {}
+                if result.model:
+                    fields["model"] = result.model
+                if result.url:
+                    fields["url"] = result.url
+                if result.api_key:
+                    fields["key"] = result.api_key
+                if result.ptype:
+                    fields["type"] = result.ptype
+                if not fields:
+                    return
+                try:
+                    updated = edit_provider(name, **fields)
+                    app._append_log(
+                        f"[green]Updated provider '{name}': {', '.join(updated)}[/green]"
+                    )
+                except ValueError as e:
+                    app._append_log(f"[red]Error: {e}[/red]")
+
+            app.push_screen(ProviderModal(mode="edit", existing=existing), _on_edit)
             return
         try:
             updated = edit_provider(name, **flags)
