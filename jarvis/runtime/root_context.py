@@ -82,6 +82,15 @@ def build_root_context(
     if summary:
         parts.append(f"CONVERSATION_SUMMARY: {summary}")
 
+    mcp_buffer = getattr(app, "mcp_buffer", {})
+    if mcp_buffer:
+        buf_parts = [
+            "MCP_BUFFER (recently used servers — call dispatch directly, skip get_server_docs):"
+        ]
+        for _sid, entry in mcp_buffer.items():
+            buf_parts.append(entry["docs"])
+        parts.append("\n".join(buf_parts))
+
     if new_input:
         parts.append(f"NEW INPUT: {new_input}")
 

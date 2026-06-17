@@ -14,6 +14,8 @@ class BaseLLMProvider(ABC):
 
     def __init__(self, model: str):
         self.model = model
+        self.last_prompt_tokens: int = 0
+        self.last_completion_tokens: int = 0
 
     @abstractmethod
     def chat(self, messages: List[Dict[str, str]]) -> str:
