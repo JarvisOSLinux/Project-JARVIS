@@ -296,7 +296,7 @@ Annual Fee = revenue_basis × K₁ × (1 + K₂ × inclusion_index) × inflation
 
 #### K₁ — Rate Constant
 
-K₁ represents the percentage of the Licensee's revenue basis paid as a base license fee. The Board sets K₁ at the time of license activation (Article 2.1) and may adjust it with ninety (90) days' written notice (Article 4.2).
+K₁ represents the percentage of the Licensee's revenue basis paid as a base license fee. The Board sets K₁ at the time of license activation (Article 2.1) and may adjust it with ninety (90) days' written notice (Article 4.2). Adjustments take effect at the Licensee's next annual renewal, not mid-term — no Licensee will face an increased fee during a year they have already paid for.
 
 **Reasonable range:** 1–5%. Software royalties in comparable open-core and dual-licensing arrangements typically fall in this range. A K₁ of 2% on a $10M revenue basis yields a $200,000 annual fee before ecosystem adjustments.
 
