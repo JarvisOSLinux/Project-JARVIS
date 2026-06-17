@@ -20,6 +20,7 @@ class ProviderModalResult:
     name: str = ""
     url: str = ""
     api_key: str = ""
+    temperature: Optional[float] = None
 
 
 _OLLAMA_DEFAULT_URL = "http://localhost:11434"
@@ -117,8 +118,14 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
 
     def compose(self) -> ComposeResult:
         ex = self._existing
-        title = "Add Provider" if self._mode == "add" else f"Edit Provider: {ex.get('name', '')}"
-        default_url = ex.get("url", _OLLAMA_DEFAULT_URL if self._ptype == "ollama" else "")
+        title = (
+            "Add Provider"
+            if self._mode == "add"
+            else f"Edit Provider: {ex.get('name', '')}"
+        )
+        default_url = ex.get(
+            "url", _OLLAMA_DEFAULT_URL if self._ptype == "ollama" else ""
+        )
 
         with Vertical(id="provider-dialog"):
             yield Label(title, id="dialog-title")
@@ -133,13 +140,36 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
                 )
 
             yield Label("Model", classes="field-label")
-            yield Input(value=ex.get("model", ""), placeholder="e.g. qwen3:8b or gpt-4o", id="input-model")
+            yield Input(
+                value=ex.get("model", ""),
+                placeholder="e.g. qwen3:8b or gpt-4o",
+                id="input-model",
+            )
 
-            yield Label("Name  (optional — auto-generated if blank)", classes="field-label")
-            yield Input(value=ex.get("name", ""), placeholder="e.g. my-ollama", id="input-name")
+            yield Label(
+                "Name  (optional — auto-generated if blank)", classes="field-label"
+            )
+            yield Input(
+                value=ex.get("name", ""), placeholder="e.g. my-ollama", id="input-name"
+            )
 
             yield Label("URL", classes="field-label")
-            yield Input(value=default_url, placeholder=_OLLAMA_DEFAULT_URL, id="input-url")
+            yield Input(
+                value=default_url, placeholder=_OLLAMA_DEFAULT_URL, id="input-url"
+            )
+
+            yield Label(
+                "Temperature  (0.0–2.0, blank = global default)", classes="field-label"
+            )
+            yield Input(
+                value=(
+                    str(ex.get("temperature", ""))
+                    if ex.get("temperature") is not None
+                    else ""
+                ),
+                placeholder="0.7",
+                id="input-temperature",
+            )
 
             yield Label("API Key", classes="field-label")
             with Horizontal():
@@ -205,6 +235,22 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
             err.add_class("visible")
             return
 
+        temperature: Optional[float] = None
+        temp_str = self.query_one("#input-temperature", Input).value.strip()
+        if temp_str:
+            try:
+                temperature = float(temp_str)
+                if temperature < 0.0 or temperature > 2.0:
+                    err = self.query_one("#error-label", Static)
+                    err.update("Temperature must be between 0.0 and 2.0.")
+                    err.add_class("visible")
+                    return
+            except ValueError:
+                err = self.query_one("#error-label", Static)
+                err.update("Temperature must be a number (e.g. 0.7).")
+                err.add_class("visible")
+                return
+
         self.dismiss(
             ProviderModalResult(
                 confirmed=True,
@@ -213,5 +259,6 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
                 name=self.query_one("#input-name", Input).value.strip(),
                 url=url,
                 api_key=api_key,
+                temperature=temperature,
             )
         )

@@ -51,6 +51,7 @@ def add_provider(
     name: Optional[str] = None,
     url: Optional[str] = None,
     api_key: Optional[str] = None,
+    temperature: Optional[float] = None,
 ) -> Tuple[str, int]:
     """Add a provider. Returns (name, position) or raises ValueError."""
     ptype = ptype.lower()
@@ -72,6 +73,8 @@ def add_provider(
         entry["url"] = url
     if api_key:
         entry["api_key"] = api_key
+    if temperature is not None:
+        entry["temperature"] = temperature
 
     data.setdefault("providers", []).append(entry)
     save_providers(data)
@@ -114,9 +117,15 @@ def move_provider(name: str, position: int) -> None:
     save_providers(data)
 
 
-def edit_provider(name: str, **fields: str) -> List[str]:
+def edit_provider(name: str, **fields) -> List[str]:
     """Update fields on an existing provider. Returns list of updated field names."""
-    field_map = {"model": "model", "url": "url", "key": "api_key", "type": "type"}
+    field_map = {
+        "model": "model",
+        "url": "url",
+        "key": "api_key",
+        "type": "type",
+        "temperature": "temperature",
+    }
 
     data = load_providers()
     target = None
@@ -135,7 +144,9 @@ def edit_provider(name: str, **fields: str) -> List[str]:
             updated.append(flag_key)
 
     if not updated:
-        raise ValueError("No recognized fields. Use model, url, key, or type.")
+        raise ValueError(
+            "No recognized fields. Use model, url, key, temperature, or type."
+        )
 
     save_providers(data)
     return updated
