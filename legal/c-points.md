@@ -154,7 +154,7 @@ No subsystem weighting is applied to the base pool. Contributors working on less
 
 ### 7.3 Incentive Pool Distribution
 
-Each January, the Board publishes the **annual incentive allocation** — the percentage of the monthly incentive budget directed to each subsystem or task category. These percentages reflect strategic priorities (e.g., security-critical work, underserved subsystems, documentation gaps) and may be adjusted mid-year through the Charter amendment process (Charter §B.4.5).
+Each month, the Board may publish a revised **monthly incentive allocation** — the percentage of the monthly incentive budget directed to each subsystem or task category. These percentages reflect strategic priorities (e.g., security-critical work, underserved subsystems, documentation gaps). If the Board does not publish a new allocation for a given month, the most recent allocation remains in effect.
 
 Example annual incentive allocation:
 
@@ -187,37 +187,178 @@ Board members are compensated from the operations slice (SCCL Article 4.7(f)), n
 
 Board members who are also Active Contributors continue to earn contributor compensation through the base and incentive pools on equal footing with all other contributors. Their Board compensation is additive and separate.
 
-### 7.5 Example
+### 7.5 Activation
 
-Annual SCCL fees: **$1,000,000**
+The monthly compensation model activates at **Governance Stage 3** (Charter §B.9.3), when the project has 30+ Active Contributors and at least one active SCCL commercial license generating revenue. At Stages 1–2, there is no SCCL revenue to distribute. Stage 3 serves as the beta period for testing the compensation mechanics, refining the incentive allocation process, and establishing operational infrastructure (payment methods, tax compliance, contributor identity verification) before Stage 4 scales it to the full Governance Pool.
 
-| Pool | Annual | Monthly |
+### 7.6 Example — Full Moneyfall
+
+This example traces **$1,000,000** in annual SCCL license fees from collection to individual contributor payouts.
+
+---
+
+#### Step 1 — Annual fund allocation (SCCL Article 4.7)
+
+| Category | % | Annual | Monthly (÷12) |
+|---|---|---|---|
+| **(a) Contributor base pool** | **52%** | **$520,000** | **$43,333** |
+| **(b) Contributor incentive pool** | **5%** | **$50,000** | **$4,167** |
+| (c) Infrastructure | 18% | $180,000 | — |
+| (d) Reserve fund | 12% | $120,000 | — |
+| (e) Emergency fund | 8% | $80,000 | — |
+| (f) Operations (incl. Board comp.) | 5% | $50,000 | — |
+| **Total** | **100%** | **$1,000,000** | |
+
+Total contributor allocation: (a) + (b) = **57%** = **$570,000/year** = **$47,500/month**.
+
+---
+
+#### Step 2 — Board sets monthly incentive allocation
+
+The Board publishes the incentive allocation for March (if unchanged from the previous month, the previous allocation carries over):
+
+| Subsystem | Incentive share | Monthly incentive budget |
 |---|---|---|
-| Base pool (52%) | $520,000 | $43,333 |
-| Incentive pool (5%) | $50,000 | $4,167 |
-| Infrastructure (17%) | $170,000 | — |
-| Reserve (12%) | $120,000 | — |
-| Emergency (7%) | $70,000 | — |
-| Operations (3%) | $30,000 | — |
+| Security / auth | 35% | $1,458 |
+| Core dispatch engine | 25% | $1,042 |
+| Documentation | 20% | $833 |
+| TUI | 10% | $417 |
+| Voice / STT | 10% | $417 |
+| **Total** | **100%** | **$4,167** |
 
-In March, three contributors are active. The incentive allocation puts 35% of monthly incentive ($1,458) toward security work.
+---
 
-**Base pool payout (March):**
+#### Step 3 — Contributors earn C-points in March
 
-| Contributor | Monthly C-points | Share | Base payout |
+Three contributors are active. Their raw activity in March:
+
+| Contributor | PRs merged | Reviews | Security patches | Doc PRs | Subsystems touched |
+|---|---|---|---|---|---|
+| Alice | 8 | 12 | 2 | 0 | dispatch, security |
+| Bob | 5 | 6 | 0 | 3 | TUI, docs |
+| You | 4 | 10 | 1 | 2 | security, docs, TUI |
+
+---
+
+#### Step 4 — Calculate monthly C-points per contributor
+
+Using the 8-dimension formula (§1), each dimension normalized against the 95th-percentile contributor over the rolling 24-month window. For this example, assume the 95th-percentile ceilings are:
+
+| Dimension | 95th-pctl ceiling (24-month) | Weight |
+|---|---|---|
+| Merged volume | 50 PRs | 20% |
+| Code scope | 8,000 complexity-adjusted LOC | 20% |
+| Review labor | 40 substantive reviews | 15% |
+| Security work | 10 security patches | 15% |
+| Maintenance | 20 triage actions | 10% |
+| Documentation | 15 doc PRs | 10% |
+| Mentorship | 30 mentoring interactions | 5% |
+| Leadership | 10 events | 5% |
+
+**Alice's March C-points** (showing only non-zero dimensions for brevity):
+
+| Dimension | Raw value | Normalized (÷ ceiling × 100) | × Weight | Points |
+|---|---|---|---|---|
+| Merged volume | 8 PRs | (8/50) × 100 = 16.0 | × 0.20 | 3.20 |
+| Code scope | 2,400 LOC | (2400/8000) × 100 = 30.0 | × 0.20 | 6.00 |
+| Review labor | 12 reviews | (12/40) × 100 = 30.0 | × 0.15 | 4.50 |
+| Security work | 2 patches | (2/10) × 100 = 20.0 | × 0.15 | 3.00 |
+| **Alice total** | | | | **16.70** |
+
+**Bob's March C-points:**
+
+| Dimension | Raw value | Normalized | × Weight | Points |
+|---|---|---|---|---|
+| Merged volume | 5 PRs | 10.0 | × 0.20 | 2.00 |
+| Code scope | 1,200 LOC | 15.0 | × 0.20 | 3.00 |
+| Review labor | 6 reviews | 15.0 | × 0.15 | 2.25 |
+| Documentation | 3 doc PRs | 20.0 | × 0.10 | 2.00 |
+| **Bob total** | | | | **9.25** |
+
+**Your March C-points:**
+
+| Dimension | Raw value | Normalized | × Weight | Points |
+|---|---|---|---|---|
+| Merged volume | 4 PRs | 8.0 | × 0.20 | 1.60 |
+| Code scope | 1,800 LOC | 22.5 | × 0.20 | 4.50 |
+| Review labor | 10 reviews | 25.0 | × 0.15 | 3.75 |
+| Security work | 1 patch | 10.0 | × 0.15 | 1.50 |
+| Documentation | 2 doc PRs | 13.3 | × 0.10 | 1.33 |
+| **Your total** | | | | **12.68** |
+
+**Total monthly C-points (all contributors):** 16.70 + 9.25 + 12.68 = **38.63**
+
+---
+
+#### Step 5 — Base pool payout (March)
+
+Monthly base budget: **$43,333**
+
+| Contributor | C-points | Share (÷ 38.63) | Base payout |
 |---|---|---|---|
-| Alice | 36.0 | 40% | $17,333 |
-| Bob | 27.0 | 30% | $13,000 |
-| You | 27.0 | 30% | $13,000 |
+| Alice | 16.70 | 43.2% | $18,733 |
+| Bob | 9.25 | 23.9% | $10,373 |
+| You | 12.68 | 32.8% | $14,227 |
+| **Total** | **38.63** | **100%** | **$43,333** |
 
-**Incentive payout — security (March):** Alice and You both did security work; Bob did not.
+---
 
-| Contributor | Security C-points | Share | Incentive payout |
+#### Step 6 — Incentive pool payout (March)
+
+Each contributor's C-points are broken down by subsystem to determine incentive eligibility.
+
+**Security incentive ($1,458):** Alice (2 patches) and You (1 patch) worked on security.
+
+| Contributor | Security C-points | Share | Payout |
 |---|---|---|---|
-| Alice | 18.0 | 60% | $875 |
-| You | 12.0 | 40% | $583 |
+| Alice | 3.00 | 66.7% | $972 |
+| You | 1.50 | 33.3% | $486 |
 
-**Total March payout:** Alice $18,208 · You $13,583 · Bob $13,000.
+**Dispatch incentive ($1,042):** Only Alice worked on dispatch.
+
+| Contributor | Dispatch C-points | Share | Payout |
+|---|---|---|---|
+| Alice | 6.00 | 100% | $1,042 |
+
+**Documentation incentive ($833):** Bob and You wrote docs.
+
+| Contributor | Docs C-points | Share | Payout |
+|---|---|---|---|
+| Bob | 2.00 | 60.0% | $500 |
+| You | 1.33 | 40.0% | $333 |
+
+**TUI incentive ($417):** Bob worked on TUI.
+
+| Contributor | TUI C-points | Share | Payout |
+|---|---|---|---|
+| Bob | 3.00 | 100% | $417 |
+
+**Voice/STT incentive ($417):** No contributors worked here this month. Unspent — returns to the reserve fund.
+
+---
+
+#### Step 7 — Total March compensation per contributor
+
+| Contributor | Base payout | + Security | + Dispatch | + Docs | + TUI | **Total** |
+|---|---|---|---|---|---|---|
+| Alice | $18,733 | $972 | $1,042 | — | — | **$20,747** |
+| Bob | $10,373 | — | — | $500 | $417 | **$11,290** |
+| You | $14,227 | $486 | — | $333 | — | **$15,046** |
+| **Monthly total** | **$43,333** | **$1,458** | **$1,042** | **$833** | **$417** | **$47,083** |
+
+Unspent incentive (Voice/STT): $417 → reserve fund.
+
+---
+
+#### Step 8 — Board member compensation (separate)
+
+From the operations slice ($50,000/year = $4,167/month), Board members receive 0.0001–0.001% of annual SCCL fees. At 0.0005% for a Board of 5:
+
+```
+per_board_member = $1,000,000 × 0.000005 = $5.00/year
+```
+
+This is intentionally nominal at low revenue. At $100M in annual fees, the same rate yields $500/year per Board member. Board members who are also Active Contributors continue earning contributor compensation through the base and incentive pools on equal footing.
 
 ---
 
