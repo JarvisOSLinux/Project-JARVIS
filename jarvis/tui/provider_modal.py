@@ -61,9 +61,9 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
     }
 
     #form-scroll {
-        padding: 0 2;
+        padding: 0 2 1 2;
         height: auto;
-        max-height: 70vh;
+        max-height: calc(90vh - 6);
     }
 
     .field-label {
@@ -82,11 +82,12 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
     }
 
     #footer {
+        dock: bottom;
         height: 3;
         align: right middle;
-        margin-top: 1;
         padding: 0 2;
         border-top: solid $primary-darken-3;
+        background: $surface;
     }
 
     #btn-cancel {
