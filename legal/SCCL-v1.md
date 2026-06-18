@@ -144,17 +144,19 @@ The Board shall communicate the applicable Revenue Basis to the Licensee in writ
 
 **4.7 Fund Allocation.** All fees collected under this License shall be allocated transparently in accordance with the compensation structure defined in the Organization's charter. The recommended allocation is:
 
-  (a) **50–60%** to contributor compensation;
+  (a) **50–55%** to the contributor base compensation pool — distributed monthly to contributors proportionally by C-points (see Appendix D);
 
-  (b) **15–20%** to project infrastructure (hosting, CI/CD, security audits, tooling);
+  (b) **5%** to the contributor incentive pool — Board-directed monthly bounties allocated across subsystems and tasks to steer community effort toward strategic priorities (see Appendix D);
 
-  (c) **10–15%** to a reserve fund (legal defense, sustainability buffer);
+  (c) **15–20%** to project infrastructure (hosting, CI/CD, security audits, tooling);
 
-  (d) **5–10%** to an emergency fund (incident response, operational contingencies);
+  (d) **10–15%** to a reserve fund (legal defense, sustainability buffer);
 
-  (e) **Up to 5%** to Organization operations and administration.
+  (e) **5–10%** to an emergency fund (incident response, operational contingencies);
 
-  The exact percentages are set by the Governing Board and published publicly. Adjustments require thirty (30) days' advance notice.
+  (f) **Up to 5%** to Organization operations and administration, including Board member compensation (see Organization Charter B.5.5).
+
+  The total contributor allocation ((a) + (b)) is 55–60% of fees collected. The exact percentages are set by the Governing Board and published publicly. Adjustments require thirty (30) days' advance notice.
 
 ---
 
