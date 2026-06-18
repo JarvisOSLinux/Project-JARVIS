@@ -63,7 +63,7 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
     #form-scroll {
         padding: 0 2 1 2;
         height: auto;
-        max-height: calc(90vh - 6);
+        max-height: 80vh;
     }
 
     .field-label {
