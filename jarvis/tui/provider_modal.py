@@ -51,7 +51,6 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
         border: round $primary;
         background: $surface;
         padding: 0 2 0 2;
-        overflow-y: auto;
     }
 
     #dialog-title {
@@ -86,9 +85,8 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
     }
 
     #footer {
-        height: 3;
+        height: auto;
         align: right middle;
-        margin-top: 1;
         margin-left: -2;
         margin-right: -2;
         padding: 0 2;
