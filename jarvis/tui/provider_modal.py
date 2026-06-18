@@ -46,6 +46,7 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
 
     #provider-dialog {
         width: 60;
+        height: auto;
         max-height: 90vh;
         border: round $primary;
         background: $surface;
@@ -62,7 +63,7 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
     #form-scroll {
         padding: 0 2;
         height: auto;
-        max-height: 1fr;
+        max-height: 70vh;
     }
 
     .field-label {
