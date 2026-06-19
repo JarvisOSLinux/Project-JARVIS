@@ -155,8 +155,8 @@ class JarvisTUI(App):
         Binding("ctrl+d", "delete_selected_session", "Delete", show=True),
         Binding("ctrl+l", "focus_chat", "Log", show=True),
         Binding("ctrl+i", "focus_input", "Input", show=True),
-        Binding("f1", "help", "Help", show=True),
-        Binding("f2", "settings", "Settings", show=True),
+        Binding("f1", "help", "Help", show=True, priority=True),
+        Binding("f2", "settings", "Settings", show=True, priority=True),
         Binding("ctrl+shift+c", "clear_transcript", "Clear log", show=False),
         Binding("ctrl+shift+e", "export_transcript", "Export", show=False),
     ]
@@ -315,7 +315,8 @@ class JarvisTUI(App):
 
     def action_help(self) -> None:
         """Open the help modal (Esc / F1 closes while help is focused)."""
-        tui_actions.open_help(self, JarvisTUI.BINDINGS)
+        if len(self.screen_stack) <= 1:
+            tui_actions.open_help(self, JarvisTUI.BINDINGS)
 
     def action_clear_transcript(self) -> None:
         """Clear the RichLog and export buffer only (does not touch contextor)."""
@@ -326,7 +327,8 @@ class JarvisTUI(App):
         tui_actions.export_transcript(self)
 
     def action_settings(self) -> None:
-        self._open_config("settings")
+        if len(self.screen_stack) <= 1:
+            self._open_config("settings")
 
     def _open_config(self, tab: str = "settings") -> None:
         from .local_input import _apply_in_memory

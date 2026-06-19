@@ -161,18 +161,18 @@ class ConfigModal(ModalScreen[ConfigModalResult]):
 
     #config-tabs {
         height: auto;
-        max-height: 80vh;
+        max-height: 76vh;
     }
 
     #settings-pane {
         height: auto;
-        max-height: 75vh;
+        max-height: 68vh;
         padding: 0 2;
     }
 
     #providers-pane {
         height: auto;
-        max-height: 75vh;
+        max-height: 68vh;
         padding: 0 2;
     }
 
@@ -202,7 +202,7 @@ class ConfigModal(ModalScreen[ConfigModalResult]):
 
     #settings-error {
         color: $error;
-        margin-top: 1;
+        padding: 0 2;
         display: none;
     }
 
@@ -210,11 +210,15 @@ class ConfigModal(ModalScreen[ConfigModalResult]):
         display: block;
     }
 
-    #settings-save-row {
+    #config-footer {
         height: 3;
         align: right middle;
-        margin-top: 1;
-        padding: 0;
+        padding: 0 2;
+        border-top: solid $primary 30%;
+    }
+
+    #config-footer Button {
+        margin-left: 1;
     }
 
     #provider-table {
@@ -293,15 +297,6 @@ class ConfigModal(ModalScreen[ConfigModalResult]):
                                     id=f"setting-{s.key}",
                                 )
 
-                        yield Static("", id="settings-error")
-
-                        with Horizontal(id="settings-save-row"):
-                            yield Button(
-                                "Save settings",
-                                id="btn-save-settings",
-                                variant="primary",
-                            )
-
                 with TabPane("Providers", id="tab-providers"):
                     with VerticalScroll(id="providers-pane"):
                         yield DataTable(id="provider-table", show_cursor=True)
@@ -315,6 +310,11 @@ class ConfigModal(ModalScreen[ConfigModalResult]):
                             "Select a row then Edit/Remove, or Add a new provider.",
                             id="provider-hint",
                         )
+
+            yield Static("", id="settings-error")
+            with Horizontal(id="config-footer"):
+                yield Button("Cancel", id="btn-cancel", variant="default")
+                yield Button("Save settings", id="btn-save-settings", variant="primary")
 
     def on_mount(self) -> None:
         self._refresh_provider_table()
@@ -339,6 +339,8 @@ class ConfigModal(ModalScreen[ConfigModalResult]):
         bid = event.button.id
         if bid == "btn-save-settings":
             self._save_settings()
+        elif bid == "btn-cancel":
+            self.action_cancel()
         elif bid == "btn-prov-add":
             self._add_provider()
         elif bid == "btn-prov-edit":
