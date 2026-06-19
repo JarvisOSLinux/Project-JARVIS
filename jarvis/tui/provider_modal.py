@@ -47,6 +47,7 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
     #provider-dialog {
         width: 60;
         height: auto;
+        max-height: 90vh;
         border: round $primary;
         background: $surface;
         padding: 0;
@@ -193,11 +194,6 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
                         id="btn-confirm",
                         variant="primary",
                     )
-
-    def on_mount(self) -> None:
-        scroll = self.query_one("#form-scroll", VerticalScroll)
-        scroll.styles.height = "auto"
-        scroll.styles.max_height = "90vh"
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id != "input-type":
