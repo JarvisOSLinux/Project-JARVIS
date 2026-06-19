@@ -42,7 +42,7 @@ class SettingsModal(ModalScreen[None]):
 
     BINDINGS = [
         Binding("escape", "dismiss_modal", "Close", show=True),
-        Binding("ctrl+comma", "dismiss_modal", "Close", show=False),
+        Binding("f2", "dismiss_modal", "Close", show=False),
     ]
 
     CSS = """

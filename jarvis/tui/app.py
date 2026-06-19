@@ -156,7 +156,7 @@ class JarvisTUI(App):
         Binding("ctrl+l", "focus_chat", "Log", show=True),
         Binding("ctrl+i", "focus_input", "Input", show=True),
         Binding("f1", "help", "Help", show=True),
-        Binding("ctrl+comma", "settings", "Settings", show=True),
+        Binding("f2", "settings", "Settings", show=True),
         Binding("ctrl+shift+c", "clear_transcript", "Clear log", show=False),
         Binding("ctrl+shift+e", "export_transcript", "Export", show=False),
     ]
