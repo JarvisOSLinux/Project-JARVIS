@@ -19,7 +19,6 @@ from ..core.providers import (
 )
 from .help_screen import HelpScreen
 from .provider_modal import ProviderModal
-from .settings_editor_modal import SettingsEditorModal
 from .slash_commands_doc import build_help_markdown
 
 
@@ -59,7 +58,7 @@ def handle_local_input(app: Any, text: str, bindings: Any) -> bool:
         return True
 
     if low == "/settings":
-        _handle_settings(app)
+        app._open_config("settings")
         return True
 
     return False
@@ -137,7 +136,7 @@ def _handle_providers(app: Any, text: str) -> None:
     """Route /providers subcommands."""
     parts = text.strip().split(maxsplit=1)
     if len(parts) == 1:
-        _show_providers(app)
+        app._open_config("providers")
         return
 
     rest = parts[1].strip()
@@ -297,28 +296,6 @@ def _handle_model(app: Any, text: str) -> None:
         update_status(app)
     except Exception as e:
         app._append_log(f"[red]Error setting model: {e}[/red]")
-
-
-def _handle_settings(app: Any) -> None:
-    """Open the settings editor modal."""
-
-    def _on_result(result: Any) -> None:
-        if not result or not result.confirmed or not result.changes:
-            return
-        from ..cli import _update_env_setting
-
-        applied = []
-        for key, value in result.changes.items():
-            try:
-                _update_env_setting(key, value)
-                _apply_in_memory(key, value)
-                applied.append(f"{key}={value}")
-            except Exception as e:
-                app._append_log(f"[red]Error setting {key}: {e}[/red]")
-        if applied:
-            app._append_log(f"[green]Settings updated: {', '.join(applied)}[/green]")
-
-    app.push_screen(SettingsEditorModal(), _on_result)
 
 
 def _apply_in_memory(key: str, value: str) -> None:

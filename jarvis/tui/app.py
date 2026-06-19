@@ -73,7 +73,7 @@ from .local_input import export_transcript_to_disk, handle_local_input
 from .session_sidebar import on_session_selected as handle_session_selected
 from .session_sidebar import refresh_sidebar
 from .session_sidebar import schedule_sidebar_refresh as queue_sidebar_refresh
-from .settings_modal import SettingsModal
+from .config_modal import ConfigModal, ConfigModalResult
 
 logger = get_logger(__name__)
 
@@ -326,7 +326,31 @@ class JarvisTUI(App):
         tui_actions.export_transcript(self)
 
     def action_settings(self) -> None:
-        self.push_screen(SettingsModal())
+        self._open_config("settings")
+
+    def _open_config(self, tab: str = "settings") -> None:
+        from .local_input import _apply_in_memory
+
+        def _on_config(result: ConfigModalResult) -> None:
+            if result.settings_changes:
+                from ..cli import _update_env_setting
+
+                applied = []
+                for key, value in result.settings_changes.items():
+                    try:
+                        _update_env_setting(key, value)
+                        _apply_in_memory(key, value)
+                        applied.append(f"{key}={value}")
+                    except Exception as e:
+                        self._append_log(f"[red]Error setting {key}: {e}[/red]")
+                if applied:
+                    self._append_log(
+                        f"[green]Settings updated: {', '.join(applied)}[/green]"
+                    )
+            if result.providers_changed:
+                self._append_log("[green]Provider config updated.[/green]")
+
+        self.push_screen(ConfigModal(initial_tab=tab), _on_config)
 
     async def _tui_confirm(self, request_id: str, tool_names: list[str]) -> bool:
         return await self.push_screen_wait(ConfirmModal(request_id, tool_names))
