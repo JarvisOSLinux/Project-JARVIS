@@ -19,6 +19,7 @@ from ..core.providers import (
 )
 from .help_screen import HelpScreen
 from .provider_modal import ProviderModal
+from .settings_editor_modal import SettingsEditorModal
 from .slash_commands_doc import build_help_markdown
 
 
@@ -55,6 +56,10 @@ def handle_local_input(app: Any, text: str, bindings: Any) -> bool:
 
     if low == "/model" or low.startswith("/model "):
         _handle_model(app, text)
+        return True
+
+    if low == "/settings":
+        _handle_settings(app)
         return True
 
     return False
@@ -292,6 +297,51 @@ def _handle_model(app: Any, text: str) -> None:
         update_status(app)
     except Exception as e:
         app._append_log(f"[red]Error setting model: {e}[/red]")
+
+
+def _handle_settings(app: Any) -> None:
+    """Open the settings editor modal."""
+
+    def _on_result(result: Any) -> None:
+        if not result or not result.confirmed or not result.changes:
+            return
+        from ..cli import _update_env_setting
+
+        applied = []
+        for key, value in result.changes.items():
+            try:
+                _update_env_setting(key, value)
+                _apply_in_memory(key, value)
+                applied.append(f"{key}={value}")
+            except Exception as e:
+                app._append_log(f"[red]Error setting {key}: {e}[/red]")
+        if applied:
+            app._append_log(f"[green]Settings updated: {', '.join(applied)}[/green]")
+
+    app.push_screen(SettingsEditorModal(), _on_result)
+
+
+def _apply_in_memory(key: str, value: str) -> None:
+    """Apply a setting change to the live Config object with proper type coercion."""
+    from ..config import Config
+
+    bool_keys = {"RESET_HISTORY_AFTER_RESPONSE"}
+    int_keys = {
+        "MCP_BUFFER_SIZE",
+        "RAG_TOP_K",
+        "MAX_GOALS_IN_CONTEXT",
+        "CONFIRMATION_TIMEOUT",
+    }
+    float_keys = {"RAG_MIN_SCORE"}
+
+    if key in bool_keys:
+        setattr(Config, key, value.lower() == "true")
+    elif key in int_keys:
+        setattr(Config, key, int(value))
+    elif key in float_keys:
+        setattr(Config, key, float(value))
+    else:
+        setattr(Config, key, value)
 
 
 def export_transcript_to_disk(app: Any, filename: Optional[str]) -> None:
