@@ -1,7 +1,7 @@
 """Ollama LLM provider."""
 
 import sys
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from ...core.logger import get_logger
 from ..base import BaseLLMProvider
@@ -9,6 +9,21 @@ from ..base import BaseLLMProvider
 logger = get_logger(__name__)
 
 LLM_TIMEOUT = 60  # seconds — prevents indefinite hangs on cloud API
+
+_shared_clients: Dict[tuple, Any] = {}
+
+
+def _get_shared_client(host: str, api_key: Optional[str]) -> Any:
+    """Return a shared ollama.Client for the given (host, api_key) pair."""
+    from ollama import Client
+
+    key = (host, api_key or "")
+    if key not in _shared_clients:
+        client_kwargs: Dict[str, Any] = {"timeout": LLM_TIMEOUT}
+        if api_key:
+            client_kwargs["headers"] = {"Authorization": f"Bearer {api_key}"}
+        _shared_clients[key] = Client(host=host, **client_kwargs)
+    return _shared_clients[key]
 
 
 class OllamaProvider(BaseLLMProvider):
@@ -31,22 +46,25 @@ class OllamaProvider(BaseLLMProvider):
         self.strict_json = strict_json
         self.think = think
         self._api_key = api_key
+        self._client: Any = None
+        self._ollama: Any = None
+
+    def _ensure_client(self) -> None:
+        """Create the ollama Client on first use."""
+        if self._client is not None:
+            return
 
         import os
 
-        if base_url and base_url != "http://localhost:11434":
-            os.environ["OLLAMA_HOST"] = base_url
+        if self.base_url and self.base_url != "http://localhost:11434":
+            os.environ["OLLAMA_HOST"] = self.base_url
 
         try:
-            from ollama import Client
-
-            client_kwargs = {"timeout": LLM_TIMEOUT}
-            if api_key:
-                client_kwargs["headers"] = {"Authorization": f"Bearer {api_key}"}
-            self._client = Client(host=self.base_url, **client_kwargs)
             import ollama as _ollama
 
             self._ollama = _ollama
+            self._client = _get_shared_client(self.base_url, self._api_key)
+            logger.debug(f"Ollama client initialized for {self.base_url}")
         except ImportError:
             raise ImportError(
                 "ollama package not installed. Install with: pip install ollama"
@@ -55,6 +73,8 @@ class OllamaProvider(BaseLLMProvider):
     # -- BaseLLMProvider interface -------------------------------------------
 
     def chat(self, messages: List[Dict[str, str]]) -> str:
+        self._ensure_client()
+
         options = {}
         if self.temperature is not None:
             options["temperature"] = self.temperature
@@ -65,13 +85,8 @@ class OllamaProvider(BaseLLMProvider):
             "options": options or None,
         }
         if self.strict_json:
-            # Grammar-constrained JSON. Conflicts with thinking-mode models —
-            # leave off unless the user explicitly opts in.
             kwargs["format"] = "json"
         if self.think is not None:
-            # think=True keeps the reasoning chain in the separate `thinking`
-            # field rather than letting it leak into `content`. Silently ignored
-            # by models that don't support the option.
             kwargs["think"] = self.think
 
         log_kwargs = {k: v for k, v in kwargs.items() if k != "messages"}
@@ -149,7 +164,6 @@ class OllamaProvider(BaseLLMProvider):
                 )
             if cleaned:
                 return cleaned
-            # Stripping removed everything — fall through to thinking/raw
             logger.warning(
                 "Ollama: content was non-empty but stripping removed all text, "
                 "falling through to thinking field / raw content"
@@ -173,6 +187,7 @@ class OllamaProvider(BaseLLMProvider):
         return self.base_url != "http://localhost:11434"
 
     def is_available(self) -> bool:
+        self._ensure_client()
         try:
             self._client.list()
             return True
@@ -184,6 +199,7 @@ class OllamaProvider(BaseLLMProvider):
 
     def ensure_model(self) -> bool:
         """Ensure the model exists, pulling it if necessary."""
+        self._ensure_client()
         if self._model_exists():
             logger.debug(f"Model '{self.model}' is already available")
             return True
