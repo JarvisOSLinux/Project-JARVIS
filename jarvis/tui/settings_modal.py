@@ -98,8 +98,8 @@ class SettingsModal(ModalScreen[None]):
 
             yield table
             yield Label(
-                "[dim]LLM providers: use [bold]/providers[/bold] to add, edit, or remove.  "
-                "Other settings: edit [bold]jarvis/.env[/bold] and restart.[/dim]",
+                "[dim]Providers: [bold]/providers[/bold]  |  "
+                "Other settings: [bold]jarvis/.env[/bold][/dim]",
                 id="settings-footer",
                 markup=True,
             )
