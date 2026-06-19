@@ -7,7 +7,7 @@ from typing import Optional
 
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, Select, Static
 
@@ -47,17 +47,19 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
     #provider-dialog {
         width: 60;
         height: auto;
-        max-height: 90vh;
         border: round $primary;
         background: $surface;
-        padding: 0 2 0 2;
+        padding: 0;
+    }
+
+    #form-scroll {
+        padding: 1 2 1 2;
     }
 
     #dialog-title {
         text-style: bold;
         color: $primary;
         margin-bottom: 1;
-        padding: 1 0 0 0;
     }
 
     .field-label {
@@ -85,12 +87,14 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
     }
 
     #footer {
-        height: auto;
+        height: 3;
         align: right middle;
+        margin-top: 1;
         margin-left: -2;
         margin-right: -2;
         padding: 0 2;
         border-top: solid $primary-darken-3;
+        background: $surface;
     }
 
     #btn-cancel {
@@ -121,71 +125,79 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
         )
 
         with Vertical(id="provider-dialog"):
-            yield Label(title, id="dialog-title")
+            with VerticalScroll(id="form-scroll"):
+                yield Label(title, id="dialog-title")
 
-            yield Label("Type", classes="field-label")
-            with Horizontal(id="type-row"):
-                yield Select(
-                    [("Ollama (local)", "ollama"), ("API (cloud)", "api")],
-                    value=self._ptype,
-                    id="input-type",
-                    allow_blank=False,
-                )
+                yield Label("Type", classes="field-label")
+                with Horizontal(id="type-row"):
+                    yield Select(
+                        [("Ollama (local)", "ollama"), ("API (cloud)", "api")],
+                        value=self._ptype,
+                        id="input-type",
+                        allow_blank=False,
+                    )
 
-            yield Label("Model", classes="field-label")
-            yield Input(
-                value=ex.get("model", ""),
-                placeholder="e.g. qwen3:8b or gpt-4o",
-                id="input-model",
-            )
-
-            yield Label(
-                "Name  (optional — auto-generated if blank)", classes="field-label"
-            )
-            yield Input(
-                value=ex.get("name", ""),
-                placeholder="e.g. my-ollama",
-                id="input-name",
-            )
-
-            yield Label("URL", classes="field-label")
-            yield Input(
-                value=default_url, placeholder=_OLLAMA_DEFAULT_URL, id="input-url"
-            )
-
-            yield Label(
-                "Temperature  (0.0–2.0, blank = global default)",
-                classes="field-label",
-            )
-            yield Input(
-                value=(
-                    str(ex.get("temperature", ""))
-                    if ex.get("temperature") is not None
-                    else ""
-                ),
-                placeholder="0.7",
-                id="input-temperature",
-            )
-
-            yield Label("API Key", classes="field-label")
-            with Horizontal():
+                yield Label("Model", classes="field-label")
                 yield Input(
-                    value=ex.get("api_key", ""),
-                    placeholder="sk-… (leave blank for Ollama)",
-                    password=True,
-                    id="input-key",
+                    value=ex.get("model", ""),
+                    placeholder="e.g. qwen3:8b or gpt-4o",
+                    id="input-model",
                 )
-                yield Button("show", id="btn-toggle-key", variant="default")
 
-            yield Static("", id="error-label")
-
-            with Horizontal(id="footer"):
-                yield Button("Cancel", id="btn-cancel", variant="default")
-                yield Button(
-                    "Add" if self._mode == "add" else "Save",
-                    id="btn-confirm",
-                    variant="primary",
+                yield Label(
+                    "Name  (optional — auto-generated if blank)", classes="field-label"
                 )
+                yield Input(
+                    value=ex.get("name", ""),
+                    placeholder="e.g. my-ollama",
+                    id="input-name",
+                )
+
+                yield Label("URL", classes="field-label")
+                yield Input(
+                    value=default_url,
+                    placeholder=_OLLAMA_DEFAULT_URL,
+                    id="input-url",
+                )
+
+                yield Label(
+                    "Temperature  (0.0–2.0, blank = global default)",
+                    classes="field-label",
+                )
+                yield Input(
+                    value=(
+                        str(ex.get("temperature", ""))
+                        if ex.get("temperature") is not None
+                        else ""
+                    ),
+                    placeholder="0.7",
+                    id="input-temperature",
+                )
+
+                yield Label("API Key", classes="field-label")
+                with Horizontal():
+                    yield Input(
+                        value=ex.get("api_key", ""),
+                        placeholder="sk-… (leave blank for Ollama)",
+                        password=True,
+                        id="input-key",
+                    )
+                    yield Button("show", id="btn-toggle-key", variant="default")
+
+                yield Static("", id="error-label")
+
+                with Horizontal(id="footer"):
+                    yield Button("Cancel", id="btn-cancel", variant="default")
+                    yield Button(
+                        "Add" if self._mode == "add" else "Save",
+                        id="btn-confirm",
+                        variant="primary",
+                    )
+
+    def on_mount(self) -> None:
+        scroll = self.query_one("#form-scroll", VerticalScroll)
+        scroll.styles.height = "auto"
+        scroll.styles.max_height = "90vh"
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id != "input-type":
