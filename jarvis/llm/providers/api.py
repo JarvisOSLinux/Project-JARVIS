@@ -1,6 +1,6 @@
 """OpenAI-compatible API LLM provider."""
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from ...core.logger import get_logger
 from ..base import BaseLLMProvider
@@ -38,10 +38,17 @@ class APIProvider(BaseLLMProvider):
         if headers:
             self.headers.update(headers)
 
+        self._httpx: Any = None
+
+    def _ensure_client(self) -> None:
+        """Import httpx on first use."""
+        if self._httpx is not None:
+            return
         try:
             import httpx as _httpx
 
             self._httpx = _httpx
+            logger.debug(f"httpx initialized for {self.api_url}")
         except ImportError:
             raise ImportError(
                 "httpx package not installed. Install with: pip install httpx"
@@ -50,6 +57,8 @@ class APIProvider(BaseLLMProvider):
     # -- BaseLLMProvider interface -------------------------------------------
 
     def chat(self, messages: List[Dict[str, str]]) -> str:
+        self._ensure_client()
+
         payload = {
             "model": self.model,
             "messages": messages,
@@ -81,6 +90,7 @@ class APIProvider(BaseLLMProvider):
             raise
 
     def is_available(self) -> bool:
+        self._ensure_client()
         try:
             with self._httpx.Client(timeout=5.0) as client:
                 try:
