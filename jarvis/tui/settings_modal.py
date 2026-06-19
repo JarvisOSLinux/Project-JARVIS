@@ -1,12 +1,7 @@
-"""TUI settings viewer — Ctrl+, opens a read-only panel of the active config.
+"""TUI settings viewer — F2 opens a read-only panel of the active runtime config.
 
-Settings are pulled from the live Config object (which mirrors jarvis/.env).
-Editing is intentionally not supported in the TUI; users should edit .env
-and restart JARVIS.  The panel exists so you can inspect the current state
-without leaving the interface.
-
-Security-sensitive values (CONFIRMATION_MODE=allow_all,
-JARVIS_SUDO_ENABLED=true) are highlighted in red so they are hard to miss.
+Provider configuration (model, URL, API key) is managed via /providers.
+These settings cover everything else: confirmation mode, memory, RAG, etc.
 """
 
 from __future__ import annotations
@@ -18,11 +13,8 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Label
 
 _SETTINGS_KEYS: list[tuple[str, str]] = [
-    ("LLM_PROVIDER", "LLM Provider"),
-    ("LLM_MODEL", "Model"),
-    ("LLM_URL", "LLM URL"),
-    ("CONFIRMATION_MODE", "Confirmation Mode"),
-    ("OUTPUT_MODE", "Output Mode"),
+    ("CONFIRMATION_MODE", "Confirmation mode"),
+    ("OUTPUT_MODE", "Output mode"),
     ("CONTEXTOR_ENABLED", "Contextor (memory)"),
     ("RAG_ENABLED", "RAG"),
     ("RAG_TOP_K", "RAG top-k"),
@@ -106,7 +98,8 @@ class SettingsModal(ModalScreen[None]):
 
             yield table
             yield Label(
-                "[dim]Edit jarvis/.env and restart JARVIS to apply changes.[/dim]",
+                "[dim]LLM providers: use [bold]/providers[/bold] to add, edit, or remove.  "
+                "Other settings: edit [bold]jarvis/.env[/bold] and restart.[/dim]",
                 id="settings-footer",
                 markup=True,
             )
