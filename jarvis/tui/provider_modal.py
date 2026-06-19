@@ -73,6 +73,19 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
         margin-bottom: 0;
     }
 
+    #key-row {
+        height: 3;
+    }
+
+    #key-row Input {
+        width: 1fr;
+    }
+
+    #btn-toggle-key {
+        width: 8;
+        min-width: 8;
+    }
+
     Select {
         width: 1fr;
     }
@@ -90,12 +103,7 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
     #footer {
         height: 3;
         align: right middle;
-        margin-top: 1;
-        margin-left: -2;
-        margin-right: -2;
         padding: 0 2;
-        border-top: solid $primary-darken-3;
-        background: $surface;
     }
 
     #btn-cancel {
@@ -176,7 +184,7 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
                 )
 
                 yield Label("API Key", classes="field-label")
-                with Horizontal():
+                with Horizontal(id="key-row"):
                     yield Input(
                         value=ex.get("api_key", ""),
                         placeholder="sk-… (leave blank for Ollama)",
