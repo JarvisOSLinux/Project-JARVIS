@@ -61,6 +61,8 @@ class ProviderPool(BaseLLMProvider):
             try:
                 result = entry.provider.chat(messages)
                 self.model = entry.provider.model
+                self.last_prompt_tokens = entry.provider.last_prompt_tokens
+                self.last_completion_tokens = entry.provider.last_completion_tokens
                 if entry.failure_count > 0:
                     logger.info(f"Provider '{entry.name}' recovered")
                     entry.failure_count = 0
