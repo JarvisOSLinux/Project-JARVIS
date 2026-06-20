@@ -3,7 +3,7 @@
 import subprocess
 import sys
 import time
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 
 from ...core.logger import get_logger
 from ..base import BaseLLMProvider
@@ -13,7 +13,8 @@ logger = get_logger(__name__)
 LLM_TIMEOUT = 60  # seconds — prevents indefinite hangs on cloud API
 
 _shared_clients: Dict[tuple, Any] = {}
-_autostart_attempted: Set[str] = set()  # hosts where we've already tried auto-start
+_last_autostart: Dict[str, float] = {}  # host -> epoch of last auto-start attempt
+AUTOSTART_COOLDOWN = 60.0  # minimum seconds between auto-start attempts per host
 
 
 def _is_ollama_up(base_url: str) -> bool:
@@ -265,19 +266,23 @@ class OllamaProvider(BaseLLMProvider):
         return self.base_url != "http://localhost:11434"
 
     def _maybe_autostart(self) -> bool:
-        """Try to start Ollama if this is a localhost provider and we haven't yet.
+        """Try to start Ollama if this is a localhost provider and the cooldown has elapsed.
 
-        Returns True if Ollama is now reachable.  Respects OLLAMA_AUTO_START.
+        Returns True if Ollama is now reachable.  Respects OLLAMA_AUTO_START and
+        AUTOSTART_COOLDOWN to avoid hammering the system on repeated failures.
         """
+        import time as _time
+
         from ...config import Config
 
         if self._is_remote:
             return False
         if not Config.OLLAMA_AUTO_START:
             return False
-        if self.base_url in _autostart_attempted:
+        now = _time.monotonic()
+        if now - _last_autostart.get(self.base_url, 0) < AUTOSTART_COOLDOWN:
             return False
-        _autostart_attempted.add(self.base_url)
+        _last_autostart[self.base_url] = now
         return _try_start_ollama(self.base_url)
 
     def is_available(self) -> bool:

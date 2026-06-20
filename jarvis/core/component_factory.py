@@ -71,6 +71,8 @@ class ComponentFactory:
                     )
                     entries.append(ProviderEntry(provider=provider, name=name))
                     logger.info(f"  [{len(entries)}] {name}: {ptype}/{model}")
+                    if ptype == "ollama":
+                        provider.is_available()  # proactive auto-start at startup
                 except Exception as e:
                     logger.warning(f"Failed to create provider '{name}': {e}")
 
