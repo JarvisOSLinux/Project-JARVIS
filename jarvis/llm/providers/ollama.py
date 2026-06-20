@@ -3,7 +3,7 @@
 import subprocess
 import sys
 import time
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 
 from ...core.logger import get_logger
 from ..base import BaseLLMProvider
@@ -13,7 +13,8 @@ logger = get_logger(__name__)
 LLM_TIMEOUT = 60  # seconds — prevents indefinite hangs on cloud API
 
 _shared_clients: Dict[tuple, Any] = {}
-_autostart_attempted: Set[str] = set()  # hosts where we've already tried auto-start
+_last_autostart: Dict[str, float] = {}
+AUTOSTART_COOLDOWN = 60.0
 
 
 def _is_ollama_up(base_url: str) -> bool:
@@ -130,6 +131,7 @@ class OllamaProvider(BaseLLMProvider):
     # -- BaseLLMProvider interface -------------------------------------------
 
     def chat(self, messages: List[Dict[str, str]]) -> str:
+        self._maybe_autostart()
         self._ensure_client()
 
         options = {}
@@ -180,27 +182,6 @@ class OllamaProvider(BaseLLMProvider):
                             )
                             raise
                 raise RuntimeError(f"model '{self.model}' not found (status code: 404)")
-
-            # Connection error to localhost — try auto-start once then retry
-            is_conn_err = any(
-                k in error_str
-                for k in ("connect", "refused", "unreachable", "network", "timeout")
-            )
-            if is_conn_err and not self._is_remote and self._maybe_autostart():
-                try:
-                    response = self._client.chat(**kwargs)
-                    text = self._extract_content(response)
-                    self.last_prompt_tokens = (
-                        getattr(response, "prompt_eval_count", 0) or 0
-                    )
-                    self.last_completion_tokens = (
-                        getattr(response, "eval_count", 0) or 0
-                    )
-                    return text
-                except Exception as retry_error:
-                    logger.error(f"Ollama chat error after auto-start: {retry_error}")
-                    raise
-
             logger.error(f"Ollama chat error: {e}")
             raise
 
@@ -264,25 +245,29 @@ class OllamaProvider(BaseLLMProvider):
     def _is_remote(self) -> bool:
         return self.base_url != "http://localhost:11434"
 
-    def _maybe_autostart(self) -> bool:
-        """Try to start Ollama if this is a localhost provider and we haven't yet.
+    def _maybe_autostart(self) -> None:
+        """Start Ollama if this is a localhost provider and it isn't running.
 
-        Returns True if Ollama is now reachable.  Respects OLLAMA_AUTO_START.
+        Rate-limited to one attempt per AUTOSTART_COOLDOWN seconds per host.
+        Controlled by OLLAMA_AUTO_START config (default true).
         """
+        import time as _time
+
         from ...config import Config
 
         if self._is_remote:
-            return False
+            return
         if not Config.OLLAMA_AUTO_START:
-            return False
-        if self.base_url in _autostart_attempted:
-            return False
-        _autostart_attempted.add(self.base_url)
-        return _try_start_ollama(self.base_url)
+            return
+        if _is_ollama_up(self.base_url):
+            return
+        now = _time.monotonic()
+        if now - _last_autostart.get(self.base_url, 0) < AUTOSTART_COOLDOWN:
+            return
+        _last_autostart[self.base_url] = now
+        _try_start_ollama(self.base_url)
 
     def is_available(self) -> bool:
-        if not self._is_remote and not _is_ollama_up(self.base_url):
-            self._maybe_autostart()
         self._ensure_client()
         try:
             self._client.list()
