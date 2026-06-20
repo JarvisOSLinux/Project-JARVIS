@@ -43,6 +43,7 @@ class Config:
 
     # Ollama-specific
     LLM_AUTO_PULL = os.getenv("LLM_AUTO_PULL", "false").lower() == "true"
+    OLLAMA_AUTO_START = os.getenv("OLLAMA_AUTO_START", "true").lower() == "true"
 
     # Sampling temperature for LLM responses (0.0 = deterministic, 1.0+ = creative)
     # Default 0.7 gives a balance of consistency and variety.

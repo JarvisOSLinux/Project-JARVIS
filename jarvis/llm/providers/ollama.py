@@ -1,6 +1,8 @@
 """Ollama LLM provider."""
 
+import subprocess
 import sys
+import time
 from typing import Any, Dict, List, Optional
 
 from ...core.logger import get_logger
@@ -11,6 +13,62 @@ logger = get_logger(__name__)
 LLM_TIMEOUT = 60  # seconds — prevents indefinite hangs on cloud API
 
 _shared_clients: Dict[tuple, Any] = {}
+_last_autostart: Dict[str, float] = {}
+AUTOSTART_COOLDOWN = 60.0
+
+
+def _is_ollama_up(base_url: str) -> bool:
+    """Return True if Ollama responds on base_url/api/tags within 2 s."""
+    import urllib.request
+
+    try:
+        urllib.request.urlopen(f"{base_url}/api/tags", timeout=2)
+        return True
+    except Exception:
+        return False
+
+
+def _try_start_ollama(base_url: str) -> bool:
+    """Start Ollama via systemd or direct spawn. Return True if it comes up."""
+    logger.info("Ollama not reachable — attempting auto-start")
+
+    # systemd --user first (most common for desktop installs), then system-wide
+    for cmd in (
+        ["systemctl", "--user", "start", "ollama"],
+        ["systemctl", "start", "ollama"],
+    ):
+        try:
+            subprocess.run(cmd, timeout=5, capture_output=True)
+        except Exception:
+            continue
+        for _ in range(3):
+            time.sleep(1)
+            if _is_ollama_up(base_url):
+                logger.info(f"Ollama started via: {' '.join(cmd)}")
+                return True
+
+    # Fall back to direct spawn
+    try:
+        subprocess.Popen(
+            ["ollama", "serve"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except FileNotFoundError:
+        logger.warning("ollama binary not found; cannot auto-start")
+        return False
+    except Exception as exc:
+        logger.warning(f"Failed to spawn ollama serve: {exc}")
+        return False
+
+    for _ in range(5):
+        time.sleep(1)
+        if _is_ollama_up(base_url):
+            logger.info("Ollama started via direct spawn")
+            return True
+
+    logger.warning("Ollama auto-start attempted but did not become ready in time")
+    return False
 
 
 def _get_shared_client(host: str, api_key: Optional[str]) -> Any:
@@ -73,6 +131,7 @@ class OllamaProvider(BaseLLMProvider):
     # -- BaseLLMProvider interface -------------------------------------------
 
     def chat(self, messages: List[Dict[str, str]]) -> str:
+        self._maybe_autostart()
         self._ensure_client()
 
         options = {}
@@ -185,6 +244,28 @@ class OllamaProvider(BaseLLMProvider):
     @property
     def _is_remote(self) -> bool:
         return self.base_url != "http://localhost:11434"
+
+    def _maybe_autostart(self) -> None:
+        """Start Ollama if this is a localhost provider and it isn't running.
+
+        Rate-limited to one attempt per AUTOSTART_COOLDOWN seconds per host.
+        Controlled by OLLAMA_AUTO_START config (default true).
+        """
+        import time as _time
+
+        from ...config import Config
+
+        if self._is_remote:
+            return
+        if not Config.OLLAMA_AUTO_START:
+            return
+        if _is_ollama_up(self.base_url):
+            return
+        now = _time.monotonic()
+        if now - _last_autostart.get(self.base_url, 0) < AUTOSTART_COOLDOWN:
+            return
+        _last_autostart[self.base_url] = now
+        _try_start_ollama(self.base_url)
 
     def is_available(self) -> bool:
         self._ensure_client()
