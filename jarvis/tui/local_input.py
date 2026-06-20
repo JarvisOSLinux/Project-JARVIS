@@ -57,6 +57,10 @@ def handle_local_input(app: Any, text: str, bindings: Any) -> bool:
         _handle_model(app, text)
         return True
 
+    if low == "/settings":
+        app._open_config("settings")
+        return True
+
     return False
 
 
@@ -132,7 +136,7 @@ def _handle_providers(app: Any, text: str) -> None:
     """Route /providers subcommands."""
     parts = text.strip().split(maxsplit=1)
     if len(parts) == 1:
-        _show_providers(app)
+        app._open_config("providers")
         return
 
     rest = parts[1].strip()
@@ -292,6 +296,29 @@ def _handle_model(app: Any, text: str) -> None:
         update_status(app)
     except Exception as e:
         app._append_log(f"[red]Error setting model: {e}[/red]")
+
+
+def _apply_in_memory(key: str, value: str) -> None:
+    """Apply a setting change to the live Config object with proper type coercion."""
+    from ..config import Config
+
+    bool_keys = {"RESET_HISTORY_AFTER_RESPONSE"}
+    int_keys = {
+        "MCP_BUFFER_SIZE",
+        "RAG_TOP_K",
+        "MAX_GOALS_IN_CONTEXT",
+        "CONFIRMATION_TIMEOUT",
+    }
+    float_keys = {"RAG_MIN_SCORE"}
+
+    if key in bool_keys:
+        setattr(Config, key, value.lower() == "true")
+    elif key in int_keys:
+        setattr(Config, key, int(value))
+    elif key in float_keys:
+        setattr(Config, key, float(value))
+    else:
+        setattr(Config, key, value)
 
 
 def export_transcript_to_disk(app: Any, filename: Optional[str]) -> None:

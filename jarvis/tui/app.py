@@ -68,12 +68,12 @@ from . import actions as tui_actions
 from . import lifecycle as tui_lifecycle
 from . import output as tui_output
 from . import status_bar as tui_status_bar
+from .config_modal import ConfigModal, ConfigModalResult
 from .confirm_modal import ConfirmModal
 from .local_input import export_transcript_to_disk, handle_local_input
 from .session_sidebar import on_session_selected as handle_session_selected
 from .session_sidebar import refresh_sidebar
 from .session_sidebar import schedule_sidebar_refresh as queue_sidebar_refresh
-from .settings_modal import SettingsModal
 
 logger = get_logger(__name__)
 
@@ -155,8 +155,8 @@ class JarvisTUI(App):
         Binding("ctrl+d", "delete_selected_session", "Delete", show=True),
         Binding("ctrl+l", "focus_chat", "Log", show=True),
         Binding("ctrl+i", "focus_input", "Input", show=True),
-        Binding("f1", "help", "Help", show=True),
-        Binding("ctrl+comma", "settings", "Settings", show=True),
+        Binding("f1", "help", "Help", show=True, priority=True),
+        Binding("f2", "settings", "Settings", show=True, priority=True),
         Binding("ctrl+shift+c", "clear_transcript", "Clear log", show=False),
         Binding("ctrl+shift+e", "export_transcript", "Export", show=False),
     ]
@@ -315,7 +315,8 @@ class JarvisTUI(App):
 
     def action_help(self) -> None:
         """Open the help modal (Esc / F1 closes while help is focused)."""
-        tui_actions.open_help(self, JarvisTUI.BINDINGS)
+        if len(self.screen_stack) <= 1:
+            tui_actions.open_help(self, JarvisTUI.BINDINGS)
 
     def action_clear_transcript(self) -> None:
         """Clear the RichLog and export buffer only (does not touch contextor)."""
@@ -326,7 +327,32 @@ class JarvisTUI(App):
         tui_actions.export_transcript(self)
 
     def action_settings(self) -> None:
-        self.push_screen(SettingsModal())
+        if len(self.screen_stack) <= 1:
+            self._open_config("settings")
+
+    def _open_config(self, tab: str = "settings") -> None:
+        from .local_input import _apply_in_memory
+
+        def _on_config(result: ConfigModalResult) -> None:
+            if result.settings_changes:
+                from ..cli import _update_env_setting
+
+                applied = []
+                for key, value in result.settings_changes.items():
+                    try:
+                        _update_env_setting(key, value)
+                        _apply_in_memory(key, value)
+                        applied.append(f"{key}={value}")
+                    except Exception as e:
+                        self._append_log(f"[red]Error setting {key}: {e}[/red]")
+                if applied:
+                    self._append_log(
+                        f"[green]Settings updated: {', '.join(applied)}[/green]"
+                    )
+            if result.providers_changed:
+                self._append_log("[green]Provider config updated.[/green]")
+
+        self.push_screen(ConfigModal(initial_tab=tab), _on_config)
 
     async def _tui_confirm(self, request_id: str, tool_names: list[str]) -> bool:
         return await self.push_screen_wait(ConfirmModal(request_id, tool_names))

@@ -50,6 +50,7 @@ TUI_LOCAL_SLASH_HELP: tuple[tuple[str, str], ...] = (
         "Update a provider field directly (power-user flags).",
     ),
     ("/model [name]", "Show or switch the current LLM model."),
+    ("/settings", "Open settings editor (runtime config)."),
 )
 
 # Keys that are not represented as App BINDINGS but belong in the cheat sheet.
