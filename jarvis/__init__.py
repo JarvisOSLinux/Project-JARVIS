@@ -7,7 +7,7 @@ License: GPL-3.0
 
 __version__ = "1.0.0"
 __author__ = "YakupAtahanov"
-__email__ = "your.email@example.com"
+__email__ = "yakup.atahanow.b@gmail.com"
 __license__ = "GPL-3.0"
 __description__ = "AI-Native Voice Assistant with Concurrent Task Dispatch"
 
