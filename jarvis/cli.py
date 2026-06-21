@@ -458,6 +458,13 @@ def show_usage() -> None:
     print("  jarvis llm-config             # Show current LLM configuration")
 
 
+def _has_llm_configured() -> bool:
+    """True if at least one LLM source is configured (pool or legacy)."""
+    if Config.LLM_MODEL and str(Config.LLM_MODEL).strip():
+        return True
+    return bool(list_providers())
+
+
 def main() -> None:
     """Main CLI entry point."""
     from .main import Jarvis
@@ -466,10 +473,10 @@ def main() -> None:
     if len(sys.argv) == 1 or (len(sys.argv) > 1 and sys.argv[1] == "run"):
         if len(sys.argv) > 1:
             sys.argv.pop(1)
-        if not Config.LLM_MODEL or not str(Config.LLM_MODEL).strip():
-            print("Error: LLM model not configured.")
-            print("  Run: jarvis model <model-name>")
-            print("  Example: jarvis model qwen3:4b")
+        if not _has_llm_configured():
+            print("Error: No LLM configured.")
+            print("  Quick start: jarvis providers add --type ollama --model qwen3:4b")
+            print("  Or set a model: jarvis model qwen3:4b")
             sys.exit(1)
         print("Starting JARVIS (dual input: voice + socket)...")
         print(
@@ -496,8 +503,9 @@ def main() -> None:
         return
 
     if command == "chat":
-        if not Config.LLM_MODEL or not str(Config.LLM_MODEL).strip():
-            print("Error: LLM model not configured. Run: jarvis model <model-name>")
+        if not _has_llm_configured():
+            print("Error: No LLM configured.")
+            print("  Quick start: jarvis providers add --type ollama --model qwen3:4b")
             sys.exit(1)
         print("Starting JARVIS interactive chat...")
         print("Type your messages. Press Ctrl+C to exit.\n")
@@ -512,8 +520,9 @@ def main() -> None:
             sys.exit(1)
 
     elif command == "tui":
-        if not Config.LLM_MODEL or not str(Config.LLM_MODEL).strip():
-            print("Error: LLM model not configured. Run: jarvis model <model-name>")
+        if not _has_llm_configured():
+            print("Error: No LLM configured.")
+            print("  Quick start: jarvis providers add --type ollama --model qwen3:4b")
             sys.exit(1)
         try:
             from .tui import run_tui
