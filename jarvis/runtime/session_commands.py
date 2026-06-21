@@ -119,11 +119,11 @@ def handle_slash_command(app: Any, text: str) -> bool:
             if window > 0:
                 pct = int(prompt_toks / window * 100)
                 lines.append(f"  Context window:    {window} ({pct}% used)")
-        buf = getattr(jarvis, "mcp_buffer", {})
-        if buf:
-            lines.append(f"  MCP buffer:        {len(buf)} server(s) cached")
-            for sid, entry in buf.items():
-                lines.append(f"    {sid}  (used {entry['count']}x)")
+        dispatch_docs = getattr(jarvis, "mcp_dispatch_docs", {})
+        if dispatch_docs:
+            lines.append(f"  Active server docs: {len(dispatch_docs)} server(s)")
+            for sid in dispatch_docs:
+                lines.append(f"    {sid}")
         session_reply(app, "\n".join(lines))
         return True
 

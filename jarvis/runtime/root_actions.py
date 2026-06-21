@@ -90,19 +90,8 @@ async def _handle_get_server_docs(
         server_id, tools, error=tools_error, configurable_props=configurable_props
     )
 
-    # Cache successful server docs in the MCP buffer for future turns.
-    if tools and hasattr(app, "mcp_buffer"):
-        buf = app.mcp_buffer
-        if server_id in buf:
-            buf[server_id]["count"] += 1
-            buf[server_id]["docs"] = docs_block
-        else:
-            max_size = getattr(Config, "MCP_BUFFER_SIZE", 5)
-            if len(buf) >= max_size:
-                # Evict lowest-frequency entry.
-                evict = min(buf, key=lambda k: buf[k]["count"])
-                del buf[evict]
-            buf[server_id] = {"docs": docs_block, "count": 1}
+    if tools and hasattr(app, "mcp_dispatch_docs"):
+        app.mcp_dispatch_docs[server_id] = docs_block
 
     context = build_root_context(app, logger)
     context += "\n" + docs_block
@@ -377,6 +366,8 @@ async def act_on_root_response(
         apply_goal_updates(app, parsed.get("goal_updates", []))
         app.output_manager.handle_response({"output": output})
         persist_assistant_turn(app, output)
+        if hasattr(app, "mcp_dispatch_docs"):
+            app.mcp_dispatch_docs.clear()
         dismissed = app.goals.dismiss_completed()
         if dismissed:
             logger.info(f"JARVIS: Dismissed {len(dismissed)} completed goal(s)")

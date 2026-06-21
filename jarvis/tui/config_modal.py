@@ -60,13 +60,6 @@ _SETTINGS: List[_SettingDef] = [
         hint="Auto-deny after this many seconds",
     ),
     _SettingDef(
-        "MCP_BUFFER_SIZE",
-        "MCP buffer size",
-        "Memory",
-        "int",
-        hint="Recently-used server docs kept in context",
-    ),
-    _SettingDef(
         "RAG_TOP_K",
         "RAG top-k",
         "Memory",

@@ -100,8 +100,8 @@ class Jarvis:
 
         # PIDs from the most recently dispatched task batch (used by wait action).
         self._pending_dispatch_pids: list = []
-        # Session-scoped MCP server doc buffer: {server_id: {"docs": str, "count": int}}
-        self.mcp_buffer: dict = {}
+        # Server docs scoped to the active dispatch chain — cleared on respond.
+        self.mcp_dispatch_docs: dict = {}
         # Set by the TUI layer to open the server config modal before setup runs.
         # Signature: async (server_id, server_name, server_desc, props, saved) -> ConfigModalResult
         self.config_modal_callback: Any = None

@@ -304,7 +304,6 @@ def _apply_in_memory(key: str, value: str) -> None:
 
     bool_keys = {"RESET_HISTORY_AFTER_RESPONSE"}
     int_keys = {
-        "MCP_BUFFER_SIZE",
         "RAG_TOP_K",
         "MAX_GOALS_IN_CONTEXT",
         "CONFIRMATION_TIMEOUT",
