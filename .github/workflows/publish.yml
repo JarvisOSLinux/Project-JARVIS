@@ -48,8 +48,6 @@ jobs:
     name: Publish to PyPI
     needs: build
     runs-on: ubuntu-latest
-    # Only runs if PYPI_API_TOKEN secret is configured
-    if: ${{ secrets.PYPI_API_TOKEN != '' }}
     environment:
       name: pypi
       url: https://pypi.org/project/jarvis-ai/
