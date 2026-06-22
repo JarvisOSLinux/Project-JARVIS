@@ -16,8 +16,8 @@ def update_status(app: Any) -> None:
     else:
         parts.append("session: (none)")
 
-    model = getattr(Config, "LLM_MODEL", None) or "(unset)"
-    provider = getattr(Config, "LLM_PROVIDER", "?")
+    model = "(unset)"
+    provider = "(none)"
 
     if app.jarvis is not None and hasattr(app.jarvis, "llm"):
         pool = getattr(app.jarvis.llm, "provider", None)

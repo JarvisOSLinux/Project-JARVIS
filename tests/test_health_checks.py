@@ -184,8 +184,6 @@ class TestConfig:
     def test_config_has_expected_attributes(self):
         from jarvis.config import Config
 
-        assert hasattr(Config, "LLM_PROVIDER")
-        assert hasattr(Config, "LLM_MODEL")
         assert hasattr(Config, "OUTPUT_MODE")
         assert hasattr(Config, "LOG_LEVEL")
         assert hasattr(Config, "DISPATCH_TIMEOUT")

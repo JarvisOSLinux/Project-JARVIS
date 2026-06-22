@@ -160,74 +160,13 @@ def get_sudo_status() -> None:
         print("  Run 'jarvis sudo enable' or 'jarvis sudo disable' to sync")
 
 
-def set_llm_provider(provider: str) -> None:
-    """Set LLM provider (ollama or api)."""
-    provider = provider.lower().strip()
-    if provider not in ["ollama", "api"]:
-        print(f"Error: Invalid provider '{provider}'. Must be 'ollama' or 'api'")
-        sys.exit(1)
-
-    _update_env_setting("LLM_PROVIDER", provider)
-    print(f"LLM provider set to: {provider}")
-
-    if provider == "api":
-        print("  Note: Set URL and key with 'jarvis llm-url' and 'jarvis api-key'")
-
-
-def set_llm_model(model_name: str) -> None:
-    """
-    Update LLM_MODEL in .env file.
-
-    Args:
-        model_name: Model name (e.g., 'qwen2.5:7b', 'gpt-4')
-    """
-    if not model_name or not model_name.strip():
-        print("Error: Model name cannot be empty")
-        sys.exit(1)
-
-    model_name = model_name.strip()
-    _update_env_setting("LLM_MODEL", model_name)
-    print(f"LLM model set to: {model_name}")
-
-
-def get_llm_model() -> str:
-    """Get current LLM model from config."""
-    return Config.LLM_MODEL or "(not set)"
-
-
-def set_llm_url(url: str) -> None:
-    """Set LLM base URL (used by all providers)."""
-    if not url or not url.strip():
-        print("Error: URL cannot be empty")
-        sys.exit(1)
-
-    _update_env_setting("LLM_URL", url.strip())
-    print(f"LLM URL set to: {url.strip()}")
-
-
-def set_api_key(key: str) -> None:
-    """Set API key (used by all providers that require authentication)."""
-    if not key or not key.strip():
-        print("Error: API key cannot be empty")
-        sys.exit(1)
-
-    _update_env_setting("LLM_API_KEY", key.strip())
-    print(f"API key set (length: {len(key.strip())} chars)")
-
-
-def show_llm_config() -> None:
-    """Show current LLM configuration."""
-    print("LLM Configuration:")
-    print(f"  Provider: {Config.LLM_PROVIDER}")
-    print(f"  Model: {Config.LLM_MODEL or '(not set)'}")
-    print(f"  URL: {Config.LLM_URL}")
-    print(f"  API Key: {'set' if Config.LLM_API_KEY else '(not set)'}")
-
-    if Config.LLM_PROVIDER == "ollama":
-        print(f"  Auto-pull: {'enabled' if Config.LLM_AUTO_PULL else 'disabled'}")
-
-    print(f"  Dispatch binary: {Config.DISPATCH_BINARY}")
-    print(f"  Dispatch timeout: {Config.DISPATCH_TIMEOUT}s")
+def _legacy_redirect(old_cmd: str) -> None:
+    """Print a migration hint for removed legacy commands."""
+    print(f"'{old_cmd}' has been removed. Use the provider pool instead:")
+    print("  jarvis providers                                    # List providers")
+    print("  jarvis providers add --type ollama --model <model>  # Add provider")
+    print("  jarvis providers edit <name> --model <model>        # Update a field")
+    sys.exit(1)
 
 
 def _update_env_setting(key: str, value: str) -> None:
@@ -296,8 +235,7 @@ def _cmd_providers() -> None:
     if len(sys.argv) == 2:
         providers = list_providers()
         if not providers:
-            print("No providers configured in providers.json.")
-            print(f"  Using legacy config: {Config.LLM_PROVIDER} / {Config.LLM_MODEL}")
+            print("No providers configured.")
             print()
             print("Add one with:")
             print("  jarvis providers add --type ollama --model qwen3:4b")
@@ -447,21 +385,13 @@ def show_usage() -> None:
     print("  jarvis providers remove <name>                      # Remove provider")
     print("  jarvis providers move <name> <position>             # Reorder priority")
     print("  jarvis providers edit <name> --model <model>        # Update a field")
-    print()
-    print("LLM Configuration (legacy — prefer 'jarvis providers'):")
-    print("  jarvis provider <ollama|api>  # Set LLM provider")
-    print("  jarvis model                  # Show current LLM model")
-    print("  jarvis model <model_name>     # Set LLM model")
-    print("  jarvis llm-url <url>          # Set LLM base URL")
-    print("  jarvis api-key <key>          # Set API key")
-    print("  jarvis auto-pull on/off       # Enable/disable auto-pull missing models")
-    print("  jarvis llm-config             # Show current LLM configuration")
+    print(
+        "  jarvis auto-pull on/off                             # Auto-pull missing models"
+    )
 
 
 def _has_llm_configured() -> bool:
-    """True if at least one LLM source is configured (pool or legacy)."""
-    if Config.LLM_MODEL and str(Config.LLM_MODEL).strip():
-        return True
+    """True if at least one provider is configured."""
     return bool(list_providers())
 
 
@@ -592,21 +522,7 @@ def main() -> None:
             sys.exit(1)
 
     elif command == "model":
-        if len(sys.argv) == 2:
-            model = get_llm_model()
-            print(f"Current LLM model: {model}")
-        elif len(sys.argv) == 3:
-            if sys.argv[2] in ["-n", "--name", "set"]:
-                print("Error: Model name required")
-                print("Usage: jarvis model <model_name>")
-                sys.exit(1)
-            else:
-                set_llm_model(sys.argv[2])
-        elif len(sys.argv) == 4 and sys.argv[2] in ["-n", "--name", "set"]:
-            set_llm_model(sys.argv[3])
-        else:
-            print("Usage: jarvis model [<model_name>]")
-            sys.exit(1)
+        _legacy_redirect("jarvis model")
 
     elif command == "ask":
         if len(sys.argv) < 3:
@@ -618,27 +534,8 @@ def main() -> None:
         jarvis = Jarvis(text_mode=True)
         jarvis.ask(message)
 
-    elif command == "provider":
-        if len(sys.argv) < 3:
-            print(f"Current provider: {Config.LLM_PROVIDER}")
-            print("Usage: jarvis provider <ollama|api>")
-            sys.exit(1)
-        set_llm_provider(sys.argv[2])
-
-    elif command == "llm-url":
-        if len(sys.argv) < 3:
-            print(f"Current LLM URL: {Config.LLM_URL}")
-            sys.exit(1)
-        set_llm_url(sys.argv[2])
-
-    elif command == "api-key":
-        if len(sys.argv) < 3:
-            print(f"API key: {'set' if Config.LLM_API_KEY else '(not set)'}")
-            sys.exit(1)
-        set_api_key(sys.argv[2])
-
-    elif command == "llm-config":
-        show_llm_config()
+    elif command in ("provider", "llm-url", "api-key", "llm-config"):
+        _legacy_redirect(f"jarvis {command}")
 
     elif command == "providers":
         _cmd_providers()

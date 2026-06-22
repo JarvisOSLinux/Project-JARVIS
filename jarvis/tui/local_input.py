@@ -66,8 +66,8 @@ def handle_local_input(app: Any, text: str, bindings: Any) -> bool:
 
 def _show_status(app: Any) -> None:
     """Display current provider, model, and session info."""
-    model = getattr(Config, "LLM_MODEL", None) or "(unset)"
-    provider_name = getattr(Config, "LLM_PROVIDER", "?")
+    model = "(unset)"
+    provider_name = "(none)"
 
     pool = None
     if app.jarvis is not None and hasattr(app.jarvis, "llm"):
@@ -103,7 +103,7 @@ def _show_providers(app: Any) -> None:
     if not providers:
         app._append_log(
             "[dim]No providers configured. "
-            f"Using legacy: {Config.LLM_PROVIDER} / {Config.LLM_MODEL}[/dim]"
+            "Use /providers add or: jarvis providers add --type ollama --model qwen3:4b[/dim]"
         )
         return
 
@@ -275,7 +275,7 @@ def _handle_model(app: Any, text: str) -> None:
     """Show or switch the current model."""
     parts = text.strip().split(maxsplit=1)
     if len(parts) == 1:
-        model = getattr(Config, "LLM_MODEL", None) or "(unset)"
+        model = "(unset)"
         pool = None
         if app.jarvis is not None and hasattr(app.jarvis, "llm"):
             pool = getattr(app.jarvis.llm, "provider", None)
@@ -284,18 +284,9 @@ def _handle_model(app: Any, text: str) -> None:
         app._append_log(f"[bold cyan]Model:[/bold cyan] {model}")
         return
 
-    new_model = parts[1].strip()
-    from .status_bar import update_status
-
-    try:
-        from ..cli import _update_env_setting
-
-        _update_env_setting("LLM_MODEL", new_model)
-        app._append_log(f"[green]Model set to: {new_model}[/green]")
-        app._append_log("[dim]Note: takes effect on next LLM request or restart.[/dim]")
-        update_status(app)
-    except Exception as e:
-        app._append_log(f"[red]Error setting model: {e}[/red]")
+    app._append_log(
+        "[yellow]Use /providers edit <name> --model <model> to change a provider's model.[/yellow]"
+    )
 
 
 def _apply_in_memory(key: str, value: str) -> None:
@@ -352,7 +343,11 @@ def export_transcript_to_disk(app: Any, filename: Optional[str]) -> None:
         return
 
     sid2 = "none"
-    model = getattr(Config, "LLM_MODEL", None) or "(unset)"
+    model = "(unset)"
+    if app.jarvis is not None and hasattr(app.jarvis, "llm"):
+        pool = getattr(app.jarvis.llm, "provider", None)
+        if pool is not None:
+            model = getattr(pool, "model", model)
     if app.jarvis is not None and app.jarvis.sessions.current:
         sid2 = app.jarvis.sessions.current.id
 

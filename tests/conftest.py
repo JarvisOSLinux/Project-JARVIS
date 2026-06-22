@@ -14,9 +14,7 @@ import pytest
 def temp_env_file():
     """Create a temporary .env file for testing"""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".env", delete=False) as f:
-        f.write("""LLM_MODEL=test-model
-LLM_PROVIDER=ollama
-DISPATCH_TIMEOUT=30
+        f.write("""DISPATCH_TIMEOUT=30
 OUTPUT_MODE=text
 """)
         f.flush()
@@ -28,8 +26,6 @@ OUTPUT_MODE=text
 def mock_config():
     """Mock configuration for testing"""
     return {
-        "LLM_MODEL": "test-model",
-        "LLM_PROVIDER": "ollama",
         "DISPATCH_TIMEOUT": 60,
         "OUTPUT_MODE": "text",
         "LOG_LEVEL": "INFO",

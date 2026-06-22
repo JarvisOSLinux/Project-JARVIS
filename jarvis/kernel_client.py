@@ -501,7 +501,7 @@ class KernelClient:
 
 def provider_from_config(provider_name: str) -> int:
     """
-    Convert a JARVIS Config.LLM_PROVIDER string to a JARVIS_PROVIDER_* int.
+    Convert a provider type name to a JARVIS_PROVIDER_* int.
     """
     mapping = {
         "ollama": PROVIDER_OLLAMA,

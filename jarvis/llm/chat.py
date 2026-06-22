@@ -207,7 +207,7 @@ class LLM:
                     "LLM: Cannot reach Ollama — is it running?\n"
                     f"  Expected at: {getattr(self.provider, 'base_url', 'http://localhost:11434')}\n"
                     "  Start Ollama with: ollama serve\n"
-                    "  Or set LLM_URL in ~/.config/jarvis/jarvis.conf"
+                    "  Or check your provider config: jarvis providers"
                 )
             else:
                 logger.error(f"LLM [{self._mode}] provider error: {e}")
