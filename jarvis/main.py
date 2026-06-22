@@ -98,8 +98,6 @@ class Jarvis:
         self.voice_manager = self.components.get("voice_manager")
         self._output_clients: List[asyncio.StreamWriter] = []
 
-        # PIDs from the most recently dispatched task batch (used by wait action).
-        self._pending_dispatch_pids: list = []
         # Server docs scoped to the active dispatch chain — cleared on respond.
         self.mcp_dispatch_docs: dict = {}
         # Set by the TUI layer to open the server config modal before setup runs.
