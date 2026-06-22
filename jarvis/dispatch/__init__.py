@@ -1,9 +1,18 @@
 """
-Dispatch subsystem for JARVIS.
+Dispatch subsystem — Python interface layer for the Rust dispatch engine.
 
-Handles concurrent task execution through the dispatch binary,
-goal tracking for user requests, and async event merging for
-dual-input (user messages + dispatch signals).
+This package is NOT the orchestrator itself. The Rust ``dispatch`` binary
+(a separate repo/crate) is the execution engine that spawns MCP tool calls
+in parallel, tracks PIDs, and fires signals (INIT/EXIT/REMIND/WAIT/KILL).
+
+This Python package wraps that binary:
+
+- ``adapter.py``       — subprocess lifecycle, MCP JSON-RPC over stdio
+- ``discovery.py``     — semantic + keyword tool search via dmcp
+- ``dmcp_registry.py`` — dmcp CLI wrappers (install, tools, config)
+- ``goal_manager.py``  — tracks user goals and links them to dispatch PIDs
+- ``event_merger.py``  — merges voice/CLI/socket/dispatch events
+- ``transport.py``     — MCP transport type resolution
 """
 
 from .adapter import DispatchAdapter

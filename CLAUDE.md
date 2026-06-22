@@ -27,17 +27,17 @@ jarvisos-app                — Desktop GUI (Rust + CXX-Qt + Qt6/QML)
 jarvisos                    — AI-native Linux distro (Arch base + custom kernel)
 ```
 
-### Two-Dispatch Clarification
+### Dispatch: Python wrapper vs Rust engine
 
-`jarvis/dispatch/` (Python) is the **interface layer** — wraps the Rust
-`dispatch` binary, manages subprocess lifecycle, translates Python calls into
-MCP JSON-RPC, surfaces signals back to the event loop.
+Two things share the name "dispatch":
 
-The standalone `dispatch` repo (Rust/Tokio) is the **execution engine** — spawns
-MCP tool calls in parallel, tracks PIDs, fires INIT/EXIT/REMIND/WAIT/KILL
-signals, only wakes the LLM when there is something to reason about.
+| Layer | Location | Language | Role |
+|-------|----------|----------|------|
+| Interface | `jarvis/dispatch/` | Python | Wraps the Rust binary, translates Python calls to MCP JSON-RPC, surfaces signals to the event loop |
+| Engine | `deps/rust/dispatch` (submodule) | Rust/Tokio | Spawns MCP tool calls in parallel, tracks PIDs, fires INIT/EXIT/REMIND/WAIT/KILL signals |
 
-Python dispatch wraps Rust dispatch.
+One-liner: **Python dispatch wraps Rust dispatch.** The Python package
+docstring (`jarvis/dispatch/__init__.py`) documents this boundary.
 
 ---
 
