@@ -118,8 +118,7 @@ class TestComponentFactoryIntegration:
 
             components = ComponentFactory.create_all_components(text_mode=True)
 
-            # Output manager gets TTS instance
-            mock_om.assert_called_once_with(tts_instance)
+            mock_om.assert_called_once_with(tts_instance, suppress_stdout=False)
 
 
 @pytest.mark.integration

@@ -33,14 +33,12 @@ class TestConfigurationLoading:
         with patch.dict(
             os.environ,
             {
-                "LLM_MODEL": "test-model",
                 "DISPATCH_TIMEOUT": "45",
                 "OUTPUT_MODE": "voice",
                 "LOG_LEVEL": "DEBUG",
             },
         ):
             Config = _reload_config()
-            assert Config.LLM_MODEL == "test-model"
             assert Config.DISPATCH_TIMEOUT == 45
             assert Config.OUTPUT_MODE == "voice"
             assert Config.LOG_LEVEL == "DEBUG"
@@ -49,7 +47,6 @@ class TestConfigurationLoading:
         """Test configuration uses defaults when environment variables not set."""
         from jarvis.config import Config
 
-        assert hasattr(Config, "LLM_PROVIDER")
         assert hasattr(Config, "OUTPUT_MODE")
         assert hasattr(Config, "LOG_LEVEL")
         assert hasattr(Config, "DISPATCH_BINARY")
@@ -62,13 +59,11 @@ class TestConfigurationLoading:
         with patch.dict(
             os.environ,
             {
-                "LLM_MODEL": "override-model",
                 "OUTPUT_MODE": "text",
                 "DISPATCH_TIMEOUT": "120",
             },
         ):
             Config = _reload_config()
-            assert Config.LLM_MODEL == "override-model"
             assert Config.OUTPUT_MODE == "text"
             assert Config.DISPATCH_TIMEOUT == 120
 
@@ -206,7 +201,6 @@ class TestConfigurationValidation:
         """Test handling when required configuration is missing."""
         from jarvis.config import Config
 
-        assert hasattr(Config, "LLM_MODEL")
         assert hasattr(Config, "DISPATCH_BINARY")
         assert Config.DISPATCH_TIMEOUT > 0
 
@@ -312,10 +306,8 @@ class TestConfigurationPersistence:
         with patch.dict(
             os.environ,
             {
-                "LLM_MODEL": "persistence-test",
                 "DISPATCH_TIMEOUT": "123",
             },
         ):
             Config = _reload_config()
-            assert Config.LLM_MODEL == "persistence-test"
             assert Config.DISPATCH_TIMEOUT == 123

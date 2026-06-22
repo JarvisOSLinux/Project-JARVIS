@@ -103,8 +103,8 @@ Slack tokens, and months of complete chat histories.
 - Chat history lives in `~/.jarvis/` (local, not served).
 - Output socket broadcasts only to processes that explicitly connect.
 
-- Status: ✅ No default cloud exposure · ⚠️ Users choosing `LLM_PROVIDER=api`
-  must protect their own `.env`
+- Status: ✅ No default cloud exposure · ⚠️ Users adding API providers
+  must protect their `providers.json` (API keys stored there)
 
 ### Root / Privileged Execution
 
@@ -209,7 +209,7 @@ into future LLM contexts through RAG retrieval.
 |---|---|---|
 | `CONFIRMATION_MODE` | `smart` | `allow_all` disables all tool confirmation |
 | `JARVIS_SUDO_ENABLED` | `false` | `true` grants shell access to privileged commands |
-| `LLM_PROVIDER` | `ollama` | `api` requires protecting API keys in `.env` |
+| `providers.json` | (empty) | API providers store keys in this file |
 | `NOTIFICATION_SILENT` | `false` | `true` suppresses desktop confirmation UI |
 | `DATA_CONSENT` | `true` | Controls proactive vs explicit memory only |
 

@@ -32,15 +32,6 @@ class Config:
         os.path.join(MODELS_DIR, "vosk", "vosk-model-small-en-us-0.15"),
     )
 
-    # LLM Configuration
-    LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama")  # "ollama" or "api"
-    LLM_MODEL = os.getenv("LLM_MODEL")
-
-    # Unified LLM connection settings (used by all providers)
-    LLM_URL = os.getenv("LLM_URL", "http://localhost:11434")
-    LLM_API_KEY = os.getenv("LLM_API_KEY")
-    LLM_API_HEADERS = os.getenv("LLM_API_HEADERS")
-
     # Ollama-specific
     LLM_AUTO_PULL = os.getenv("LLM_AUTO_PULL", "false").lower() == "true"
     OLLAMA_AUTO_START = os.getenv("OLLAMA_AUTO_START", "true").lower() == "true"

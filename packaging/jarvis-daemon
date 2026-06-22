@@ -69,11 +69,6 @@ class JarvisDaemon:
             # Setup environment
             self.setup_environment()
 
-            # Check LLM model is configured (required)
-            if not Config.LLM_MODEL or not str(Config.LLM_MODEL).strip():
-                self.logger.error("LLM_MODEL not configured. Configure model before starting.")
-                return 1
-
             # Initialize JARVIS
             self.logger.info("Initializing JARVIS...")
             self.jarvis = Jarvis()

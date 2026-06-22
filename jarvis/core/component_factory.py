@@ -76,50 +76,12 @@ class ComponentFactory:
 
             if entries:
                 return ProviderPool(entries)
-            logger.warning("No valid providers in providers.json, falling back to env")
 
-        provider_type = Config.LLM_PROVIDER.lower()
-        kwargs = {}
-        if provider_type == "ollama":
-            kwargs["base_url"] = Config.LLM_URL
-            kwargs["api_key"] = Config.LLM_API_KEY
-            kwargs["auto_pull"] = getattr(Config, "LLM_AUTO_PULL", False)
-            kwargs["temperature"] = getattr(Config, "LLM_TEMPERATURE", 0.7)
-            kwargs["strict_json"] = getattr(Config, "LLM_STRICT_JSON", False)
-            llm_think = getattr(Config, "LLM_THINK", None)
-            if llm_think is not None:
-                kwargs["think"] = llm_think
-        elif provider_type == "api":
-            if not Config.LLM_URL:
-                raise ValueError("LLM_URL must be set when using API provider")
-            if not Config.LLM_API_KEY:
-                raise ValueError("LLM_API_KEY must be set when using API provider")
-            kwargs["api_url"] = Config.LLM_URL
-            kwargs["api_key"] = Config.LLM_API_KEY
-            if Config.LLM_API_HEADERS:
-                try:
-                    kwargs["headers"] = json.loads(Config.LLM_API_HEADERS)
-                except json.JSONDecodeError:
-                    logger.warning("Invalid LLM_API_HEADERS JSON, ignoring")
-
-        provider = create_llm_provider(
-            provider=provider_type,
-            model=Config.LLM_MODEL,
-            **kwargs,
+        raise RuntimeError(
+            "No LLM providers configured.\n"
+            "  Add one with: jarvis providers add --type ollama --model qwen3:4b\n"
+            "  Or in the TUI: /providers add"
         )
-
-        if provider_type == "ollama":
-            if not provider.is_available():
-                logger.warning("Ollama provider configured but not available.")
-            else:
-                logger.info(f"Checking if model '{Config.LLM_MODEL}' is available...")
-                if not provider.ensure_model():
-                    raise RuntimeError(
-                        f"Model '{Config.LLM_MODEL}' is not available. "
-                        "Please install it or enable auto-pull."
-                    )
-
-        return ProviderPool([ProviderEntry(provider=provider, name=provider_type)])
 
     @staticmethod
     def create_llm() -> LLM:
@@ -438,8 +400,11 @@ class ComponentFactory:
         # Report active LLM provider to kernel sysfs
         kernel_client = components["kernel_client"]
         if kernel_client.available:
-            k_provider = provider_from_config(Config.LLM_PROVIDER)
-            kernel_client.report_provider(k_provider, Config.LLM_MODEL)
+            pool = components["llm"].provider
+            pname = pool.active_provider_name or "unknown"
+            model = getattr(pool, "model", "") or ""
+            k_provider = provider_from_config(pname)
+            kernel_client.report_provider(k_provider, model)
 
         logger.info("Initiations Complete!")
         return components

@@ -21,7 +21,6 @@ class TestConfigDirect:
     @patch.dict(
         os.environ,
         {
-            "LLM_MODEL": "test-model",
             "TTS_MODEL_ONNX": "test.onnx",
             "TTS_MODEL_JSON": "test.json",
             "DISPATCH_TIMEOUT": "60",
@@ -36,7 +35,6 @@ class TestConfigDirect:
         importlib.reload(jarvis.config)
         Config = jarvis.config.Config
 
-        assert Config.LLM_MODEL == "test-model"
         assert Config.TTS_MODEL_ONNX == "test.onnx"
         assert Config.TTS_MODEL_JSON == "test.json"
         assert Config.DISPATCH_TIMEOUT == 60
@@ -83,7 +81,6 @@ class TestConfigDirect:
         """Test default values when environment variables are not set"""
         from jarvis.config import Config
 
-        assert hasattr(Config, "LLM_MODEL")
         assert hasattr(Config, "TTS_MODEL_ONNX")
         assert hasattr(Config, "TTS_MODEL_JSON")
         assert hasattr(Config, "DISPATCH_BINARY")

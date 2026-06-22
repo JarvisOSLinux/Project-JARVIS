@@ -649,6 +649,12 @@ async def dispatch_execute_tasks(
         )
         return
 
+    pids = _extract_pids_from_result(result)
+    if pids:
+        active = app.goals.get_active_goals()
+        if active:
+            app.goals.link_tasks(active[-1].id, pids)
+
     app.llm.switch_mode("root")
     context = build_root_context(app, logger)
     if isinstance(result, dict) and "error" in result:
