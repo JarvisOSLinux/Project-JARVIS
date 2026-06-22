@@ -59,9 +59,11 @@ class Config:
     # when using a non-reasoning model that benefits from strict mode.
     LLM_STRICT_JSON = os.getenv("LLM_STRICT_JSON", "false").lower() == "true"
 
+    from .platform import current as _platform
+
     _DEFAULT_CONFIG_DIR = os.getenv(
         "JARVIS_CONFIG_DIR",
-        os.path.join(os.path.expanduser("~"), ".config", "jarvis"),
+        str(_platform.config_dir()),
     )
     PROVIDERS_FILE = os.getenv(
         "PROVIDERS_FILE",
@@ -164,13 +166,8 @@ class Config:
 
     # Data directory — when set (e.g. systemd JARVIS_DATA_DIR=/var/lib/jarvis),
     # memory, goal archive, and default socket use this base path
-    _DEFAULT_DATA_DIR = os.path.join(
-        os.getenv(
-            "XDG_DATA_HOME", os.path.join(os.path.expanduser("~"), ".local", "share")
-        ),
-        "jarvis",
-    )
-    JARVIS_DATA_DIR = os.getenv("JARVIS_DATA_DIR", _DEFAULT_DATA_DIR)
+    _DEFAULT_DATA_DIR = os.getenv("JARVIS_DATA_DIR", str(_platform.data_dir()))
+    JARVIS_DATA_DIR = _DEFAULT_DATA_DIR
 
     # Dual input — Unix socket for "jarvis send" and app integration
     # Default: JARVIS_DATA_DIR/input.sock (or ~/.jarvis/input.sock)

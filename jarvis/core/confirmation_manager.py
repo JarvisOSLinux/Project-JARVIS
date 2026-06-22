@@ -36,7 +36,6 @@ The global ``CONFIRMATION_MODE`` (config) controls overall behaviour:
 
 import asyncio
 import json
-import shutil
 import sys
 import uuid
 from dataclasses import dataclass, field
@@ -311,7 +310,9 @@ class ConfirmationManager:
 
     @staticmethod
     def _has_desktop_notifications() -> bool:
-        return shutil.which("notify-send") is not None
+        from ..platform import current as platform
+
+        return platform.has_desktop_notifications()
 
     async def _notify_desktop(
         self,
@@ -319,24 +320,15 @@ class ConfirmationManager:
         tool_summary: str,
         timeout: float,
     ) -> None:
-        """Launch ``notify-send`` in the background.  When the user clicks
-        an action, inject the response into the event loop.
-        """
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "notify-send",
-                "--app-name=JARVIS",
-                f"--expire-time={int(timeout * 1000)}",
-                "--action=allow=Allow",
-                "--action=deny=Deny",
-                "JARVIS — Confirmation Required",
-                f"Tool: {tool_summary}",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
+        """Show a desktop notification via the platform layer."""
+        from ..platform import current as platform
 
-            stdout, _ = await proc.communicate()
-            action = stdout.decode().strip()
+        try:
+            action = await platform.send_desktop_notification(
+                title="JARVIS — Confirmation Required",
+                body=f"Tool: {tool_summary}",
+                timeout_ms=int(timeout * 1000),
+            )
             approved = action == "allow"
 
             if self._inject_confirmation:

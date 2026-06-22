@@ -9,41 +9,25 @@ from logging import Logger
 from typing import Any
 
 from ..config import Config
+from ..platform import current as platform
 
 
 async def run_socket_listener(app: Any, logger: Logger) -> None:
-    """Listen on Unix socket for external text/JSON input."""
+    """Listen on IPC endpoint for external text/JSON input."""
     path = Config.JARVIS_INPUT_SOCKET
     if not path:
         return
-    sock_dir = os.path.dirname(path)
-    os.makedirs(sock_dir, exist_ok=True)
-    if os.path.exists(path):
-        try:
-            os.unlink(path)
-        except OSError:
-            pass
-    server = await asyncio.start_unix_server(
-        lambda r, w: handle_socket_connection(app, logger, r, w),
-        path=path,
+    server = await platform.create_ipc_server(
+        path, lambda r, w: handle_socket_connection(app, logger, r, w)
     )
     try:
-        if os.path.exists(path):
-            try:
-                os.chmod(path, 0o660)
-            except OSError:
-                pass
         await asyncio.Future()
     except asyncio.CancelledError:
         pass
     finally:
         server.close()
         await server.wait_closed()
-        if os.path.exists(path):
-            try:
-                os.unlink(path)
-            except OSError:
-                pass
+        platform.ipc_cleanup(path)
 
 
 async def handle_socket_connection(
@@ -115,27 +99,14 @@ async def broadcast_to_output_clients(app: Any, response: dict[str, Any]) -> Non
 
 
 async def run_output_socket_listener(app: Any, logger: Logger) -> None:
-    """Listen on Unix socket for output subscribers (apps/widgets)."""
+    """Listen on IPC endpoint for output subscribers (apps/widgets)."""
     path = Config.JARVIS_OUTPUT_SOCKET
     if not path:
         return
-    sock_dir = os.path.dirname(path)
-    os.makedirs(sock_dir, exist_ok=True)
-    if os.path.exists(path):
-        try:
-            os.unlink(path)
-        except OSError:
-            pass
-    server = await asyncio.start_unix_server(
-        lambda r, w: handle_output_connection(app, logger, r, w),
-        path=path,
+    server = await platform.create_ipc_server(
+        path, lambda r, w: handle_output_connection(app, logger, r, w)
     )
     try:
-        if os.path.exists(path):
-            try:
-                os.chmod(path, 0o660)
-            except OSError:
-                pass
         await asyncio.Future()
     except asyncio.CancelledError:
         pass
@@ -143,11 +114,7 @@ async def run_output_socket_listener(app: Any, logger: Logger) -> None:
         app._output_clients.clear()
         server.close()
         await server.wait_closed()
-        if os.path.exists(path):
-            try:
-                os.unlink(path)
-            except OSError:
-                pass
+        platform.ipc_cleanup(path)
 
 
 async def handle_output_connection(

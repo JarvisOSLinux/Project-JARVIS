@@ -18,8 +18,9 @@ except ImportError:
 
 
 def _params_path() -> Path:
-    config_dir = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    path = config_dir / "jarvis" / "jarvis_params.toml"
+    from ..platform import current as platform
+
+    path = platform.config_dir() / "jarvis_params.toml"
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 
