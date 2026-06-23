@@ -43,13 +43,22 @@ Key/provider reporting is called directly:
 """
 
 import ctypes
-import fcntl
 import os
-import select
+import platform as _platform_mod
 import struct
 import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
+
+# fcntl and select are Unix-only — unavailable on Windows.
+# KernelClient degrades gracefully when /dev/jarvis is absent, but the
+# import must not crash.
+try:
+    import fcntl
+    import select
+except ImportError:
+    fcntl = None  # type: ignore[assignment]
+    select = None  # type: ignore[assignment]
 
 if TYPE_CHECKING:
     from .main import Jarvis
@@ -232,6 +241,12 @@ class KernelClient:
         Open /dev/jarvis and start the poll thread.
         Returns True if the kernel module is present, False if gracefully skipped.
         """
+        if _platform_mod.system() != "Linux":
+            logger.info(
+                "kernel_client: non-Linux platform — kernel integration unavailable"
+            )
+            return False
+
         if not Path(self._dev_path).exists():
             logger.info(
                 "kernel_client: %s not found — running without kernel integration",

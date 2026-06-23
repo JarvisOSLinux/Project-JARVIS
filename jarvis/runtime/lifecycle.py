@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import signal
 import sys
 import threading
 from collections.abc import Callable
@@ -11,6 +10,7 @@ from logging import Logger
 from typing import Any, Optional
 
 from ..config import Config
+from ..platform import current as platform
 from .voice_activation_thread import run_voice_activation
 
 
@@ -18,13 +18,7 @@ def install_signal_handlers(
     loop: asyncio.AbstractEventLoop, stop_callback: Callable[[], None]
 ) -> None:
     """Register graceful-stop signal handlers for SIGTERM/SIGINT."""
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        try:
-            loop.add_signal_handler(sig, stop_callback)
-        except (ValueError, OSError):
-            # Some environments (e.g. non-main thread/platform constraints)
-            # do not allow adding custom signal handlers.
-            pass
+    platform.install_signal_handlers(loop, stop_callback)
 
 
 async def connect_dispatch_nonfatal(dispatch: Any, logger: Logger) -> None:

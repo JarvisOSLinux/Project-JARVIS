@@ -47,11 +47,15 @@ _jarvis_config_dir = os.environ.get("JARVIS_CONFIG_DIR")
 if _jarvis_config_dir:
     ENV_FILE = Path(_jarvis_config_dir) / "jarvis.conf"
 else:
-    ENV_FILE = Path.home() / ".config" / "jarvis" / "jarvis.conf"
+    from .platform import current as _platform
+
+    ENV_FILE = _platform.config_dir() / "jarvis.conf"
 
 
 def _cmd_send() -> None:
-    """Send a message to a running JARVIS instance via Unix socket."""
+    """Send a message to a running JARVIS instance via IPC."""
+    from .platform import current as platform
+
     if len(sys.argv) < 3:
         print("Usage: jarvis send <message>")
         print("  Sends the message to a running JARVIS instance.")
@@ -64,28 +68,32 @@ def _cmd_send() -> None:
     candidates = [Config.JARVIS_INPUT_SOCKET, "/run/jarvis/input.sock"]
     path = None
     for p in candidates:
-        if p and os.path.exists(p):
+        if p and _ipc_endpoint_exists(p):
             path = p
             break
     if not path:
-        print("Error: JARVIS socket not found.")
+        print("Error: JARVIS IPC endpoint not found.")
         print("  Tried:", ", ".join(p for p in candidates if p))
         print("  Is JARVIS running? Start with 'jarvis' or 'jarvis run'.")
         sys.exit(1)
-    from .core.socket_security import verify_socket_ownership
-
-    if not verify_socket_ownership(path):
-        print("Error: Socket ownership check failed. Unexpected owner on socket file.")
+    if not platform.ipc_verify_owner(path):
+        print("Error: IPC endpoint ownership check failed.")
         sys.exit(1)
     try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
-            sock.settimeout(5)
-            sock.connect(path)
+        sock = platform.ipc_connect(path)
+        try:
             sock.sendall((msg + "\n").encode("utf-8"))
+        finally:
+            sock.close()
         print("Sent.")
     except (socket.error, OSError) as e:
         print(f"Error: Could not send to JARVIS: {e}")
         sys.exit(1)
+
+
+def _ipc_endpoint_exists(path: str) -> bool:
+    """Check if an IPC endpoint exists (socket file or port file)."""
+    return os.path.exists(path) or os.path.exists(path + ".port")
 
 
 def set_output_mode(mode: str) -> None:

@@ -29,23 +29,14 @@ def _is_ollama_up(base_url: str) -> bool:
 
 
 def _try_start_ollama(base_url: str) -> bool:
-    """Start Ollama via systemd or direct spawn. Return True if it comes up."""
+    """Start Ollama via platform service manager or direct spawn. Return True if it comes up."""
     logger.info("Ollama not reachable — attempting auto-start")
 
-    # systemd --user first (most common for desktop installs), then system-wide
-    for cmd in (
-        ["systemctl", "--user", "start", "ollama"],
-        ["systemctl", "start", "ollama"],
-    ):
-        try:
-            subprocess.run(cmd, timeout=5, capture_output=True)
-        except Exception:
-            continue
-        for _ in range(3):
-            time.sleep(1)
-            if _is_ollama_up(base_url):
-                logger.info(f"Ollama started via: {' '.join(cmd)}")
-                return True
+    from ...platform import current as platform
+
+    if platform.try_start_service("ollama", base_url):
+        logger.info("Ollama started via system service manager")
+        return True
 
     # Fall back to direct spawn
     try:
