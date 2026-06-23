@@ -80,10 +80,10 @@ pip install jarvis-ai
 # Install Ollama from https://ollama.com/
 ollama pull qwen3:4b
 
-# Configure and run
-cp jarvis/.env.example jarvis/.env
-cd jarvis
-python main.py
+# Add an LLM provider and run
+jarvis /providers add          # interactive — or:
+# jarvis providers add --type ollama --model qwen3:4b
+jarvis
 ```
 
 ### Full Installation with Voice Features
@@ -142,14 +142,17 @@ python main.py
    ollama pull qwen3:4b
    ```
 
-7. **Configure environment variables**:  
-   - Copy `jarvis/.env.example` to `jarvis/.env`
-   - Adjust settings as needed for your system
-
-8. **Run JARVIS**:  
+7. **Configure LLM provider**:
    ```bash
-   cd jarvis
-   python main.py
+   jarvis /providers add
+   ```
+   Providers (Ollama, OpenAI-compatible APIs) are stored in `~/.config/jarvis/providers.json`.
+   Voice, logging, and other settings can be customized in `~/.config/jarvis/jarvis.conf`
+   (see `jarvis/.env.example` for all available options).
+
+8. **Run JARVIS**:
+   ```bash
+   jarvis
    ```
 
 ### Optional Dependency Groups
@@ -304,7 +307,7 @@ JARVIS features advanced voice activation capabilities with customizable wake wo
 
 ### **Configuration Options**
 
-Edit `jarvis/.env` to customize voice activation:
+Edit `~/.config/jarvis/jarvis.conf` (or `jarvis/.env` in development) to customize voice activation:
 
 ```bash
 # Wake words (comma-separated)

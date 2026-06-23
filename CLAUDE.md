@@ -153,7 +153,8 @@ make check                  # Format + lint + typecheck + tests
 | `jarvis/tui/app.py` | Textual app shell |
 | `jarvis/tui/lifecycle.py` | App startup/shutdown, callback registration |
 | `jarvis/tui/confirm_modal.py` | Tool confirmation modal |
-| `jarvis/tui/settings_modal.py` | Config viewer modal |
+| `jarvis/tui/config_modal.py` | Tabbed config/provider settings modal (F2 / /settings) |
+| `jarvis/tui/provider_modal.py` | Provider add/edit modal |
 | `jarvis/core/confirmation_manager.py` | Multi-channel confirmation gate |
 | `jarvis/core/socket_security.py` | Socket hardening |
 | `jarvis/core/command_parser.py` | LLM response parser + action registry |
