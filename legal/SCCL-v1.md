@@ -22,7 +22,7 @@ The defining feature of this License is **Board-governed commercial access**: th
 
 **1.1 "Organization"** means the legal entity (foundation, non-profit, LLC, or equivalent) that owns or stewards the Software and its ecosystem. The Organization acts as Licensor under this Agreement.
 
-**1.2 "Governing Board"** (or "Board") means the decision-making body of the Organization, responsible for issuing, conditioning, and revoking commercial licenses under this Agreement. The Board's composition and procedures are defined in the Organization's charter or bylaws.
+**1.2 "Governing Board"** (or "Board") means the decision-making body of the Organization, responsible for issuing, conditioning, and revoking commercial licenses under this Agreement. The Board's composition and procedures are defined in the [Organization Charter](organization-charter.md).
 
 **1.3 "Licensee"** means the legal entity (company, organization, or individual acting in a commercial capacity) entering into this Agreement with the Organization.
 
@@ -40,13 +40,33 @@ The defining feature of this License is **Board-governed commercial access**: th
 
 **1.10 "Cure Period"** means the period granted to a Licensee to remedy a breach or misalignment before further action is taken, as determined by the Board in accordance with Article 6.3.
 
-**1.11 "Licensee Relationship Index"** means the Board's internal, qualitative assessment of a Licensee's cumulative conduct, compliance history, and relationship with the Organization and its ecosystem. The Index is maintained by the Board as a governance instrument and may inform the Board's exercise of discretion under this License, including but not limited to licensing decisions, Cure Period duration, and reinstatement applications.
+**1.11 "Licensee Relationship Index"** means the Board's internal, qualitative assessment of a Licensee's cumulative conduct, compliance history, and relationship with the Organization and its ecosystem. The Index is maintained by the Board as a governance instrument and may inform the Board's exercise of discretion under this License, including but not limited to licensing decisions, Cure Period duration, Revenue Basis, and reinstatement applications.
+
+**1.12 "Revenue Basis"** means the financial figure used to calculate the Annual License Fee under Appendix A. The Revenue Basis is determined by the Board for each Licensee based on the Licensee's Relationship Index, and falls within the following spectrum, ordered by severity of the Board's stance:
+
+  (a) **Profit on the Software** — net profit attributable to products or services incorporating the Software, after directly attributable expenses (most lenient);
+
+  (b) **Profit on the Company** — the Licensee's total net income across all business lines;
+
+  (c) **Profit on the Ecosystem** — combined net income of the Licensee and all affiliated entities (subsidiaries, parent companies, and entities under common control);
+
+  (d) **Revenue on the Software** — gross revenue attributable to products or services incorporating the Software;
+
+  (e) **Revenue on the Company** — the Licensee's total annual gross revenue across all business lines;
+
+  (f) **Revenue on the Ecosystem** — combined total gross revenue of the Licensee and all affiliated entities (most restrictive).
+
+**Note:** The tiers above are ordered by the severity of the Board's intent, not by guaranteed monetary value. In practice, a narrower-scope revenue figure (e.g., Revenue on the Software) may be smaller than a broader-scope profit figure (e.g., Profit on the Ecosystem) depending on the Licensee's business structure. The Board should consider the actual financial impact when selecting a tier, ensuring the chosen basis reflects the appropriate level of accountability rather than simply maximizing the fee.
+
+"Affiliated entities" means any entity that directly or indirectly controls, is controlled by, or is under common control with the Licensee, where "control" means ownership of more than fifty percent (50%) of the voting securities or equivalent ownership interest.
+
+The Board shall communicate the applicable Revenue Basis to the Licensee in writing at the time of license issuance and at each annual renewal.
 
 ---
 
 ## Article 2 — Grant of Commercial License
 
-**2.1 Activation Threshold.** This License may not be issued to any Licensee until the Project has at least **[N] independent contributors**, of which no single legal entity (including its subsidiaries and affiliates) accounts for more than **[X]%** of the total. This threshold is verified by the Board at the time of license issuance.
+**2.1 Activation Threshold.** This License may not be issued to any Licensee until the Project has at least **fifteen (15) Active Contributors** (as defined in the [Organization Charter](organization-charter.md), Section B.2.2, excluding corporate contributions per B.2.3), of which no single legal entity (including its subsidiaries and affiliates) accounts for more than **twenty-five percent (25%)** of total contributions measured by commit authorship over the preceding twelve (12) months. This threshold is verified by the Board at the time of license issuance.
 
 **2.2 Board Approval.** Commercial licenses are granted at the sole discretion of the Governing Board. The Board may accept, reject, or condition any application for a commercial license, and is not required to provide reasons for rejection.
 
@@ -112,11 +132,11 @@ The defining feature of this License is **Board-governed commercial access**: th
 
 **4.1 Fee Obligation.** The Licensee shall pay the Annual License Fee to the Organization on or before the anniversary of the Effective Date each year.
 
-**4.2 Fee Calculation.** The Annual License Fee is calculated in accordance with the Fee Formula set out in Appendix A to this License. The Organization may update the Fee Formula with ninety (90) days' written notice, provided that no increase shall take effect mid-term of any paid year.
+**4.2 Fee Calculation.** The Annual License Fee is calculated in accordance with the Fee Formula set out in Appendix A to this License, using the Revenue Basis determined by the Board for the Licensee (Definition 1.12). The Organization may update the Fee Formula with ninety (90) days' written notice, provided that no increase shall take effect mid-term of any paid year. Changes to the Licensee's Revenue Basis take effect at the next annual renewal.
 
 **4.3 Payment Process.** The Organization shall issue an invoice or fee statement no fewer than thirty (30) days before each payment is due. Payment terms and accepted methods are as specified in the invoice.
 
-**4.4 Self-Reporting.** The Licensee shall provide to the Organization, on an annual basis, an honest declaration of the figures required to calculate the Fee (e.g., annual revenue, ecosystem inclusion factors), signed by an authorized officer of the Licensee.
+**4.4 Self-Reporting.** The Licensee shall provide to the Organization, on an annual basis, an honest declaration of the figures required to calculate the Fee (including the applicable Revenue Basis figure, ecosystem inclusion factors, and any other data the Board reasonably requires), signed by an authorized officer of the Licensee.
 
 **4.5 Audit Right.** The Organization reserves the right to audit the Licensee's records relevant to Fee calculation, upon thirty (30) days' written notice, no more than once per year. The cost of the audit is borne by the Organization unless the audit reveals an underpayment exceeding the **Audit Tolerance Threshold**, in which case the Licensee bears the audit cost. The Audit Tolerance Threshold is set by the Board within a range of **ten percent (10%) to fifteen percent (15%)**, and may be adjusted per Licensee based on the Licensee's Relationship Index and prior reporting accuracy.
 
@@ -124,17 +144,19 @@ The defining feature of this License is **Board-governed commercial access**: th
 
 **4.7 Fund Allocation.** All fees collected under this License shall be allocated transparently in accordance with the compensation structure defined in the Organization's charter. The recommended allocation is:
 
-  (a) **50–60%** to contributor compensation;
+  (a) **50–55%** to the contributor base compensation pool — distributed monthly to contributors proportionally by C-points (see Appendix D);
 
-  (b) **15–20%** to project infrastructure (hosting, CI/CD, security audits, tooling);
+  (b) **5%** to the contributor incentive pool — Board-directed monthly bounties allocated across subsystems and tasks to steer community effort toward strategic priorities (see Appendix D);
 
-  (c) **10–15%** to a reserve fund (legal defense, sustainability buffer);
+  (c) **15–20%** to project infrastructure (hosting, CI/CD, security audits, tooling);
 
-  (d) **5–10%** to an emergency fund (incident response, operational contingencies);
+  (d) **10–15%** to a reserve fund (legal defense, sustainability buffer);
 
-  (e) **Up to 5%** to Organization operations and administration.
+  (e) **5–10%** to an emergency fund (incident response, operational contingencies);
 
-  The exact percentages are set by the Governing Board and published publicly. Adjustments require thirty (30) days' advance notice.
+  (f) **Up to 5%** to Organization operations and administration, including Board member compensation (see Organization Charter B.5.5).
+
+  The total contributor allocation ((a) + (b)) is 55–60% of fees collected. The exact percentages are set by the Governing Board and published publicly. Adjustments require thirty (30) days' advance notice.
 
 ---
 
@@ -142,7 +164,7 @@ The defining feature of this License is **Board-governed commercial access**: th
 
 **5.1 Mandatory Contribution.** Any Contribution developed by or on behalf of the Licensee — including modifications, patches, improvements, or Derivative Works — must be submitted to the Organization within ninety (90) days of internal deployment or use, whichever is earlier.
 
-**5.2 Submission Method.** Contributions shall be submitted in accordance with the Project's Contributor License Agreement (CLA) for commercial licensees, or via Developer Certificate of Origin (DCO) where specified by the Organization. The applicable method and terms are published at [CLA/DCO URL].
+**5.2 Submission Method.** Contributions shall be submitted in accordance with the Project's [Contributor License Agreement (CLA)](cla.md) for commercial licensees, or via Developer Certificate of Origin (DCO) where specified by the Organization. The applicable method and terms are published at [CLA/DCO URL].
 
 **5.3 Organization's Rights Over Contributions.** The Organization may, at its sole discretion:
 
@@ -242,7 +264,7 @@ The defining feature of this License is **Board-governed commercial access**: th
 
 **8.3 Governing Law and Jurisdiction.** This License shall be governed by and construed in accordance with the laws of **[JURISDICTION TO BE SPECIFIED]**. Any disputes shall be subject to the exclusive jurisdiction of the courts of **[JURISDICTION]**.
 
-**8.4 Entire Agreement.** This License, together with its Appendices, constitutes the entire agreement between the parties regarding commercial use of the Software and supersedes all prior negotiations, representations, or agreements.
+**8.4 Entire Agreement.** This License, together with its Appendices and the documents incorporated by reference ([Organization Charter](organization-charter.md), [CLA](cla.md), [C-Points Methodology](c-points.md)), constitutes the entire agreement between the parties regarding commercial use of the Software and supersedes all prior negotiations, representations, or agreements.
 
 **8.5 Severability.** If any provision of this License is found invalid or unenforceable, it shall be modified to the minimum extent necessary to make it enforceable. The remaining provisions shall continue in full force.
 
@@ -259,15 +281,15 @@ The defining feature of this License is **Board-governed commercial access**: th
 ### A.1 Formula
 
 ```
-Annual Fee = annual_revenue × K₁ × (1 + K₂ × inclusion_index) × inflation_factor
+Annual Fee = revenue_basis × K₁ × (1 + K₂ × inclusion_index) × inflation_factor
 ```
 
 ### A.2 Variables
 
 | Variable | Definition |
 |----------|-----------|
-| `annual_revenue` | Licensee's total annual gross revenue for the most recently completed fiscal year, as declared under Article 4.4. |
-| `K₁` | Rate constant — the base percentage of revenue charged as a license fee. |
+| `revenue_basis` | The financial figure determined by the Board per Licensee based on the Licensee's Relationship Index (see Definition 1.12). Six tiers from Profit on the Software (most lenient) to Revenue on the Ecosystem (most restrictive). |
+| `K₁` | Rate constant — the base percentage of revenue basis charged as a license fee. |
 | `K₂` | Ecosystem lock-in penalty multiplier — scales the surcharge applied to closed-ecosystem business models. |
 | `inclusion_index` | A score from 0.0 (fully open) to 1.0 (fully locked-in), assessed annually by the Board using the methodology in A.4. |
 | `inflation_factor` | Annual CPI adjustment. Calculated as `1 + CPI_change + buffer`, where `buffer` is a fixed percentage above inflation to account for project growth costs. |
@@ -276,9 +298,9 @@ Annual Fee = annual_revenue × K₁ × (1 + K₂ × inclusion_index) × inflatio
 
 #### K₁ — Rate Constant
 
-K₁ represents the percentage of the Licensee's annual revenue paid as a base license fee. The Board sets K₁ at the time of license activation (Article 2.1) and may adjust it with ninety (90) days' written notice (Article 4.2).
+K₁ represents the percentage of the Licensee's revenue basis paid as a base license fee. The Board sets K₁ at the time of license activation (Article 2.1) and may adjust it with ninety (90) days' written notice (Article 4.2). Adjustments take effect at the Licensee's next annual renewal, not mid-term — no Licensee will face an increased fee during a year they have already paid for.
 
-**Reasonable range:** 1–5%. Software royalties in comparable open-core and dual-licensing arrangements typically fall in this range. A K₁ of 2% on a $10M revenue company yields a $200,000 annual fee before ecosystem adjustments.
+**Reasonable range:** 1–5%. Software royalties in comparable open-core and dual-licensing arrangements typically fall in this range. A K₁ of 2% on a $10M revenue basis yields a $200,000 annual fee before ecosystem adjustments.
 
 **Board guidance for setting K₁:**
 - Project maturity: early-stage projects may set K₁ at the lower end to encourage commercial adoption.
@@ -323,51 +345,40 @@ The Board assesses a Licensee's `inclusion_index` annually using the following s
 **Assessment process:**
 1. The Licensee submits a self-assessment alongside the annual revenue declaration (Article 4.4).
 2. The Board reviews the self-assessment and may request supporting evidence.
-3. The Board issues a final score. Disputes are resolved under Article 7 (Dispute Resolution).
+3. The Board issues a final score. Disputes regarding the score may be raised with the Board in writing; the Board shall respond within thirty (30) days.
 
 **Example scores:**
 - A fully open-source product with standard APIs and free data export: `inclusion_index ≈ 0.05`
 - A SaaS product with export features but proprietary APIs: `inclusion_index ≈ 0.40`
 - A walled-garden platform with no export, proprietary APIs, and vendor lock-in contracts: `inclusion_index ≈ 0.90`
 
----
+### A.5 Dynamic Nature of the Fee
 
-## Appendix B — Organization Charter
+The Annual License Fee is **hyper-dynamic by design**. Multiple variables in the formula — including the Revenue Basis, inclusion index, and applicable constants — are subject to Board discretion and may change between annual terms based on the Licensee's conduct, Relationship Index, and ecosystem alignment.
 
-> *To be completed. Must specify:*
-> - *Legal structure of the Organization (foundation, non-profit, LLC)*
-> - *Composition, election/appointment, and term of the Governing Board*
-> - *Board decision-making procedures (quorum, voting, minutes)*
-> - *Minimum contributor threshold and diversity requirements for license activation (Article 2.1)*
-> - *Fund allocation percentages and process for adjusting them*
-> - *Contributor compensation methodology and distribution schedule*
-> - *Public license registry maintenance and transparency obligations*
-> - *Licensee Relationship Index: maintenance procedures, assessment criteria, and internal access controls*
-> - *Process for updating this Charter*
->
-> **Current status:** Under development. See project governance discussions.
+The Licensee acknowledges that the Fee is not a fixed or purely formulaic calculation, but a Board-governed assessment informed by the formula above and the Licensee's overall relationship with the Organization.
 
----
+### A.6 Negotiation
 
-## Appendix C — Contributor Agreement Reference
+If the Licensee considers the Fee proposed by the Board to be unreasonable or misaligned with the Licensee's actual use of the Software, the Licensee may request a negotiation with the Board before the annual payment is due. The Board shall consider such requests in good faith but is not obligated to adjust the Fee. If no agreement is reached, the Licensee may:
 
-Commercial licensees contributing back under Article 5 must sign the Project's **Contributor License Agreement (CLA)**. Community contributors use the **Developer Certificate of Origin (DCO)** — a `Signed-off-by` line in each commit.
+  (a) Pay the Fee as proposed by the Board to maintain the commercial license;
 
-**CLA document:** [`legal/cla.md`](legal/cla.md)
+  (b) Decline the Fee and transition to AGPLv3 compliance in accordance with Article 2.5; or
 
-**DCO reference:** [developercertificate.org](https://developercertificate.org/)
-
-The CLA covers IP license grant, scope of Article 5 contributions, representations and warranties, and the per-entity signing process. See `legal/cla.md` for the full text.
+  (c) Cease use of the Software in accordance with Article 7.
 
 ---
 
-## Appendix D — Contribution Points (C-points) Methodology
+## Companion Documents
 
-C-points are the weighted composite score used to rank contributors for **Governance Pool** membership (top 1000 contributors). The Governance Pool determines voting rights and eligibility for the contributor compensation pool.
+The following documents are part of this License and incorporated by reference:
 
-**Methodology document:** [`legal/c-points.md`](legal/c-points.md)
-
-The methodology covers: variables and weights (merge volume, code scope, review labor, security work, maintenance, docs, mentorship, leadership), calculation mechanics (rolling 24-month window, daily recalculation, normalization), anti-gaming measures, and tooling requirements.
+| Document | Description |
+|---|---|
+| [Organization Charter](organization-charter.md) | Governance structure, Board composition, membership, staged governance (B.1–B.9) |
+| [Contributor License Agreement](cla.md) | IP license grant, scope of Article 5 contributions, representations and warranties, per-entity signing process |
+| [C-Points Methodology](c-points.md) | Variables and weights (8 dimensions), calculation mechanics (rolling 24-month, daily recalculation), anti-gaming measures, tooling |
 
 ---
 
