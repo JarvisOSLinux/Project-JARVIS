@@ -49,7 +49,18 @@ async def start_jarvis(app: Any, logger: Any) -> None:
     await asyncio.sleep(0.1)
     await app._refresh_sidebar()
     app._update_status()
-    app._append_log("[green]Ready.[/green] Type below or use Ctrl+N for a new chat.")
+
+    if jarvis.llm is None:
+        app._append_log(
+            "[yellow]No LLM provider configured.[/yellow]\n"
+            "  Use [bold]/providers add[/bold] or open "
+            "[bold]Settings (F2)[/bold] to get started.\n"
+            "  After adding a provider, restart the TUI."
+        )
+    else:
+        app._append_log(
+            "[green]Ready.[/green] Type below or use Ctrl+N for a new chat."
+        )
     app.query_one("#input", Input).focus()
 
 

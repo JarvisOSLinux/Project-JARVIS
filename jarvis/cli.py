@@ -458,10 +458,6 @@ def main() -> None:
             sys.exit(1)
 
     elif command == "tui":
-        if not _has_llm_configured():
-            print("Error: No LLM configured.")
-            print("  Quick start: jarvis providers add --type ollama --model qwen3:4b")
-            sys.exit(1)
         try:
             from .tui import run_tui
         except ImportError as e:
