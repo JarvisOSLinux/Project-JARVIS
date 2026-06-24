@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=61.0", "setuptools-scm>=8", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "project-jarvis"
-version = "1.1.1"
+dynamic = ["version"]
 description = "AI-Native Voice Assistant with Concurrent Task Dispatch"
 readme = "README.md"
 license = "GPL-3.0-only"
@@ -169,3 +169,8 @@ markers = [
     "integration: marks tests as integration tests",
     "unit: marks tests as unit tests",
 ]
+
+[tool.setuptools_scm]
+version_scheme = "guess-next-dev"
+local_scheme = "no-local-version"
+write_to = "jarvis/_version.py"

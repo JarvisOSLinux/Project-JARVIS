@@ -5,7 +5,10 @@ Copyright (C) 2025 YakupAtahanov
 License: GPL-3.0
 """
 
-__version__ = "1.0.0"
+try:
+    from ._version import version as __version__
+except ImportError:
+    __version__ = "0.0.0"
 __author__ = "YakupAtahanov"
 __email__ = "yakup.atahanow.b@gmail.com"
 __license__ = "GPL-3.0"
