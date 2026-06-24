@@ -11,6 +11,11 @@ from .output_hooks import emit_activity
 from .root_context import build_root_context, compact_payload_for_llm
 from .session_commands import handle_slash_command
 
+_NO_LLM_MSG = (
+    "No LLM provider configured. "
+    "Add one with `/providers add` or through settings, then restart."
+)
+
 
 async def on_user_input(app: Any, logger: Logger, text: str) -> None:
     logger.info(f"JARVIS: User input: '{text}'")
@@ -19,6 +24,10 @@ async def on_user_input(app: Any, logger: Logger, text: str) -> None:
         handled = handle_slash_command(app, text)
         if handled:
             return
+
+    if app.llm is None:
+        app.output_manager.display({"output": _NO_LLM_MSG})
+        return
 
     app.sessions.ensure_session()
     app.goals.add_goal(text)
@@ -52,6 +61,10 @@ async def on_dispatch_signal(app: Any, logger: Logger, signal: dict[str, Any]) -
         emit_activity(
             app, f"Dispatch signal: {sig_type} (pid {sig_pid})", kind="dispatch"
         )
+
+    if app.llm is None:
+        logger.warning("Dispatch signal received but no LLM configured — ignoring")
+        return
 
     app.goals.update_from_signal(signal)
     app.llm.switch_mode("root")
@@ -102,6 +115,10 @@ async def on_confirmation_response(
         f"approved={len(pending.approved_tasks)}, "
         f"denied={len(pending.denied_tools)}"
     )
+
+    if app.llm is None:
+        logger.warning("Confirmation resolved but no LLM configured — ignoring")
+        return
 
     if pending.denied_tools and not pending.approved_tasks:
         denied_list = ", ".join(pending.denied_tools)

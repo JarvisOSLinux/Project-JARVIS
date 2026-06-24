@@ -77,19 +77,21 @@ class ComponentFactory:
             if entries:
                 return ProviderPool(entries)
 
-        raise RuntimeError(
-            "No LLM providers configured.\n"
-            "  Add one with: jarvis providers add --type ollama --model qwen3:4b\n"
-            "  Or in the TUI: /providers add"
-        )
+        return None
 
     @staticmethod
-    def create_llm() -> LLM:
-        """Create LLM with provider pool (failover-capable)."""
+    def create_llm() -> Optional[LLM]:
+        """Create LLM with provider pool (failover-capable).
+
+        Returns None if no providers are configured.
+        """
         logger.info("Getting system information...")
         system_info = SystemInfo.get_system_info()
 
         pool = ComponentFactory._build_provider_pool()
+        if pool is None:
+            logger.warning("No LLM providers configured — running without LLM")
+            return None
         logger.info(
             f"Provider pool ready: {len(pool.entries)} provider(s), "
             f"active: {pool.active_provider_name}"
@@ -399,7 +401,7 @@ class ComponentFactory:
 
         # Report active LLM provider to kernel sysfs
         kernel_client = components["kernel_client"]
-        if kernel_client.available:
+        if kernel_client.available and components["llm"] is not None:
             pool = components["llm"].provider
             pname = pool.active_provider_name or "unknown"
             model = getattr(pool, "model", "") or ""
