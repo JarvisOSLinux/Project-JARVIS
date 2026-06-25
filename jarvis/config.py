@@ -183,6 +183,13 @@ class Config:
         os.path.join(JARVIS_DATA_DIR, "output.sock"),
     )
 
+    # GUI IPC — bidirectional socket for desktop apps (jarvisos-app, widgets).
+    # Structured JSON protocol with state, streaming responses, confirmations.
+    JARVIS_GUI_SOCKET = os.getenv(
+        "JARVIS_GUI_SOCKET",
+        os.path.join(JARVIS_DATA_DIR, "jarvis.sock"),
+    )
+
     # Tool-Level Action (TLA) Confirmation
     # - "allow_all": never ask, run everything (power users / trusted environments)
     # - "smart":     only ask when tool has confirmation_required=true (default)

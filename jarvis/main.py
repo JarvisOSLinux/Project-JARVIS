@@ -97,6 +97,8 @@ class Jarvis:
         self.confirmation = self.components["confirmation_manager"]
         self.voice_manager = self.components.get("voice_manager")
         self._output_clients: List[asyncio.StreamWriter] = []
+        self._gui_clients: set[asyncio.StreamWriter] = set()
+        self._gui_state: str = "idle"
 
         # Server docs scoped to the active dispatch chain — cleared on respond.
         self.mcp_dispatch_docs: dict = {}
@@ -121,6 +123,7 @@ class Jarvis:
         runtime_tasks = await start_runtime_services(self, logger)
         socket_task = runtime_tasks["input_socket"]
         output_task = runtime_tasks["output_socket"]
+        gui_task = runtime_tasks["gui_socket"]
 
         logger.info("JARVIS: Event loop started")
 
@@ -132,6 +135,7 @@ class Jarvis:
         finally:
             cancel_task_if_running(socket_task)
             cancel_task_if_running(output_task)
+            cancel_task_if_running(gui_task)
             await shutdown(self, logger)
 
     async def _handle_event(self, event: Event):
@@ -285,6 +289,12 @@ class Jarvis:
         writer: asyncio.StreamWriter,
     ) -> None:
         await runtime_io.handle_output_connection(self, logger, reader, writer)
+
+    async def _run_gui_socket_listener(self) -> None:
+        await runtime_io.run_gui_socket_listener(self, logger)
+
+    def _on_gui_output(self, response: Dict[str, Any]) -> None:
+        runtime_io.on_gui_output(self, response)
 
     async def _await_user_input(self) -> str:
         return await runtime_events.await_user_input()

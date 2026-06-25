@@ -106,9 +106,19 @@ async def start_runtime_services(
         output_socket_task = asyncio.create_task(app._run_output_socket_listener())
         logger.info(f"JARVIS: Output socket at {Config.JARVIS_OUTPUT_SOCKET}")
 
+    gui_socket_task: Optional[asyncio.Task] = None
+    if Config.JARVIS_GUI_SOCKET:
+        from ..core.socket_security import harden_socket_path
+
+        harden_socket_path(Config.JARVIS_GUI_SOCKET)
+        app.output_manager.add_output_callback(app._on_gui_output)
+        gui_socket_task = asyncio.create_task(app._run_gui_socket_listener())
+        logger.info(f"JARVIS: GUI socket at {Config.JARVIS_GUI_SOCKET}")
+
     return {
         "input_socket": input_socket_task,
         "output_socket": output_socket_task,
+        "gui_socket": gui_socket_task,
     }
 
 
@@ -133,6 +143,7 @@ async def shutdown(app: Any, logger: Logger) -> None:
     """Tear down event sources, sockets, dispatch, and contextor."""
     app._running = False
     app.output_manager.remove_output_callback(app._on_output_for_broadcast)
+    app.output_manager.remove_output_callback(app._on_gui_output)
     await app.events.stop()
     await app.dispatch.disconnect()
     if app.contextor:
