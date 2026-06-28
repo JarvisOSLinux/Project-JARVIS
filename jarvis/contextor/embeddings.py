@@ -11,7 +11,9 @@ Why Ollama embeddings?
 - nomic-embed-text is small (~270MB) and produces 768-dim vectors
 """
 
-from typing import List, Optional
+import subprocess
+import time
+from typing import List
 
 from ..config import Config
 from ..core.logger import get_logger
@@ -19,6 +21,49 @@ from ..core.logger import get_logger
 logger = get_logger(__name__)
 
 DEFAULT_EMBED_MODEL = "nomic-embed-text"
+
+_CONNECT_KEYWORDS = ("connect", "connection", "refused", "unreachable", "timeout")
+
+
+def _is_ollama_up(base_url: str) -> bool:
+    import urllib.request
+
+    try:
+        urllib.request.urlopen(f"{base_url}/api/tags", timeout=2)
+        return True
+    except Exception:
+        return False
+
+
+def _try_start_ollama(base_url: str) -> bool:
+    """Start Ollama via platform service manager or direct spawn."""
+    from ..platform import current as platform
+
+    if platform.try_start_service("ollama", base_url):
+        logger.info("Embeddings: Ollama started via system service manager")
+        return True
+
+    try:
+        subprocess.Popen(
+            ["ollama", "serve"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except FileNotFoundError:
+        logger.warning("Embeddings: ollama binary not found; cannot auto-start")
+        return False
+    except Exception as exc:
+        logger.warning(f"Embeddings: Failed to spawn ollama serve: {exc}")
+        return False
+
+    for _ in range(5):
+        time.sleep(1)
+        if _is_ollama_up(base_url):
+            logger.info("Embeddings: Ollama started via direct spawn")
+            return True
+
+    logger.warning("Embeddings: Ollama auto-start attempted but did not become ready")
+    return False
 
 
 class OllamaEmbeddings:
@@ -63,37 +108,40 @@ class OllamaEmbeddings:
 
     def embed_batch(self, texts: List[str]) -> List[List[float]]:
         """Embed a batch of texts. Falls back to sequential calls."""
-        # Ollama doesn't natively support batch embeddings in all versions,
-        # so we call sequentially. For typical JARVIS workloads (storing a
-        # few memories per interaction) this is fine.
         results = []
         for text in texts:
             try:
                 results.append(self.embed_single(text))
             except Exception as e:
                 logger.warning(f"Embeddings: Failed to embed text: {e}")
-                # Return zero vector as fallback so indexing stays consistent
                 dim = self._dim or 768
                 results.append([0.0] * dim)
         return results
 
     def ensure_model(self) -> bool:
-        """Check if the embedding model is available, pull if configured."""
+        """Check if the embedding model is available; auto-start Ollama and pull if needed."""
         try:
-            # Quick probe — if this works, the model is available
             self.embed_single("test")
             return True
         except Exception as e:
             error_str = str(e).lower()
+
+            if any(kw in error_str for kw in _CONNECT_KEYWORDS):
+                logger.info("Embeddings: Ollama not reachable — attempting auto-start")
+                if not _try_start_ollama(self.base_url):
+                    return False
+                # Ollama is now up — re-check; may still need to pull the model.
+                return self.ensure_model()
+
             if "not found" in error_str or "does not exist" in error_str:
-                logger.warning(
-                    f"Embedding model '{self.model}' not found. "
-                    f"Pull it with: ollama pull {self.model}"
+                # nomic-embed-text is infrastructure, not a user LLM choice —
+                # always pull it automatically when Ollama is reachable.
+                logger.info(
+                    f"Embeddings: Model '{self.model}' not pulled yet — pulling now"
                 )
-                if getattr(Config, "LLM_AUTO_PULL", False):
-                    return self._pull_model()
-            else:
-                logger.error(f"Embeddings: Availability check failed: {e}")
+                return self._pull_model()
+
+            logger.error(f"Embeddings: Availability check failed: {e}")
             return False
 
     def _pull_model(self) -> bool:
