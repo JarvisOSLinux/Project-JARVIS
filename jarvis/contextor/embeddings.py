@@ -119,7 +119,7 @@ class OllamaEmbeddings:
         return results
 
     def ensure_model(self) -> bool:
-        """Check if the embedding model is available; auto-start Ollama if needed."""
+        """Check if the embedding model is available; auto-start Ollama and pull if needed."""
         try:
             self.embed_single("test")
             return True
@@ -127,26 +127,19 @@ class OllamaEmbeddings:
             error_str = str(e).lower()
 
             if any(kw in error_str for kw in _CONNECT_KEYWORDS):
-                # Ollama server not running — try to start it and retry once.
                 logger.info("Embeddings: Ollama not reachable — attempting auto-start")
-                if _try_start_ollama(self.base_url):
-                    try:
-                        self.embed_single("test")
-                        return True
-                    except Exception as retry_err:
-                        logger.error(
-                            f"Embeddings: Still unavailable after Ollama start: {retry_err}"
-                        )
-                return False
+                if not _try_start_ollama(self.base_url):
+                    return False
+                # Ollama is now up — re-check; may still need to pull the model.
+                return self.ensure_model()
 
             if "not found" in error_str or "does not exist" in error_str:
-                logger.warning(
-                    f"Embedding model '{self.model}' not found. "
-                    f"Pull it with: ollama pull {self.model}"
+                # nomic-embed-text is infrastructure, not a user LLM choice —
+                # always pull it automatically when Ollama is reachable.
+                logger.info(
+                    f"Embeddings: Model '{self.model}' not pulled yet — pulling now"
                 )
-                if getattr(Config, "LLM_AUTO_PULL", False):
-                    return self._pull_model()
-                return False
+                return self._pull_model()
 
             logger.error(f"Embeddings: Availability check failed: {e}")
             return False
