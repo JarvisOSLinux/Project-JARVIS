@@ -330,13 +330,8 @@ class ComponentFactory:
         # Kernel integration client (started first — LLM providers may use keyring)
         components["kernel_client"] = ComponentFactory.create_kernel_client()
 
-        # LLM — created before embeddings so that Ollama auto-start fires here,
-        # ensuring the server is up before the embedding availability check runs.
-        components["llm"] = ComponentFactory.create_llm()
-
         # Shared embeddings instance — used by both contextor (memory)
         # and dispatch (semantic tool discovery). Created once, shared.
-        # Ollama is already running at this point (warmed by LLM preload above).
         embeddings = None
         if Config.RAG_ENABLED or Config.ALLOW_EMBEDDING_SEARCH:
             try:
@@ -375,6 +370,9 @@ class ComponentFactory:
                 components["contextor"] = None
         else:
             components["contextor"] = None
+
+        # LLM — no longer needs contextor (RAG is handled in main.py)
+        components["llm"] = ComponentFactory.create_llm()
 
         components["dispatch_adapter"] = ComponentFactory.create_dispatch_adapter()
         components["goal_manager"] = ComponentFactory.create_goal_manager()
