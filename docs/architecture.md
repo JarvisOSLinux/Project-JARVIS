@@ -162,9 +162,27 @@ Built on [Textual](https://textual.textualize.io/). All platform-agnostic.
 | `tts/` | Piper TTS provider |
 | `activation/` | Wake-word detection (Vosk-based) |
 
-Voice runs in a background thread (`voice_activation_thread.py` in `runtime/`). When a wake word fires, it opens the STT capture window and injects a `VOICE_INPUT` event into `EventMerger` once an utterance completes. If the user says nothing within `VOICE_ACTIVATION_TIMEOUT` seconds, capture is abandoned and control returns to wake-word mode without processing anything; the timeout is disabled the moment speech is detected, so mid-sentence pauses never cut a command off early. Every capture attempt broadcasts its `listening`/`idle` state over the GUI socket.
+Voice runs in a background thread (`voice_activation_thread.py` in `runtime/`). When a wake word fires, it opens the STT capture window and injects a `VOICE_INPUT` event into `EventMerger` once an utterance completes. If the user says nothing within `VOICE_ACTIVATION_TIMEOUT` seconds, capture is abandoned and control returns to wake-word mode without processing anything; the timeout is disabled the moment speech is detected, so mid-sentence pauses never cut a command off early.
 
 Config: `WAKE_WORDS`, `VOICE_ACTIVATION_SENSITIVITY`, `VOICE_ACTIVATION_TIMEOUT`, `VOSK_MODEL_PATH`, `TTS_MODEL_ONNX`/`TTS_MODEL_JSON` — all in `~/.config/jarvis/jarvis.conf`.
+
+### Voice/response session state machine (`jarvis/core/voice_state.py`)
+
+`VoiceState` is the single source of truth for the daemon's voice + response lifecycle:
+
+```
+IDLE (wake-word listening)
+  → WOKEN       (wake word fired, chime plays -- hook point exists, no chime yet)
+    → CAPTURING (STT active, subject to the silence timeout above)
+      → IDLE       (nothing usable was said -- discarded)
+      → PROCESSING (LLM + dispatch running; also entered directly for GUI/CLI/stdin text input)
+        → SPEAKING (TTS playing the reply)
+          → IDLE
+```
+
+Every transition broadcasts over the GUI socket as a structured event: `{"type": "state", "state": "<value>", "meta": {...}}`. `meta` is omitted unless the transition carries extra detail (currently only the CAPTURING → IDLE discard case, with `{"reason": "discard", "detail": "..."}`). `jarvis.runtime.io.set_gui_state(app, state, meta=None)` is the only place a transition should be broadcast from; `state` is a `VoiceState` member for anything in the diagram above, or the plain string `"listening"`/`"idle"` for the separate, orthogonal `start_listening`/`stop_listening` GUI toggle (whether the wake-word listener is enabled at all — not part of this state machine).
+
+**Known limitation:** `OutputManager._output_voice()` still calls TTS synthesis/playback synchronously on the event loop thread (a pre-existing characteristic, not introduced by this state machine). SPEAKING and the following IDLE are broadcast at the logically correct points around that call, but because the call blocks the loop, delivery to socket clients can lag behind the exact moment TTS starts/stops. Making TTS playback non-blocking is tracked separately.
 
 ---
 

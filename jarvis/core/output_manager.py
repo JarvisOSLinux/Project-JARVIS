@@ -2,6 +2,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from ..config import Config
 from .logger import get_logger
+from .voice_state import VoiceState
 
 logger = get_logger(__name__)
 
@@ -25,6 +26,23 @@ class OutputManager:
         self._output_callbacks: List[Callable[[Dict[str, Any]], None]] = []
         self._activity_callbacks: List[Callable[[Dict[str, Any]], None]] = []
         self._suppress_stdout = suppress_stdout
+        self._state_callback: Optional[Callable[[VoiceState], None]] = None
+
+    def set_state_callback(self, cb: Optional[Callable[[VoiceState], None]]) -> None:
+        """Register a callback notified of SPEAKING/IDLE around TTS playback.
+
+        Wired by lifecycle.py to broadcast the transition over the GUI
+        socket. Left unset in contexts with no daemon/socket (bare CLI use).
+        """
+        self._state_callback = cb
+
+    def _notify_state(self, state: VoiceState) -> None:
+        if self._state_callback is None:
+            return
+        try:
+            self._state_callback(state)
+        except Exception as e:
+            logger.warning(f"State callback error: {e}")
 
     def add_output_callback(self, cb: Callable[[Dict[str, Any]], None]) -> None:
         """Register a callback to receive every response (for app/stream integration)."""
@@ -95,11 +113,14 @@ class OutputManager:
             text: Text to speak
         """
         if self._has_tts and self.tts is not None:
+            self._notify_state(VoiceState.SPEAKING)
             try:
                 self.tts.say(text)
             except Exception as e:
                 logger.warning(f"TTS failed, falling back to text output: {e}")
                 self._output_text(text)
+            finally:
+                self._notify_state(VoiceState.IDLE)
         else:
             logger.info("Voice output requested but TTS unavailable, using text output")
             self._output_text(text)

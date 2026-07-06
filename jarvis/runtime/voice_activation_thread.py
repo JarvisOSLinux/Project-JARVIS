@@ -8,9 +8,10 @@ from logging import Logger
 from typing import Any
 
 from ..config import Config
+from ..core.voice_state import VoiceState
 
 
-def _broadcast_gui_state(app: Any, state: str) -> None:
+def _broadcast_gui_state(app: Any, state: VoiceState, meta: dict | None = None) -> None:
     """Thread-safe: schedule a GUI-socket state broadcast onto the event loop."""
     events = getattr(app, "events", None)
     if events is None:
@@ -18,7 +19,9 @@ def _broadcast_gui_state(app: Any, state: str) -> None:
 
     from .io import set_gui_state
 
-    events.call_soon_threadsafe(lambda: asyncio.create_task(set_gui_state(app, state)))
+    events.call_soon_threadsafe(
+        lambda: asyncio.create_task(set_gui_state(app, state, meta))
+    )
 
 
 def process_voice_command_inject(app: Any, logger: Logger) -> None:
@@ -30,10 +33,11 @@ def process_voice_command_inject(app: Any, logger: Logger) -> None:
     detect "nothing was said" (see Project-JARVIS#137). ``read()`` polls with
     a bounded wait instead, so the deadline is actually checked.
     """
+    idle_meta: dict | None = None
     try:
         app.voice_manager.activation.stop_listening()
         app.voice_manager.stt.start()
-        _broadcast_gui_state(app, "listening")
+        _broadcast_gui_state(app, VoiceState.CAPTURING)
         try:
             timeout = Config.VOICE_ACTIVATION_TIMEOUT
             deadline = time.monotonic() + timeout if timeout > 0 else None
@@ -48,6 +52,10 @@ def process_voice_command_inject(app: Any, logger: Logger) -> None:
                             "JARVIS: No speech detected after wake word, "
                             "returning to wake-word mode"
                         )
+                        idle_meta = {
+                            "reason": "discard",
+                            "detail": "no speech detected within timeout",
+                        }
                         return
                     poll_timeout = min(poll_timeout, remaining)
 
@@ -67,7 +75,7 @@ def process_voice_command_inject(app: Any, logger: Logger) -> None:
     except Exception as e:
         logger.error(f"JARVIS: Voice processing error: {e}")
     finally:
-        _broadcast_gui_state(app, "idle")
+        _broadcast_gui_state(app, VoiceState.IDLE, idle_meta)
         if app._running and hasattr(app.voice_manager, "activation"):
             app.voice_manager.activation.start_listening()
 
@@ -87,6 +95,9 @@ def run_voice_activation(app: Any, logger: Logger) -> None:
         while app._running:
             if getattr(app.voice_manager, "_wake_word_detected", False):
                 app.voice_manager._wake_word_detected = False
+                # WOKEN is deliberately transient -- no chime plays yet
+                # (Project-JARVIS#139), but this is the hook point for it.
+                _broadcast_gui_state(app, VoiceState.WOKEN)
                 process_voice_command_inject(app, logger)
             time.sleep(0.3)
     except Exception as e:

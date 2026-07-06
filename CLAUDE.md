@@ -163,6 +163,7 @@ make check                  # Format + lint + typecheck + tests
 | `jarvis/core/confirmation_manager.py` | Multi-channel confirmation gate |
 | `jarvis/core/socket_security.py` | Socket hardening |
 | `jarvis/core/command_parser.py` | LLM response parser + action registry |
+| `jarvis/core/voice_state.py` | `VoiceState` — formal voice/response session state machine |
 | `jarvis/dispatch/adapter.py` | Python wrapper for Rust dispatch binary |
 | `jarvis/dispatch/discovery.py` | Embedding search via dmcp vector index |
 | `jarvis/dispatch/dmcp_registry.py` | dmcp CLI wrappers (install, tools, config) |
