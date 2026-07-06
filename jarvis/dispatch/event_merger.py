@@ -152,6 +152,17 @@ class EventMerger:
 
         self._loop.call_soon_threadsafe(_put)
 
+    def call_soon_threadsafe(self, callback: Callable[[], None]) -> None:
+        """Schedule a plain callback on the event loop from any thread.
+
+        For voice/socket threads that need to trigger async work (e.g.
+        broadcasting a GUI state change) without going through the merged
+        event queue.
+        """
+        if self._loop is None:
+            return
+        self._loop.call_soon_threadsafe(callback)
+
     def request_shutdown(self) -> None:
         """Thread-safe request to shut down the event loop (e.g. from signal handler)."""
         if self._loop is None:

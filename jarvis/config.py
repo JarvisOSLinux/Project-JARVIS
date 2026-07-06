@@ -78,6 +78,9 @@ class Config:
     VOICE_ACTIVATION_SENSITIVITY = float(
         os.getenv("VOICE_ACTIVATION_SENSITIVITY", "0.8")
     )
+    # Seconds of silence after a wake word before giving up and returning to
+    # wake-word mode. Disabled (never times out) when <= 0.
+    VOICE_ACTIVATION_TIMEOUT = float(os.getenv("VOICE_ACTIVATION_TIMEOUT", "4.0"))
 
     # CLI Output Mode Configuration
     OUTPUT_MODE = os.getenv("OUTPUT_MODE", "voice")  # voice or text
