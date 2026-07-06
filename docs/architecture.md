@@ -162,9 +162,9 @@ Built on [Textual](https://textual.textualize.io/). All platform-agnostic.
 | `tts/` | Piper TTS provider |
 | `activation/` | Wake-word detection (Vosk-based) |
 
-Voice runs in a background thread (`voice_activation_thread.py` in `runtime/`). When a wake word fires, it injects a `VOICE_INPUT` event into `EventMerger`. TTS output is triggered by `output_manager.py` after ROOT responds.
+Voice runs in a background thread (`voice_activation_thread.py` in `runtime/`). When a wake word fires, it opens the STT capture window and injects a `VOICE_INPUT` event into `EventMerger` once an utterance completes. If the user says nothing within `VOICE_ACTIVATION_TIMEOUT` seconds, capture is abandoned and control returns to wake-word mode without processing anything; the timeout is disabled the moment speech is detected, so mid-sentence pauses never cut a command off early. Every capture attempt broadcasts its `listening`/`idle` state over the GUI socket.
 
-Config: `WAKE_WORDS`, `VOICE_ACTIVATION_SENSITIVITY`, `VOSK_MODEL_PATH`, `TTS_MODEL_ONNX`/`TTS_MODEL_JSON` — all in `~/.config/jarvis/jarvis.conf`.
+Config: `WAKE_WORDS`, `VOICE_ACTIVATION_SENSITIVITY`, `VOICE_ACTIVATION_TIMEOUT`, `VOSK_MODEL_PATH`, `TTS_MODEL_ONNX`/`TTS_MODEL_JSON` — all in `~/.config/jarvis/jarvis.conf`.
 
 ---
 

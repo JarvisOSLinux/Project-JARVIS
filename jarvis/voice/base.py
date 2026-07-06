@@ -31,7 +31,17 @@ class STTProvider(ABC):
         """Yield ``(text, is_final)`` tuples as speech is recognised.
 
         Must block between results and stop iterating when the provider
-        is no longer running.
+        is no longer running. Yields nothing during pure silence -- callers
+        that need to detect "no speech at all" (e.g. a post-wake-word
+        timeout) must use ``read()`` instead, since a silent ``for`` loop
+        over this generator never re-enters its body to check a deadline.
+        """
+
+    @abstractmethod
+    def read(self, timeout: Optional[float] = None) -> Optional[Tuple[str, bool]]:
+        """Pop the next ``(text, is_final)`` result, waiting up to ``timeout``
+        seconds. Returns None if none arrives in time, so callers can bound
+        how long they wait through stretches of silence.
         """
 
     @abstractmethod
