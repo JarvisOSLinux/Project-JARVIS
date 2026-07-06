@@ -34,6 +34,9 @@ def _make_app(stt_read_side_effect, is_running=True):
             voice_manager=voice_manager,
             events=events,
             _running=True,
+            _gui_clients=set(),  # run_voice_activation also broadcasts
+            # wake_word_detected via the real broadcast_to_gui_clients;
+            # empty set makes it a safe no-op for these tests.
         ),
         stt,
         activation,
@@ -203,7 +206,9 @@ class TestVoiceStateBroadcasts:
         vm.activation.start_listening.side_effect = fake_start_listening
         events = Mock()
         events.call_soon_threadsafe = Mock()
-        app = SimpleNamespace(voice_manager=vm, events=events, _running=True)
+        app = SimpleNamespace(
+            voice_manager=vm, events=events, _running=True, _gui_clients=set()
+        )
 
         def stop_after_one_pass(_seconds):
             app._running = False  # exit run_voice_activation's while loop next check

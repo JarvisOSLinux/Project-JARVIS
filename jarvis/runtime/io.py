@@ -11,6 +11,7 @@ from typing import Any
 from ..config import Config
 from ..core.voice_state import VoiceState
 from ..platform import current as platform
+from ..voice.chime import validate_chime_path
 
 
 async def run_socket_listener(app: Any, logger: Logger) -> None:
@@ -325,6 +326,9 @@ async def _process_gui_message(
         )
         await set_gui_state(app, VoiceState.IDLE)
 
+    elif msg_type == "set_wake_chime_path":
+        await _handle_set_wake_chime_path(app, msg, writer)
+
     elif msg_type == "list_sessions":
         await _gui_write(writer, _handle_list_sessions(app, msg))
 
@@ -345,6 +349,35 @@ async def _process_gui_message(
             await _gui_write(writer, {"type": "pong"})
         except Exception:
             pass
+
+
+# ---------------------------------------------------------------------------
+# GUI socket — wake chime config
+# ---------------------------------------------------------------------------
+
+
+async def _handle_set_wake_chime_path(
+    app: Any, msg: dict, writer: asyncio.StreamWriter
+) -> None:
+    """Validated, single-purpose config write for WAKE_CHIME_PATH only --
+    deliberately NOT a generic "set any config key" message. Exposing an
+    unscoped config writer over the GUI socket would let any local client
+    silently rewrite security-relevant settings (e.g. CONFIRMATION_MODE).
+    """
+    path = msg.get("path", "")
+    error = validate_chime_path(path)
+    if error:
+        await _gui_write(
+            writer, {"type": "config_error", "key": "WAKE_CHIME_PATH", "message": error}
+        )
+        return
+
+    from ..cli import _update_env_setting
+
+    _update_env_setting("WAKE_CHIME_PATH", path)
+    await broadcast_to_gui_clients(
+        app, {"type": "config_updated", "key": "WAKE_CHIME_PATH", "value": path}
+    )
 
 
 # ---------------------------------------------------------------------------

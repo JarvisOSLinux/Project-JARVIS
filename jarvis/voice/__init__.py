@@ -31,6 +31,9 @@ from .audio import (
 # Abstract interfaces
 from .base import ActivationProvider, STTProvider, TTSProvider
 
+# Wake-word earcon
+from .chime import play_chime, validate_chime_path
+
 # Orchestrator
 from .manager import VoiceManager
 
@@ -50,6 +53,9 @@ __all__ = [
     "list_audio_devices",
     "get_default_input_device",
     "get_default_output_device",
+    # Wake-word earcon
+    "validate_chime_path",
+    "play_chime",
     # Factories
     "create_stt",
     "create_tts",

@@ -9,6 +9,7 @@ from typing import Any
 
 from ..config import Config
 from ..core.voice_state import VoiceState
+from ..voice.chime import play_chime
 
 
 def _broadcast_gui_state(app: Any, state: VoiceState, meta: dict | None = None) -> None:
@@ -21,6 +22,26 @@ def _broadcast_gui_state(app: Any, state: VoiceState, meta: dict | None = None) 
 
     events.call_soon_threadsafe(
         lambda: asyncio.create_task(set_gui_state(app, state, meta))
+    )
+
+
+def _broadcast_wake_word_detected(app: Any) -> None:
+    """Thread-safe: unconditionally notify GUI clients a wake word fired.
+
+    Distinct from the WOKEN VoiceState broadcast -- this is the dedicated,
+    always-emitted signal jarvisos-app's ipc.rs already parses
+    (IpcEvent::WakeWordDetected); the daemon just never sent it before now.
+    """
+    events = getattr(app, "events", None)
+    if events is None:
+        return
+
+    from .io import broadcast_to_gui_clients
+
+    events.call_soon_threadsafe(
+        lambda: asyncio.create_task(
+            broadcast_to_gui_clients(app, {"type": "wake_word_detected"})
+        )
     )
 
 
@@ -95,9 +116,12 @@ def run_voice_activation(app: Any, logger: Logger) -> None:
         while app._running:
             if getattr(app.voice_manager, "_wake_word_detected", False):
                 app.voice_manager._wake_word_detected = False
-                # WOKEN is deliberately transient -- no chime plays yet
-                # (Project-JARVIS#139), but this is the hook point for it.
+                _broadcast_wake_word_detected(app)
                 _broadcast_gui_state(app, VoiceState.WOKEN)
+                # Blocking is intentional: the chime is the audible cue to
+                # start talking, so it plays out before the mic reopens for
+                # capture rather than racing the user's own speech.
+                play_chime(Config.WAKE_CHIME_PATH)
                 process_voice_command_inject(app, logger)
             time.sleep(0.3)
     except Exception as e:
