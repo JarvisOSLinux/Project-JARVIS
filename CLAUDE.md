@@ -165,6 +165,7 @@ make check                  # Format + lint + typecheck + tests
 | `jarvis/core/command_parser.py` | LLM response parser + action registry |
 | `jarvis/core/voice_state.py` | `VoiceState` — formal voice/response session state machine |
 | `jarvis/voice/chime.py` | Wake-word earcon: path validation + best-effort playback |
+| `jarvis/voice/audio.py` | Audio device detection + `passes_noise_gate` RMS filter |
 | `jarvis/dispatch/adapter.py` | Python wrapper for Rust dispatch binary |
 | `jarvis/dispatch/discovery.py` | Embedding search via dmcp vector index |
 | `jarvis/dispatch/dmcp_registry.py` | dmcp CLI wrappers (install, tools, config) |

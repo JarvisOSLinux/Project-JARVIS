@@ -88,6 +88,11 @@ class Config:
         "WAKE_CHIME_PATH",
         os.path.join(os.path.dirname(__file__), "assets", "wake_chime.wav"),
     )
+    # Minimum RMS amplitude (0-32767, int16 PCM) a raw audio chunk must have
+    # to reach the STT/wake-word recognizer at all -- quiet ambient noise is
+    # dropped before it ever becomes a Vosk hypothesis. Typical quiet-room
+    # noise sits well under 150; normal speech is usually 1000+.
+    NOISE_GATE_RMS_THRESHOLD = int(os.getenv("NOISE_GATE_RMS_THRESHOLD", "150"))
 
     # CLI Output Mode Configuration
     OUTPUT_MODE = os.getenv("OUTPUT_MODE", "voice")  # voice or text

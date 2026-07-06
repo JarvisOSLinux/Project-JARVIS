@@ -6,6 +6,7 @@ from queue import Empty, Queue
 from typing import Callable, List, Optional
 
 from ...core.logger import get_logger
+from ..audio import passes_noise_gate
 from ..base import ActivationProvider
 
 logger = get_logger(__name__)
@@ -21,6 +22,7 @@ class VoskActivation(ActivationProvider):
         sample_rate: int = 16000,
         chunk_size: int = 4000,
         sensitivity: float = 0.8,
+        noise_gate_threshold: int = 150,
         on_wake_word: Optional[Callable[[], None]] = None,
     ):
         self.wake_words = [w.lower() for w in (wake_words or ["jarvis", "hey jarvis"])]
@@ -28,6 +30,7 @@ class VoskActivation(ActivationProvider):
         self.sample_rate = sample_rate
         self.chunk_size = chunk_size
         self.sensitivity = sensitivity
+        self.noise_gate_threshold = noise_gate_threshold
         self.on_wake_word = on_wake_word
 
         try:
@@ -176,16 +179,16 @@ class VoskActivation(ActivationProvider):
                 except Empty:
                     continue
 
+                if not passes_noise_gate(data, self.noise_gate_threshold):
+                    continue
+
                 if self._recognizer.AcceptWaveform(data):
                     result = self.json.loads(self._recognizer.Result())
                     text = result.get("text", "").lower().strip()
                     if text:
                         self._check_for_wake_word(text)
-                else:
-                    partial = self.json.loads(self._recognizer.PartialResult())
-                    partial_text = partial.get("partial", "").lower().strip()
-                    if partial_text:
-                        self._check_for_wake_word(partial_text)
+                # Partial hypotheses are Vosk's least reliable output --
+                # only a finalized result triggers a wake word (Project-JARVIS#140).
         except Exception as e:
             logger.error(f"Error in listening loop: {e}")
         finally:

@@ -270,8 +270,8 @@ class ComponentFactory:
                 model_path=Config.VOSK_MODEL_PATH,
                 sample_rate=16000,
                 chunk_size=4000,
-                phrase_timeout=3.0,
                 silence_timeout=1.0,
+                noise_gate_threshold=Config.NOISE_GATE_RMS_THRESHOLD,
             )
 
             activation = create_activation(
@@ -279,6 +279,7 @@ class ComponentFactory:
                 wake_words=Config.WAKE_WORDS,
                 model_path=Config.VOSK_MODEL_PATH,
                 sensitivity=Config.VOICE_ACTIVATION_SENSITIVITY,
+                noise_gate_threshold=Config.NOISE_GATE_RMS_THRESHOLD,
             )
 
             vm = VoiceManager(
