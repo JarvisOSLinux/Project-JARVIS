@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from logging import Logger
 from typing import Any
 
+from .io import broadcast_to_gui_clients
 from .llm_bridge import ask_llm
 from .output_hooks import emit_activity
 from .root_context import build_root_context, compact_payload_for_llm
@@ -115,6 +117,21 @@ async def on_confirmation_response(
         f"approved={len(pending.approved_tasks)}, "
         f"denied={len(pending.denied_tools)}"
     )
+
+    # This is the one true point where _pending actually changes, regardless
+    # of which channel resolved it (CLI, GUI, TUI, desktop notification, or
+    # an opted-back-in timeout) -- so it's the right place to keep every
+    # connected GUI client's pending-confirmations view in sync.
+    if getattr(app, "_gui_clients", None):
+        asyncio.create_task(
+            broadcast_to_gui_clients(
+                app,
+                {
+                    "type": "confirmation_list",
+                    "confirmations": app.confirmation.list_pending(),
+                },
+            )
+        )
 
     if app.llm is None:
         logger.warning("Confirmation resolved but no LLM configured — ignoring")

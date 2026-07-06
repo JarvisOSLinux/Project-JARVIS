@@ -46,10 +46,14 @@ async def handle_socket_connection(
             if not text:
                 continue
 
-            # Check for confirmation responses — inject into event loop.
+            # Check for confirmation responses / queries — handled here,
+            # never treated as chat input.
             if text.startswith("{"):
                 try:
                     msg = json.loads(text)
+                    handled = await _handle_confirmation_query(app, msg, writer)
+                    if handled:
+                        continue
                     if msg.get("type") == "confirmation_response":
                         app.events.inject_confirmation_response(msg)
                         continue
@@ -66,6 +70,66 @@ async def handle_socket_connection(
             await writer.wait_closed()
         except Exception:
             pass
+
+
+async def _handle_confirmation_query(
+    app: Any, msg: dict, writer: asyncio.StreamWriter
+) -> bool:
+    """Handle list/approve/deny confirmation queries, shared by both sockets.
+
+    Returns True if `msg` was a confirmation query and has been handled (the
+    caller should not fall through to its own message routing for it).
+    """
+    msg_type = msg.get("type")
+
+    if msg_type == "list_confirmations":
+        await _gui_write(
+            writer,
+            {
+                "type": "confirmation_list",
+                "confirmations": app.confirmation.list_pending(),
+            },
+        )
+        return True
+
+    if msg_type == "approve_confirmation":
+        app.events.inject_confirmation_response(
+            {
+                "type": "confirmation_response",
+                "id": msg.get("id", ""),
+                "approved": True,
+            }
+        )
+        await _gui_write(
+            writer, {"type": "ack", "message": f"Approved {msg.get('id', '')}"}
+        )
+        return True
+
+    if msg_type == "deny_confirmation":
+        app.events.inject_confirmation_response(
+            {
+                "type": "confirmation_response",
+                "id": msg.get("id", ""),
+                "approved": False,
+            }
+        )
+        await _gui_write(
+            writer, {"type": "ack", "message": f"Denied {msg.get('id', '')}"}
+        )
+        return True
+
+    if msg_type == "approve_all_confirmations":
+        ids = [c["id"] for c in app.confirmation.list_pending()]
+        for cid in ids:
+            app.events.inject_confirmation_response(
+                {"type": "confirmation_response", "id": cid, "approved": True}
+            )
+        await _gui_write(
+            writer, {"type": "ack", "message": f"Approved {len(ids)} confirmation(s)"}
+        )
+        return True
+
+    return False
 
 
 def on_output_for_broadcast(app: Any, response: dict[str, Any]) -> None:
@@ -226,6 +290,9 @@ async def _process_gui_message(
 ) -> None:
     """Route an incoming GUI protocol message."""
     msg_type = msg.get("type")
+
+    if await _handle_confirmation_query(app, msg, writer):
+        return
 
     if msg_type == "message":
         content = msg.get("content", "").strip()

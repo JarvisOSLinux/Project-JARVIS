@@ -57,7 +57,7 @@ _SETTINGS: List[_SettingDef] = [
         "Confirmation timeout (s)",
         "Security",
         "int",
-        hint="Auto-deny after this many seconds",
+        hint="Auto-deny after N seconds; 0 disables (pending list instead)",
     ),
     _SettingDef(
         "RAG_TOP_K",

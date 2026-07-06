@@ -37,6 +37,7 @@ The global ``CONFIRMATION_MODE`` (config) controls overall behaviour:
 import asyncio
 import json
 import sys
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
@@ -59,6 +60,10 @@ class PendingConfirmation:
     approved_tasks: List[Dict[str, Any]] = field(default_factory=list)
     # Dispatch sub-chain context to resume after confirmation.
     dispatch_context: Optional[Dict[str, Any]] = None
+    # Retained so a later list_pending() query can describe what's waiting --
+    # the original request only computes these locally otherwise.
+    tool_names: List[str] = field(default_factory=list)
+    created_at: float = field(default_factory=time.time)
 
 
 class ConfirmationManager:
@@ -160,18 +165,19 @@ class ConfirmationManager:
             notification_silent: Suppress desktop notification.
             timeout: Seconds before auto-deny.
         """
+        # Build a human-readable summary of tools needing confirmation.
+        tool_names = [t["tool_name"] for t in tools_needing_confirmation]
+        tool_summaries = ", ".join(tool_names)
+
         pending = PendingConfirmation(
             request_id=request_id,
             tasks=tasks,
             approved_tasks=list(approved_tasks),
             denied_tools=list(denied_tools),
             dispatch_context=dispatch_context,
+            tool_names=tool_names,
         )
         self._pending[request_id] = pending
-
-        # Build a human-readable summary of tools needing confirmation.
-        tool_names = [t["tool_name"] for t in tools_needing_confirmation]
-        tool_summaries = ", ".join(tool_names)
 
         logger.info(
             f"Confirmation requested (non-blocking): id={request_id}, "
@@ -187,10 +193,26 @@ class ConfirmationManager:
             timeout=timeout,
         )
 
-        # Start timeout — auto-deny if no response within `timeout` seconds.
-        self._timeout_tasks[request_id] = asyncio.create_task(
-            self._auto_deny_after(request_id, timeout)
-        )
+        # Start timeout only if one is configured. The default (0) leaves
+        # the confirmation pending indefinitely -- it's tracked in
+        # list_pending() and reviewable via CLI/socket at any time, so
+        # nothing needs to expire on a clock. A positive value restores the
+        # old auto-deny behavior for unattended/headless setups.
+        if timeout and timeout > 0:
+            self._timeout_tasks[request_id] = asyncio.create_task(
+                self._auto_deny_after(request_id, timeout)
+            )
+
+    def list_pending(self) -> List[Dict[str, Any]]:
+        """Summaries of currently pending confirmations, for CLI/socket review."""
+        return [
+            {
+                "id": p.request_id,
+                "tool_names": p.tool_names,
+                "created_at": p.created_at,
+            }
+            for p in self._pending.values()
+        ]
 
     def resolve(self, response: Dict[str, Any]) -> Optional[PendingConfirmation]:
         """Process a confirmation response and return the pending data.
@@ -277,16 +299,14 @@ class ConfirmationManager:
             asyncio.create_task(self._notify_cli(request_id, tool_summary, timeout))
             return
 
-        # No channel available — auto-deny immediately.
-        logger.warning("No confirmation channel available, auto-denying")
-        if self._inject_confirmation:
-            self._inject_confirmation(
-                {
-                    "type": "confirmation_response",
-                    "id": request_id,
-                    "approved": False,
-                }
-            )
+        # No live channel available right now -- that's fine. The request
+        # stays in _pending, reviewable anytime via list_pending() (CLI or
+        # socket), rather than being auto-denied just because nobody
+        # happened to be watching at this exact moment.
+        logger.info(
+            f"No live confirmation channel available for id={request_id}; "
+            "left pending for CLI/socket review"
+        )
 
     # -- TUI (ConfirmModal) --------------------------------------------
 

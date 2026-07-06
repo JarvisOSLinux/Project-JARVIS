@@ -21,7 +21,11 @@ loop, which prevents it from misrepresenting the action.
    keeping the LLM and dispatcher fully async.
 4. **Channel-agnostic** — confirmation works across desktop notifications,
    CLI stdin, and socket IPC.  The kernel picks the best available channel.
-5. **Deny-safe** — timeout and "no channel available" both default to denial.
+5. **Persistent by default** — pending confirmations are tracked in a
+   queryable list (`ConfirmationManager.list_pending()`, exposed via CLI
+   and socket), reviewable at any time rather than expiring on a clock.
+   Auto-deny-on-timeout is opt-in (`CONFIRMATION_TIMEOUT` > 0) for
+   unattended/headless setups that want the old fail-safe behavior back.
 
 ## Configuration
 
@@ -29,7 +33,7 @@ loop, which prevents it from misrepresenting the action.
 |---|---|---|
 | `CONFIRMATION_MODE` | `smart` | `allow_all` / `smart` / `ask_all` |
 | `NOTIFICATION_SILENT` | `false` | Suppress desktop notifications (socket/CLI only) |
-| `CONFIRMATION_TIMEOUT` | `30` | Seconds to wait before auto-deny |
+| `CONFIRMATION_TIMEOUT` | `0` | Seconds before auto-deny; `0` disables it (persistent list instead) |
 
 ### Modes
 
@@ -82,7 +86,9 @@ User: "delete my temp files"
         │       ├─ Desktop: notify-send runs as async subprocess
         │       ├─ Socket:  JSON broadcast to connected clients
         │       └─ CLI:     input() in executor thread
-        ├─ 3. Start timeout task (auto-deny after N seconds)
+        ├─ 3. Start timeout task, only if CONFIRMATION_TIMEOUT > 0
+        │      (default 0 -- stays pending indefinitely, reviewable via
+        │      list_pending()/CLI/socket instead of expiring)
         └─ 4. Return {"awaiting_confirmation": True} immediately
             │
             ▼

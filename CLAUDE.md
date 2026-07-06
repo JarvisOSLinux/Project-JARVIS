@@ -89,7 +89,12 @@ requests to the best available channel:
 3. **Socket** — JSON over output socket for external clients
 4. **CLI prompt** — stdin `[y/N]` fallback
 
-Auto-denies after 30 seconds if no response.
+Pending confirmations are tracked in a persistent, queryable list
+(`ConfirmationManager.list_pending()`), reviewable anytime via `jarvis
+confirmations` (CLI) or `list_confirmations`/`approve_confirmation`/
+`deny_confirmation`/`approve_all_confirmations` (GUI socket) rather than
+expiring on a clock. `CONFIRMATION_TIMEOUT` defaults to `0` (disabled);
+set it > 0 to restore auto-deny for unattended/headless setups.
 
 ### Socket Security
 
