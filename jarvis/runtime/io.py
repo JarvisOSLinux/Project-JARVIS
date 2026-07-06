@@ -253,11 +253,131 @@ async def _process_gui_message(
         )
         await set_gui_state(app, "idle")
 
+    elif msg_type == "list_sessions":
+        await _gui_write(writer, _handle_list_sessions(app, msg))
+
+    elif msg_type == "create_session":
+        await _reply_or_broadcast(app, writer, _handle_create_session(app, msg))
+
+    elif msg_type == "switch_session":
+        await _reply_or_broadcast(app, writer, _handle_switch_session(app, msg))
+
+    elif msg_type == "rename_session":
+        await _reply_or_broadcast(app, writer, _handle_rename_session(app, msg))
+
+    elif msg_type == "delete_session":
+        await _reply_or_broadcast(app, writer, _handle_delete_session(app, msg))
+
     elif msg_type == "ping":
         try:
             await _gui_write(writer, {"type": "pong"})
         except Exception:
             pass
+
+
+# ---------------------------------------------------------------------------
+# GUI socket — session CRUD
+# ---------------------------------------------------------------------------
+
+SESSION_HISTORY_LIMIT = 200
+
+_ROLE_BY_ENTRY_TYPE = {"user_prompt": "user", "assistant_reply": "assistant"}
+
+
+def _session_error(message: str) -> dict:
+    return {"type": "session_error", "message": message}
+
+
+def _entries_to_messages(entries: list) -> list:
+    """Map conversation_log entries (chronological) to {role, content, timestamp}."""
+    messages = []
+    for entry in entries:
+        role = _ROLE_BY_ENTRY_TYPE.get((entry.get("metadata") or {}).get("type"))
+        if not role:
+            continue
+        messages.append(
+            {
+                "role": role,
+                "content": entry.get("content", ""),
+                "timestamp": entry.get("stored_at"),
+            }
+        )
+    return messages
+
+
+def _handle_list_sessions(app: Any, msg: dict) -> dict:
+    if not app.sessions.available:
+        return _session_error("Sessions unavailable (memory disabled)")
+    limit = msg.get("limit", 50)
+    offset = msg.get("offset", 0)
+    sessions = app.sessions.list(limit=limit, offset=offset)
+    return {"type": "session_list", "sessions": [s.to_dict() for s in sessions]}
+
+
+def _handle_create_session(app: Any, msg: dict) -> dict:
+    if not app.sessions.available:
+        return _session_error("Sessions unavailable (memory disabled)")
+    session = app.sessions.new_session(title=msg.get("title") or None)
+    if not session:
+        return _session_error("Failed to create session")
+    return {"type": "session_switched", "session": session.to_dict(), "messages": []}
+
+
+def _handle_switch_session(app: Any, msg: dict) -> dict:
+    session_id = msg.get("id", "")
+    if not session_id:
+        return _session_error("switch_session requires 'id'")
+    if not app.sessions.available:
+        return _session_error("Sessions unavailable (memory disabled)")
+    session = app.sessions.switch(session_id)
+    if not session:
+        return _session_error(f"No session matches '{session_id}'")
+    recall_result = app.contextor.recall(
+        "conversation_log", limit=SESSION_HISTORY_LIMIT, session_id=session.id
+    )
+    messages = _entries_to_messages(recall_result.get("entries", []))
+    return {
+        "type": "session_switched",
+        "session": session.to_dict(),
+        "messages": messages,
+    }
+
+
+def _handle_rename_session(app: Any, msg: dict) -> dict:
+    session_id = msg.get("id", "")
+    title = msg.get("title", "")
+    if not session_id or not title:
+        return _session_error("rename_session requires 'id' and 'title'")
+    if not app.sessions.available:
+        return _session_error("Sessions unavailable (memory disabled)")
+    if not app.sessions.rename(title, session_id=session_id):
+        return _session_error(f"Rename failed for '{session_id}'")
+    sessions = app.sessions.list(limit=50)
+    return {"type": "session_list", "sessions": [s.to_dict() for s in sessions]}
+
+
+def _handle_delete_session(app: Any, msg: dict) -> dict:
+    session_id = msg.get("id", "")
+    if not session_id:
+        return _session_error("delete_session requires 'id'")
+    if not app.sessions.available:
+        return _session_error("Sessions unavailable (memory disabled)")
+    if not app.sessions.delete(session_id):
+        return _session_error(f"Delete failed for '{session_id}'")
+    sessions = app.sessions.list(limit=50)
+    return {"type": "session_list", "sessions": [s.to_dict() for s in sessions]}
+
+
+async def _reply_or_broadcast(
+    app: Any, writer: asyncio.StreamWriter, response: dict
+) -> None:
+    """Session mutations reflect shared daemon state, so success broadcasts
+    to every GUI client; errors are specific to the requester's malformed
+    request and go back to them alone."""
+    if response.get("type") == "session_error":
+        await _gui_write(writer, response)
+    else:
+        await broadcast_to_gui_clients(app, response)
 
 
 async def set_gui_state(app: Any, state: str) -> None:
