@@ -87,6 +87,13 @@ _SETTINGS: List[_SettingDef] = [
         "bool",
     ),
     _SettingDef(
+        "WAKE_CHIME_PATH",
+        "Wake chime path",
+        "Voice",
+        "str",
+        hint="Must be a readable WAV file; bundled default used if unset",
+    ),
+    _SettingDef(
         "OUTPUT_MODE",
         "Output mode",
         "Output",

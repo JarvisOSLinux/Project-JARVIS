@@ -158,13 +158,22 @@ Built on [Textual](https://textual.textualize.io/). All platform-agnostic.
 | `manager.py` | `VoiceManager` — coordinates STT, TTS, wake-word detection |
 | `audio.py` | Shared audio device init (PyAudio / sounddevice) |
 | `base.py` | `BaseSTT`, `BaseTTS` ABCs |
+| `chime.py` | Wake-word earcon: path validation + best-effort playback |
 | `stt/` | Vosk STT provider |
 | `tts/` | Piper TTS provider |
 | `activation/` | Wake-word detection (Vosk-based) |
 
-Voice runs in a background thread (`voice_activation_thread.py` in `runtime/`). When a wake word fires, it opens the STT capture window and injects a `VOICE_INPUT` event into `EventMerger` once an utterance completes. If the user says nothing within `VOICE_ACTIVATION_TIMEOUT` seconds, capture is abandoned and control returns to wake-word mode without processing anything; the timeout is disabled the moment speech is detected, so mid-sentence pauses never cut a command off early.
+Voice runs in a background thread (`voice_activation_thread.py` in `runtime/`). When a wake word fires: the daemon unconditionally broadcasts `{"type": "wake_word_detected"}` over the GUI socket, transitions to `VoiceState.WOKEN`, plays the wake chime (blocking — see below), then opens the STT capture window and injects a `VOICE_INPUT` event into `EventMerger` once an utterance completes. If the user says nothing within `VOICE_ACTIVATION_TIMEOUT` seconds, capture is abandoned and control returns to wake-word mode without processing anything; the timeout is disabled the moment speech is detected, so mid-sentence pauses never cut a command off early.
 
-Config: `WAKE_WORDS`, `VOICE_ACTIVATION_SENSITIVITY`, `VOICE_ACTIVATION_TIMEOUT`, `VOSK_MODEL_PATH`, `TTS_MODEL_ONNX`/`TTS_MODEL_JSON` — all in `~/.config/jarvis/jarvis.conf`.
+Config: `WAKE_WORDS`, `VOICE_ACTIVATION_SENSITIVITY`, `VOICE_ACTIVATION_TIMEOUT`, `WAKE_CHIME_PATH`, `VOSK_MODEL_PATH`, `TTS_MODEL_ONNX`/`TTS_MODEL_JSON` — all in `~/.config/jarvis/jarvis.conf`.
+
+### Wake chime (`jarvis/voice/chime.py`)
+
+A short, pre-rendered earcon (not TTS) plays the instant a wake word fires, so activation is never silent — important for a headless `jarvis.service` with no terminal/GUI attached. `WAKE_CHIME_PATH` defaults to a bundled two-tone WAV (`jarvis/assets/wake_chime.wav`, synthesized offline, no external asset dependency) and can be overridden to any readable WAV file.
+
+`validate_chime_path()` checks the file exists, is readable, and parses as a valid WAV — used both before playback (so a bad path just skips the chime with a logged warning, never crashes the wake-word thread) and before persisting a client-supplied override. `play_chime()` is entirely best-effort: missing `sounddevice`, no output device, or any playback error is caught and logged, never raised.
+
+`WAKE_CHIME_PATH` is writable by any connected GUI-socket client via a single-purpose `{"type": "set_wake_chime_path", "path": "..."}` message (`jarvis.runtime.io._handle_set_wake_chime_path`) — validated the same way, persisted via the same `.env`/`jarvis.conf` write path the TUI settings modal and provider config already use, and broadcasts `{"type": "config_updated", "key": "WAKE_CHIME_PATH", "value": "..."}` to every connected client on success (or `{"type": "config_error", ...}` to the requester only on failure). This is deliberately a single dedicated message, not a generic "set any config key" — a generic writer over an unauthenticated local socket would let any connected client silently rewrite security-relevant settings like `CONFIRMATION_MODE`.
 
 ### Voice/response session state machine (`jarvis/core/voice_state.py`)
 
@@ -172,7 +181,7 @@ Config: `WAKE_WORDS`, `VOICE_ACTIVATION_SENSITIVITY`, `VOICE_ACTIVATION_TIMEOUT`
 
 ```
 IDLE (wake-word listening)
-  → WOKEN       (wake word fired, chime plays -- hook point exists, no chime yet)
+  → WOKEN       (wake word fired, chime plays)
     → CAPTURING (STT active, subject to the silence timeout above)
       → IDLE       (nothing usable was said -- discarded)
       → PROCESSING (LLM + dispatch running; also entered directly for GUI/CLI/stdin text input)

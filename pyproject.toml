@@ -113,7 +113,7 @@ where = ["."]
 include = ["jarvis*"]
 
 [tool.setuptools.package-data]
-jarvis = ["*.json", "*.yaml", "*.yml"]
+jarvis = ["*.json", "*.yaml", "*.yml", "assets/*.wav"]
 
 [tool.black]
 line-length = 88

@@ -168,6 +168,7 @@ cython_debug/
 *.wav
 *.mp3
 *.ogg
+!jarvis/assets/*.wav
 temp/
 logs/
 cache/

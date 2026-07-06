@@ -81,6 +81,13 @@ class Config:
     # Seconds of silence after a wake word before giving up and returning to
     # wake-word mode. Disabled (never times out) when <= 0.
     VOICE_ACTIVATION_TIMEOUT = float(os.getenv("VOICE_ACTIVATION_TIMEOUT", "4.0"))
+    # Short local earcon played the instant a wake word fires -- not TTS, so
+    # it plays with no model warm-up and no dependency on any GUI being
+    # attached. Falls back to the bundled default when unset.
+    WAKE_CHIME_PATH = os.getenv(
+        "WAKE_CHIME_PATH",
+        os.path.join(os.path.dirname(__file__), "assets", "wake_chime.wav"),
+    )
 
     # CLI Output Mode Configuration
     OUTPUT_MODE = os.getenv("OUTPUT_MODE", "voice")  # voice or text
