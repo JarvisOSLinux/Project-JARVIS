@@ -7,7 +7,11 @@ from queue import Empty, Queue
 from typing import Any, Callable, Generator, Optional, Tuple
 
 from ...core.logger import get_logger
-from ..audio import AudioUnavailableError, check_audio_input_available
+from ..audio import (
+    AudioUnavailableError,
+    check_audio_input_available,
+    passes_noise_gate,
+)
 from ..base import STTProvider
 
 logger = get_logger(__name__)
@@ -32,8 +36,8 @@ class VoskSTT(STTProvider):
         model_path: str = "vosk-model-small-en-us-0.15",
         sample_rate: int = 16000,
         chunk_size: int = 4000,
-        phrase_timeout: float = 3.0,
         silence_timeout: float = 1.0,
+        noise_gate_threshold: int = 150,
         device_index: Optional[int] = None,
     ):
         try:
@@ -62,8 +66,8 @@ class VoskSTT(STTProvider):
         self.model_path = model_path
         self.sample_rate = sample_rate
         self.chunk_size = chunk_size
-        self.phrase_timeout = phrase_timeout
         self.silence_timeout = silence_timeout
+        self.noise_gate_threshold = noise_gate_threshold
         self.device_index = device_index
 
         self._result_q: Queue[Tuple[str, bool]] = Queue()
@@ -212,6 +216,9 @@ class VoskSTT(STTProvider):
                 try:
                     data = self._audio_buffer.get(timeout=0.1)
                 except Empty:
+                    continue
+
+                if not passes_noise_gate(data, self.noise_gate_threshold):
                     continue
 
                 if self._recognizer.AcceptWaveform(data):

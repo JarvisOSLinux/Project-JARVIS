@@ -165,7 +165,15 @@ Built on [Textual](https://textual.textualize.io/). All platform-agnostic.
 
 Voice runs in a background thread (`voice_activation_thread.py` in `runtime/`). When a wake word fires: the daemon unconditionally broadcasts `{"type": "wake_word_detected"}` over the GUI socket, transitions to `VoiceState.WOKEN`, plays the wake chime (blocking — see below), then opens the STT capture window and injects a `VOICE_INPUT` event into `EventMerger` once an utterance completes. If the user says nothing within `VOICE_ACTIVATION_TIMEOUT` seconds, capture is abandoned and control returns to wake-word mode without processing anything; the timeout is disabled the moment speech is detected, so mid-sentence pauses never cut a command off early.
 
-Config: `WAKE_WORDS`, `VOICE_ACTIVATION_SENSITIVITY`, `VOICE_ACTIVATION_TIMEOUT`, `WAKE_CHIME_PATH`, `VOSK_MODEL_PATH`, `TTS_MODEL_ONNX`/`TTS_MODEL_JSON` — all in `~/.config/jarvis/jarvis.conf`.
+Config: `WAKE_WORDS`, `VOICE_ACTIVATION_SENSITIVITY`, `VOICE_ACTIVATION_TIMEOUT`, `WAKE_CHIME_PATH`, `NOISE_GATE_RMS_THRESHOLD`, `VOSK_MODEL_PATH`, `TTS_MODEL_ONNX`/`TTS_MODEL_JSON` — all in `~/.config/jarvis/jarvis.conf`.
+
+### Noise gate (`jarvis/voice/audio.py::passes_noise_gate`)
+
+Raw int16 PCM chunks are RMS-gated in both `VoskSTT` (`stt/vosk_stt.py`) and `VoskActivation` (`activation/vosk_activation.py`) *before* they ever reach `recognizer.AcceptWaveform()` — a chunk quieter than `NOISE_GATE_RMS_THRESHOLD` never becomes a Vosk hypothesis at all, rather than being filtered after the fact. Deliberately amplitude-based, not confidence- or word-based: Vosk is never configured for word-level confidence scoring, and a hardcoded noise-word denylist isn't reliable.
+
+Wake-word matching (`VoskActivation._check_for_wake_word`) only runs on Vosk's *finalized* results now — partial hypotheses (Vosk's least reliable output) are never checked, removing a source of false-positive wake triggers.
+
+`VoskSTT`'s `phrase_timeout` parameter was removed — it was accepted by the constructor and set by `component_factory.py`, but never actually read anywhere in `_process_loop`; only `silence_timeout` (pause-based endpointing) was ever wired up.
 
 ### Wake chime (`jarvis/voice/chime.py`)
 

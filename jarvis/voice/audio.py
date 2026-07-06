@@ -5,6 +5,8 @@ This module provides functions to detect audio input/output device availability
 with graceful handling of missing audio packages or devices.
 """
 
+import array
+import math
 from typing import Dict, List, Optional, Tuple
 
 from ..core.logger import get_logger
@@ -16,6 +18,26 @@ class AudioUnavailableError(Exception):
     """Raised when audio functionality is requested but unavailable"""
 
     pass
+
+
+def passes_noise_gate(data: bytes, threshold: int) -> bool:
+    """True if raw int16 mono PCM `data` is loud enough to pass the noise gate.
+
+    Plain-Python RMS (array + math, no numpy) so quiet ambient noise never
+    reaches the STT/wake-word recognizer in the first place (Project-JARVIS#140)
+    -- deliberately not confidence- or word-based, per that issue's constraints.
+    """
+    usable_len = len(data) - (len(data) % 2)
+    if usable_len <= 0:
+        return False
+
+    samples = array.array("h")
+    samples.frombytes(data[:usable_len])
+    if not samples:
+        return False
+
+    rms = math.sqrt(sum(s * s for s in samples) / len(samples))
+    return rms >= threshold
 
 
 def _try_import_sounddevice() -> Optional[object]:
