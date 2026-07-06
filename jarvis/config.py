@@ -202,8 +202,13 @@ class Config:
     #          (lets external apps render their own confirmation UI)
     NOTIFICATION_SILENT = os.getenv("NOTIFICATION_SILENT", "false").lower() == "true"
 
-    # Timeout (seconds) for user to respond to a confirmation prompt
-    CONFIRMATION_TIMEOUT = int(os.getenv("CONFIRMATION_TIMEOUT", "30"))
+    # Timeout (seconds) for user to respond to a confirmation prompt before
+    # auto-denying. 0 disables the timeout entirely -- pending confirmations
+    # are tracked in a persistent, queryable list (CLI/socket) instead, so
+    # nothing needs to expire just because nobody answered within N seconds.
+    # Set a positive value to restore the old auto-deny behavior for
+    # unattended/headless setups.
+    CONFIRMATION_TIMEOUT = int(os.getenv("CONFIRMATION_TIMEOUT", "0"))
 
     # Logging Configuration
     LOG_LEVEL = os.getenv(

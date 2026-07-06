@@ -11,6 +11,7 @@ from typing import Any, Optional
 
 from ..config import Config
 from ..platform import current as platform
+from .io import broadcast_to_gui_clients
 from .voice_activation_thread import run_voice_activation
 
 
@@ -49,6 +50,27 @@ async def bootstrap_tool_index_nonfatal(
             logger.info("JARVIS: No servers to index")
     except Exception as e:
         logger.warning(f"JARVIS: Tool index sync failed (non-fatal): {e}")
+
+
+def _broadcast_confirmation_notice(app: Any, message: dict[str, Any]) -> None:
+    """Forward a confirmation notification to whichever socket(s) have
+    clients connected, plus a refreshed pending list for GUI clients so an
+    already-open Permission Requests view updates the moment a new one
+    arrives, not just when one gets resolved.
+    """
+    if Config.JARVIS_OUTPUT_SOCKET and app._output_clients:
+        app._on_output_for_broadcast(message)
+    if app._gui_clients:
+        asyncio.create_task(broadcast_to_gui_clients(app, message))
+        asyncio.create_task(
+            broadcast_to_gui_clients(
+                app,
+                {
+                    "type": "confirmation_list",
+                    "confirmations": app.confirmation.list_pending(),
+                },
+            )
+        )
 
 
 def stdin_is_tty() -> bool:
@@ -99,10 +121,6 @@ async def start_runtime_services(
     output_socket_task: Optional[asyncio.Task] = None
     if Config.JARVIS_OUTPUT_SOCKET:
         app.output_manager.add_output_callback(app._on_output_for_broadcast)
-        app.confirmation.set_output_callback(
-            app._on_output_for_broadcast,
-            has_clients=lambda: len(app._output_clients) > 0,
-        )
         output_socket_task = asyncio.create_task(app._run_output_socket_listener())
         logger.info(f"JARVIS: Output socket at {Config.JARVIS_OUTPUT_SOCKET}")
 
@@ -114,6 +132,16 @@ async def start_runtime_services(
         app.output_manager.add_output_callback(app._on_gui_output)
         gui_socket_task = asyncio.create_task(app._run_gui_socket_listener())
         logger.info(f"JARVIS: GUI socket at {Config.JARVIS_GUI_SOCKET}")
+
+    # Confirmation notifications need to reach whichever socket(s) are
+    # actually enabled -- previously this only ever wired to the legacy
+    # output socket, so a GUI-only setup (no JARVIS_OUTPUT_SOCKET) never
+    # got a confirmation_request at all.
+    if Config.JARVIS_OUTPUT_SOCKET or Config.JARVIS_GUI_SOCKET:
+        app.confirmation.set_output_callback(
+            lambda message: _broadcast_confirmation_notice(app, message),
+            has_clients=lambda: bool(app._output_clients) or bool(app._gui_clients),
+        )
 
     return {
         "input_socket": input_socket_task,

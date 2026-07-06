@@ -14,6 +14,7 @@ Usage:
 """
 
 import asyncio
+import json
 import os
 import socket
 import sys
@@ -52,6 +53,31 @@ else:
     ENV_FILE = _platform.config_dir() / "jarvis.conf"
 
 
+def _find_ipc_endpoint() -> "str | None":
+    """Locate and ownership-verify a running JARVIS instance's input socket.
+
+    Prints its own error and returns None on failure so callers can decide
+    whether to exit.
+    """
+    from .platform import current as platform
+
+    candidates = [Config.JARVIS_INPUT_SOCKET, "/run/jarvis/input.sock"]
+    path = None
+    for p in candidates:
+        if p and _ipc_endpoint_exists(p):
+            path = p
+            break
+    if not path:
+        print("Error: JARVIS IPC endpoint not found.")
+        print("  Tried:", ", ".join(p for p in candidates if p))
+        print("  Is JARVIS running? Start with 'jarvis' or 'jarvis run'.")
+        return None
+    if not platform.ipc_verify_owner(path):
+        print("Error: IPC endpoint ownership check failed.")
+        return None
+    return path
+
+
 def _cmd_send() -> None:
     """Send a message to a running JARVIS instance via IPC."""
     from .platform import current as platform
@@ -65,19 +91,8 @@ def _cmd_send() -> None:
     if not msg:
         print("Error: Message cannot be empty")
         sys.exit(1)
-    candidates = [Config.JARVIS_INPUT_SOCKET, "/run/jarvis/input.sock"]
-    path = None
-    for p in candidates:
-        if p and _ipc_endpoint_exists(p):
-            path = p
-            break
+    path = _find_ipc_endpoint()
     if not path:
-        print("Error: JARVIS IPC endpoint not found.")
-        print("  Tried:", ", ".join(p for p in candidates if p))
-        print("  Is JARVIS running? Start with 'jarvis' or 'jarvis run'.")
-        sys.exit(1)
-    if not platform.ipc_verify_owner(path):
-        print("Error: IPC endpoint ownership check failed.")
         sys.exit(1)
     try:
         sock = platform.ipc_connect(path)
@@ -94,6 +109,79 @@ def _cmd_send() -> None:
 def _ipc_endpoint_exists(path: str) -> bool:
     """Check if an IPC endpoint exists (socket file or port file)."""
     return os.path.exists(path) or os.path.exists(path + ".port")
+
+
+def _cmd_confirmations() -> None:
+    """List or resolve pending tool confirmations on a running JARVIS instance."""
+    from .platform import current as platform
+
+    if len(sys.argv) == 2:
+        request = {"type": "list_confirmations"}
+    else:
+        subcmd = sys.argv[2]
+        if subcmd == "approve-all":
+            request = {"type": "approve_all_confirmations"}
+        elif subcmd in ("approve", "deny") and len(sys.argv) >= 4:
+            request = {
+                "type": (
+                    "approve_confirmation"
+                    if subcmd == "approve"
+                    else "deny_confirmation"
+                ),
+                "id": sys.argv[3],
+            }
+        else:
+            _show_confirmations_usage()
+            sys.exit(1)
+
+    path = _find_ipc_endpoint()
+    if not path:
+        sys.exit(1)
+
+    try:
+        sock = platform.ipc_connect(path)
+        try:
+            sock.sendall((json.dumps(request) + "\n").encode("utf-8"))
+            sock.settimeout(5.0)
+            response_line = sock.makefile().readline()
+        finally:
+            sock.close()
+    except (socket.error, OSError) as e:
+        print(f"Error: Could not reach JARVIS: {e}")
+        sys.exit(1)
+
+    if not response_line:
+        print("Error: No response from JARVIS.")
+        sys.exit(1)
+
+    try:
+        response = json.loads(response_line)
+    except json.JSONDecodeError:
+        print("Error: Invalid response from JARVIS.")
+        sys.exit(1)
+
+    if response.get("type") == "confirmation_list":
+        confirmations = response.get("confirmations", [])
+        if not confirmations:
+            print("No pending confirmations.")
+            return
+        print(f"Pending confirmations ({len(confirmations)}):")
+        for c in confirmations:
+            tools = ", ".join(c.get("tool_names", []))
+            print(f"  [{c['id']}] {tools}")
+    elif response.get("type") == "ack":
+        print(response.get("message", "Done."))
+    else:
+        print(f"Error: {response.get('message', 'Unexpected response')}")
+        sys.exit(1)
+
+
+def _show_confirmations_usage() -> None:
+    print("Usage:")
+    print("  jarvis confirmations               # List pending confirmations")
+    print("  jarvis confirmations approve <id>  # Approve one")
+    print("  jarvis confirmations deny <id>      # Deny one")
+    print("  jarvis confirmations approve-all    # Approve all pending")
 
 
 def set_output_mode(mode: str) -> None:
@@ -386,6 +474,12 @@ def show_usage() -> None:
     print("  jarvis sudo disable       # Disable sudo access (requires root)")
     print("  jarvis sudo               # Show current sudo access status")
     print()
+    print("Pending Confirmations:")
+    print("  jarvis confirmations               # List pending confirmations")
+    print("  jarvis confirmations approve <id>  # Approve one")
+    print("  jarvis confirmations deny <id>      # Deny one")
+    print("  jarvis confirmations approve-all    # Approve all pending")
+    print()
     print("Provider Pool:")
     print("  jarvis providers                                    # List providers")
     print("  jarvis providers add --type ollama --model <model>  # Add Ollama")
@@ -524,6 +618,9 @@ def main() -> None:
         else:
             print("Usage: jarvis sudo [enable|disable]")
             sys.exit(1)
+
+    elif command == "confirmations":
+        _cmd_confirmations()
 
     elif command == "model":
         _legacy_redirect("jarvis model")
