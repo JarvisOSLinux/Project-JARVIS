@@ -10,8 +10,9 @@ from logging import Logger
 from typing import Any, Optional
 
 from ..config import Config
+from ..core.voice_state import VoiceState
 from ..platform import current as platform
-from .io import broadcast_to_gui_clients
+from .io import broadcast_to_gui_clients, set_gui_state
 from .voice_activation_thread import run_voice_activation
 
 
@@ -73,6 +74,18 @@ def _broadcast_confirmation_notice(app: Any, message: dict[str, Any]) -> None:
         )
 
 
+def _notify_voice_output_state(app: Any, state: VoiceState) -> None:
+    """Bridge OutputManager's synchronous SPEAKING/IDLE callback onto the
+    event loop. handle_response() already runs on the loop thread (called
+    from async ROOT handlers), so this only needs to schedule a task -- no
+    cross-thread handoff, unlike the voice thread's own state broadcasts."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(set_gui_state(app, state))
+    except RuntimeError:
+        pass
+
+
 def stdin_is_tty() -> bool:
     """True if stdin is a TTY (interactive chat mode)."""
     return hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
@@ -93,6 +106,10 @@ async def start_runtime_services(
     app.events.start(
         signal_window_source=app.dispatch.get_signal_window,
         user_source=user_source,
+    )
+
+    app.output_manager.set_state_callback(
+        lambda state: _notify_voice_output_state(app, state)
     )
 
     if app.voice_manager:

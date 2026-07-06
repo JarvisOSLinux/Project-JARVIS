@@ -11,6 +11,7 @@ from .component_factory import ComponentFactory
 from .confirmation_manager import ConfirmationManager
 from .output_manager import OutputManager
 from .system_info import SystemInfo
+from .voice_state import VoiceState
 
 __all__ = [
     "SystemInfo",
@@ -18,4 +19,5 @@ __all__ = [
     "ConfirmationManager",
     "OutputManager",
     "ComponentFactory",
+    "VoiceState",
 ]

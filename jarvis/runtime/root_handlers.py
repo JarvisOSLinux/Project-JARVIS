@@ -7,7 +7,8 @@ import json
 from logging import Logger
 from typing import Any
 
-from .io import broadcast_to_gui_clients
+from ..core.voice_state import VoiceState
+from .io import broadcast_to_gui_clients, set_gui_state
 from .llm_bridge import ask_llm
 from .output_hooks import emit_activity
 from .root_context import build_root_context, compact_payload_for_llm
@@ -21,6 +22,11 @@ _NO_LLM_MSG = (
 
 async def on_user_input(app: Any, logger: Logger, text: str) -> None:
     logger.info(f"JARVIS: User input: '{text}'")
+
+    # Single funnel for every input source (voice, GUI/CLI socket, stdin) --
+    # the GUI "message" handler already broadcasts this for its own path,
+    # but voice-injected input had no PROCESSING signal at all before this.
+    await set_gui_state(app, VoiceState.PROCESSING)
 
     if text.startswith("/"):
         handled = handle_slash_command(app, text)

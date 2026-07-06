@@ -9,6 +9,7 @@ from logging import Logger
 from typing import Any
 
 from ..config import Config
+from ..core.voice_state import VoiceState
 from ..platform import current as platform
 
 
@@ -297,7 +298,7 @@ async def _process_gui_message(
     if msg_type == "message":
         content = msg.get("content", "").strip()
         if content:
-            await set_gui_state(app, "processing")
+            await set_gui_state(app, VoiceState.PROCESSING)
             app.events.inject_user_input(content)
             logger.info(f"JARVIS: GUI input: {content[:80]}...")
 
@@ -305,6 +306,10 @@ async def _process_gui_message(
         app.events.inject_confirmation_response(msg)
 
     elif msg_type == "start_listening":
+        # Toggles whether the wake-word listener is enabled at all -- a
+        # separate, orthogonal concept from the WOKEN/CAPTURING/PROCESSING/
+        # SPEAKING session lifecycle in VoiceState, so it keeps its own
+        # plain-string state rather than reusing VoiceState.IDLE.
         if app.voice_manager and hasattr(app.voice_manager, "activation"):
             app.voice_manager.activation.start_listening()
         await set_gui_state(app, "listening")
@@ -318,7 +323,7 @@ async def _process_gui_message(
         await broadcast_to_gui_clients(
             app, {"type": "response", "content": "", "done": True}
         )
-        await set_gui_state(app, "idle")
+        await set_gui_state(app, VoiceState.IDLE)
 
     elif msg_type == "list_sessions":
         await _gui_write(writer, _handle_list_sessions(app, msg))
@@ -447,10 +452,23 @@ async def _reply_or_broadcast(
         await broadcast_to_gui_clients(app, response)
 
 
-async def set_gui_state(app: Any, state: str) -> None:
-    """Update tracked GUI state and broadcast to all GUI clients."""
-    app._gui_state = state
-    await broadcast_to_gui_clients(app, {"type": "state", "state": state})
+async def set_gui_state(
+    app: Any, state: VoiceState | str, meta: dict | None = None
+) -> None:
+    """Update tracked GUI state and broadcast to all GUI clients.
+
+    `state` is normally a VoiceState member; the manual start_listening/
+    stop_listening toggle passes a plain string instead (see its call site).
+    `meta` carries transition-specific detail (e.g. a discard reason) and is
+    omitted from the wire payload entirely when empty, keeping the common
+    case a plain `{"type": "state", "state": ...}` message.
+    """
+    state_value = state.value if isinstance(state, VoiceState) else state
+    app._gui_state = state_value
+    message: dict[str, Any] = {"type": "state", "state": state_value}
+    if meta:
+        message["meta"] = meta
+    await broadcast_to_gui_clients(app, message)
 
 
 def on_gui_output(app: Any, response: dict[str, Any]) -> None:
@@ -463,13 +481,21 @@ def on_gui_output(app: Any, response: dict[str, Any]) -> None:
 
 
 async def _gui_output_and_idle(app: Any, response: dict[str, Any]) -> None:
-    """Translate daemon output into GUI protocol and reset state to idle."""
+    """Translate daemon output into GUI protocol and reset state to idle.
+
+    Skips the idle reset when the response is about to be spoken -- the
+    OutputManager's own SPEAKING/IDLE bracket around the actual TTS call
+    (wired in lifecycle.py) is the accurate signal for when speech ends,
+    and firing idle here first would just flash it prematurely.
+    """
     text = response.get("output", "")
     if text:
         await broadcast_to_gui_clients(
             app, {"type": "response", "content": text, "done": True}
         )
-    await set_gui_state(app, "idle")
+    about_to_speak = Config.OUTPUT_MODE == "voice" and app.output_manager.has_tts()
+    if not about_to_speak:
+        await set_gui_state(app, VoiceState.IDLE)
 
 
 async def broadcast_to_gui_clients(app: Any, message: dict) -> None:
