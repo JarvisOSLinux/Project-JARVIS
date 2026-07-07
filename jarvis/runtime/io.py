@@ -9,6 +9,12 @@ from logging import Logger
 from typing import Any
 
 from ..config import Config
+from ..core.providers import (
+    add_provider,
+    edit_provider,
+    list_providers,
+    remove_provider,
+)
 from ..core.voice_state import VoiceState
 from ..platform import current as platform
 from ..voice.chime import validate_chime_path
@@ -329,6 +335,36 @@ async def _process_gui_message(
     elif msg_type == "set_wake_chime_path":
         await _handle_set_wake_chime_path(app, msg, writer)
 
+    elif msg_type == "reset_wake_chime_path":
+        await _handle_reset_wake_chime_path(app, writer)
+
+    elif msg_type == "get_settings":
+        await _gui_write(
+            writer,
+            {
+                "type": "settings",
+                "confirmation_mode": Config.CONFIRMATION_MODE,
+                "wake_chime_path": Config.WAKE_CHIME_PATH,
+            },
+        )
+
+    elif msg_type == "set_confirmation_mode":
+        await _handle_set_confirmation_mode(app, msg, writer)
+
+    elif msg_type == "list_providers":
+        await _gui_write(
+            writer, {"type": "provider_list", "providers": list_providers()}
+        )
+
+    elif msg_type == "add_provider":
+        await _reply_or_broadcast_providers(app, writer, _handle_add_provider(msg))
+
+    elif msg_type == "edit_provider":
+        await _reply_or_broadcast_providers(app, writer, _handle_edit_provider(msg))
+
+    elif msg_type == "remove_provider":
+        await _reply_or_broadcast_providers(app, writer, _handle_remove_provider(msg))
+
     elif msg_type == "list_sessions":
         await _gui_write(writer, _handle_list_sessions(app, msg))
 
@@ -378,6 +414,109 @@ async def _handle_set_wake_chime_path(
     await broadcast_to_gui_clients(
         app, {"type": "config_updated", "key": "WAKE_CHIME_PATH", "value": path}
     )
+
+
+async def _handle_reset_wake_chime_path(app: Any, writer: asyncio.StreamWriter) -> None:
+    """Restore WAKE_CHIME_PATH to the bundled default -- the settings-panel
+    counterpart to `_handle_set_wake_chime_path`'s custom-path write."""
+    from ..cli import _update_env_setting
+
+    default = Config.DEFAULT_WAKE_CHIME_PATH
+    _update_env_setting("WAKE_CHIME_PATH", default)
+    await broadcast_to_gui_clients(
+        app, {"type": "config_updated", "key": "WAKE_CHIME_PATH", "value": default}
+    )
+
+
+_VALID_CONFIRMATION_MODES = ("smart", "ask_all", "allow_all")
+
+
+async def _handle_set_confirmation_mode(
+    app: Any, msg: dict, writer: asyncio.StreamWriter
+) -> None:
+    """Validated, single-purpose config write for CONFIRMATION_MODE only --
+    same rationale as `_handle_set_wake_chime_path`: no generic config setter
+    over the GUI socket, only specific, whitelisted, validated keys.
+    """
+    mode = msg.get("mode", "")
+    if mode not in _VALID_CONFIRMATION_MODES:
+        await _gui_write(
+            writer,
+            {
+                "type": "config_error",
+                "key": "CONFIRMATION_MODE",
+                "message": f"Invalid mode '{mode}'. Use one of: "
+                f"{', '.join(_VALID_CONFIRMATION_MODES)}.",
+            },
+        )
+        return
+
+    from ..cli import _update_env_setting
+
+    _update_env_setting("CONFIRMATION_MODE", mode)
+    await broadcast_to_gui_clients(
+        app, {"type": "config_updated", "key": "CONFIRMATION_MODE", "value": mode}
+    )
+
+
+# ---------------------------------------------------------------------------
+# GUI socket — provider CRUD
+# ---------------------------------------------------------------------------
+
+
+def _provider_error(message: str) -> dict:
+    return {"type": "provider_error", "message": message}
+
+
+def _handle_add_provider(msg: dict) -> dict:
+    try:
+        add_provider(
+            msg.get("ptype", ""),
+            msg.get("model", ""),
+            name=msg.get("name") or None,
+            url=msg.get("url") or None,
+            api_key=msg.get("api_key") or None,
+            temperature=msg.get("temperature"),
+        )
+    except ValueError as e:
+        return _provider_error(str(e))
+    return {"type": "provider_list", "providers": list_providers()}
+
+
+def _handle_edit_provider(msg: dict) -> dict:
+    name = msg.get("name", "")
+    fields = msg.get("fields") or {}
+    if not name or not fields:
+        return _provider_error("edit_provider requires 'name' and 'fields'")
+    try:
+        edit_provider(name, **fields)
+    except ValueError as e:
+        return _provider_error(str(e))
+    return {"type": "provider_list", "providers": list_providers()}
+
+
+def _handle_remove_provider(msg: dict) -> dict:
+    name = msg.get("name", "")
+    if not name:
+        return _provider_error("remove_provider requires 'name'")
+    try:
+        remove_provider(name)
+    except ValueError as e:
+        return _provider_error(str(e))
+    return {"type": "provider_list", "providers": list_providers()}
+
+
+async def _reply_or_broadcast_providers(
+    app: Any, writer: asyncio.StreamWriter, response: dict
+) -> None:
+    """Provider config is shared daemon state (providers.json), so a
+    successful mutation broadcasts the refreshed list to every GUI client,
+    matching `_reply_or_broadcast`'s session-CRUD pattern; errors are
+    specific to the requester's malformed/invalid request."""
+    if response.get("type") == "provider_error":
+        await _gui_write(writer, response)
+    else:
+        await broadcast_to_gui_clients(app, response)
 
 
 # ---------------------------------------------------------------------------

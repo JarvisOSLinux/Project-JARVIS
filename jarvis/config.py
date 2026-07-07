@@ -84,10 +84,10 @@ class Config:
     # Short local earcon played the instant a wake word fires -- not TTS, so
     # it plays with no model warm-up and no dependency on any GUI being
     # attached. Falls back to the bundled default when unset.
-    WAKE_CHIME_PATH = os.getenv(
-        "WAKE_CHIME_PATH",
-        os.path.join(os.path.dirname(__file__), "assets", "wake_chime.wav"),
+    DEFAULT_WAKE_CHIME_PATH = os.path.join(
+        os.path.dirname(__file__), "assets", "wake_chime.wav"
     )
+    WAKE_CHIME_PATH = os.getenv("WAKE_CHIME_PATH", DEFAULT_WAKE_CHIME_PATH)
     # Minimum RMS amplitude (0-32767, int16 PCM) a raw audio chunk must have
     # to reach the STT/wake-word recognizer at all -- quiet ambient noise is
     # dropped before it ever becomes a Vosk hypothesis. Typical quiet-room
