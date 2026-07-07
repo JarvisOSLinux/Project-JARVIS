@@ -1,6 +1,7 @@
 """Piper-based text-to-speech provider."""
 
 import threading
+from typing import Optional
 
 from ...core.logger import get_logger
 from ..audio import (
@@ -8,7 +9,7 @@ from ..audio import (
     check_audio_output_available,
     get_default_output_device,
 )
-from ..base import TTSProvider
+from ..base import EchoCanceller, TTSProvider
 
 logger = get_logger(__name__)
 
@@ -16,11 +17,19 @@ logger = get_logger(__name__)
 class PiperTTS(TTSProvider):
     """Offline text-to-speech using Piper (ONNX)."""
 
-    def __init__(self, model_path: str, config_path: str):
+    def __init__(
+        self,
+        model_path: str,
+        config_path: str,
+        echo_canceller: Optional[EchoCanceller] = None,
+    ):
         """
         Args:
             model_path: Path to Piper TTS ONNX model file.
             config_path: Path to Piper TTS JSON config file.
+            echo_canceller: Optional AEC fed this provider's own output as
+                the far-end reference signal, so the mic doesn't pick up
+                JARVIS's own voice during barge-in (Project-JARVIS#143).
 
         Raises:
             AudioUnavailableError: If audio packages or devices unavailable.
@@ -67,6 +76,8 @@ class PiperTTS(TTSProvider):
             logger.warning("No default output device found, using system default")
             self.device_index = self.sd.default.device[1]
 
+        self.sample_rate = self.tts.config.sample_rate
+        self.echo_canceller = echo_canceller
         self._stop_requested = threading.Event()
 
     # -- TTSProvider interface ------------------------------------------------
@@ -77,9 +88,8 @@ class PiperTTS(TTSProvider):
 
         self._stop_requested.clear()
         try:
-            sr = self.tts.config.sample_rate
             with self.sd.RawOutputStream(
-                samplerate=sr,
+                samplerate=self.sample_rate,
                 channels=1,
                 dtype="int16",
                 device=self.device_index,
@@ -90,6 +100,11 @@ class PiperTTS(TTSProvider):
                         logger.info("TTS playback interrupted (barge-in)")
                         stream.abort()
                         return
+                    if self.echo_canceller is not None:
+                        try:
+                            self.echo_canceller.feed_reference(chunk.audio_int16_bytes)
+                        except Exception as e:
+                            logger.warning(f"Echo reference feed failed: {e}")
                     stream.write(chunk.audio_int16_bytes)
         except Exception as e:
             logger.error(f"Error during TTS synthesis: {e}")

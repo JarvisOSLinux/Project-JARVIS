@@ -94,6 +94,18 @@ class Config:
     # noise sits well under 150; normal speech is usually 1000+.
     NOISE_GATE_RMS_THRESHOLD = int(os.getenv("NOISE_GATE_RMS_THRESHOLD", "150"))
 
+    # Acoustic echo cancellation (Project-JARVIS#143) -- prevents the mic
+    # from picking up JARVIS's own TTS output (esp. its own wake word) during
+    # barge-in. Off by default: it's a native-compiled optional extra
+    # (`project-jarvis[voice-aec]`) and only matters when the user actually
+    # talks over JARVIS's replies.
+    AEC_ENABLED = os.getenv("AEC_ENABLED", "false").lower() == "true"
+    # Expected speaker -> air -> mic round-trip delay in milliseconds. The
+    # single most sensitive AEC tuning parameter -- a delay far from the real
+    # acoustic path measurably degrades cancellation. Needs empirical
+    # measurement per device; there is no universal correct default.
+    AEC_STREAM_DELAY_MS = int(os.getenv("AEC_STREAM_DELAY_MS", "80"))
+
     # CLI Output Mode Configuration
     OUTPUT_MODE = os.getenv("OUTPUT_MODE", "voice")  # voice or text
 

@@ -67,6 +67,15 @@ voice = [
     "numpy>=2.2.0",
 ]
 
+# Acoustic echo cancellation (Project-JARVIS#143) -- prevents the mic from
+# picking up JARVIS's own TTS output (esp. its own wake word) during
+# barge-in. Native-compiled (needs a C++ toolchain); pulls in `voice` since
+# it needs both the mic path and the TTS reference signal.
+voice-aec = [
+    "project-jarvis[voice]",
+    "aec-audio-processing>=1.0.1",
+]
+
 # Interactive terminal UI (OpenClaw-style chat with session sidebar).
 # Launch with `jarvis tui`.
 tui = [
@@ -94,7 +103,7 @@ docs = [
 # Everything - convenience group
 all = [
     "project-jarvis[tui]",
-    "project-jarvis[voice]",
+    "project-jarvis[voice-aec]",
     "project-jarvis[dev]",
     "project-jarvis[docs]",
 ]

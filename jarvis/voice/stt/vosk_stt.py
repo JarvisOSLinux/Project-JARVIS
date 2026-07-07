@@ -12,7 +12,7 @@ from ..audio import (
     check_audio_input_available,
     passes_noise_gate,
 )
-from ..base import STTProvider
+from ..base import EchoCanceller, STTProvider
 
 logger = get_logger(__name__)
 
@@ -39,6 +39,7 @@ class VoskSTT(STTProvider):
         silence_timeout: float = 1.0,
         noise_gate_threshold: int = 150,
         device_index: Optional[int] = None,
+        echo_canceller: Optional[EchoCanceller] = None,
     ):
         try:
             import sounddevice as sd
@@ -69,6 +70,7 @@ class VoskSTT(STTProvider):
         self.silence_timeout = silence_timeout
         self.noise_gate_threshold = noise_gate_threshold
         self.device_index = device_index
+        self.echo_canceller = echo_canceller
 
         self._result_q: Queue[Tuple[str, bool]] = Queue()
         self._model: Optional[Any] = None
@@ -217,6 +219,14 @@ class VoskSTT(STTProvider):
                     data = self._audio_buffer.get(timeout=0.1)
                 except Empty:
                     continue
+
+                if self.echo_canceller is not None:
+                    try:
+                        data = self.echo_canceller.process(data)
+                    except Exception as e:
+                        logger.warning(
+                            f"Echo cancellation failed, using raw audio: {e}"
+                        )
 
                 if not passes_noise_gate(data, self.noise_gate_threshold):
                     continue
