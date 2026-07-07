@@ -37,9 +37,17 @@ User Input (TUI / CLI / voice / socket)
 1. Registers signal handlers (`lifecycle.py`)
 2. Starts IPC socket listeners (`runtime/io.py`)
 3. Enters `asyncio` event loop
-4. Feeds events from `EventMerger` into `dispatch_flow.py` indefinitely
+4. Feeds events from `EventMerger` into `runtime/events.py::handle_event`, one `asyncio.create_task` per event
 
 `ComponentFactory` decides whether to enable voice, TUI, contextor, etc. based on config and available hardware. All subsystems are optional — the daemon degrades gracefully (e.g. no mic → text-only, no contextor binary → memory disabled).
+
+### Concurrent goal execution (Project-JARVIS#154)
+
+Each merged event (`USER_INPUT`, `DISPATCH_SIGNAL`, `CONFIRMATION_RESPONSE`) is dispatched as its own `asyncio.Task` in `Jarvis.run()` rather than awaited inline — tracked via `runtime/events.py::track_event_task`, which logs (rather than silently swallows, or takes down the whole daemon) any unhandled exception from a goal's handler. On graceful shutdown, `run()` awaits every still-in-flight task before tearing down the rest of the daemon.
+
+This lets a second goal (e.g. a wake-word-triggered "Hey Jarvis, do B" while goal A is still running) get a real LLM turn as soon as the LLM is free, instead of waiting for goal A's *entire* multi-round dispatch subchain to conclude. The one thing that must stay serialized is the LLM itself: `LLM` (`jarvis/llm/chat.py`) has a single mutable `chat_history`/`_mode` — two goals calling it "at the same time" would interleave into the same conversation, which is wrong regardless of thread-safety. `runtime/llm_bridge.py::ask_llm()` is the single choke point for every live LLM call; it acquires `app.llm_lock` (an `asyncio.Lock`) and asserts the caller's required `mode` atomically with the actual provider call, so a goal's turn can never run under a sibling goal's mode no matter how the event loop interleaves them. Every call site passes `mode="root"` explicitly (the only mode any live code path uses today — `dispatch_flow.py`'s legacy "dispatch" mode subchain is dead code, unreachable since ROOT began using `search_tools`/`get_server_docs`/`dispatch` directly).
+
+Concretely: goal A calls the LLM (brief, lock held), then spends most of its time inside `app.dispatch.send_tasks()`/`wait_task()` waiting on a real MCP tool call (lock released) — during that window, goal B's task can acquire the lock and complete its own LLM turn, dispatch its own tools, and so on. Goals only ever block each other for the LLM inference instants themselves, never for the (usually much longer) tool-execution time — this is turn-level interleaving with one serialized LLM ("one brain, many hands"), not parallel LLM inference, matching the concurrency model already established for voice barge-in (#142).
 
 ---
 
@@ -167,7 +175,7 @@ Voice runs in a background thread (`voice_activation_thread.py` in `runtime/`). 
 
 ### Concurrent goals + barge-in
 
-Wake-word listening restarts the moment capture ends — not after the full LLM/dispatch/TTS turn — in both the daemon path (`voice_activation_thread.py`) and the standalone `VoiceManager` path (`manager.py`). Saying "Hey Jarvis, do B" while A is still being worked on captures and queues B via `EventMerger`; when the LLM finishes its current turn for A (typically by dispatching A's tasks and going idle awaiting signals), B's queued input gets the next turn and `GoalManager.add_goal()` creates a second concurrent root goal. Goal A's task results arrive later as dispatch signals and interleave back into the same queue — turn-level interleaving with a single serialized LLM ("one brain, many hands"), not parallel LLM inference. When new input arrives while goals are already active, the PROCESSING broadcast carries `meta: {"concurrent_goals": N}`.
+Wake-word listening restarts the moment capture ends — not after the full LLM/dispatch/TTS turn — in both the daemon path (`voice_activation_thread.py`) and the standalone `VoiceManager` path (`manager.py`). Saying "Hey Jarvis, do B" while A is still being worked on captures and queues B via `EventMerger`. Since #154, B doesn't wait for A's entire turn to conclude — each queued input is dispatched as its own task (see "Concurrent goal execution" above), so B gets a real LLM turn (and `GoalManager.add_goal()` creates a second concurrent root goal) as soon as the LLM is free, typically while A is still mid-dispatch waiting on its own tools. Goal A's task results arrive later as dispatch signals and interleave back into the same queue. When new input arrives while goals are already active, the PROCESSING broadcast carries `meta: {"concurrent_goals": N}`.
 
 A wake word detected **while TTS is speaking** barges in: the voice thread calls `OutputManager.stop_speaking()`, which sets a stop flag checked between synthesis chunks in `PiperTTS.say()` (`stream.abort()` discards already-buffered audio), then the WOKEN broadcast carries `meta: {"barge_in": true}` and capture proceeds normally. Known risk: the mic is live during TTS, so JARVIS can hear its own voice — acoustic echo cancellation is the real fix, tracked separately (#143).
 
