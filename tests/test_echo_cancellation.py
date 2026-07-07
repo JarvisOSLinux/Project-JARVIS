@@ -1,24 +1,43 @@
 """Tests for acoustic echo cancellation (Project-JARVIS#143).
 
-WebRtcAEC is exercised for real (aec-audio-processing + numpy are already
-installed here) with synthetic echo signals -- not mocked -- since that's
-the only way to actually prove cancellation happens rather than merely that
-methods were called. VoskSTT/VoskActivation/PiperTTS wiring is exercised
-against real instances driven by injected fake vosk/sounddevice/piper
-modules, matching this codebase's established pattern (tests/test_noise_gate.py,
+WebRtcAEC is exercised for real (where numpy + aec-audio-processing --
+the native-compiled `voice-aec` extra -- are installed) with synthetic
+echo signals, not mocked, since that's the only way to actually prove
+cancellation happens rather than merely that methods were called. CI's
+"Test suite" job installs only `.[dev]`, so tests needing the real native
+engine are skipped there via `requires_aec_native`; a dev environment with
+`.[voice-aec]` installed runs them for real. VoskSTT/VoskActivation/PiperTTS
+wiring needs neither and always runs, exercised against real instances
+driven by injected fake vosk/sounddevice/piper modules, matching this
+codebase's established pattern (tests/test_noise_gate.py,
 tests/test_concurrent_goals_barge_in.py).
 """
+
+from __future__ import annotations
 
 import sys
 import types
 from unittest.mock import MagicMock, Mock, patch
 
-import numpy as np
 import pytest
 
 from jarvis.voice.aec import create_echo_canceller
 from jarvis.voice.aec.webrtc_aec import WebRtcAEC
 from jarvis.voice.base import EchoCanceller
+
+try:
+    import aec_audio_processing  # noqa: F401
+    import numpy as np
+
+    _AEC_NATIVE_AVAILABLE = True
+except ImportError:
+    np = None
+    _AEC_NATIVE_AVAILABLE = False
+
+requires_aec_native = pytest.mark.skipif(
+    not _AEC_NATIVE_AVAILABLE,
+    reason="numpy/aec-audio-processing not installed (voice-aec extra)",
+)
 
 
 def _tone(freq: float, duration_s: float, sample_rate: int, amplitude: float = 0.5):
@@ -39,6 +58,7 @@ def _energy(samples: np.ndarray) -> float:
 
 @pytest.mark.unit
 class TestCreateEchoCanceller:
+    @requires_aec_native
     def test_webrtc_provider_returns_webrtc_aec(self):
         aec = create_echo_canceller(provider="webrtc")
         assert isinstance(aec, WebRtcAEC)
@@ -50,6 +70,7 @@ class TestCreateEchoCanceller:
 
 
 @pytest.mark.unit
+@requires_aec_native
 class TestWebRtcAecRealCancellation:
     """Real end-to-end proof: synthetic echo goes in, attenuated signal
     comes out. No mocking of the DSP itself -- this is the actual
@@ -412,6 +433,7 @@ class TestComponentFactoryEchoCanceller:
         with patch.object(cf.Config, "AEC_ENABLED", True):
             assert cf.ComponentFactory.create_echo_canceller_optional(None) is None
 
+    @requires_aec_native
     def test_enabled_with_tts_builds_webrtc_aec_matching_tts_sample_rate(self):
         from jarvis.core import component_factory as cf
 
