@@ -168,6 +168,8 @@ make check                  # Format + lint + typecheck + tests
 | `jarvis/voice/chime.py` | Wake-word earcon: path validation + best-effort playback |
 | `jarvis/voice/audio.py` | Audio device detection + `passes_noise_gate` RMS filter |
 | `jarvis/voice/aec/webrtc_aec.py` | `WebRtcAEC` — acoustic echo cancellation (barge-in fix, #143) |
+| `jarvis/runtime/io.py` | Input/GUI/output sockets — confirmation queries, session CRUD, settings + provider CRUD |
+| `jarvis/core/providers.py` | Provider pool CRUD (`providers.json`), shared by CLI, TUI, and the GUI socket |
 | `jarvis/dispatch/adapter.py` | Python wrapper for Rust dispatch binary |
 | `jarvis/dispatch/discovery.py` | Embedding search via dmcp vector index |
 | `jarvis/dispatch/dmcp_registry.py` | dmcp CLI wrappers (install, tools, config) |
