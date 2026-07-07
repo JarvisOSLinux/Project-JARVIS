@@ -7,7 +7,7 @@ from typing import Callable, List, Optional
 
 from ...core.logger import get_logger
 from ..audio import passes_noise_gate
-from ..base import ActivationProvider
+from ..base import ActivationProvider, EchoCanceller
 
 logger = get_logger(__name__)
 
@@ -24,6 +24,7 @@ class VoskActivation(ActivationProvider):
         sensitivity: float = 0.8,
         noise_gate_threshold: int = 150,
         on_wake_word: Optional[Callable[[], None]] = None,
+        echo_canceller: Optional[EchoCanceller] = None,
     ):
         self.wake_words = [w.lower() for w in (wake_words or ["jarvis", "hey jarvis"])]
         self.model_path = model_path
@@ -32,6 +33,7 @@ class VoskActivation(ActivationProvider):
         self.sensitivity = sensitivity
         self.noise_gate_threshold = noise_gate_threshold
         self.on_wake_word = on_wake_word
+        self.echo_canceller = echo_canceller
 
         try:
             import json as _json
@@ -178,6 +180,14 @@ class VoskActivation(ActivationProvider):
                     data = self._audio_buffer.get(timeout=0.1)
                 except Empty:
                     continue
+
+                if self.echo_canceller is not None:
+                    try:
+                        data = self.echo_canceller.process(data)
+                    except Exception as e:
+                        logger.warning(
+                            f"Echo cancellation failed, using raw audio: {e}"
+                        )
 
                 if not passes_noise_gate(data, self.noise_gate_threshold):
                     continue

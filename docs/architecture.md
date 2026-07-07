@@ -165,11 +165,12 @@ Built on [Textual](https://textual.textualize.io/). All platform-agnostic.
 |------|------|
 | `manager.py` | `VoiceManager` — coordinates STT, TTS, wake-word detection |
 | `audio.py` | Shared audio device init (PyAudio / sounddevice) |
-| `base.py` | `BaseSTT`, `BaseTTS` ABCs |
+| `base.py` | `STTProvider`, `TTSProvider`, `ActivationProvider`, `EchoCanceller` ABCs |
 | `chime.py` | Wake-word earcon: path validation + best-effort playback |
 | `stt/` | Vosk STT provider |
 | `tts/` | Piper TTS provider |
 | `activation/` | Wake-word detection (Vosk-based) |
+| `aec/` | Acoustic echo cancellation provider (WebRTC-backed) |
 
 Voice runs in a background thread (`voice_activation_thread.py` in `runtime/`). When a wake word fires: the daemon unconditionally broadcasts `{"type": "wake_word_detected"}` over the GUI socket, transitions to `VoiceState.WOKEN`, plays the wake chime (blocking — see below), then opens the STT capture window and injects a `VOICE_INPUT` event into `EventMerger` once an utterance completes. If the user says nothing within `VOICE_ACTIVATION_TIMEOUT` seconds, capture is abandoned and control returns to wake-word mode without processing anything; the timeout is disabled the moment speech is detected, so mid-sentence pauses never cut a command off early.
 
@@ -177,7 +178,7 @@ Voice runs in a background thread (`voice_activation_thread.py` in `runtime/`). 
 
 Wake-word listening restarts the moment capture ends — not after the full LLM/dispatch/TTS turn — in both the daemon path (`voice_activation_thread.py`) and the standalone `VoiceManager` path (`manager.py`). Saying "Hey Jarvis, do B" while A is still being worked on captures and queues B via `EventMerger`. Since #154, B doesn't wait for A's entire turn to conclude — each queued input is dispatched as its own task (see "Concurrent goal execution" above), so B gets a real LLM turn (and `GoalManager.add_goal()` creates a second concurrent root goal) as soon as the LLM is free, typically while A is still mid-dispatch waiting on its own tools. Goal A's task results arrive later as dispatch signals and interleave back into the same queue. When new input arrives while goals are already active, the PROCESSING broadcast carries `meta: {"concurrent_goals": N}`.
 
-A wake word detected **while TTS is speaking** barges in: the voice thread calls `OutputManager.stop_speaking()`, which sets a stop flag checked between synthesis chunks in `PiperTTS.say()` (`stream.abort()` discards already-buffered audio), then the WOKEN broadcast carries `meta: {"barge_in": true}` and capture proceeds normally. Known risk: the mic is live during TTS, so JARVIS can hear its own voice — acoustic echo cancellation is the real fix, tracked separately (#143).
+A wake word detected **while TTS is speaking** barges in: the voice thread calls `OutputManager.stop_speaking()`, which sets a stop flag checked between synthesis chunks in `PiperTTS.say()` (`stream.abort()` discards already-buffered audio), then the WOKEN broadcast carries `meta: {"barge_in": true}` and capture proceeds normally. The mic is live during TTS, so JARVIS can hear its own voice (including its own wake word) — acoustic echo cancellation (below) is the fix.
 
 Config: `WAKE_WORDS`, `VOICE_ACTIVATION_SENSITIVITY`, `VOICE_ACTIVATION_TIMEOUT`, `WAKE_CHIME_PATH`, `NOISE_GATE_RMS_THRESHOLD`, `VOSK_MODEL_PATH`, `TTS_MODEL_ONNX`/`TTS_MODEL_JSON` — all in `~/.config/jarvis/jarvis.conf`.
 
@@ -188,6 +189,50 @@ Raw int16 PCM chunks are RMS-gated in both `VoskSTT` (`stt/vosk_stt.py`) and `Vo
 Wake-word matching (`VoskActivation._check_for_wake_word`) only runs on Vosk's *finalized* results now — partial hypotheses (Vosk's least reliable output) are never checked, removing a source of false-positive wake triggers.
 
 `VoskSTT`'s `phrase_timeout` parameter was removed — it was accepted by the constructor and set by `component_factory.py`, but never actually read anywhere in `_process_loop`; only `silence_timeout` (pause-based endpointing) was ever wired up.
+
+### Acoustic echo cancellation (`jarvis/voice/aec/`, Project-JARVIS#143)
+
+`WebRtcAEC` (`aec/webrtc_aec.py`) wraps `aec-audio-processing`, which vendors
+freedesktop.org's `webrtc-audio-processing` — the same AEC engine behind
+PipeWire's own `module-echo-cancel` — via a SWIG binding, rather than a
+bespoke DSP filter. It's an optional native-compiled extra
+(`project-jarvis[voice-aec]`), gated by `AEC_ENABLED` (default `false`).
+
+`ComponentFactory.create_echo_canceller_optional()` builds one shared
+instance (matching the TTS provider's own sample rate for the reference
+signal) after TTS is constructed, and hands it to `PiperTTS` (as
+`echo_canceller`, feeding `feed_reference()` with every synthesized chunk)
+and to `VoskSTT`/`VoskActivation` (as `echo_canceller`, calling `process()`
+on the raw mic chunk before the noise gate in `_process_loop`/`_listen_loop`).
+A single instance must be shared across all three — the mic-side cancellation
+and the TTS-side reference feed only make sense against the same adaptive
+filter state. A failure in `process()`/`feed_reference()` is caught and
+logged, falling back to raw audio — AEC is a quality improvement, not a
+dependency STT/TTS should ever break on.
+
+Two non-obvious constraints, found only by exercising the library, not from
+its docs:
+
+- `aec-audio-processing`'s `process_reverse_stream` computes frame size from
+  the *forward* stream's configured rate regardless of what
+  `set_reverse_stream_format` declares (confirmed by reading its C++ source).
+  `WebRtcAEC` therefore always frames both streams at `sample_rate` (16kHz,
+  matching Vosk) and resamples the TTS reference down from its own rate
+  before framing, rather than trusting the reverse-rate field to do it.
+- WebRTC's internal echo-path tracking needs forward/reverse `process_stream`/
+  `process_reverse_stream` calls interleaved roughly one-for-one. Buffering
+  each side's producer chunks (VoskSTT's 250ms mic callbacks; Piper's
+  independently-sized TTS chunks) and draining each side's queue in an
+  uninterrupted burst measured ~6dB attenuation on synthetic echo — buffering
+  both sides and draining one matched frame pair at a time (`_drain_locked`)
+  recovered ~30-50dB, matching true lockstep. See
+  `tests/test_echo_cancellation.py` for the measurements.
+
+`AEC_STREAM_DELAY_MS` (expected speaker → air → mic round-trip delay) is the
+single most sensitive tuning parameter — a value far from the real acoustic
+path measurably degrades cancellation even with correct interleaving, and
+there's no universally-correct default; it needs empirical measurement per
+device.
 
 ### Wake chime (`jarvis/voice/chime.py`)
 

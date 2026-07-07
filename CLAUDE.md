@@ -114,6 +114,7 @@ set it > 0 to restore auto-deny for unattended/headless setups.
 | `jarvis-ai` | Core daemon (text I/O, LLM, dispatch) |
 | `jarvis-ai[tui]` | Textual TUI (`jarvis tui`) |
 | `jarvis-ai[voice]` | Vosk STT + Piper TTS |
+| `jarvis-ai[voice-aec]` | Voice + acoustic echo cancellation (native-compiled, barge-in fix) |
 | `jarvis-ai[dev]` | pytest, black, isort, flake8, mypy, pre-commit |
 | `jarvis-ai[all]` | Everything above |
 
@@ -166,6 +167,7 @@ make check                  # Format + lint + typecheck + tests
 | `jarvis/core/voice_state.py` | `VoiceState` — formal voice/response session state machine |
 | `jarvis/voice/chime.py` | Wake-word earcon: path validation + best-effort playback |
 | `jarvis/voice/audio.py` | Audio device detection + `passes_noise_gate` RMS filter |
+| `jarvis/voice/aec/webrtc_aec.py` | `WebRtcAEC` — acoustic echo cancellation (barge-in fix, #143) |
 | `jarvis/dispatch/adapter.py` | Python wrapper for Rust dispatch binary |
 | `jarvis/dispatch/discovery.py` | Embedding search via dmcp vector index |
 | `jarvis/dispatch/dmcp_registry.py` | dmcp CLI wrappers (install, tools, config) |

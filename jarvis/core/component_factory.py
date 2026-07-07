@@ -221,6 +221,43 @@ class ComponentFactory:
             return None
 
     @staticmethod
+    def create_echo_canceller_optional(tts: Optional[any]) -> Optional[any]:
+        """
+        Create the shared acoustic echo canceller (AEC) if enabled and available.
+
+        Requires an active TTS provider -- it supplies the far-end reference
+        signal, and with no TTS there is nothing for the mic to echo. The
+        returned instance must be shared between the TTS output path and
+        every mic-reading STT/activation provider: they need to agree on
+        what "JARVIS's own voice" sounds like right now (Project-JARVIS#143).
+        """
+        if not Config.AEC_ENABLED:
+            return None
+        if tts is None:
+            logger.debug("AEC disabled: no TTS provider active (nothing to echo)")
+            return None
+
+        try:
+            from ..voice.aec import create_echo_canceller
+        except ImportError as e:
+            logger.warning(f"AEC dependencies not available: {e}")
+            return None
+
+        try:
+            logger.info("Initiating acoustic echo canceller (webrtc)...")
+            aec = create_echo_canceller(
+                provider="webrtc",
+                sample_rate=16000,
+                reference_sample_rate=getattr(tts, "sample_rate", 22050),
+                stream_delay_ms=Config.AEC_STREAM_DELAY_MS,
+            )
+            logger.info("Echo canceller initialized successfully")
+            return aec
+        except Exception as e:
+            logger.warning(f"Failed to initialize echo canceller (non-fatal): {e}")
+            return None
+
+    @staticmethod
     def create_output_manager(
         tts: Optional[any] = None,
         suppress_stdout: bool = False,
@@ -234,7 +271,9 @@ class ComponentFactory:
         return OutputManager(tts, suppress_stdout=suppress_stdout)
 
     @staticmethod
-    def create_voice_manager_optional(on_command) -> Optional[any]:
+    def create_voice_manager_optional(
+        on_command, echo_canceller: Optional[any] = None
+    ) -> Optional[any]:
         """
         Create VoiceManager if voice input is enabled and audio is available.
 
@@ -243,6 +282,7 @@ class ComponentFactory:
 
         Args:
             on_command: Callback for voice commands.
+            echo_canceller: Optional shared AEC instance (Project-JARVIS#143).
 
         Returns:
             VoiceManager instance or None if unavailable.
@@ -272,6 +312,7 @@ class ComponentFactory:
                 chunk_size=4000,
                 silence_timeout=1.0,
                 noise_gate_threshold=Config.NOISE_GATE_RMS_THRESHOLD,
+                echo_canceller=echo_canceller,
             )
 
             activation = create_activation(
@@ -280,6 +321,7 @@ class ComponentFactory:
                 model_path=Config.VOSK_MODEL_PATH,
                 sensitivity=Config.VOICE_ACTIVATION_SENSITIVITY,
                 noise_gate_threshold=Config.NOISE_GATE_RMS_THRESHOLD,
+                echo_canceller=echo_canceller,
             )
 
             vm = VoiceManager(
@@ -386,6 +428,15 @@ class ComponentFactory:
         # TTS (optional - only if voice output enabled and available)
         components["tts"] = ComponentFactory.create_tts_optional()
 
+        # Shared echo canceller (Project-JARVIS#143) -- built after TTS so it
+        # can match the reference signal's sample rate, then handed to TTS
+        # (reference feed) and STT/activation (mic-side cancellation) alike.
+        components["echo_canceller"] = ComponentFactory.create_echo_canceller_optional(
+            components["tts"]
+        )
+        if components["echo_canceller"] is not None and components["tts"] is not None:
+            components["tts"].echo_canceller = components["echo_canceller"]
+
         # Dependent components
         components["output_manager"] = ComponentFactory.create_output_manager(
             components["tts"],
@@ -395,7 +446,9 @@ class ComponentFactory:
         # Voice input components (only if not in text mode and available)
         if not text_mode and on_voice_command:
             components["voice_manager"] = (
-                ComponentFactory.create_voice_manager_optional(on_voice_command)
+                ComponentFactory.create_voice_manager_optional(
+                    on_voice_command, echo_canceller=components["echo_canceller"]
+                )
             )
         else:
             components["voice_manager"] = None
