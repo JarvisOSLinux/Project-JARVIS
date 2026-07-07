@@ -335,6 +335,9 @@ async def _process_gui_message(
     elif msg_type == "set_wake_chime_path":
         await _handle_set_wake_chime_path(app, msg, writer)
 
+    elif msg_type == "reset_wake_chime_path":
+        await _handle_reset_wake_chime_path(app, writer)
+
     elif msg_type == "get_settings":
         await _gui_write(
             writer,
@@ -410,6 +413,18 @@ async def _handle_set_wake_chime_path(
     _update_env_setting("WAKE_CHIME_PATH", path)
     await broadcast_to_gui_clients(
         app, {"type": "config_updated", "key": "WAKE_CHIME_PATH", "value": path}
+    )
+
+
+async def _handle_reset_wake_chime_path(app: Any, writer: asyncio.StreamWriter) -> None:
+    """Restore WAKE_CHIME_PATH to the bundled default -- the settings-panel
+    counterpart to `_handle_set_wake_chime_path`'s custom-path write."""
+    from ..cli import _update_env_setting
+
+    default = Config.DEFAULT_WAKE_CHIME_PATH
+    _update_env_setting("WAKE_CHIME_PATH", default)
+    await broadcast_to_gui_clients(
+        app, {"type": "config_updated", "key": "WAKE_CHIME_PATH", "value": default}
     )
 
 

@@ -242,6 +242,8 @@ A short, pre-rendered earcon (not TTS) plays the instant a wake word fires, so a
 
 `WAKE_CHIME_PATH` is writable by any connected GUI-socket client via a single-purpose `{"type": "set_wake_chime_path", "path": "..."}` message (`jarvis.runtime.io._handle_set_wake_chime_path`) — validated the same way, persisted via the same `.env`/`jarvis.conf` write path the TUI settings modal and provider config already use, and broadcasts `{"type": "config_updated", "key": "WAKE_CHIME_PATH", "value": "..."}` to every connected client on success (or `{"type": "config_error", ...}` to the requester only on failure). This is deliberately a single dedicated message, not a generic "set any config key" — a generic writer over an unauthenticated local socket would let any connected client silently rewrite security-relevant settings like `CONFIRMATION_MODE`.
 
+`{"type": "reset_wake_chime_path"}` restores `WAKE_CHIME_PATH` to `Config.DEFAULT_WAKE_CHIME_PATH` (the bundled two-tone WAV) — the settings-panel counterpart to a custom-path write, for a "restore default" action.
+
 ### GUI socket settings + provider CRUD (jarvisos-app#12)
 
 `jarvis/runtime/io.py` exposes the same settings surface the TUI's config

@@ -40,6 +40,30 @@ class TestGetSettings:
 
 
 @pytest.mark.unit
+class TestResetWakeChimePath:
+    @pytest.mark.asyncio
+    async def test_restores_bundled_default_and_broadcasts(self):
+        app = _make_app()
+        writer = Mock()
+        with (
+            patch("jarvis.cli._update_env_setting") as mock_update,
+            patch.object(runtime_io, "broadcast_to_gui_clients", new=AsyncMock()) as bc,
+        ):
+            await runtime_io._handle_reset_wake_chime_path(app, writer)
+        mock_update.assert_called_once_with(
+            "WAKE_CHIME_PATH", Config.DEFAULT_WAKE_CHIME_PATH
+        )
+        bc.assert_awaited_once_with(
+            app,
+            {
+                "type": "config_updated",
+                "key": "WAKE_CHIME_PATH",
+                "value": Config.DEFAULT_WAKE_CHIME_PATH,
+            },
+        )
+
+
+@pytest.mark.unit
 class TestSetConfirmationMode:
     @pytest.mark.asyncio
     async def test_valid_mode_persists_and_broadcasts(self):
