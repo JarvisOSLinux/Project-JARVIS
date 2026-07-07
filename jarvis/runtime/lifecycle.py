@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import sys
 import threading
+import time
 from collections.abc import Callable
 from logging import Logger
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 from ..config import Config
 from ..core.voice_state import VoiceState
@@ -98,9 +99,7 @@ def resolve_user_source(app: Any) -> Optional[Callable[[], Any]]:
     return app._await_user_input if stdin_is_tty() else None
 
 
-async def start_runtime_services(
-    app: Any, logger: Logger
-) -> dict[str, Optional[asyncio.Task]]:
+async def start_runtime_services(app: Any, logger: Logger) -> dict[str, Any]:
     """Start event sources and optional socket/voice runtime services."""
     user_source = resolve_user_source(app)
     app.events.start(
@@ -112,6 +111,7 @@ async def start_runtime_services(
         lambda state: _notify_voice_output_state(app, state)
     )
 
+    voice_thread: Optional[threading.Thread] = None
     if app.voice_manager:
         voice_thread = threading.Thread(
             target=run_voice_activation,
@@ -164,6 +164,7 @@ async def start_runtime_services(
         "input_socket": input_socket_task,
         "output_socket": output_socket_task,
         "gui_socket": gui_socket_task,
+        "voice_thread": voice_thread,
     }
 
 
@@ -173,8 +174,24 @@ def cancel_task_if_running(task: Optional[asyncio.Task]) -> None:
         task.cancel()
 
 
+def join_voice_thread_if_running(
+    thread: Optional[threading.Thread], timeout: float = 2.0
+) -> None:
+    """Best-effort join of the voice-activation thread on shutdown (#146).
+
+    request_stop() already flips app._running, which run_voice_activation's
+    loop notices within one poll interval and exits via -- this just waits
+    for that to actually happen instead of trusting the daemon thread to be
+    killed silently whenever the process happens to exit.
+    """
+    if thread and thread.is_alive():
+        thread.join(timeout=timeout)
+
+
 def request_stop(app: Any) -> None:
-    """Request graceful shutdown (e.g. from signal handler)."""
+    """Request graceful shutdown (e.g. from signal handler or a GUI client's
+    shutdown_request -- both funnel through here, so SIGTERM/SIGINT and the
+    socket protocol trigger the exact same sequence, per #146)."""
     app._running = False
     if app.voice_manager and hasattr(app.voice_manager, "activation"):
         try:
@@ -184,9 +201,44 @@ def request_stop(app: Any) -> None:
     app.events.request_shutdown()
 
 
+def build_shutdown_snapshot(app: Any) -> Dict[str, Any]:
+    """Final-state snapshot broadcast on shutdown_request (#146): current GUI
+    state, still-unresolved goals, the active session id, and a timestamp."""
+    return {
+        "state": app._gui_state,
+        "goals": [g.to_context() for g in app.goals.get_active_goals()],
+        "session_id": app.sessions.current_id if app.sessions else None,
+        "timestamp": time.time(),
+    }
+
+
+async def broadcast_shutdown_notice(app: Any, logger: Logger) -> None:
+    """Broadcast DAEMON_SHUTDOWN + the final-state snapshot to every
+    connected GUI client. Must run before the GUI socket listener task is
+    cancelled -- cancelling it clears app._gui_clients in its own cleanup,
+    so broadcasting after that point would silently reach nobody.
+    """
+    if not app._gui_clients:
+        return
+    logger.info(
+        f"JARVIS: Broadcasting shutdown notice to {len(app._gui_clients)} client(s)"
+    )
+    snapshot = build_shutdown_snapshot(app)
+    await broadcast_to_gui_clients(app, {"type": "DAEMON_SHUTDOWN", **snapshot})
+
+
 async def shutdown(app: Any, logger: Logger) -> None:
-    """Tear down event sources, sockets, dispatch, and contextor."""
+    """Tear down event sources, sockets, dispatch, and contextor.
+
+    Goal state is archived unconditionally first -- dismiss_completed/
+    dismiss_failed only ever ran for terminal goals, so without this any
+    still-PENDING/ACTIVE/DEFERRED goal had zero on-disk trace once the
+    process exited (#146).
+    """
     app._running = False
+    archived = app.goals.archive_all()
+    if archived:
+        logger.info(f"JARVIS: Archived {len(archived)} in-flight goal(s) on shutdown")
     app.output_manager.remove_output_callback(app._on_output_for_broadcast)
     app.output_manager.remove_output_callback(app._on_gui_output)
     await app.events.stop()

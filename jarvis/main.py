@@ -30,9 +30,11 @@ from .runtime.dispatch_flow import get_tool_metadata as runtime_get_tool_metadat
 from .runtime.goal_updates import apply_goal_updates as runtime_apply_goal_updates
 from .runtime.lifecycle import (
     bootstrap_tool_index_nonfatal,
+    broadcast_shutdown_notice,
     cancel_task_if_running,
     connect_dispatch_nonfatal,
     install_signal_handlers,
+    join_voice_thread_if_running,
     request_stop,
     shutdown,
     start_runtime_services,
@@ -104,7 +106,9 @@ class Jarvis:
         self.confirmation = self.components["confirmation_manager"]
         self.voice_manager = self.components.get("voice_manager")
         self._output_clients: List[asyncio.StreamWriter] = []
-        self._gui_clients: set[asyncio.StreamWriter] = set()
+        # writer -> client-supplied label (Project-JARVIS#146's "hello" message),
+        # defaulting to DEFAULT_CLIENT_LABEL until a client identifies itself.
+        self._gui_clients: Dict[asyncio.StreamWriter, str] = {}
         self._gui_state: str = "idle"
 
         # Server docs scoped to the active dispatch chain — cleared on respond.
@@ -131,6 +135,7 @@ class Jarvis:
         socket_task = runtime_tasks["input_socket"]
         output_task = runtime_tasks["output_socket"]
         gui_task = runtime_tasks["gui_socket"]
+        voice_thread = runtime_tasks["voice_thread"]
 
         logger.info("JARVIS: Event loop started")
 
@@ -151,9 +156,14 @@ class Jarvis:
         except KeyboardInterrupt:
             logger.info("JARVIS: Interrupted")
         finally:
+            # Must run before the GUI socket listener is cancelled below --
+            # cancelling it clears self._gui_clients in its own cleanup, so
+            # anything broadcast after that point reaches nobody (#146).
+            await broadcast_shutdown_notice(self, logger)
             cancel_task_if_running(socket_task)
             cancel_task_if_running(output_task)
             cancel_task_if_running(gui_task)
+            join_voice_thread_if_running(voice_thread)
             if event_tasks:
                 logger.info(
                     f"JARVIS: Waiting for {len(event_tasks)} in-flight goal(s) to finish..."
