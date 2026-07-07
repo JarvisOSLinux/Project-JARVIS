@@ -37,9 +37,17 @@ User Input (TUI / CLI / voice / socket)
 1. Registers signal handlers (`lifecycle.py`)
 2. Starts IPC socket listeners (`runtime/io.py`)
 3. Enters `asyncio` event loop
-4. Feeds events from `EventMerger` into `dispatch_flow.py` indefinitely
+4. Feeds events from `EventMerger` into `runtime/events.py::handle_event`, one `asyncio.create_task` per event
 
 `ComponentFactory` decides whether to enable voice, TUI, contextor, etc. based on config and available hardware. All subsystems are optional — the daemon degrades gracefully (e.g. no mic → text-only, no contextor binary → memory disabled).
+
+### Concurrent goal execution (Project-JARVIS#154)
+
+Each merged event (`USER_INPUT`, `DISPATCH_SIGNAL`, `CONFIRMATION_RESPONSE`) is dispatched as its own `asyncio.Task` in `Jarvis.run()` rather than awaited inline — tracked via `runtime/events.py::track_event_task`, which logs (rather than silently swallows, or takes down the whole daemon) any unhandled exception from a goal's handler. On graceful shutdown, `run()` awaits every still-in-flight task before tearing down the rest of the daemon.
+
+This lets a second goal (e.g. a wake-word-triggered "Hey Jarvis, do B" while goal A is still running) get a real LLM turn as soon as the LLM is free, instead of waiting for goal A's *entire* multi-round dispatch subchain to conclude. The one thing that must stay serialized is the LLM itself: `LLM` (`jarvis/llm/chat.py`) has a single mutable `chat_history`/`_mode` — two goals calling it "at the same time" would interleave into the same conversation, which is wrong regardless of thread-safety. `runtime/llm_bridge.py::ask_llm()` is the single choke point for every live LLM call; it acquires `app.llm_lock` (an `asyncio.Lock`) and asserts the caller's required `mode` atomically with the actual provider call, so a goal's turn can never run under a sibling goal's mode no matter how the event loop interleaves them. Every call site passes `mode="root"` explicitly (the only mode any live code path uses today — `dispatch_flow.py`'s legacy "dispatch" mode subchain is dead code, unreachable since ROOT began using `search_tools`/`get_server_docs`/`dispatch` directly).
+
+Concretely: goal A calls the LLM (brief, lock held), then spends most of its time inside `app.dispatch.send_tasks()`/`wait_task()` waiting on a real MCP tool call (lock released) — during that window, goal B's task can acquire the lock and complete its own LLM turn, dispatch its own tools, and so on. Goals only ever block each other for the LLM inference instants themselves, never for the (usually much longer) tool-execution time — this is turn-level interleaving with one serialized LLM ("one brain, many hands"), not parallel LLM inference, matching the concurrency model already established for voice barge-in (#142).
 
 ---
 
@@ -165,6 +173,12 @@ Built on [Textual](https://textual.textualize.io/). All platform-agnostic.
 
 Voice runs in a background thread (`voice_activation_thread.py` in `runtime/`). When a wake word fires: the daemon unconditionally broadcasts `{"type": "wake_word_detected"}` over the GUI socket, transitions to `VoiceState.WOKEN`, plays the wake chime (blocking — see below), then opens the STT capture window and injects a `VOICE_INPUT` event into `EventMerger` once an utterance completes. If the user says nothing within `VOICE_ACTIVATION_TIMEOUT` seconds, capture is abandoned and control returns to wake-word mode without processing anything; the timeout is disabled the moment speech is detected, so mid-sentence pauses never cut a command off early.
 
+### Concurrent goals + barge-in
+
+Wake-word listening restarts the moment capture ends — not after the full LLM/dispatch/TTS turn — in both the daemon path (`voice_activation_thread.py`) and the standalone `VoiceManager` path (`manager.py`). Saying "Hey Jarvis, do B" while A is still being worked on captures and queues B via `EventMerger`. Since #154, B doesn't wait for A's entire turn to conclude — each queued input is dispatched as its own task (see "Concurrent goal execution" above), so B gets a real LLM turn (and `GoalManager.add_goal()` creates a second concurrent root goal) as soon as the LLM is free, typically while A is still mid-dispatch waiting on its own tools. Goal A's task results arrive later as dispatch signals and interleave back into the same queue. When new input arrives while goals are already active, the PROCESSING broadcast carries `meta: {"concurrent_goals": N}`.
+
+A wake word detected **while TTS is speaking** barges in: the voice thread calls `OutputManager.stop_speaking()`, which sets a stop flag checked between synthesis chunks in `PiperTTS.say()` (`stream.abort()` discards already-buffered audio), then the WOKEN broadcast carries `meta: {"barge_in": true}` and capture proceeds normally. Known risk: the mic is live during TTS, so JARVIS can hear its own voice — acoustic echo cancellation is the real fix, tracked separately (#143).
+
 Config: `WAKE_WORDS`, `VOICE_ACTIVATION_SENSITIVITY`, `VOICE_ACTIVATION_TIMEOUT`, `WAKE_CHIME_PATH`, `NOISE_GATE_RMS_THRESHOLD`, `VOSK_MODEL_PATH`, `TTS_MODEL_ONNX`/`TTS_MODEL_JSON` — all in `~/.config/jarvis/jarvis.conf`.
 
 ### Noise gate (`jarvis/voice/audio.py::passes_noise_gate`)
@@ -199,7 +213,7 @@ IDLE (wake-word listening)
 
 Every transition broadcasts over the GUI socket as a structured event: `{"type": "state", "state": "<value>", "meta": {...}}`. `meta` is omitted unless the transition carries extra detail (currently only the CAPTURING → IDLE discard case, with `{"reason": "discard", "detail": "..."}`). `jarvis.runtime.io.set_gui_state(app, state, meta=None)` is the only place a transition should be broadcast from; `state` is a `VoiceState` member for anything in the diagram above, or the plain string `"listening"`/`"idle"` for the separate, orthogonal `start_listening`/`stop_listening` GUI toggle (whether the wake-word listener is enabled at all — not part of this state machine).
 
-**Known limitation:** `OutputManager._output_voice()` still calls TTS synthesis/playback synchronously on the event loop thread (a pre-existing characteristic, not introduced by this state machine). SPEAKING and the following IDLE are broadcast at the logically correct points around that call, but because the call blocks the loop, delivery to socket clients can lag behind the exact moment TTS starts/stops. Making TTS playback non-blocking is tracked separately.
+**Known limitation:** `OutputManager._output_voice()` still calls TTS synthesis/playback synchronously on the event loop thread (a pre-existing characteristic, not introduced by this state machine). SPEAKING and the following IDLE are broadcast at the logically correct points around that call, but because the call blocks the loop, delivery to socket clients can lag behind the exact moment TTS starts/stops, and queued events (including a second command captured mid-reply) wait until playback ends. Barge-in is the escape hatch: interrupting via the wake word stops playback and unblocks the loop almost immediately. Making TTS playback fully non-blocking is tracked separately.
 
 ---
 

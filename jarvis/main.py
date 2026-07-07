@@ -87,6 +87,13 @@ class Jarvis:
         )
 
         self.llm = self.components["llm"]
+        # Serializes LLM.ask()/switch_mode() across concurrent goals (#154) --
+        # chat_history/_mode are shared mutable state that two goals'
+        # coroutines must never touch at the same instant. Scoped tightly
+        # around individual ask_llm() calls (see llm_bridge.py), not whole
+        # goal turns, so one goal's dispatch/tool-wait time doesn't block
+        # another goal's LLM turn.
+        self.llm_lock = asyncio.Lock()
         self.dispatch = self.components["dispatch_adapter"]
         self.contextor = self.components["contextor"]
         self.goals = self.components["goal_manager"]
@@ -127,15 +134,31 @@ class Jarvis:
 
         logger.info("JARVIS: Event loop started")
 
+        # Each merged event (user input, dispatch signal, confirmation
+        # response) is dispatched as its own task rather than awaited inline,
+        # so a wake-word-triggered second goal gets a real turn as soon as
+        # the LLM is free, instead of waiting for the first goal's entire
+        # multi-round dispatch subchain to conclude (#154). ask_llm() itself
+        # still serializes actual LLM calls via app.llm_lock -- this only
+        # frees up the (often much longer) time a goal spends waiting on
+        # tool execution, not the LLM inference moments themselves.
+        event_tasks: set[asyncio.Task] = set()
+
         try:
             async for event in self.events:
-                await self._handle_event(event)
+                task = asyncio.create_task(self._handle_event(event))
+                runtime_events.track_event_task(event_tasks, task, logger)
         except KeyboardInterrupt:
             logger.info("JARVIS: Interrupted")
         finally:
             cancel_task_if_running(socket_task)
             cancel_task_if_running(output_task)
             cancel_task_if_running(gui_task)
+            if event_tasks:
+                logger.info(
+                    f"JARVIS: Waiting for {len(event_tasks)} in-flight goal(s) to finish..."
+                )
+                await asyncio.gather(*event_tasks, return_exceptions=True)
             await shutdown(self, logger)
 
     async def _handle_event(self, event: Event):

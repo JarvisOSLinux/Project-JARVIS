@@ -1,5 +1,7 @@
 """Piper-based text-to-speech provider."""
 
+import threading
+
 from ...core.logger import get_logger
 from ..audio import (
     AudioUnavailableError,
@@ -65,12 +67,15 @@ class PiperTTS(TTSProvider):
             logger.warning("No default output device found, using system default")
             self.device_index = self.sd.default.device[1]
 
+        self._stop_requested = threading.Event()
+
     # -- TTSProvider interface ------------------------------------------------
 
     def say(self, text: str) -> None:
         if not text.strip():
             return
 
+        self._stop_requested.clear()
         try:
             sr = self.tts.config.sample_rate
             with self.sd.RawOutputStream(
@@ -81,7 +86,14 @@ class PiperTTS(TTSProvider):
                 blocksize=0,
             ) as stream:
                 for chunk in self.tts.synthesize(text):
+                    if self._stop_requested.is_set():
+                        logger.info("TTS playback interrupted (barge-in)")
+                        stream.abort()
+                        return
                     stream.write(chunk.audio_int16_bytes)
         except Exception as e:
             logger.error(f"Error during TTS synthesis: {e}")
             raise AudioUnavailableError(f"Failed to output audio: {e}") from e
+
+    def stop(self) -> None:
+        self._stop_requested.set()

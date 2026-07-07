@@ -131,45 +131,64 @@ class VoiceManager:
 
         self.activation.stop_listening()
         self.stt.start()
+        text = None
         try:
             logger.info("Listening for your command...")
-            for text, is_final in self.stt.iter_results():
-                if is_final and text.strip():
-                    logger.info(f"Final Input: {text}")
-                    response = self.on_command(text)
-
-                    if response and isinstance(response, dict):
-                        output = response.get("output", "")
-                        if output.rstrip().endswith("?"):
-                            logger.info(
-                                "LLM asked a follow-up question, listening for response (10s timeout)..."
-                            )
-                            follow_up_start = time.time()
-                            got_follow_up = False
-                            for follow_text, follow_final in self.stt.iter_results():
-                                if time.time() - follow_up_start > 10:
-                                    logger.info(
-                                        "Follow-up listen timed out after 10 seconds"
-                                    )
-                                    break
-                                if follow_final and follow_text.strip():
-                                    logger.info(f"Follow-up Input: {follow_text}")
-                                    self.on_command(follow_text)
-                                    got_follow_up = True
-                                    break
-                            if not got_follow_up:
-                                logger.info(
-                                    "No follow-up received, returning to wake word mode"
-                                )
-
+            for t, is_final in self.stt.iter_results():
+                if is_final and t.strip():
+                    text = t.strip()
                     break
         except Exception as e:
-            logger.error(f"Error processing voice command: {e}")
+            logger.error(f"Error capturing voice command: {e}")
         finally:
             self.stt.stop()
-            logger.debug(
-                "Voice processing completed. Restarting wake word detection..."
-            )
 
-            if not self.activation.start_listening():
-                logger.error("Failed to restart voice activation")
+        # Wake-word listening resumes the moment capture ends -- NOT after
+        # the full LLM/TTS turn -- so "Hey Jarvis, do B" while A is still
+        # being worked on queues the next command (Project-JARVIS#142).
+        if not self.activation.start_listening():
+            logger.error("Failed to restart voice activation")
+
+        if text is None:
+            return
+
+        logger.info(f"Final Input: {text}")
+        try:
+            response = self.on_command(text)
+        except Exception as e:
+            logger.error(f"Error processing voice command: {e}")
+            return
+
+        if response and isinstance(response, dict):
+            output = response.get("output", "")
+            if output.rstrip().endswith("?"):
+                self._listen_for_follow_up()
+
+    def _listen_for_follow_up(self, timeout: float = 10.0) -> None:
+        """Reopen capture for a reply to an LLM follow-up question.
+
+        Polls via read() with a bounded wait -- iter_results() never yields
+        during pure silence, so a plain loop over it could never enforce
+        the timeout (same pitfall as Project-JARVIS#137).
+        """
+        logger.info(
+            f"LLM asked a follow-up question, listening for response "
+            f"({timeout:.0f}s timeout)..."
+        )
+        self.stt.start()
+        try:
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                result = self.stt.read(timeout=0.2)
+                if result is None:
+                    continue
+                text, is_final = result
+                if is_final and text.strip():
+                    logger.info(f"Follow-up Input: {text}")
+                    self.on_command(text)
+                    return
+            logger.info("No follow-up received, returning to wake word mode")
+        except Exception as e:
+            logger.error(f"Error capturing follow-up: {e}")
+        finally:
+            self.stt.stop()

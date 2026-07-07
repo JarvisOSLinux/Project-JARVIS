@@ -26,7 +26,18 @@ async def on_user_input(app: Any, logger: Logger, text: str) -> None:
     # Single funnel for every input source (voice, GUI/CLI socket, stdin) --
     # the GUI "message" handler already broadcasts this for its own path,
     # but voice-injected input had no PROCESSING signal at all before this.
-    await set_gui_state(app, VoiceState.PROCESSING)
+    # When goals are already in flight, meta tells clients this input adds
+    # a concurrent goal rather than starting from idle (#142).
+    goals = getattr(app, "goals", None)
+    already_active = goals.get_active_goals() if goals is not None else []
+    if already_active:
+        await set_gui_state(
+            app,
+            VoiceState.PROCESSING,
+            {"concurrent_goals": len(already_active) + 1},
+        )
+    else:
+        await set_gui_state(app, VoiceState.PROCESSING)
 
     if text.startswith("/"):
         handled = handle_slash_command(app, text)
@@ -46,11 +57,10 @@ async def on_user_input(app: Any, logger: Logger, text: str) -> None:
             session_id=app.sessions.current_id,
         )
 
-    app.llm.switch_mode("root")
     context = build_root_context(app, logger, new_input=text)
     emit_activity(app, "Thinking about your request…", kind="llm")
 
-    response = await ask_llm(app, logger, context, tag="root")
+    response = await ask_llm(app, logger, context, tag="root", mode="root")
     await app._act_on_root_response(response)
 
 
@@ -75,7 +85,6 @@ async def on_dispatch_signal(app: Any, logger: Logger, signal: dict[str, Any]) -
         return
 
     app.goals.update_from_signal(signal)
-    app.llm.switch_mode("root")
 
     # Build a context scoped to the goal that owns this PID.
     # If no goal owns the PID (e.g. a timer from defer), fall back to
@@ -107,7 +116,7 @@ async def on_dispatch_signal(app: Any, logger: Logger, signal: dict[str, Any]) -
             f"EXIT_DATA: {compact_payload_for_llm(exit_data)}"
         )
 
-    response = await ask_llm(app, logger, context, tag="root")
+    response = await ask_llm(app, logger, context, tag="root", mode="root")
     await app._act_on_root_response(response)
 
 
@@ -145,17 +154,17 @@ async def on_confirmation_response(
 
     if pending.denied_tools and not pending.approved_tasks:
         denied_list = ", ".join(pending.denied_tools)
-        app.llm.switch_mode("root")
         context = build_root_context(app, logger)
         context += f"\nUSER_DENIAL: Action {denied_list} was denied by the user"
-        response = await ask_llm(app, logger, context, tag="root-confirmation-denied")
+        response = await ask_llm(
+            app, logger, context, tag="root-confirmation-denied", mode="root"
+        )
         await app._act_on_root_response(response)
         return
 
     if pending.approved_tasks:
         result = await app.dispatch.send_tasks(pending.approved_tasks)
 
-        app.llm.switch_mode("root")
         context = build_root_context(app, logger)
 
         if isinstance(result, dict) and "error" in result:
@@ -167,5 +176,7 @@ async def on_confirmation_response(
             denied_list = ", ".join(pending.denied_tools)
             context += f"\nUSER_DENIAL: Action {denied_list} was denied by the user"
 
-        response = await ask_llm(app, logger, context, tag="root-confirmation-result")
+        response = await ask_llm(
+            app, logger, context, tag="root-confirmation-result", mode="root"
+        )
         await app._act_on_root_response(response)

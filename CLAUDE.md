@@ -172,3 +172,5 @@ make check                  # Format + lint + typecheck + tests
 | `jarvis/dispatch/event_merger.py` | Merges voice/CLI/socket/dispatch events |
 | `jarvis/runtime/root_actions.py` | ROOT-mode LLM response action handlers |
 | `jarvis/runtime/root_context.py` | Context assembly for ROOT-mode prompts |
+| `jarvis/runtime/llm_bridge.py` | `ask_llm()` — the sole locked/mode-atomic LLM call site |
+| `jarvis/runtime/events.py` | Event routing + per-event task tracking (concurrent goals) |

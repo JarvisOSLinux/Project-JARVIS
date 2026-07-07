@@ -58,7 +58,19 @@ class TTSProvider(ABC):
 
     @abstractmethod
     def say(self, text: str) -> None:
-        """Synthesise *text* and play it through the default audio output."""
+        """Synthesise *text* and play it through the default audio output.
+
+        Must return early (without raising) if ``stop()`` is called from
+        another thread mid-playback -- barge-in interrupts playback at
+        chunk granularity.
+        """
+
+    @abstractmethod
+    def stop(self) -> None:
+        """Request that any in-progress ``say()`` stop as soon as possible.
+
+        Thread-safe; a no-op when nothing is playing.
+        """
 
 
 class ActivationProvider(ABC):

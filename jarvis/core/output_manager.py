@@ -1,3 +1,4 @@
+import threading
 from typing import Any, Callable, Dict, List, Optional
 
 from ..config import Config
@@ -27,6 +28,23 @@ class OutputManager:
         self._activity_callbacks: List[Callable[[Dict[str, Any]], None]] = []
         self._suppress_stdout = suppress_stdout
         self._state_callback: Optional[Callable[[VoiceState], None]] = None
+        self._speaking = threading.Event()
+
+    def is_speaking(self) -> bool:
+        """True while TTS playback is in progress. Thread-safe."""
+        return self._speaking.is_set()
+
+    def stop_speaking(self) -> None:
+        """Interrupt in-progress TTS playback (barge-in). Thread-safe;
+        a no-op when nothing is playing or the TTS provider can't stop."""
+        if not self._speaking.is_set():
+            return
+        if self.tts is None or not hasattr(self.tts, "stop"):
+            return
+        try:
+            self.tts.stop()
+        except Exception as e:
+            logger.warning(f"Failed to stop TTS playback: {e}")
 
     def set_state_callback(self, cb: Optional[Callable[[VoiceState], None]]) -> None:
         """Register a callback notified of SPEAKING/IDLE around TTS playback.
@@ -113,6 +131,7 @@ class OutputManager:
             text: Text to speak
         """
         if self._has_tts and self.tts is not None:
+            self._speaking.set()
             self._notify_state(VoiceState.SPEAKING)
             try:
                 self.tts.say(text)
@@ -120,6 +139,7 @@ class OutputManager:
                 logger.warning(f"TTS failed, falling back to text output: {e}")
                 self._output_text(text)
             finally:
+                self._speaking.clear()
                 self._notify_state(VoiceState.IDLE)
         else:
             logger.info("Voice output requested but TTS unavailable, using text output")

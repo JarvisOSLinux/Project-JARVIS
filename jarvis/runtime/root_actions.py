@@ -26,11 +26,10 @@ async def feed_root_summary(
     depth: int,
 ) -> None:
     """Feed a subsystem summary back into ROOT for the next decision."""
-    app.llm.switch_mode("root")
     context = build_root_context(app, logger)
     context += f"\n{label}: {summary}"
 
-    response = await ask_llm(app, logger, context, tag="root-chain")
+    response = await ask_llm(app, logger, context, tag="root-chain", mode="root")
     await app._act_on_root_response(response, depth + 1)
 
 
@@ -60,7 +59,7 @@ async def _handle_search_tools(
 
     context = build_root_context(app, logger)
     context += "\n" + format_search_results(capability, entries)
-    response = await ask_llm(app, logger, context, tag="root-search-tools")
+    response = await ask_llm(app, logger, context, tag="root-search-tools", mode="root")
     await app._act_on_root_response(response, depth + 1)
 
 
@@ -95,7 +94,9 @@ async def _handle_get_server_docs(
 
     context = build_root_context(app, logger)
     context += "\n" + docs_block
-    response = await ask_llm(app, logger, context, tag="root-get-server-docs")
+    response = await ask_llm(
+        app, logger, context, tag="root-get-server-docs", mode="root"
+    )
     await app._act_on_root_response(response, depth + 1)
 
 
@@ -121,7 +122,9 @@ async def _handle_install_server(
         )
         context = build_root_context(app, logger)
         context += f"\nINSTALL_ERROR: {install_result['error']}"
-        response = await ask_llm(app, logger, context, tag="root-install-error")
+        response = await ask_llm(
+            app, logger, context, tag="root-install-error", mode="root"
+        )
         await app._act_on_root_response(response, depth + 1)
         return
 
@@ -156,7 +159,9 @@ async def _handle_install_server(
             if missing:
                 cancelled_msg += f" — user did not provide: {', '.join(missing)}"
             context += f"\n{cancelled_msg}"
-            response = await ask_llm(app, logger, context, tag="root-install-cancelled")
+            response = await ask_llm(
+                app, logger, context, tag="root-install-cancelled", mode="root"
+            )
             await app._act_on_root_response(response, depth + 1)
             return
 
@@ -172,7 +177,9 @@ async def _handle_install_server(
         logger.warning(f"JARVIS: setup '{server_id}' failed: {setup_result['error']}")
         context = build_root_context(app, logger)
         context += f"\nINSTALL_ERROR: setup failed — {setup_result['error']}"
-        response = await ask_llm(app, logger, context, tag="root-setup-error")
+        response = await ask_llm(
+            app, logger, context, tag="root-setup-error", mode="root"
+        )
         await app._act_on_root_response(response, depth + 1)
         return
 
@@ -195,7 +202,9 @@ async def _handle_install_server(
         error=tools_error,
         configurable_props=install_configurable_props,
     )
-    response = await ask_llm(app, logger, context, tag="root-install-result")
+    response = await ask_llm(
+        app, logger, context, tag="root-install-result", mode="root"
+    )
     await app._act_on_root_response(response, depth + 1)
 
 
@@ -220,7 +229,9 @@ async def _handle_uninstall_server(
         logger.info(f"JARVIS: uninstall_server '{server_id}' succeeded")
         context += f"\nUNINSTALL_RESULT: {server_id} removed successfully."
 
-    response = await ask_llm(app, logger, context, tag="root-uninstall-result")
+    response = await ask_llm(
+        app, logger, context, tag="root-uninstall-result", mode="root"
+    )
     await app._act_on_root_response(response, depth + 1)
 
 
@@ -258,7 +269,9 @@ async def _handle_configure_server(
             f"\nCONFIGURE_BLOCKED: The value(s) for {placeholder_keys} look like placeholders, "
             "not real credentials. Use respond to ask the user for the actual value(s) before calling configure_server."
         )
-        response = await ask_llm(app, logger, context, tag="root-configure-placeholder")
+        response = await ask_llm(
+            app, logger, context, tag="root-configure-placeholder", mode="root"
+        )
         await app._act_on_root_response(response, depth + 1)
         return
 
@@ -280,7 +293,9 @@ async def _handle_configure_server(
 
     context = build_root_context(app, logger)
     context += f"\n{label}"
-    response = await ask_llm(app, logger, context, tag="root-configure-server")
+    response = await ask_llm(
+        app, logger, context, tag="root-configure-server", mode="root"
+    )
     await app._act_on_root_response(response, depth + 1)
 
 
@@ -315,7 +330,9 @@ async def act_on_root_response(
             '  {"action": "respond", "output": "<message>", "goal_updates": []}\n'
             "Do NOT wrap fields in a 'params' object. Output exactly one JSON object."
         )
-        retry_response = await ask_llm(app, logger, context, tag="root-retry-parse")
+        retry_response = await ask_llm(
+            app, logger, context, tag="root-retry-parse", mode="root"
+        )
         await app._act_on_root_response(retry_response, depth + 1)
         return
 
@@ -360,7 +377,9 @@ async def act_on_root_response(
             logger.warning("JARVIS: LLM returned empty respond — retrying")
             context = build_root_context(app, logger)
             context += "\nYour previous response had an empty output. Please respond to the user."
-            retry_response = await ask_llm(app, logger, context, tag="root-retry-empty")
+            retry_response = await ask_llm(
+                app, logger, context, tag="root-retry-empty", mode="root"
+            )
             await app._act_on_root_response(retry_response, depth + 1)
             return
         apply_goal_updates(app, parsed.get("goal_updates", []))
