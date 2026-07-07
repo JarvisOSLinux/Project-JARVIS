@@ -116,8 +116,16 @@ def run_voice_activation(app: Any, logger: Logger) -> None:
         while app._running:
             if getattr(app.voice_manager, "_wake_word_detected", False):
                 app.voice_manager._wake_word_detected = False
+                woken_meta = None
+                output_manager = getattr(app, "output_manager", None)
+                if output_manager is not None and output_manager.is_speaking():
+                    # Barge-in: the wake word interrupts JARVIS mid-reply,
+                    # exactly like commercial assistants (Project-JARVIS#142).
+                    logger.info("JARVIS: Barge-in — stopping TTS for new command")
+                    output_manager.stop_speaking()
+                    woken_meta = {"barge_in": True}
                 _broadcast_wake_word_detected(app)
-                _broadcast_gui_state(app, VoiceState.WOKEN)
+                _broadcast_gui_state(app, VoiceState.WOKEN, woken_meta)
                 # Blocking is intentional: the chime is the audible cue to
                 # start talking, so it plays out before the mic reopens for
                 # capture rather than racing the user's own speech.

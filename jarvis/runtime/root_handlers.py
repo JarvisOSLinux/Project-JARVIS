@@ -26,7 +26,18 @@ async def on_user_input(app: Any, logger: Logger, text: str) -> None:
     # Single funnel for every input source (voice, GUI/CLI socket, stdin) --
     # the GUI "message" handler already broadcasts this for its own path,
     # but voice-injected input had no PROCESSING signal at all before this.
-    await set_gui_state(app, VoiceState.PROCESSING)
+    # When goals are already in flight, meta tells clients this input adds
+    # a concurrent goal rather than starting from idle (#142).
+    goals = getattr(app, "goals", None)
+    already_active = goals.get_active_goals() if goals is not None else []
+    if already_active:
+        await set_gui_state(
+            app,
+            VoiceState.PROCESSING,
+            {"concurrent_goals": len(already_active) + 1},
+        )
+    else:
+        await set_gui_state(app, VoiceState.PROCESSING)
 
     if text.startswith("/"):
         handled = handle_slash_command(app, text)
