@@ -168,7 +168,9 @@ make check                  # Format + lint + typecheck + tests
 | `jarvis/voice/chime.py` | Wake-word earcon: path validation + best-effort playback |
 | `jarvis/voice/audio.py` | Audio device detection + `passes_noise_gate` RMS filter |
 | `jarvis/voice/aec/webrtc_aec.py` | `WebRtcAEC` — acoustic echo cancellation (barge-in fix, #143) |
-| `jarvis/runtime/io.py` | Input/GUI/output sockets — confirmation queries, session CRUD, settings + provider CRUD |
+| `jarvis/runtime/io.py` | Input/GUI/output sockets — confirmation queries, session CRUD, settings + provider CRUD, client labeling/`list_clients`/`shutdown_request` |
+| `jarvis/runtime/lifecycle.py` | Signal handlers, startup service wiring, `shutdown_request`'s safe save-then-exit sequence |
+| `jarvis/dispatch/goal_manager.py` | `GoalManager` — goal tree + on-disk archive (`archive_all()` for shutdown) |
 | `jarvis/core/providers.py` | Provider pool CRUD (`providers.json`), shared by CLI, TUI, and the GUI socket |
 | `jarvis/dispatch/adapter.py` | Python wrapper for Rust dispatch binary |
 | `jarvis/dispatch/discovery.py` | Embedding search via dmcp vector index |

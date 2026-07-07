@@ -322,6 +322,19 @@ class GoalManager:
     def clear(self):
         self._goals.clear()
 
+    def archive_all(self) -> List[Goal]:
+        """Archive every goal currently in memory, regardless of status, and
+        clear in-memory state. Unlike dismiss_completed/dismiss_failed (which
+        only ever touch terminal goals), this also covers PENDING/ACTIVE/
+        DEFERRED goals -- used on daemon shutdown (#146) so in-flight work
+        isn't silently lost with zero on-disk trace.
+        """
+        goals = list(self._goals)
+        if goals:
+            self._archive_goals(goals)
+        self._goals.clear()
+        return goals
+
     def _archive_goals(self, goals: List[Goal]):
         try:
             with open(self._archive_path, "a", encoding="utf-8") as f:

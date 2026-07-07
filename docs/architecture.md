@@ -256,6 +256,23 @@ can build an equivalent settings panel without a special-cased protocol:
 - `{"type": "add_provider", "ptype": ..., "model": ..., "name": ..., "url": ..., "api_key": ..., "temperature": ...}`, `{"type": "edit_provider", "name": ..., "fields": {...}}`, `{"type": "remove_provider", "name": ...}` — thin wrappers around `jarvis/core/providers.py`'s existing CRUD (already shared between CLI and TUI). A successful mutation broadcasts the refreshed `provider_list` to every GUI client (providers.json is shared daemon state, same rationale as session CRUD's `_reply_or_broadcast`); a `ValueError` (unknown type, missing required field, duplicate name, not found) replies `provider_error` to the requester only.
 - **Known limitation, not introduced by this protocol**: there is no live `ProviderPool` reload. Like the TUI's own provider modal, a provider add/edit/remove only takes effect for the *next* daemon start — `create_llm()` builds the pool once from `providers.json` at startup. Any settings-panel UI built on this should say so.
 
+### Connected-clients query + graceful shutdown (Project-JARVIS#146)
+
+`app._gui_clients` changed from a bare `set[StreamWriter]` to `dict[StreamWriter, str]` (writer → label), so a client can identify itself and every other connected client can see who's attached before requesting a shutdown:
+
+- `{"type": "hello", "label": "jarvis-app"}` — sets the sender's label (blank/missing labels are ignored, not cleared). Unlabeled clients default to `runtime.io.DEFAULT_CLIENT_LABEL` ("unlabeled") from the moment they connect, so `list_clients` always has something to show even for a client that never identifies itself.
+- `{"type": "list_clients"}` → replies `{"type": "client_list", "clients": [label, ...]}` — callable by any client, no restriction. Just labels (not writer identities or connection metadata) — enough for `jarvisos-app`#17 to show "N other clients are connected" before asking the user to confirm a shutdown.
+- `{"type": "shutdown_request"}` — callable by any connected client, **no daemon-enforced confirmation gate**. The socket's trust boundary is already "same local user" (`socket_security.py`); checking with the user first is each client's own job (`jarvisos-app`#17 does this by querying `list_clients` and requiring explicit confirmation before ever sending this). The handler is a one-liner: `app.stop()` — the same `request_stop()` a SIGTERM/SIGINT signal handler calls, so both triggers converge on identical behavior rather than two parallel shutdown paths.
+
+**The safe save-then-exit sequence**, run from `Jarvis.run()`'s `finally` block regardless of what triggered it (loop exit via `request_stop()`, whether from a signal or `shutdown_request`):
+
+1. `lifecycle.broadcast_shutdown_notice()` broadcasts `{"type": "DAEMON_SHUTDOWN", "state": ..., "goals": [...], "session_id": ..., "timestamp": ...}` to every connected GUI client — purely informational, no negotiation, no single "owner." **Must run before any socket-task cancellation**: cancelling the GUI listener task clears `app._gui_clients` in its own cleanup, so broadcasting after that reaches nobody. `goals` is every still-PENDING/ACTIVE/DEFERRED goal via `GoalManager.get_active_goals()`.
+2. Input/output/GUI socket listener tasks are cancelled, then `lifecycle.join_voice_thread_if_running()` blocks (bounded, 2s default) until the voice-activation thread's own loop notices `app._running is False` and exits — previously this daemon thread (`daemon=True`, never joined) was just left to die implicitly whenever the process happened to exit.
+3. In-flight event-handler tasks are awaited (pre-existing behavior from #154).
+4. `lifecycle.shutdown()` now calls `app.goals.archive_all()` **before** any other teardown — unlike `dismiss_completed()`/`dismiss_failed()` (which only ever handled terminal goals), this archives every goal regardless of status and clears in-memory state, so a PENDING/ACTIVE/DEFERRED goal that was mid-flight at shutdown has an on-disk record in `goal_archive.jsonl` instead of vanishing. Session/contextor writes need no explicit flush — `ContextorAdapter._send()` is already a synchronous round-trip per call, so `contextor.disconnect()` never races a pending write.
+
+**Explicitly not a security boundary**: the issue text is deliberate about this — it's a cooperative shutdown mechanism for a well-behaved daemon and client, not protection against a compromised one.
+
 ### Voice/response session state machine (`jarvis/core/voice_state.py`)
 
 `VoiceState` is the single source of truth for the daemon's voice + response lifecycle:

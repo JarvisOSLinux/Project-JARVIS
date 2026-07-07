@@ -239,6 +239,9 @@ async def run_gui_socket_listener(app: Any, logger: Logger) -> None:
         platform.ipc_cleanup(path)
 
 
+DEFAULT_CLIENT_LABEL = "unlabeled"
+
+
 async def handle_gui_connection(
     app: Any,
     logger: Logger,
@@ -246,7 +249,7 @@ async def handle_gui_connection(
     writer: asyncio.StreamWriter,
 ) -> None:
     """Handle a bidirectional GUI client connection."""
-    app._gui_clients.add(writer)
+    app._gui_clients[writer] = DEFAULT_CLIENT_LABEL
     logger.info(f"JARVIS: GUI client connected ({len(app._gui_clients)} total)")
 
     try:
@@ -281,7 +284,7 @@ async def handle_gui_connection(
     except (ConnectionResetError, BrokenPipeError, asyncio.IncompleteReadError):
         pass
     finally:
-        app._gui_clients.discard(writer)
+        app._gui_clients.pop(writer, None)
         try:
             writer.close()
             await writer.wait_closed()
@@ -311,6 +314,22 @@ async def _process_gui_message(
 
     elif msg_type == "confirmation_response":
         app.events.inject_confirmation_response(msg)
+
+    elif msg_type == "hello":
+        label = str(msg.get("label", "")).strip()
+        if label:
+            app._gui_clients[writer] = label
+            logger.info(f"JARVIS: GUI client identified as '{label}'")
+
+    elif msg_type == "list_clients":
+        await _gui_write(
+            writer,
+            {"type": "client_list", "clients": list(app._gui_clients.values())},
+        )
+
+    elif msg_type == "shutdown_request":
+        logger.info("JARVIS: shutdown_request received over the GUI socket")
+        app.stop()
 
     elif msg_type == "start_listening":
         # Toggles whether the wake-word listener is enabled at all -- a
@@ -682,7 +701,8 @@ async def broadcast_to_gui_clients(app: Any, message: dict) -> None:
             await writer.drain()
         except (ConnectionResetError, BrokenPipeError, OSError):
             dead.add(writer)
-    app._gui_clients -= dead
+    for writer in dead:
+        app._gui_clients.pop(writer, None)
 
 
 async def _gui_write(writer: asyncio.StreamWriter, message: dict) -> None:
