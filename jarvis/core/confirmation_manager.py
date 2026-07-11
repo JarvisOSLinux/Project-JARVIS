@@ -1,5 +1,5 @@
 """
-Confirmation Manager — Tool-Level Action (TLA) confirmation gate.
+Confirmation Manager — Threat Level Access (TLA) confirmation gate.
 
 MCP server developers declare ``confirmation_required: true`` on tools that
 need user approval before execution.  The ConfirmationManager reads that
