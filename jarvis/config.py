@@ -217,7 +217,7 @@ class Config:
         os.path.join(JARVIS_DATA_DIR, "jarvis.sock"),
     )
 
-    # Tool-Level Action (TLA) Confirmation
+    # Threat Level Access (TLA) Confirmation
     # - "allow_all": never ask, run everything (power users / trusted environments)
     # - "smart":     only ask when tool has confirmation_required=true (default)
     # - "ask_all":   ask for every tool call, regardless of metadata

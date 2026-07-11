@@ -24,25 +24,27 @@ OS embodiment, not the core.
 | 1 | Malicious MCP Servers | registry vetting + `dmcp` manifest-hash verify + agent source-confinement | **implemented** (official tier not yet populated) |
 | 2 | Prompt Injection | dispatch 128-bit boundary nonce + `input_guard` on direct input | **partial** — dispatch tags output; the daemon does not yet verify the tag |
 | 3 | Misleading MCP Server Usage | official-tier review of tool descriptions + structured schema | **partial** |
-| 4 | Unauthorized Sudo via MCP | userspace Tool-Level-Action confirmation gate | **implemented**, with the `shellmcp` gap (#159) |
+| 4 | Unauthorized Sudo via MCP | userspace Threat-Level-Access confirmation gate | **implemented**, with the `shellmcp` gap (#159) |
 | 5 | Sudo Capability Exploitation | same confirmation gate, goal-scoped | **implemented**, same gap |
 | 6 | Bloated Context | daemon two-tier context + dispatch rolling window + contextor pruning | **partial** — constraint preservation not implemented |
 | — | Kernel 4-tier policy engine (`/dev/jarvis`) | linux-jarvisos + daemon `KernelClient` | **OS-side** — not consulted from the daemon today |
 
 ### On the "TLA" acronym (important for the paper)
 
-The confirmation gate in this repo is **"TLA = Tool-Level Action" confirmation**
+**TLA = Threat Level Access.** It is a **userspace**, non-blocking,
+human-in-the-loop confirmation gate on the dispatch path
 (`docs/tla-confirmation-design.md`, `jarvis/core/confirmation_manager.py`,
-`jarvis/runtime/dispatch_flow.py`): a **userspace**, non-blocking,
-human-in-the-loop gate on the dispatch path — the LLM is deliberately kept out
-of the confirmation loop so it cannot misrepresent an action. The website and
-earlier drafts expand TLA as **"Threat Level Access"** and describe it as
-**OS-enforced**; that phrasing does not match the code. The enforcement of
-record is the **userspace Tool-Level-Action gate**. The kernel `/dev/jarvis`
-policy engine is part of the OS embodiment and is **not** consulted from the
-daemon today — `KernelClient.policy_check` and `get_api_key` have no callers in
-the execution path. For publication: pick one expansion of "TLA," and use
-"userspace confirmation gate," not "OS-enforced," for the current core behavior.
+`jarvis/runtime/dispatch_flow.py`) — the LLM is deliberately kept out of the
+confirmation loop so it cannot misrepresent an action. Every privileged tool
+call is evaluated against a host-assigned threat level and escalation requires
+explicit out-of-band user approval.
+
+Enforcement is **in userspace** (the JARVIS daemon), so do **not** describe the
+current core behavior as "OS-enforced." The kernel `/dev/jarvis` policy engine
+is part of the OS embodiment and is **not** consulted from the daemon today —
+`KernelClient.policy_check` and `get_api_key` have no callers in the execution
+path. (Earlier drafts expanded TLA as "Tool-Level Action"; "Threat Level
+Access" is now the canonical expansion.)
 
 ---
 
