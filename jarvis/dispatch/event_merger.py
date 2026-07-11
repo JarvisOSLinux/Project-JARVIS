@@ -36,6 +36,7 @@ from enum import Enum
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from ..core.logger import get_logger
+from .boundary import verify_and_mark
 
 logger = get_logger(__name__)
 
@@ -311,11 +312,27 @@ class EventMerger:
                         if sig.get("type") in _INLINE_SIGNAL_TYPES:
                             continue
 
+                        # Verify dispatch's output-provenance boundary (#165): an
+                        # EXIT body must be wrapped by the nonce dispatch assigned
+                        # to that PID. A missing/mismatched tag means the output
+                        # did not come through dispatch's boundary (or was
+                        # tampered) — flag it in-band so ROOT treats it as
+                        # untrusted rather than acting on it.
+                        if sig.get("type") in ("EXIT", "TIMEOUT") and verify_and_mark(
+                            sig
+                        ):
+                            logger.warning(
+                                "EventMerger: output-provenance boundary FAILED for "
+                                f"pid={sig.get('pid')} ({sig.get('_boundary_reason')}) "
+                                "— marked UNVERIFIED"
+                            )
+
                         if sig.get("type") == "REMIND":
                             pid = sig.get("pid")
                             if pid in exits_by_pid:
                                 # Task already finished — merge exit info so
                                 # ROOT gets the full picture in one LLM turn.
+                                verify_and_mark(exits_by_pid[pid])
                                 sig = {
                                     **sig,
                                     "_remind_completed": True,
