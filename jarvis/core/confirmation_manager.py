@@ -43,8 +43,8 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 from ..config import Config
-from .threat_level import ThreatLevel, classify
 from .logger import get_logger
+from .threat_level import ThreatLevel, classify
 
 logger = get_logger(__name__)
 
