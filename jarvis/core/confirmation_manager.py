@@ -43,6 +43,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 from ..config import Config
+from .threat_level import ThreatLevel, classify
 from .logger import get_logger
 
 logger = get_logger(__name__)
@@ -122,11 +123,17 @@ class ConfirmationManager:
     # Public API
     # ------------------------------------------------------------------
 
-    def should_confirm(self, tool_metadata: Dict[str, Any]) -> bool:
+    def should_confirm(
+        self, tool_metadata: Dict[str, Any], tool_name: Optional[str] = None
+    ) -> bool:
         """Decide whether a tool invocation needs confirmation.
 
-        Uses ``CONFIRMATION_MODE`` and the tool's ``confirmation_required``
-        field.
+        In ``smart`` mode the *host* sets a minimum threat level per tool (see
+        ``threat_level.classify``): host-classified dangerous tools (e.g.
+        command execution, which can escalate via sudo) are always confirmed
+        regardless of their manifest, and a manifest may only raise the level,
+        never lower it below the host floor. ``allow_all`` / ``ask_all``
+        override as before.
         """
         mode = Config.CONFIRMATION_MODE
 
@@ -135,8 +142,9 @@ class ConfirmationManager:
         if mode == "ask_all":
             return True
 
-        # "smart" — respect the tool's own declaration.
-        return bool(tool_metadata.get("confirmation_required", False))
+        # "smart" — confirm at or above ELEVATED. classify() folds in the host
+        # floor AND the tool's own confirmation_required / threat_level.
+        return classify(tool_name, tool_metadata) >= ThreatLevel.ELEVATED
 
     async def request_confirmation(
         self,
