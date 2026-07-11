@@ -11,6 +11,41 @@ AI agent to trigger a major public security incident (early 2026).
 
 ---
 
+## Six-Threat Taxonomy — Implementation Status
+
+**This table is the canonical status of each research threat's mitigation.**
+Where the website or the paper states a mitigation in the present tense, it must
+match the status here. `implemented` = enforced in code; `partial` = present but
+with a stated gap; `proposed` = designed, not built; `OS-side` = owned by the
+OS embodiment, not the core.
+
+| # | Threat | Enforcement point | Status |
+|---|--------|-------------------|--------|
+| 1 | Malicious MCP Servers | registry vetting + `dmcp` manifest-hash verify + agent source-confinement | **implemented** (official tier not yet populated) |
+| 2 | Prompt Injection | dispatch 128-bit boundary nonce + `input_guard` on direct input | **partial** — dispatch tags output; the daemon does not yet verify the tag |
+| 3 | Misleading MCP Server Usage | official-tier review of tool descriptions + structured schema | **partial** |
+| 4 | Unauthorized Sudo via MCP | userspace Tool-Level-Action confirmation gate | **implemented**, with the `shellmcp` gap (#159) |
+| 5 | Sudo Capability Exploitation | same confirmation gate, goal-scoped | **implemented**, same gap |
+| 6 | Bloated Context | daemon two-tier context + dispatch rolling window + contextor pruning | **partial** — constraint preservation not implemented |
+| — | Kernel 4-tier policy engine (`/dev/jarvis`) | linux-jarvisos + daemon `KernelClient` | **OS-side** — not consulted from the daemon today |
+
+### On the "TLA" acronym (important for the paper)
+
+The confirmation gate in this repo is **"TLA = Tool-Level Action" confirmation**
+(`docs/tla-confirmation-design.md`, `jarvis/core/confirmation_manager.py`,
+`jarvis/runtime/dispatch_flow.py`): a **userspace**, non-blocking,
+human-in-the-loop gate on the dispatch path — the LLM is deliberately kept out
+of the confirmation loop so it cannot misrepresent an action. The website and
+earlier drafts expand TLA as **"Threat Level Access"** and describe it as
+**OS-enforced**; that phrasing does not match the code. The enforcement of
+record is the **userspace Tool-Level-Action gate**. The kernel `/dev/jarvis`
+policy engine is part of the OS embodiment and is **not** consulted from the
+daemon today — `KernelClient.policy_check` and `get_api_key` have no callers in
+the execution path. For publication: pick one expansion of "TLA," and use
+"userspace confirmation gate," not "OS-enforced," for the current core behavior.
+
+---
+
 ## Threat Model
 
 ### Assets to Protect
@@ -89,8 +124,10 @@ inclusion.  There is no anonymous upload endpoint.  The model is
 deliberately inspired by Arch Linux’s AUR: open contribution, community
 review, and maintainer oversight.
 
-- Status: ✅ Curated registry · ⚠️ No cryptographic manifest signatures yet
-  (planned: SHA-256 checksums verified by `dmcp install`)
+- Status: ✅ Curated, PR-gated registry · ✅ `dmcp install` now verifies
+  `integrity.manifestSha256` (raw bytes, before parse/merge) and the agent is
+  source-confined to configured registries · ⚠️ cryptographic (keyed)
+  signatures still planned.  See `mcp-registry/docs/TRUST-MODEL.md`.
 
 ### API Key / Chat History Exposure
 
@@ -127,24 +164,30 @@ instructed.  A malicious document could embed instruction text that the
 LLM interprets as a user command and routes to `shellmcp`.
 
 **Current mitigations:**
-- `CONFIRMATION_MODE=smart` (default) — tools declaring
-  `confirmation_required: true` (including `shellmcp`) prompt the user
-  before execution.
+- `CONFIRMATION_MODE=smart` (default) — tools that declare
+  `confirmation_required: true` prompt the user before execution.
+  **Gap (Project-JARVIS #159):** the bundled `shellmcp` server does **not**
+  declare `confirmation_required` on `run_command` (which runs `sudo -A`), so
+  under the default `smart` mode a privileged shell command is *not* gated by
+  the confirmation layer — only by the ksshaskpass sudo password prompt. The
+  planned fix has the host force-confirm privileged / `scope: system` tools
+  regardless of the manifest flag, so a tool author cannot opt out of gating a
+  dangerous tool.
 - `jarvis/core/input_guard.py` — scans direct user input for known
   injection patterns and logs a WARNING.  (Does not yet scan LLM-processed
   content from external sources.)
-- **Planned — MCP output containment hashing:** Tool output returned to
-  the LLM will be wrapped in a PID-derived hash tag:
-  ```
-  Containment Hash: <hash>
-  <hash>
-  ...raw MCP server output...
-  </hash>
-  ```
-  The system prompt instructs the LLM to treat tagged content as data
-  only, never as instructions.  This creates a clear semantic boundary
-  between user instructions and external content, significantly raising
-  the bar for injection via tool results.
+- **MCP output containment hashing — implemented in dispatch; daemon
+  verification pending.** Tool output is wrapped in a boundary tag keyed by a
+  **128-bit CSPRNG nonce** (`dispatch/src/nonce.rs`), emitted in the EXIT
+  signal as `[hash=h] 200 <h>...raw MCP server output...</h>`
+  (`dispatch/src/orchestrator.rs`). The intent is that the system prompt
+  instructs the LLM to treat tagged content as data only.
+  **Gap:** the daemon does not yet verify or act on the boundary tag, and the
+  system prompt (`jarvis/config.py`) does not yet carry the injection-hardening
+  instruction — so the boundary currently *delimits* untrusted output but
+  nothing on the consuming side *enforces* it. Remaining hardening (out-of-band
+  default, moving the `(Error)` sentinel out of the untrusted stream) and
+  daemon-side verification are tracked in **dispatch #19**.
 
 **Not yet mitigated:**
 - Injection arriving through LLM-processed external content (web pages,
@@ -183,9 +226,11 @@ be picked up if `dispatch` or `dmcp` auto-discovered arbitrary processes.
   `dmcp` manifest.  No auto-discovery of arbitrary local processes.
 - `mcp-registry` requires PR review before inclusion.
 
-**Planned:**
-- SHA-256 checksums on registry manifests, verified by `dmcp install`
-  before running any server binary.
+**Now implemented:**
+- `dmcp install` verifies `integrity.manifestSha256` (raw bytes, before
+  parse/merge) and the autonomous agent is source-confined to configured
+  registries (id-only install, no source mutation over `dmcp serve`).
+  Cryptographic signing of the registry itself remains planned.
 
 ### 4. Contextor Memory Poisoning (RAG Poisoning)
 
