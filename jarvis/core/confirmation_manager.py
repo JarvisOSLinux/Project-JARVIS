@@ -124,7 +124,10 @@ class ConfirmationManager:
     # ------------------------------------------------------------------
 
     def should_confirm(
-        self, tool_metadata: Dict[str, Any], tool_name: Optional[str] = None
+        self,
+        tool_metadata: Dict[str, Any],
+        tool_name: Optional[str] = None,
+        params: Any = None,
     ) -> bool:
         """Decide whether a tool invocation needs confirmation.
 
@@ -132,7 +135,9 @@ class ConfirmationManager:
         ``threat_level.classify``): host-classified dangerous tools (e.g.
         command execution, which can escalate via sudo) are always confirmed
         regardless of their manifest, and a manifest may only raise the level,
-        never lower it below the host floor. ``allow_all`` / ``ask_all``
+        never lower it below the host floor. The ``params`` are also scanned for
+        dangerous payloads (``rm -rf``, ``| sh`` …) so a host-safe tool handed a
+        destructive argument is confirmed too. ``allow_all`` / ``ask_all``
         override as before.
         """
         mode = Config.CONFIRMATION_MODE
@@ -143,8 +148,9 @@ class ConfirmationManager:
             return True
 
         # "smart" — confirm at or above ELEVATED. classify() folds in the host
-        # floor AND the tool's own confirmation_required / threat_level.
-        return classify(tool_name, tool_metadata) >= ThreatLevel.ELEVATED
+        # floor, the tool's own confirmation_required / threat_level, AND a scan
+        # of the params for dangerous payloads (a safe tool + a destructive arg).
+        return classify(tool_name, tool_metadata, params) >= ThreatLevel.ELEVATED
 
     async def request_confirmation(
         self,
