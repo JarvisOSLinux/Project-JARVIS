@@ -543,7 +543,9 @@ async def dispatch_send(
         tool_name = f"{task.get('server', '?')}.{task.get('tool', '?')}"
         tool_meta = await get_tool_metadata(app, logger, task)
 
-        if app.confirmation.should_confirm(tool_meta, tool_name=task.get("tool")):
+        if app.confirmation.should_confirm(
+            tool_meta, tool_name=task.get("tool"), params=task.get("params")
+        ):
             notification_silent = tool_meta.get(
                 "notification_silent",
                 Config.NOTIFICATION_SILENT,

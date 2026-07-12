@@ -11,10 +11,16 @@ floor.
 Classification is per TOOL, not per server: a server's dangerous tool
 (``run_command``) is gated while its safe siblings (``web_search``) are not.
 
+Beyond tool identity, the *parameters* are scanned for dangerous payloads
+(``rm -rf``, ``dd if=``, ``| sh`` …): a host-safe tool handed a destructive
+argument is raised too. This is raise-only and complements the identity floor;
+it never lowers a level (Project-JARVIS #162).
+
 The four tiers mirror the kernel policy engine's vocabulary so the userspace
 gate and the OS embodiment speak the same language.
 """
 
+import re
 from enum import IntEnum
 from typing import Any, Dict, Optional
 
@@ -68,14 +74,65 @@ def _declared(tool_metadata: Dict[str, Any]) -> ThreatLevel:
     return ThreatLevel.SAFE
 
 
+# Substrings in tool *parameters* that mark a payload as dangerous regardless
+# of which tool carries it: a host-"safe" tool (an HTTP fetch, a file writer)
+# handed one of these is doing something destructive or escalating. Deliberately
+# narrow — only signatures that essentially never occur in benign input — so a
+# false positive (which costs only an extra confirmation) stays rare.
+_DANGEROUS_PAYLOAD_PATTERNS = (
+    re.compile(r"\bsudo\s+\S", re.IGNORECASE),  # privilege escalation
+    re.compile(r"\brm\s+-\w*[rf]", re.IGNORECASE),  # rm -rf / -r / -f
+    re.compile(r"\bdd\s+if=", re.IGNORECASE),  # raw disk copy
+    re.compile(r"\bmkfs\b|\bmkswap\b", re.IGNORECASE),  # format a filesystem
+    re.compile(
+        r">\s*/dev/(?:sd|nvme|hd|vd|mmcblk)", re.IGNORECASE
+    ),  # write block device
+    re.compile(r"\|\s*(?:sh|bash|zsh|dash)\b", re.IGNORECASE),  # pipe into a shell
+    re.compile(r":\(\)\s*\{.*\|.*&", re.DOTALL),  # fork bomb :(){ :|:& };:
+    re.compile(
+        r"\bchmod\s+-\w*R\w*\s+0*777\b", re.IGNORECASE
+    ),  # recursive world-writable
+)
+
+
+def _iter_strings(value: Any):
+    """Yield every string reachable in a params structure (dict/list/scalar)."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _iter_strings(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _iter_strings(item)
+
+
+def _payload_floor(params: Any) -> ThreatLevel:
+    if not params:
+        return ThreatLevel.SAFE
+    for text in _iter_strings(params):
+        if any(pattern.search(text) for pattern in _DANGEROUS_PAYLOAD_PATTERNS):
+            return ThreatLevel.DANGEROUS
+    return ThreatLevel.SAFE
+
+
 def classify(
     tool_name: Optional[str],
     tool_metadata: Optional[Dict[str, Any]] = None,
+    params: Any = None,
 ) -> ThreatLevel:
-    """Effective threat level = ``max(host floor, manifest declaration)``.
+    """Effective threat level = ``max(host floor, manifest, payload)``.
 
     The manifest may raise a tool's level but can never lower it below the host
-    floor, so a dangerous tool cannot opt out of gating.
+    floor, and a dangerous *payload* raises the level even for a host-safe tool
+    — so neither a permissive manifest nor a benign tool identity can hide a
+    destructive parameter.
     """
     metadata = tool_metadata or {}
-    return ThreatLevel(max(int(_host_floor(tool_name)), int(_declared(metadata))))
+    return ThreatLevel(
+        max(
+            int(_host_floor(tool_name)),
+            int(_declared(metadata)),
+            int(_payload_floor(params)),
+        )
+    )
