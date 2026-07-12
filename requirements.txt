@@ -31,7 +31,8 @@ httpx>=0.28.1
 pathspec>=0.12.1
 
 # Voice input dependencies (optional - install with jarvis-ai[voice-input])
-vosk>=0.3.45
+vosk>=0.3.45; sys_platform != 'darwin'
+vosk>=0.3.44; sys_platform == 'darwin'
 sounddevice>=0.5.2
 numpy>=2.2.0
 

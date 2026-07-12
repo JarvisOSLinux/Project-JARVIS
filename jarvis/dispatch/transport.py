@@ -14,13 +14,17 @@ async def connect(adapter: Any, logger: Logger) -> None:
     """Connect DispatchAdapter to dispatch serve over stdio MCP."""
     try:
         from mcp import ClientSession, StdioServerParameters
-        from mcp.client.stdio import stdio_client
+        from mcp.client.stdio import get_default_environment, stdio_client
 
         logger.info(f"Dispatch: Spawning '{Config.DISPATCH_BINARY} serve'")
         params = StdioServerParameters(
             command=Config.DISPATCH_BINARY,
             args=["serve"],
-            env={"RUST_LOG": "dispatch=warn"},
+            # Merge onto the SDK's default env (PATH, HOME, ...) rather than
+            # replacing it: a bare env= drops PATH, so the spawned process
+            # resolves binaries against os.defpath only and can't find
+            # ~/.local/bin or Homebrew installs (#170).
+            env={**get_default_environment(), "RUST_LOG": "dispatch=warn"},
         )
         adapter._client = stdio_client(params)
         read, write = await adapter._client.__aenter__()
