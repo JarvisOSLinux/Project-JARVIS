@@ -1,12 +1,12 @@
 """Ollama LLM provider."""
 
-import subprocess
 import sys
-import time
 from typing import Any, Dict, List, Optional
 
 from ...core.logger import get_logger
 from ..base import BaseLLMProvider
+from ..ollama_utils import is_ollama_up as _is_ollama_up
+from ..ollama_utils import try_start_ollama as _try_start_ollama
 
 logger = get_logger(__name__)
 
@@ -15,51 +15,6 @@ LLM_TIMEOUT = 60  # seconds — prevents indefinite hangs on cloud API
 _shared_clients: Dict[tuple, Any] = {}
 _last_autostart: Dict[str, float] = {}
 AUTOSTART_COOLDOWN = 60.0
-
-
-def _is_ollama_up(base_url: str) -> bool:
-    """Return True if Ollama responds on base_url/api/tags within 2 s."""
-    import urllib.request
-
-    try:
-        urllib.request.urlopen(f"{base_url}/api/tags", timeout=2)
-        return True
-    except Exception:
-        return False
-
-
-def _try_start_ollama(base_url: str) -> bool:
-    """Start Ollama via platform service manager or direct spawn. Return True if it comes up."""
-    logger.info("Ollama not reachable — attempting auto-start")
-
-    from ...platform import current as platform
-
-    if platform.try_start_service("ollama", base_url):
-        logger.info("Ollama started via system service manager")
-        return True
-
-    # Fall back to direct spawn
-    try:
-        subprocess.Popen(
-            ["ollama", "serve"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except FileNotFoundError:
-        logger.warning("ollama binary not found; cannot auto-start")
-        return False
-    except Exception as exc:
-        logger.warning(f"Failed to spawn ollama serve: {exc}")
-        return False
-
-    for _ in range(5):
-        time.sleep(1)
-        if _is_ollama_up(base_url):
-            logger.info("Ollama started via direct spawn")
-            return True
-
-    logger.warning("Ollama auto-start attempted but did not become ready in time")
-    return False
 
 
 def _get_shared_client(host: str, api_key: Optional[str]) -> Any:
@@ -266,6 +221,14 @@ class OllamaProvider(BaseLLMProvider):
         except Exception as e:
             logger.debug(f"Ollama not available: {e}")
             return False
+
+    def embed(self, texts: List[str]) -> List[List[float]]:
+        self._maybe_autostart()
+        self._ensure_client()
+        return [
+            self._client.embeddings(model=self.model, prompt=text)["embedding"]
+            for text in texts
+        ]
 
     # -- Ollama-specific -----------------------------------------------------
 

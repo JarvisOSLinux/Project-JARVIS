@@ -11,12 +11,11 @@ Why Ollama embeddings?
 - nomic-embed-text is small (~270MB) and produces 768-dim vectors
 """
 
-import subprocess
-import time
 from typing import List
 
 from ..config import Config
 from ..core.logger import get_logger
+from ..llm.ollama_utils import try_start_ollama as _try_start_ollama_base
 
 logger = get_logger(__name__)
 
@@ -25,45 +24,8 @@ DEFAULT_EMBED_MODEL = "nomic-embed-text"
 _CONNECT_KEYWORDS = ("connect", "connection", "refused", "unreachable", "timeout")
 
 
-def _is_ollama_up(base_url: str) -> bool:
-    import urllib.request
-
-    try:
-        urllib.request.urlopen(f"{base_url}/api/tags", timeout=2)
-        return True
-    except Exception:
-        return False
-
-
 def _try_start_ollama(base_url: str) -> bool:
-    """Start Ollama via platform service manager or direct spawn."""
-    from ..platform import current as platform
-
-    if platform.try_start_service("ollama", base_url):
-        logger.info("Embeddings: Ollama started via system service manager")
-        return True
-
-    try:
-        subprocess.Popen(
-            ["ollama", "serve"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except FileNotFoundError:
-        logger.warning("Embeddings: ollama binary not found; cannot auto-start")
-        return False
-    except Exception as exc:
-        logger.warning(f"Embeddings: Failed to spawn ollama serve: {exc}")
-        return False
-
-    for _ in range(5):
-        time.sleep(1)
-        if _is_ollama_up(base_url):
-            logger.info("Embeddings: Ollama started via direct spawn")
-            return True
-
-    logger.warning("Embeddings: Ollama auto-start attempted but did not become ready")
-    return False
+    return _try_start_ollama_base(base_url, log_prefix="Embeddings")
 
 
 class OllamaEmbeddings:

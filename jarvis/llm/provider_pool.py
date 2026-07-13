@@ -78,6 +78,50 @@ class ProviderPool(BaseLLMProvider):
                         f"trying next"
                     )
 
+        raise RuntimeError(
+            "All LLM providers are unavailable:\n" + self._status_lines_text(now)
+        )
+
+    def embed(self, texts: List[str]) -> List[List[float]]:
+        now = datetime.now()
+        self._restore_cooled_down(now)
+
+        errors: List[tuple[str, str]] = []
+        unsupported = 0
+        for entry in self._entries:
+            if entry.status != "active":
+                continue
+            try:
+                result = entry.provider.embed(texts)
+                if entry.failure_count > 0:
+                    logger.info(f"Provider '{entry.name}' recovered")
+                    entry.failure_count = 0
+                return result
+            except NotImplementedError:
+                unsupported += 1
+                continue
+            except Exception as e:
+                entry.failure_count += 1
+                entry.last_error = str(e)
+                self._classify_and_mark(entry, e, now)
+                errors.append((entry.name, str(e)))
+                if len(self._entries) > 1:
+                    logger.warning(
+                        f"Provider '{entry.name}' failed embeddings "
+                        f"({entry.status}), trying next"
+                    )
+
+        if unsupported and not errors:
+            raise NotImplementedError(
+                "No active provider in the pool supports embeddings"
+            )
+
+        raise RuntimeError(
+            "All LLM providers are unavailable for embeddings:\n"
+            + self._status_lines_text(now)
+        )
+
+    def _status_lines_text(self, now: datetime) -> str:
         status_lines = []
         for entry in self._entries:
             line = f"  {entry.name}: {entry.status}"
@@ -87,10 +131,7 @@ class ProviderPool(BaseLLMProvider):
             if entry.last_error:
                 line += f" — {entry.last_error}"
             status_lines.append(line)
-
-        raise RuntimeError(
-            "All LLM providers are unavailable:\n" + "\n".join(status_lines)
-        )
+        return "\n".join(status_lines)
 
     def is_available(self) -> bool:
         self._restore_cooled_down(datetime.now())

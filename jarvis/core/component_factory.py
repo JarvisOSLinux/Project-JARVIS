@@ -59,8 +59,11 @@ class ComponentFactory:
                         kwargs["think"] = spec["think"]
                     elif llm_think is not None:
                         kwargs["think"] = llm_think
-                elif ptype == "api":
-                    kwargs["api_url"] = spec.get("url", "")
+                elif ptype in ("api", "lmstudio"):
+                    default_url = (
+                        "http://localhost:1234/v1" if ptype == "lmstudio" else ""
+                    )
+                    kwargs["api_url"] = spec.get("url") or default_url
                     kwargs["api_key"] = spec.get("api_key", "")
                     if spec.get("headers"):
                         kwargs["headers"] = spec["headers"]

@@ -55,11 +55,16 @@ def add_provider(
 ) -> Tuple[str, int]:
     """Add a provider. Returns (name, position) or raises ValueError."""
     ptype = ptype.lower()
-    if ptype not in ("ollama", "api"):
-        raise ValueError(f"Unknown provider type '{ptype}'. Use 'ollama' or 'api'.")
+    if ptype not in ("ollama", "api", "lmstudio"):
+        raise ValueError(
+            f"Unknown provider type '{ptype}'. Use 'ollama', 'api', or 'lmstudio'."
+        )
 
-    if ptype == "api" and (not url or not api_key):
-        raise ValueError("API providers require url and api_key.")
+    if ptype == "lmstudio" and not url:
+        url = "http://localhost:1234/v1"
+
+    if ptype in ("api", "lmstudio") and not url:
+        raise ValueError("API/LM Studio providers require a url.")
 
     data = load_providers()
     existing_names = [p.get("name") for p in data.get("providers", [])]

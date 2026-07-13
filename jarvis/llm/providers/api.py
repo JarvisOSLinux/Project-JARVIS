@@ -12,7 +12,9 @@ class APIProvider(BaseLLMProvider):
     """Provider for OpenAI-compatible API endpoints.
 
     Works with OpenAI, Claude (via compatibility layer), OpenRouter,
-    and any server that exposes ``/v1/chat/completions``.
+    and any server that exposes ``/v1/chat/completions`` — including
+    key-less local servers such as LM Studio, where ``api_key`` may be
+    omitted entirely.
     """
 
     def __init__(
@@ -24,17 +26,14 @@ class APIProvider(BaseLLMProvider):
     ):
         if not api_url:
             raise ValueError("api_url is required for the API provider")
-        if not api_key:
-            raise ValueError("api_key is required for the API provider")
 
         super().__init__(model)
         self.api_url = api_url.rstrip("/")
         self.api_key = api_key
 
-        self.headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-        }
+        self.headers = {"Content-Type": "application/json"}
+        if api_key:
+            self.headers["Authorization"] = f"Bearer {api_key}"
         if headers:
             self.headers.update(headers)
 
@@ -106,3 +105,33 @@ class APIProvider(BaseLLMProvider):
         except Exception as e:
             logger.debug(f"API availability check failed: {e}")
             return True
+
+    def embed(self, texts: List[str]) -> List[List[float]]:
+        self._ensure_client()
+
+        payload = {"model": self.model, "input": texts}
+
+        try:
+            with self._httpx.Client(timeout=60.0) as client:
+                response = client.post(
+                    f"{self.api_url}/v1/embeddings",
+                    headers=self.headers,
+                    json=payload,
+                )
+                response.raise_for_status()
+                result = response.json()
+
+                data = result.get("data")
+                if not data:
+                    raise ValueError(f"Unexpected embeddings response format: {result}")
+                return [
+                    item["embedding"]
+                    for item in sorted(data, key=lambda d: d.get("index", 0))
+                ]
+
+        except self._httpx.HTTPError as e:
+            logger.error(f"API embeddings HTTP error: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"API embeddings error: {e}")
+            raise

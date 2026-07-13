@@ -24,3 +24,12 @@ class BaseLLMProvider(ABC):
     @abstractmethod
     def is_available(self) -> bool:
         """Return True if the provider backend is reachable."""
+
+    def embed(self, texts: List[str]) -> List[List[float]]:
+        """Generate embedding vectors for a batch of texts.
+
+        Not every provider/model supports embeddings — the default
+        raises so callers get a clear, immediate error rather than a
+        confusing failure further down the stack.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not support embeddings")
