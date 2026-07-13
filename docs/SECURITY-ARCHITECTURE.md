@@ -85,10 +85,15 @@ The table below maps their critical CVEs to JARVIS design decisions.
 transmitting the user’s authentication token.  Attacker captured the
 token, reconnected to the legitimate gateway, and achieved full RCE.
 
-**JARVIS:** Has no WebSocket gateway, no auth token, and no TCP port
-listener.  The entire attack surface for this CVE does not exist.
+**JARVIS:** Has no WebSocket gateway and no URL-parameter-driven
+auto-connect-and-exfiltrate mechanism of any kind — the specific pattern
+this CVE exploited does not exist here, regardless of the optional TCP
+listener described under "Exposed Instances" below (that listener requires
+a bearer token per request and is never auto-triggered by a URL parameter
+or untrusted input).
 
-- Status: ✅ Eliminated by design (no network gateway)
+- Status: ✅ Eliminated by design (no WebSocket gateway, no URL-driven
+  auto-connect)
 
 ### CVE-2026-28472 “ClawJacked” — WebSocket Auth Bypass
 
@@ -111,8 +116,22 @@ authentication.
 — and are not reachable from the network.  `jarvis/core/socket_security.py`
 hardens their permissions to `0600` (owner-only) at creation time.
 
-- Status: ✅ Not network-exposed · ⚠️ Same-user local processes can still
-  reach the socket (see § Remaining Attack Surfaces below)
+- Status: ✅ Not network-exposed by default · ⚠️ Same-user local processes
+  can still reach the socket (see § Remaining Attack Surfaces below) ·
+  ⚠️ **Conditional exception:** `jarvis/server/openai_compat.py` adds an
+  **opt-in** OpenAI-compatible TCP listener (`JARVIS_OPENAI_SERVER_ENABLED`,
+  default `false`) so JARVIS can act as a backend for OpenAI-compatible
+  clients. When disabled (the default), this section's "not network-exposed"
+  claim holds exactly as stated above. When explicitly enabled, JARVIS gains
+  a TCP listener with the following mitigations, none of which are optional
+  once the feature is on: bound to loopback only unless a *second* explicit
+  opt-in (`JARVIS_OPENAI_SERVER_ALLOW_NONLOCAL`) is set; a bearer token is
+  required on every request (generated on first use, stored `0600`) — there
+  is no anonymous-access mode, which is the specific gap that made stock
+  Ollama instances discoverable on Shodan in the first place; and the
+  endpoint proxies to LLM inference only (`chat`/`stream_chat`) — it does
+  not go through ROOT/DISPATCH, MCP tool calls, or the TLA confirmation
+  gate, so a client hitting it gets completions, not shell access.
 
 ### Malicious Skill Marketplace
 

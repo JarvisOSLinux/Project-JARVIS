@@ -39,6 +39,7 @@ from .runtime.lifecycle import (
     shutdown,
     start_runtime_services,
     stdin_is_tty,
+    stop_openai_server_if_running,
 )
 from .runtime.llm_bridge import ask_llm as runtime_ask_llm
 from .runtime.llm_bridge import ask_llm_sync as runtime_ask_llm_sync
@@ -136,6 +137,7 @@ class Jarvis:
         output_task = runtime_tasks["output_socket"]
         gui_task = runtime_tasks["gui_socket"]
         voice_thread = runtime_tasks["voice_thread"]
+        openai_server = runtime_tasks["openai_server"]
 
         logger.info("JARVIS: Event loop started")
 
@@ -164,6 +166,7 @@ class Jarvis:
             cancel_task_if_running(output_task)
             cancel_task_if_running(gui_task)
             join_voice_thread_if_running(voice_thread)
+            stop_openai_server_if_running(openai_server)
             if event_tasks:
                 logger.info(
                     f"JARVIS: Waiting for {len(event_tasks)} in-flight goal(s) to finish..."
