@@ -50,6 +50,70 @@ logger = get_logger(__name__)
 
 DEFAULT_TIMEOUT = 30
 
+# Longest rendered command line shown in a confirmation prompt before eliding.
+_MAX_CMD_LEN = 200
+
+
+def _truncate(text: str, limit: int = _MAX_CMD_LEN) -> str:
+    """Collapse whitespace and elide to ``limit`` chars with an ellipsis."""
+    text = " ".join(str(text).split())
+    if len(text) > limit:
+        return text[: limit - 1] + "…"
+    return text
+
+
+def _short_value(value: Any, limit: int = 60) -> str:
+    if isinstance(value, (dict, list)):
+        rendered = json.dumps(value, separators=(",", ":"), ensure_ascii=False)
+    else:
+        rendered = str(value)
+    return _truncate(rendered, limit)
+
+
+def describe_tool_call(detail: Dict[str, Any]) -> str:
+    """Render a one-line, human-readable command for a tool call.
+
+    The confirmation gate is the human-in-the-loop boundary; a boundary that
+    can't see *what* it is approving is not a boundary (#186). This turns a
+    task's params into the actual command — ``pacman -Syu --noconfirm`` — rather
+    than just the tool identity. Falls back to ``key=value`` for arbitrary tools.
+    """
+    task = detail.get("task") or {}
+    params = detail.get("params")
+    if not isinstance(params, dict):
+        tp = task.get("params")
+        params = tp if isinstance(tp, dict) else {}
+
+    if params:
+        command = params.get("command")
+        if isinstance(command, str) and command:
+            args = params.get("args")
+            if isinstance(args, list):
+                command = " ".join([command] + [str(a) for a in args])
+            extras = []
+            if params.get("cwd"):
+                extras.append(f"cwd={params['cwd']}")
+            if params.get("timeout"):
+                extras.append(f"timeout={params['timeout']}s")
+            suffix = f"  [{', '.join(extras)}]" if extras else ""
+            return _truncate(command) + suffix
+
+        script = params.get("script")
+        if isinstance(script, str) and script:
+            return _truncate(script.replace("\n", " ; "))
+
+        kv = ", ".join(f"{k}={_short_value(v)}" for k, v in params.items())
+        return _truncate(kv)
+
+    # No params: the tool name itself is the most specific thing we can show.
+    return str(task.get("tool") or detail.get("tool_name") or "(no parameters)")
+
+
+def confirmation_line(detail: Dict[str, Any]) -> str:
+    """``<tool_name>: <rendered command>`` for one confirmation item (#186)."""
+    tool_name = detail.get("tool_name", "?")
+    return f"{tool_name}: {describe_tool_call(detail)}"
+
 
 @dataclass
 class PendingConfirmation:
@@ -64,6 +128,8 @@ class PendingConfirmation:
     # Retained so a later list_pending() query can describe what's waiting --
     # the original request only computes these locally otherwise.
     tool_names: List[str] = field(default_factory=list)
+    # Human-readable "tool: command" lines shown in every channel (#186).
+    tool_lines: List[str] = field(default_factory=list)
     created_at: float = field(default_factory=time.time)
 
 
@@ -98,13 +164,14 @@ class ConfirmationManager:
 
     def set_tui_callback(
         self,
-        callback: Callable[[str, List[str]], Any],
+        callback: Callable[[str, List[Dict[str, Any]]], Any],
     ) -> None:
         """Register the TUI confirmation callback.
 
-        The callback receives (request_id, tool_names) and must return a
-        bool (True = allow, False = deny).  It is awaited, so it can use
-        Textual's ``push_screen_wait``.
+        The callback receives (request_id, tools_detail) — the list of
+        ``{tool_name, task, params, ...}`` dicts — and must return a bool
+        (True = allow, False = deny).  It is awaited, so it can use Textual's
+        ``push_screen_wait``.
         """
         self._tui_callback = callback
 
@@ -179,9 +246,11 @@ class ConfirmationManager:
             notification_silent: Suppress desktop notification.
             timeout: Seconds before auto-deny.
         """
-        # Build a human-readable summary of tools needing confirmation.
+        # Build a human-readable summary of tools needing confirmation. The
+        # summary now carries the actual command (#186), not just the tool name,
+        # so every channel shows WHAT will run.
         tool_names = [t["tool_name"] for t in tools_needing_confirmation]
-        tool_summaries = ", ".join(tool_names)
+        tool_lines = [confirmation_line(t) for t in tools_needing_confirmation]
 
         pending = PendingConfirmation(
             request_id=request_id,
@@ -190,18 +259,21 @@ class ConfirmationManager:
             denied_tools=list(denied_tools),
             dispatch_context=dispatch_context,
             tool_names=tool_names,
+            tool_lines=tool_lines,
         )
         self._pending[request_id] = pending
 
         logger.info(
-            f"Confirmation requested (non-blocking): id={request_id}, "
-            f"tools={tool_summaries}"
+            "Confirmation requested (non-blocking): id=%s, tools=%s",
+            request_id,
+            "; ".join(tool_lines),
         )
 
         # Fire notification (non-blocking) on the best available channel.
         await self._send_notification(
             request_id=request_id,
             tool_names=tool_names,
+            tool_lines=tool_lines,
             tools_detail=tools_needing_confirmation,
             notification_silent=notification_silent,
             timeout=timeout,
@@ -223,6 +295,7 @@ class ConfirmationManager:
             {
                 "id": p.request_id,
                 "tool_names": p.tool_names,
+                "tool_lines": p.tool_lines,
                 "created_at": p.created_at,
             }
             for p in self._pending.values()
@@ -281,22 +354,21 @@ class ConfirmationManager:
         self,
         request_id: str,
         tool_names: List[str],
+        tool_lines: List[str],
         tools_detail: List[Dict[str, Any]],
         notification_silent: bool,
         timeout: float,
     ) -> None:
         """Fire notification on the best available channel."""
 
-        tool_summary = ", ".join(tool_names)
-
         # 1. TUI modal — highest priority when Textual is running.
         if self._tui_callback is not None:
-            asyncio.create_task(self._notify_tui(request_id, tool_names))
+            asyncio.create_task(self._notify_tui(request_id, tools_detail))
             return
 
         # 2. Desktop notification (unless silent).
         if not notification_silent and self._has_desktop_notifications():
-            asyncio.create_task(self._notify_desktop(request_id, tool_summary, timeout))
+            asyncio.create_task(self._notify_desktop(request_id, tool_lines, timeout))
             return
 
         # 2. Socket — if clients are connected.
@@ -310,7 +382,7 @@ class ConfirmationManager:
 
         # 3. CLI / TTY fallback.
         if self._has_tty():
-            asyncio.create_task(self._notify_cli(request_id, tool_summary, timeout))
+            asyncio.create_task(self._notify_cli(request_id, tool_lines, timeout))
             return
 
         # No live channel available right now -- that's fine. The request
@@ -324,9 +396,11 @@ class ConfirmationManager:
 
     # -- TUI (ConfirmModal) --------------------------------------------
 
-    async def _notify_tui(self, request_id: str, tool_names: List[str]) -> None:
+    async def _notify_tui(
+        self, request_id: str, tools_detail: List[Dict[str, Any]]
+    ) -> None:
         try:
-            approved = await self._tui_callback(request_id, tool_names)
+            approved = await self._tui_callback(request_id, tools_detail)
         except Exception as e:
             logger.warning(f"TUI confirmation callback failed: {e}")
             approved = False
@@ -351,16 +425,20 @@ class ConfirmationManager:
     async def _notify_desktop(
         self,
         request_id: str,
-        tool_summary: str,
+        tool_lines: List[str],
         timeout: float,
     ) -> None:
         """Show a desktop notification via the platform layer."""
         from ..platform import current as platform
 
+        # Show the actual command(s), not just the tool name, so the user can
+        # see a full system upgrade is in the batch before approving (#186).
+        body = "\n".join(tool_lines) if tool_lines else "(no details)"
+
         try:
             action = await platform.send_desktop_notification(
                 title="JARVIS — Confirmation Required",
-                body=f"Tool: {tool_summary}",
+                body=body,
                 timeout_ms=int(timeout * 1000),
             )
             approved = action == "allow"
@@ -403,8 +481,14 @@ class ConfirmationManager:
             "id": request_id,
             "tools": tool_names,
             "details": [
-                {"tool": t["tool_name"], "params": t.get("params", {})}
-                for t in tools_detail
+                {
+                    "index": i,
+                    "tool": t["tool_name"],
+                    "params": t.get("params", {}),
+                    # Rendered command so a socket GUI can show what runs (#186).
+                    "command": describe_tool_call(t),
+                }
+                for i, t in enumerate(tools_detail)
             ],
             "timeout": timeout,
         }
@@ -422,15 +506,17 @@ class ConfirmationManager:
     async def _notify_cli(
         self,
         request_id: str,
-        tool_summary: str,
+        tool_lines: List[str],
         timeout: float,
     ) -> None:
         """Prompt the user on stdin.  Runs in an executor so it doesn't
         block the event loop.  Injects the response when done.
         """
+        # List the actual command(s) so the user approves what they can see (#186).
+        listing = "\n".join(f"    {line}" for line in tool_lines)
         prompt = (
-            f"\n[JARVIS] Confirmation required\n"
-            f"  Tools: {tool_summary}\n"
+            f"\n[JARVIS] Confirmation required — the following will run:\n"
+            f"{listing}\n"
             f"  Approve? [y/N]: "
         )
         try:

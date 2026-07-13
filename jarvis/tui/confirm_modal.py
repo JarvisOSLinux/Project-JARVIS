@@ -69,17 +69,21 @@ class ConfirmModal(ModalScreen[bool]):
     }
     """
 
-    def __init__(self, request_id: str, tool_names: list[str]) -> None:
+    def __init__(self, request_id: str, tools_detail: list) -> None:
         super().__init__()
         self._request_id = request_id
-        self._tool_names = tool_names
+        # Each entry is a {tool_name, task, params, ...} dict; render the actual
+        # command so the user sees what will run, not just the tool name (#186).
+        from ..core.confirmation_manager import confirmation_line
+
+        self._tool_lines = [confirmation_line(d) for d in tools_detail]
 
     def compose(self) -> ComposeResult:
-        tools_text = "\n".join(f"  • {name}" for name in self._tool_names)
+        tools_text = "\n".join(f"  • {line}" for line in self._tool_lines)
         with Vertical(id="confirm-dialog"):
             yield Label("⚠  JARVIS — Confirmation Required", id="confirm-title")
             yield Static(
-                f"[bold]Tools requesting execution:[/bold]\n{tools_text}",
+                f"[bold]The following will run:[/bold]\n{tools_text}",
                 id="confirm-tools",
                 markup=True,
             )
