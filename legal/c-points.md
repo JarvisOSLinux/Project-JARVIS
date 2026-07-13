@@ -17,10 +17,21 @@ C-points are **not currency** and carry no direct monetary value. They determine
 
 ## 1. Variables and Weights
 
+### 1a. Affiliation Disclosure (required, gates Pool/Board eligibility)
+
+Every Contributor must disclose, and keep current, their present employer(s), contracting engagements, and any other relationship a reasonable person would consider a material financial tie — updated within **thirty (30) days** of any change. This is not a scored dimension; it is a compliance gate. Its purpose is to make the Employer Concentration Limit (Organization Charter §B.2.8) enforceable — that Section is a structural cap, not a trust-based rule, and a structural cap only works if affiliation is known.
+
+- A Contributor with no disclosure on file, or a stale one (unconfirmed for 12+ months), is ineligible for Governance Pool ranking and Board candidacy until it is filed or reconfirmed. Their C-points continue to accrue for compensation purposes (§6) regardless — this gate affects governance eligibility only, never pay.
+- Disclosure is self-reported but subject to Board audit (§3.5) and public challenge; a Contributor may dispute another's disclosed (or apparently undisclosed) affiliation through the same channel used for C-point disputes.
+- The current disclosure record (employer/affiliation only, not compensation figures) is visible to the Board and to Organization tooling enforcing B.2.8; it is not published to the general public, to avoid inviting targeted harassment of individual contributors.
+
+### 1b. Dimensions and Weights
+
 The C-point score for a contributor over a rolling 24-month window is calculated as:
 
 ```
-C = Σ (dimension_score × weight)
+C_raw = Σ (dimension_score × weight)
+C_final = C_raw × Integrity_Multiplier   (see §3.6)
 ```
 
 | # | Dimension | Weight | Description |
@@ -88,6 +99,19 @@ Contributions authored by automated systems, bots, or CI pipelines are ineligibl
 
 The Board may audit any contributor's C-point breakdown and disqualify contributions that appear to be the result of gaming or coordinated inflation. Disputes are resolved under the Charter dispute resolution process.
 
+### 3.6 Integrity Multiplier
+
+`Integrity_Multiplier` starts at **1.0** for every Contributor and applies to their total score (`C_final = C_raw × Integrity_Multiplier`) — it affects both Governance Pool rank and compensation-pool share, since both are computed from `C_final`. It is reduced, proportionate to severity and never below **0.0**, on any of the following findings by the Board (subject to the same dispute/appeal process as any C-point determination):
+
+| Finding | Typical range |
+|---|---|
+| Confirmed gaming or coordinated inflation (§3.5) | 0.25–0.75, scaled to the share of score affected |
+| Undisclosed or stale affiliation (§1a), first instance | 0.75–0.9, for the period of non-disclosure only |
+| Undisclosed affiliation, willful or repeated | 0.0–0.5, and referred to Charter B.4.3 for Pool/Board disqualification |
+| Code of Conduct violation resulting in formal Board sanction | Set case-by-case by the Board, published with rationale per B.4.1 |
+
+A reduced multiplier applies only to the window it covers — it is not a permanent mark. A Contributor may appeal a multiplier determination through the same channel as any other C-point dispute (§3.5), and the Board must publish its reasoning per Charter B.4.1/B.4.2 (consistency across similar cases).
+
 ---
 
 ## 4. Edge Cases
@@ -116,7 +140,7 @@ The canonical score is stored in the Organization's registry (not derived from G
 
 ## 6. Governance Pool Membership
 
-The **Governance Pool** consists of the top 1000 contributors by C-point score in the rolling 24-month window. Membership is recalculated monthly.
+The **Governance Pool** consists of the top 1000 contributors by `C_final` score in the rolling 24-month window, subject to the **Employer Concentration Limit** (Organization Charter §B.2.8): no single Employer Group (§1a) may exceed 20% of the 1000 seats, and eligibility additionally requires a current Affiliation Disclosure (§1a). Membership is recalculated monthly.
 
 Governance Pool members receive:
 - A weighted vote on Charter amendments and major project decisions (Charter §B.3).

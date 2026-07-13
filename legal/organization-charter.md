@@ -30,11 +30,25 @@
 
 **B.2.7 No Corporate Membership Tiers.** The Organization does not sell board seats, governance influence, or voting rights. Commercial licensees fund the ecosystem through the Annual License Fee (SCCL Article 4); this entitles them to use the Software commercially — not to govern it.
 
+**B.2.8 Employer Concentration Limit.** B.2.3–B.2.4 exclude corporate-obligated contributions from governance status, but do not by themselves stop a single employer's genuinely-individual contributors from coming to dominate the Governance Pool by ordinary hiring and encouragement over years — the same dynamic that has concentrated maintainership of other major open-source projects in a handful of employers despite nominal individual meritocracy. This Section is the structural backstop; B.2.3–B.2.4 remain in force as the intent-based rule.
+
+  (a) **Scope.** This Section applies from the moment Governance Stage 4 activates and continuously thereafter. It does not apply at Stages 1–3, where the Board (not the Pool) holds decision authority and Pool composition carries no binding power.
+
+  (b) **Employer Group.** Means: (i) an Affiliated Entities group as defined in SCCL Definition 1.12's note (common control >50%); plus (ii) any entity a Contributor discloses as a current employer, contractor engagement, or material financial relationship under C-Points Methodology §1a.
+
+  (c) **Pool cap.** No single Employer Group may constitute more than **twenty percent (20%)** of the Governance Pool at any time. If a monthly recalculation (C-Points Methodology §6) would put an Employer Group over this cap, the lowest-C-points members of that Employer Group are excluded from the Pool — not merely down-weighted — until the cap is satisfied; the next-highest-ranked contributors from other Employer Groups backfill the freed seats. Exclusion under this paragraph affects governance rights only; it has no effect on the excluded contributor's C-points or compensation-pool eligibility (SCCL Article 4.7 / B.5).
+
+  (d) **Board cap.** No more than **one (1)** Board seat — excluding the Independent Seat, which is separately restricted under B.3.1(c) — may be held at any time by individuals sharing an Employer Group. If an election would otherwise seat a second member from the same Employer Group, the seat instead goes to the next-highest-voted candidate from a different Employer Group; if none exists, the seat remains vacant until a qualifying candidate is elected.
+
+  (e) **Undisclosed affiliation.** A Contributor who fails to disclose a material affiliation, or a change of affiliation, within the window required by C-Points Methodology §1a is, upon discovery, retroactively excluded from the Pool for the period of non-disclosure and subject to the Integrity Multiplier penalty (C-Points Methodology §3.6). Willful or repeated non-disclosure is grounds for Pool and Board disqualification under B.4.3.
+
+  (f) **No proxy voting workaround.** "Sharing an Employer Group" is determined by disclosed and reasonably discoverable affiliation, not by formal coordination — the Board (at Stages 1–3) or a Pool-initiated review (at Stage 4, per B.6.3's mechanics) may determine that two or more Contributors constitute a single Employer Group for purposes of this Section where the evidence shows de facto common employer direction, even absent a formal control relationship under SCCL 1.12.
+
 ### B.3 — Governing Board
 
 **B.3.1 Composition.** The Board shall consist of **five (5) to nine (9) members**, with the exact number set by Board resolution. The Board is composed as follows:
 
-  (a) **Founder Seats (up to 2)** — Appointed by the founding members of the Organization. Founder seats convert to Pool-Elected seats when the founder steps down, is removed by Pool vote, or after a maximum of **ten (10) years** from the Organization's incorporation, whichever comes first.
+  (a) **Founder Seats (up to 2)** — Appointed by the founding members of the Organization. Founder seats convert to Pool-Elected seats when the founder steps down, is removed by Pool vote, or after a maximum of **ten (10) years** from the Organization's incorporation, whichever comes first. **Death or incapacity of a Founder is governed by B.3.6, not by this paragraph** — the seat does not convert immediately in that case.
 
   (b) **Pool-Elected Seats** — Elected by the Governance Pool at Stage 4. At Stage 3, at least one seat must be filled by Active Contributor election. At Stage 4, all seats (except the Independent Seat) are Pool-Elected.
 
@@ -72,6 +86,18 @@
 
 **B.3.5 Vacancy.** If a seat is vacated by resignation, the Governance Pool fills it through a **fourteen (14) day** nomination and election (ranked choice, no self-nomination). If the Pool cannot fill the seat within thirty (30) days, Emergency Succession (B.7.2) applies.
 
+**B.3.6 Founder Succession on Death or Incapacity.** This section exists so that a Founder's death or sudden incapacity cannot hand a Founder Seat to whatever the Governance Pool happens to look like at that moment — which, before Stage 3–4 maturity, may be thin, new, or unrepresentative.
+
+  (a) **Designated Successor.** Each Founder may, at any time, file with the Organization a signed, revocable **Designated Successor** — one named individual who will hold the Founder's seat in trust if the Founder dies or becomes permanently incapacitated. A Founder may change or revoke their Designated Successor at any time; only the most recently filed designation is effective.
+
+  (b) **Eligibility restriction (immutable).** A Designated Successor must not be, at the time of designation or at the time of the triggering event, an employee, contractor, officer, or board member of any commercial Licensee, nor of any entity with a pending or reasonably anticipated commercial license application. This restriction cannot be waived by the Founder, the Board, or any amendment short of the process in B.4.6.
+
+  (c) **Bridge Period.** Upon a Founder's death or permanent incapacity (determined by the remaining Board members in good faith, or by the Founder's own advance written declaration), the Designated Successor — if named, available, and still eligible under (b) — assumes the Founder Seat for a **Bridge Period of twelve (12) months**, with full Founder Seat authority and subject to the same conflict-of-interest and recusal rules (B.4.3) as any Board member.
+
+  (d) **No Designated Successor.** If no Designated Successor is named, available, or eligible, the seat is filled for the Bridge Period through Emergency Succession (B.7.2), applied regardless of whether the Board is actually below quorum.
+
+  (e) **End of Bridge Period.** At the end of the Bridge Period, the seat converts to Pool-Elected under B.3.1(a) if the project has reached the 15-Active-Contributor threshold (B.2.1); otherwise it remains held under (c) or (d) — re-extended in twelve (12) month increments — until that threshold is met.
+
 ### B.4 — Constraints on Board Power
 
 **B.4.1 Published Principles.** The Board must publish and maintain a **Decision Principles Document** that articulates the criteria used for discretionary decisions (licensing approvals, Revenue Basis selection, cure period duration, Relationship Index assessment). Decisions must be consistent with these published principles. This obligation applies at all Governance Stages.
@@ -102,7 +128,11 @@
 
   (h) B.6.3 — Contested Revocation Review (compliance disputes are not the Board's to finalize unilaterally once contested, from Stage 3 onward);
 
-  (i) B.6.4 — Fee Formula Ratification (Fee Formula changes are not the Board's to finalize unilaterally once contested, from Stage 3 onward).
+  (i) B.6.4 — Fee Formula Ratification (Fee Formula changes are not the Board's to finalize unilaterally once contested, from Stage 3 onward);
+
+  (j) B.2.8 — Employer Concentration Limit (no single employer may dominate the Governance Pool or Board once Stage 4 activates);
+
+  (k) B.3.6(b) — Designated Successor eligibility restriction (a Founder's emergency successor can never be affiliated with a commercial licensee).
 
 ### B.5 — Financial Governance
 
@@ -222,7 +252,7 @@ The Organization's governance evolves through four stages. Stage advancement fro
 
   *Governance — The Governance Pool as Legislature:*
 
-  - The **Governance Pool** (B.2.6) — the top 1000 Active Contributors by C-points (B.2.5) — becomes the legislative body of the Organization.
+  - The **Governance Pool** (B.2.6) — the top 1000 Active Contributors by C-points (B.2.5), subject to the Employer Concentration Limit (B.2.8) — becomes the legislative body of the Organization.
   - The Board's role transitions to **executive and operational**: managing day-to-day operations, licensee relationships, fee collection, compliance enforcement, financial administration, and serving as the public face of the Organization.
   - **Pool members may initiate binding votes** on any matter within the Organization's scope, including licensing policy, fee principles, ecosystem direction, Code of Conduct changes, and fund allocation within the ranges of SCCL Article 4.7.
   - The Board may also initiate votes, on equal footing with any Pool member.
