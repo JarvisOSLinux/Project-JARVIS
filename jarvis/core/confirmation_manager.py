@@ -48,7 +48,10 @@ from .threat_level import ThreatLevel, classify
 
 logger = get_logger(__name__)
 
-DEFAULT_TIMEOUT = 30
+# No auto-deny by default (#185): a confirmation the user hasn't answered stays
+# pending rather than being denied on a timer. A positive CONFIRMATION_TIMEOUT
+# restores an explicit bounded lifetime for unattended/headless setups.
+DEFAULT_TIMEOUT = 0
 
 # Longest rendered command line shown in a confirmation prompt before eliding.
 _MAX_CMD_LEN = 200
@@ -244,7 +247,8 @@ class ConfirmationManager:
             denied_tools: Tools already denied (for partial batches).
             dispatch_context: Opaque context to resume dispatch after response.
             notification_silent: Suppress desktop notification.
-            timeout: Seconds before auto-deny.
+            timeout: Seconds before auto-deny. 0 (the default) means never
+                auto-deny — the confirmation stays pending until answered (#185).
         """
         # Build a human-readable summary of tools needing confirmation. The
         # summary now carries the actual command (#186), not just the tool name,
@@ -441,27 +445,40 @@ class ConfirmationManager:
                 body=body,
                 timeout_ms=int(timeout * 1000),
             )
-            approved = action == "allow"
 
-            if self._inject_confirmation:
-                self._inject_confirmation(
-                    {
-                        "type": "confirmation_response",
-                        "id": request_id,
-                        "approved": approved,
-                    }
+            # Only an EXPLICIT choice resolves the confirmation. A notification
+            # that was dismissed or expired (action is None) is not a "deny" —
+            # the user simply hasn't answered. Leave it pending so unattended
+            # work isn't silently killed; it stays reviewable via list_pending
+            # and can be answered on any channel (#185). Never auto-approve.
+            if action == "allow":
+                self._inject_result(request_id, approved=True)
+            elif action == "deny":
+                self._inject_result(request_id, approved=False)
+            else:
+                logger.info(
+                    "Desktop confirmation dismissed/expired for id=%s; "
+                    "left pending (not denied)",
+                    request_id,
                 )
 
         except Exception as e:
-            logger.warning(f"Desktop notification failed: {e}")
-            if self._inject_confirmation:
-                self._inject_confirmation(
-                    {
-                        "type": "confirmation_response",
-                        "id": request_id,
-                        "approved": False,
-                    }
-                )
+            # A failed notification means the user never saw the prompt, so
+            # denying would kill legitimate work they never got to weigh in on.
+            # Leave it pending for CLI/socket review instead (#185).
+            logger.warning(
+                "Desktop notification failed for id=%s: %s; left pending", request_id, e
+            )
+
+    def _inject_result(self, request_id: str, approved: bool) -> None:
+        if self._inject_confirmation:
+            self._inject_confirmation(
+                {
+                    "type": "confirmation_response",
+                    "id": request_id,
+                    "approved": approved,
+                }
+            )
 
     # -- Socket --------------------------------------------------------
 
