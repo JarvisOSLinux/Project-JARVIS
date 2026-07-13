@@ -126,6 +126,9 @@ class PendingConfirmation:
     tasks: List[Dict[str, Any]]
     denied_tools: List[str] = field(default_factory=list)
     approved_tasks: List[Dict[str, Any]] = field(default_factory=list)
+    # Ordered detail for the tools that need confirmation, so a per-task
+    # response (approved_indices) can approve a subset and deny the rest (#187).
+    confirm_details: List[Dict[str, Any]] = field(default_factory=list)
     # Dispatch sub-chain context to resume after confirmation.
     dispatch_context: Optional[Dict[str, Any]] = None
     # Retained so a later list_pending() query can describe what's waiting --
@@ -264,6 +267,7 @@ class ConfirmationManager:
             dispatch_context=dispatch_context,
             tool_names=tool_names,
             tool_lines=tool_lines,
+            confirm_details=list(tools_needing_confirmation),
         )
         self._pending[request_id] = pending
 
@@ -310,11 +314,19 @@ class ConfirmationManager:
 
         Called by Jarvis when a ``CONFIRMATION_RESPONSE`` event arrives.
 
+        Two response shapes are accepted:
+
+        * ``approved_indices``: a list of indices into the confirmation items
+          (``confirm_details``) that the user approved. The rest are denied.
+          This is the per-task path (#187) — approve some, deny others.
+        * ``approved`` (bool): the all-or-nothing path used by channels that
+          can't express a per-task choice (desktop single item, plain socket
+          approve/deny).
+
         Returns the ``PendingConfirmation`` with approval status applied,
         or None if the request id is unknown (expired / already resolved).
         """
         req_id = response.get("id")
-        approved = response.get("approved", False)
 
         if not req_id or req_id not in self._pending:
             logger.warning(f"Confirmation response for unknown id: {req_id}")
@@ -327,6 +339,32 @@ class ConfirmationManager:
         if timeout_task and not timeout_task.done():
             timeout_task.cancel()
 
+        approved_indices = response.get("approved_indices")
+        if approved_indices is not None:
+            # Per-task: approve the selected confirmation items, deny the rest.
+            # approved_tasks already holds the tools that needed no confirmation.
+            approved_set = {int(i) for i in approved_indices}
+            for i, detail in enumerate(pending.confirm_details):
+                task = detail.get("task")
+                if i in approved_set:
+                    if task is not None:
+                        pending.approved_tasks.append(task)
+                else:
+                    tool_name = detail.get("tool_name") or (
+                        f"{(task or {}).get('server', '?')}."
+                        f"{(task or {}).get('tool', '?')}"
+                    )
+                    if tool_name not in pending.denied_tools:
+                        pending.denied_tools.append(tool_name)
+            logger.info(
+                "Confirmation partially resolved: id=%s, approved=%d/%d",
+                req_id,
+                len(approved_set),
+                len(pending.confirm_details),
+            )
+            return pending
+
+        approved = response.get("approved", False)
         if approved:
             # Move all tools_needing_confirmation into approved.
             # (The tasks that needed confirmation are everything in
@@ -432,34 +470,70 @@ class ConfirmationManager:
         tool_lines: List[str],
         timeout: float,
     ) -> None:
-        """Show a desktop notification via the platform layer."""
+        """Show a desktop notification via the platform layer.
+
+        A single item gets one Allow/Deny notification. A batch gets one Allow/
+        Deny notification per task, aggregated into a per-task decision (#187) —
+        notify-send has only two actions, so per-task granularity comes from
+        asking about each task in turn rather than one dialog. An explicit choice
+        resolves; a dismissed/expired notification (action None) is never a deny
+        (#185) — it leaves the confirmation pending on any channel.
+        """
         from ..platform import current as platform
 
-        # Show the actual command(s), not just the tool name, so the user can
-        # see a full system upgrade is in the batch before approving (#186).
-        body = "\n".join(tool_lines) if tool_lines else "(no details)"
+        timeout_ms = int(timeout * 1000)
 
         try:
-            action = await platform.send_desktop_notification(
-                title="JARVIS — Confirmation Required",
-                body=body,
-                timeout_ms=int(timeout * 1000),
-            )
+            if len(tool_lines) <= 1:
+                # Show the actual command, not just the tool name (#186).
+                body = tool_lines[0] if tool_lines else "(no details)"
+                action = await platform.send_desktop_notification(
+                    title="JARVIS — Confirmation Required",
+                    body=body,
+                    timeout_ms=timeout_ms,
+                )
+                if action == "allow":
+                    self._inject_result(request_id, approved=True)
+                elif action == "deny":
+                    self._inject_result(request_id, approved=False)
+                else:
+                    logger.info(
+                        "Desktop confirmation dismissed/expired for id=%s; "
+                        "left pending (not denied)",
+                        request_id,
+                    )
+                return
 
-            # Only an EXPLICIT choice resolves the confirmation. A notification
-            # that was dismissed or expired (action is None) is not a "deny" —
-            # the user simply hasn't answered. Leave it pending so unattended
-            # work isn't silently killed; it stays reviewable via list_pending
-            # and can be answered on any channel (#185). Never auto-approve.
-            if action == "allow":
-                self._inject_result(request_id, approved=True)
-            elif action == "deny":
-                self._inject_result(request_id, approved=False)
-            else:
-                logger.info(
-                    "Desktop confirmation dismissed/expired for id=%s; "
-                    "left pending (not denied)",
-                    request_id,
+            approved_indices: List[int] = []
+            total = len(tool_lines)
+            for i, line in enumerate(tool_lines):
+                action = await platform.send_desktop_notification(
+                    title=f"JARVIS — Confirm ({i + 1}/{total})",
+                    body=line,
+                    timeout_ms=timeout_ms,
+                )
+                if action == "allow":
+                    approved_indices.append(i)
+                elif action == "deny":
+                    continue
+                else:
+                    # Dismissed/expired mid-batch: don't resolve the whole batch
+                    # on a partial answer — leave it pending (#185).
+                    logger.info(
+                        "Desktop confirmation dismissed at item %d for id=%s; "
+                        "left pending (not denied)",
+                        i,
+                        request_id,
+                    )
+                    return
+
+            if self._inject_confirmation:
+                self._inject_confirmation(
+                    {
+                        "type": "confirmation_response",
+                        "id": request_id,
+                        "approved_indices": approved_indices,
+                    }
                 )
 
         except Exception as e:
@@ -528,29 +602,60 @@ class ConfirmationManager:
     ) -> None:
         """Prompt the user on stdin.  Runs in an executor so it doesn't
         block the event loop.  Injects the response when done.
+
+        A batch is confirmed per task (#187): each command shows what it runs
+        (#186) and takes its own y/N. Returns approved_indices. A non-answer
+        (EOF, or an explicit-timeout expiry) leaves the confirmation pending
+        rather than denying it (#185).
         """
-        # List the actual command(s) so the user approves what they can see (#186).
-        listing = "\n".join(f"    {line}" for line in tool_lines)
-        prompt = (
-            f"\n[JARVIS] Confirmation required — the following will run:\n"
-            f"{listing}\n"
-            f"  Approve? [y/N]: "
-        )
+
+        def _prompt() -> Optional[List[int]]:
+            try:
+                if len(tool_lines) <= 1:
+                    line = tool_lines[0] if tool_lines else "(no details)"
+                    answer = input(
+                        "\n[JARVIS] Confirmation required — the following will run:\n"
+                        f"    {line}\n  Approve? [y/N]: "
+                    )
+                    return [0] if answer.strip().lower() in ("y", "yes") else []
+
+                print("\n[JARVIS] Confirmation required — approve each task [y/N]:")
+                approved: List[int] = []
+                for i, line in enumerate(tool_lines):
+                    answer = input(
+                        f"  [{i + 1}/{len(tool_lines)}] {line}\n      [y/N]: "
+                    )
+                    if answer.strip().lower() in ("y", "yes"):
+                        approved.append(i)
+                return approved
+            except EOFError:
+                return None
+
+        loop = asyncio.get_event_loop()
         try:
-            answer = await asyncio.wait_for(
-                asyncio.get_event_loop().run_in_executor(None, input, prompt),
-                timeout=timeout,
+            if timeout and timeout > 0:
+                result = await asyncio.wait_for(
+                    loop.run_in_executor(None, _prompt), timeout=timeout
+                )
+            else:
+                # Default: no auto-deny — wait for an actual answer (#185).
+                result = await loop.run_in_executor(None, _prompt)
+        except asyncio.TimeoutError:
+            logger.info(
+                "CLI confirmation timed out for id=%s; left pending", request_id
             )
-            approved = answer.strip().lower() in ("y", "yes")
-        except (asyncio.TimeoutError, EOFError):
-            approved = False
+            return
+
+        if result is None:
+            logger.info("CLI confirmation got EOF for id=%s; left pending", request_id)
+            return
 
         if self._inject_confirmation:
             self._inject_confirmation(
                 {
                     "type": "confirmation_response",
                     "id": request_id,
-                    "approved": approved,
+                    "approved_indices": result,
                 }
             )
 

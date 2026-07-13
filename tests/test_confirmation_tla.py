@@ -160,3 +160,87 @@ def test_desktop_explicit_deny_injects_deny():
 def test_desktop_allow_injects_approve():
     injected = _desktop_notify(ConfirmationManager(), "allow")
     assert injected == [{"type": "confirmation_response", "id": "d1", "approved": True}]
+
+
+# --- #187: per-task allow/deny -----------------------------------------------
+
+
+def _setup_batch(mgr, req_id="b1", n=2, pre_approved=None):
+    """Seed a pending confirmation directly (no channel dispatch)."""
+    details = [_cmd_detail(f"s.tool{i}", "cmd", [str(i)]) for i in range(n)]
+    tasks = [d["task"] for d in details]
+    pre = list(pre_approved or [])
+    mgr._pending[req_id] = PendingConfirmation(
+        request_id=req_id,
+        tasks=pre + tasks,
+        approved_tasks=list(pre),
+        denied_tools=[],
+        confirm_details=details,
+        tool_names=[d["tool_name"] for d in details],
+    )
+    return details, tasks
+
+
+def test_resolve_per_task_approves_subset_denies_rest():
+    mgr = ConfirmationManager()
+    _, tasks = _setup_batch(mgr, "b1", n=2)
+    pending = mgr.resolve({"id": "b1", "approved_indices": [0]})
+    assert pending.approved_tasks == [tasks[0]]
+    assert pending.denied_tools == ["s.tool1"]
+
+
+def test_resolve_per_task_empty_denies_all():
+    mgr = ConfirmationManager()
+    _setup_batch(mgr, "b2", n=2)
+    pending = mgr.resolve({"id": "b2", "approved_indices": []})
+    assert pending.approved_tasks == []
+    assert set(pending.denied_tools) == {"s.tool0", "s.tool1"}
+
+
+def test_resolve_per_task_preserves_preapproved():
+    mgr = ConfirmationManager()
+    pre = [{"server": "safe", "tool": "noop", "params": {}}]
+    _, tasks = _setup_batch(mgr, "b3", n=2, pre_approved=pre)
+    pending = mgr.resolve({"id": "b3", "approved_indices": [1]})
+    assert pending.approved_tasks == pre + [tasks[1]]
+    assert pending.denied_tools == ["s.tool0"]
+
+
+def test_resolve_fallback_all_or_nothing_without_indices():
+    mgr = ConfirmationManager()
+    _, tasks = _setup_batch(mgr, "b4", n=2)
+    pending = mgr.resolve({"id": "b4", "approved": True})
+    assert pending.approved_tasks == tasks
+    assert pending.denied_tools == []
+
+
+def _desktop_batch(mgr, actions, req_id="d2", n=2):
+    injected = []
+    mgr.set_event_injector(injected.append)
+    it = iter(actions)
+
+    async def fake_send(title, body, timeout_ms):
+        return next(it)
+
+    lines = [f"s.tool{i}: cmd {i}" for i in range(n)]
+    orig = platform_mod.current.send_desktop_notification
+    platform_mod.current.send_desktop_notification = fake_send
+    try:
+        asyncio.run(mgr._notify_desktop(req_id, lines, 0))
+    finally:
+        platform_mod.current.send_desktop_notification = orig
+    return injected
+
+
+def test_desktop_per_task_aggregates_indices():
+    injected = _desktop_batch(ConfirmationManager(), ["allow", "deny"])
+    assert injected == [
+        {"type": "confirmation_response", "id": "d2", "approved_indices": [0]}
+    ]
+
+
+def test_desktop_per_task_dismiss_midbatch_leaves_pending():
+    # First allowed, second dismissed -> don't resolve the batch on a partial
+    # answer; leave it pending (#185 + #187).
+    injected = _desktop_batch(ConfirmationManager(), ["allow", None])
+    assert injected == []
