@@ -160,11 +160,22 @@ async def start_runtime_services(app: Any, logger: Logger) -> dict[str, Any]:
             has_clients=lambda: bool(app._output_clients) or bool(app._gui_clients),
         )
 
+    # Opt-in, off by default -- see jarvis/server/openai_compat.py's
+    # module docstring for why this is the one deliberate exception to
+    # JARVIS having no TCP listener.
+    openai_server = None
+    if Config.OPENAI_SERVER_ENABLED:
+        from ..server.openai_compat import OpenAICompatServer
+
+        openai_server = OpenAICompatServer(app.llm.provider)
+        openai_server.start()
+
     return {
         "input_socket": input_socket_task,
         "output_socket": output_socket_task,
         "gui_socket": gui_socket_task,
         "voice_thread": voice_thread,
+        "openai_server": openai_server,
     }
 
 
@@ -186,6 +197,12 @@ def join_voice_thread_if_running(
     """
     if thread and thread.is_alive():
         thread.join(timeout=timeout)
+
+
+def stop_openai_server_if_running(server: Optional[Any]) -> None:
+    """Stop the opt-in OpenAI-compat server if it was started."""
+    if server is not None and server.is_running:
+        server.stop()
 
 
 def request_stop(app: Any) -> None:

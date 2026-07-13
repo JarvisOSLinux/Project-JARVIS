@@ -217,6 +217,26 @@ class Config:
         os.path.join(JARVIS_DATA_DIR, "jarvis.sock"),
     )
 
+    # OpenAI-compatible local HTTP endpoint (opt-in, off by default).
+    # SECURITY-SENSITIVE: this is a TCP listener, unlike every other JARVIS
+    # IPC surface (see core/socket_security.py's docstring). See
+    # jarvis/server/openai_compat.py and docs/SECURITY-ARCHITECTURE.md
+    # before changing any of these defaults.
+    OPENAI_SERVER_ENABLED = (
+        os.getenv("JARVIS_OPENAI_SERVER_ENABLED", "false").lower() == "true"
+    )
+    OPENAI_SERVER_HOST = os.getenv("JARVIS_OPENAI_SERVER_HOST", "127.0.0.1")
+    OPENAI_SERVER_PORT = int(os.getenv("JARVIS_OPENAI_SERVER_PORT", "8317"))
+    # A second, separate opt-in required to bind anything other than
+    # loopback — changing OPENAI_SERVER_HOST alone is not enough.
+    OPENAI_SERVER_ALLOW_NONLOCAL = (
+        os.getenv("JARVIS_OPENAI_SERVER_ALLOW_NONLOCAL", "false").lower() == "true"
+    )
+    OPENAI_SERVER_TOKEN_FILE = os.getenv(
+        "JARVIS_OPENAI_SERVER_TOKEN_FILE",
+        os.path.join(_DEFAULT_CONFIG_DIR, "openai_server_token"),
+    )
+
     # Threat Level Access (TLA) Confirmation
     # - "allow_all": never ask, run everything (power users / trusted environments)
     # - "smart":     only ask when tool has confirmation_required=true (default)
