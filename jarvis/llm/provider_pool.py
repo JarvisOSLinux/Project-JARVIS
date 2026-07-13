@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 from ..core.logger import get_logger
 from .base import BaseLLMProvider
@@ -119,6 +119,53 @@ class ProviderPool(BaseLLMProvider):
         raise RuntimeError(
             "All LLM providers are unavailable for embeddings:\n"
             + self._status_lines_text(now)
+        )
+
+    def stream_chat(self, messages: List[Dict[str, str]]) -> Iterator[str]:
+        """Stream with failover — but only before any chunk has been yielded.
+
+        Once a provider has yielded at least one chunk, a mid-stream error
+        cannot be silently retried on another provider without risking
+        duplicated/garbled output, so it propagates instead of failing over.
+        """
+        now = datetime.now()
+        self._restore_cooled_down(now)
+
+        errors: List[tuple[str, str]] = []
+        for entry in self._entries:
+            if entry.status != "active":
+                continue
+            try:
+                gen = entry.provider.stream_chat(messages)
+                first_chunk = next(gen)
+            except StopIteration:
+                self.model = entry.provider.model
+                return
+            except Exception as e:
+                entry.failure_count += 1
+                entry.last_error = str(e)
+                self._classify_and_mark(entry, e, now)
+                errors.append((entry.name, str(e)))
+                if len(self._entries) > 1:
+                    logger.warning(
+                        f"Provider '{entry.name}' failed to start streaming "
+                        f"({entry.status}), trying next"
+                    )
+                continue
+
+            self.model = entry.provider.model
+            if entry.failure_count > 0:
+                logger.info(f"Provider '{entry.name}' recovered")
+                entry.failure_count = 0
+
+            yield first_chunk
+            yield from gen
+            self.last_prompt_tokens = entry.provider.last_prompt_tokens
+            self.last_completion_tokens = entry.provider.last_completion_tokens
+            return
+
+        raise RuntimeError(
+            "All LLM providers are unavailable:\n" + self._status_lines_text(now)
         )
 
     def _status_lines_text(self, now: datetime) -> str:

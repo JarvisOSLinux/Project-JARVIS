@@ -1,7 +1,7 @@
 """Ollama LLM provider."""
 
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 from ...core.logger import get_logger
 from ..base import BaseLLMProvider
@@ -221,6 +221,42 @@ class OllamaProvider(BaseLLMProvider):
         except Exception as e:
             logger.debug(f"Ollama not available: {e}")
             return False
+
+    def stream_chat(self, messages: List[Dict[str, str]]) -> Iterator[str]:
+        """Yield response text incrementally via Ollama's streaming chat.
+
+        Simplifications vs. ``chat()``: does not auto-pull a missing model
+        (the model must already exist) and does not apply the special-token
+        stripping / thinking-field fallback that ``_extract_content`` does
+        for non-streaming responses — content is yielded as the model emits
+        it.
+        """
+        self._maybe_autostart()
+        self._ensure_client()
+
+        options = {}
+        if self.temperature is not None:
+            options["temperature"] = self.temperature
+
+        kwargs: Dict[str, object] = {
+            "model": self.model,
+            "messages": messages,
+            "options": options or None,
+            "stream": True,
+        }
+        if self.strict_json:
+            kwargs["format"] = "json"
+        if self.think is not None:
+            kwargs["think"] = self.think
+
+        for chunk in self._client.chat(**kwargs):
+            msg = chunk["message"]
+            content = msg.get("content") or ""
+            if content:
+                yield content
+            if chunk.get("done"):
+                self.last_prompt_tokens = chunk.get("prompt_eval_count", 0) or 0
+                self.last_completion_tokens = chunk.get("eval_count", 0) or 0
 
     def embed(self, texts: List[str]) -> List[List[float]]:
         self._maybe_autostart()
