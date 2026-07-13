@@ -391,6 +391,31 @@ If you want internals (state machine, dispatch loop, signal model, confirmation 
 - `docs/jarvis-workflow-investigation.md`
 - `docs/README-dispatch-2.md`
 
+---
+
+## Security & Threat Model
+
+Project JARVIS is also a security research platform, built to study what happens when an LLM agent gets real system privileges (see [Why This Exists](#why-this-exists)). Full details — asset table, attacker profiles, per-threat implementation status, and an OpenClaw CVE-by-CVE comparison — live in **[`docs/SECURITY-ARCHITECTURE.md`](docs/SECURITY-ARCHITECTURE.md)**, which is the canonical, code-verified status; treat any other doc's claims as secondary to it.
+
+**TLA (Threat Level Access)** is the core enforcement mechanism: a userspace, non-blocking, human-in-the-loop confirmation gate (`jarvis/core/confirmation_manager.py`, `jarvis/runtime/dispatch_flow.py`) that requires explicit out-of-band user approval before privileged tool calls execute. The LLM is deliberately kept out of the confirmation loop so it cannot misrepresent an action.
+
+Six threats identified through live operation, and their current status:
+
+| Threat | Status |
+|---|---|
+| Malicious MCP servers | implemented — registry vetting + `dmcp` manifest-hash verify + agent source-confinement |
+| Prompt injection | partial — dispatch tags untrusted MCP output with a 128-bit CSPRNG boundary nonce; daemon does not yet verify the tag |
+| Misleading MCP server usage | partial — official-tier review of tool descriptions + structured schema |
+| Unauthorized sudo via MCP | implemented, with a known gap — bundled `shellmcp` doesn't declare `confirmation_required` on `run_command`, so it's gated only by the sudo prompt, not TLA (#159) |
+| Sudo capability exploitation | implemented, same gap — TLA is goal-scoped |
+| Bloated context | partial — dispatch rolling window + contextor pruning; persistent constraint preservation not implemented |
+
+A seventh, novel finding — **"forgetful context"**, where the LLM silently drops security constraints stated earlier in a session — has no mitigation yet; it's the highest-priority open item. Full taxonomy and academic writeup: `docs/research.md`.
+
+**JARVIS OS** (the Linux distribution built on this system) adds a kernel-level 4-tier policy engine (`/dev/jarvis`, SAFE/ELEVATED/DANGEROUS/FORBIDDEN) as a separate OS-embodiment layer — it is not yet consulted from this daemon's execution path.
+
+Report vulnerabilities per [`SECURITY.md`](SECURITY.md); do not open public issues for unpatched findings.
+
 ### **Example MCP Servers**
 - **ShellMCP**: Terminal command execution
 - **CodeAnalysisMCP**: Code repository analysis and file operations
