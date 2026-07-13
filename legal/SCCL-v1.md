@@ -14,7 +14,9 @@ This License also exists because **unpaid maintainers are a security vulnerabili
 
 This License offers commercial entities an alternative to the GNU Affero General Public License, Version 3 ("AGPLv3"), under which the Software is also made available. Entities that do not wish to comply with AGPLv3's source disclosure requirements may instead operate under this License, subject to the conditions herein.
 
-The defining feature of this License is **Board-governed commercial access**: the Organization's Governing Board retains unilateral authority to grant, condition, and revoke commercial licenses, ensuring that every commercial use of the Software remains aligned with the Project's values, ethics, and ecosystem.
+**Precedent.** The foundational precedent for this License is Linux's GPLv2: the principle that whoever builds on community-authored software owes the community visibility into what they built, not just permission to use it. GPLv2 enforces that principle at the point of distribution. AGPLv3 — this Project's default license — closes the network-service loophole GPLv2 leaves open, extending the same obligation to software offered only as a hosted service. This License extends the principle one step further, for one specific case: hyperscale commercial operators (the scale of a Microsoft, Google, or Amazon, not a solo developer or small business) who want to avoid AGPLv3's source-disclosure obligations. Historical precedent — Elasticsearch, MongoDB, and Redis each relicensing under SSPL or comparable terms after cloud providers repackaged their work as competing managed services without contributing back — is exactly the dynamic this License is designed to prevent for this Project. The mechanism differs from Elastic's and MongoDB's: instead of a blanket relicense that also burdens small users, this License offers commercial entities of any size a choice — comply with AGPLv3, or pay into and contribute back to the commons under the terms below. Entities that never trigger this License (individuals, small businesses, anyone complying with AGPLv3) are entirely unaffected by it.
+
+The defining feature of this License is **Board-governed commercial access**: the Organization's Governing Board retains authority to grant, condition, and revoke commercial licenses — subject to the community ratification checks in Articles 4 and 6 below — ensuring that every commercial use of the Software remains aligned with the Project's values, ethics, and ecosystem, and that decisions of consequence rest with the community that built the Software, not with any single licensee or corporation.
 
 ---
 
@@ -134,6 +136,14 @@ The Board shall communicate the applicable Revenue Basis to the Licensee in writ
 
 **4.2 Fee Calculation.** The Annual License Fee is calculated in accordance with the Fee Formula set out in Appendix A to this License, using the Revenue Basis determined by the Board for the Licensee (Definition 1.12). The Organization may update the Fee Formula with ninety (90) days' written notice, provided that no increase shall take effect mid-term of any paid year. Changes to the Licensee's Revenue Basis take effect at the next annual renewal.
 
+**4.2.1 Community Ratification of Fee Formula Changes.** A change to the Fee Formula's constants or ranges (K₁, K₂, the inflation buffer, or the fund allocation percentages in Article 4.7) is a decision reserved for the community, not the Board alone, from Governance Stage 3 onward:
+
+  (a) At **Stage 3**, the Board must publish the proposed change and its rationale at least ninety (90) days before it would take effect. If, within that notice period, **fifteen percent (15%)** of Active Contributors petition against the change (Organization Charter B.9.3), the change is stayed and must be put to a ratification poll of Active Contributors; a **simple majority** against blocks the change from taking effect.
+
+  (b) At **Stage 4**, every Fee Formula change requires ratification by the Governance Pool under the standard binding-vote mechanism (Organization Charter B.9.4) before it may take effect; the Board's role is to propose and administer, not to unilaterally decide.
+
+  (c) At **Stages 1–2**, the Board's authority under this Article is unencumbered, consistent with Organization Charter B.9.1–B.9.2.
+
 **4.3 Payment Process.** The Organization shall issue an invoice or fee statement no fewer than thirty (30) days before each payment is due. Payment terms and accepted methods are as specified in the invoice.
 
 **4.4 Self-Reporting.** The Licensee shall provide to the Organization, on an annual basis, an honest declaration of the figures required to calculate the Fee (including the applicable Revenue Basis figure, ecosystem inclusion factors, and any other data the Board reasonably requires), signed by an authorized officer of the Licensee.
@@ -231,6 +241,16 @@ The Board shall communicate the applicable Revenue Basis to the Licensee in writ
   (d) Failure to comply by the end of the Transition Period exposes the Licensee to enforcement under AGPLv3 and applicable copyright law, including claims for damages for the period of unauthorized commercial use.
 
 **6.7 No Retroactive Fee Refund.** Revocation does not entitle the Licensee to a refund of any fees paid.
+
+**6.8 Contested Revocation Review.** A revocation decision under this Article is a Board determination in the first instance, but is not the Board's alone to finalize once contested:
+
+  (a) A Licensee that disputes a revocation decision, or any **fifteen percent (15%)** of Active Contributors who believe a revocation (or a Board decision *not* to revoke) is inconsistent with Article 3 or the published Decision Principles Document (Organization Charter B.4.1), may petition for Contested Revocation Review within the Cure Period or within thirty (30) days of the Revocation Notice, whichever is later.
+
+  (b) A properly filed petition stays the revocation (if any) pending review, except where the Board has invoked immediate revocation under Article 6.4(b) or 6.4(c) for a documented pattern of bad-faith cure exploitation — in which case the stay does not apply but the review proceeds.
+
+  (c) From **Governance Stage 3** onward, Contested Revocation Review is decided by a binding vote of Active Contributors (simple majority, minimum ten percent (10%) participation, mirroring the mechanics of Organization Charter B.9.4); at **Stages 1–2**, the Board reviews the petition itself and must publish a written response addressing the specific inconsistency alleged, per Charter B.4.2.
+
+  (d) The outcome of a Contested Revocation Review is binding on the Board and is recorded in the public license registry (Article 6.5(c)) alongside the original decision.
 
 ---
 

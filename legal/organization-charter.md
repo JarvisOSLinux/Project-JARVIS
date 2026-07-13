@@ -98,7 +98,11 @@
 
   (f) B.9 — Governance Stage advancement triggers (Board cannot prevent stage progression);
 
-  (g) B.9.4(e) — Stage 4 irreversibility (once ratified, contributor governance is permanent).
+  (g) B.9.4(e) — Stage 4 irreversibility (once ratified, contributor governance is permanent);
+
+  (h) B.6.3 — Contested Revocation Review (compliance disputes are not the Board's to finalize unilaterally once contested, from Stage 3 onward);
+
+  (i) B.6.4 — Fee Formula Ratification (Fee Formula changes are not the Board's to finalize unilaterally once contested, from Stage 3 onward).
 
 ### B.5 — Financial Governance
 
@@ -127,6 +131,10 @@
   (d) Upon written request from a Licensee, provide that Licensee with a summary of its own Index standing and the factors contributing to it.
 
 **B.6.2 License Registry.** The Organization shall maintain a public registry of: (a) all active commercial licenses (Licensee name and effective date); (b) all revocation decisions (grounds and summary, per SCCL Article 6.5c); (c) all terminations. The registry does not disclose fee amounts or Relationship Index scores.
+
+**B.6.3 Contested Revocation Review.** Implements SCCL Article 6.8. A revocation decision (or a Board decision not to revoke) may be escalated to the community rather than left to the Board's sole judgment. From Stage 3 onward, a properly filed petition (fifteen percent (15%) of Active Contributors, or the affected Licensee itself) triggers a binding vote of Active Contributors under the mechanics of B.9.4, superseding the Board's determination. At Stages 1–2, the Board reviews the petition directly and must publish a written response under B.4.2. The Board may not decline to run a properly filed petition.
+
+**B.6.4 Fee Formula Ratification.** Implements SCCL Article 4.2.1. Changes to the Fee Formula's constants (K₁, K₂, inflation buffer) or the fund allocation ranges (SCCL Article 4.7) are not solely a Board prerogative once the Project reaches Stage 3: a timely petition of fifteen percent (15%) of Active Contributors stays the change pending a ratification poll (simple majority against blocks it); at Stage 4, ratification via the standard Pool binding vote (B.9.4) is required for every such change, not only contested ones.
 
 ### B.7 — Succession and Continuity
 
