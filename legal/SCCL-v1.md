@@ -282,7 +282,9 @@ The Board shall communicate the applicable Revenue Basis to the Licensee in writ
 
 **8.2 Limitation of Liability.** TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL THE ORGANIZATION OR CONTRIBUTORS BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES ARISING OUT OF OR IN CONNECTION WITH THIS LICENSE OR THE SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES. THE ORGANIZATION'S AGGREGATE LIABILITY SHALL NOT EXCEED THE TOTAL FEES PAID BY THE LICENSEE IN THE TWELVE (12) MONTHS PRECEDING THE CLAIM.
 
-**8.3 Governing Law and Jurisdiction.** This License shall be governed by and construed in accordance with the laws of **[JURISDICTION TO BE SPECIFIED]**. Any disputes shall be subject to the exclusive jurisdiction of the courts of **[JURISDICTION]**.
+**8.3 Governing Law and Jurisdiction.** This License shall be governed by and construed in accordance with the laws of the **State of Washington, USA**. Any disputes shall be subject to the exclusive jurisdiction of the state and federal courts located in Washington State.
+
+  *Drafting note:* Washington is proposed here — not finalized — because the Project's founding institution (Washington State University, Everett) and founders are based there, making it the most natural state of incorporation for the Organization's 501(c)(3) (Charter B.1.3). This is a placeholder position pending confirmation by actual legal counsel at incorporation (per Issue #83's outstanding checklist item), not a final legal determination. If the Organization ultimately incorporates elsewhere, this Article and Charter B.1.3 must be updated together.
 
 **8.4 Entire Agreement.** This License, together with its Appendices and the documents incorporated by reference ([Organization Charter](organization-charter.md), [CLA](cla.md), [C-Points Methodology](c-points.md)), constitutes the entire agreement between the parties regarding commercial use of the Software and supersedes all prior negotiations, representations, or agreements.
 

@@ -98,6 +98,20 @@
 
   (e) **End of Bridge Period.** At the end of the Bridge Period, the seat converts to Pool-Elected under B.3.1(a) if the project has reached the 15-Active-Contributor threshold (B.2.1); otherwise it remains held under (c) or (d) — re-extended in twelve (12) month increments — until that threshold is met.
 
+**B.3.7 Ordinary Board Meetings, Quorum, and Minutes.** B.3.3–B.3.6 govern elections, confidence votes, and succession. This section governs the Board's routine, day-to-day decision-making — licensing approvals, Relationship Index reviews, cure-period determinations, and other business that is not an election, a Charter amendment, or a matter reserved to the community under B.6.3/B.6.4.
+
+  (a) **Cadence.** The Board shall meet no less than **once per calendar quarter**, and additionally whenever the Chair or any two (2) Board members call a meeting. At Stage 2+, at least one quarterly meeting per year must be the public consultation session required by B.9.2.
+
+  (b) **Quorum.** A quorum for any Board meeting or vote is a **simple majority of filled seats** (matching the quorum definition already used for Emergency Succession, B.7.2). No Board decision is valid without quorum present or voting.
+
+  (c) **Voting.** Absent a more specific rule elsewhere in this Charter or the SCCL (e.g., Charter amendments under B.4.5, Fee Formula ratification under B.6.4), routine Board decisions are decided by **simple majority of Board members present and voting**. The Chair votes as an ordinary member and does not hold a tiebreaking vote; a tied routine vote fails to pass.
+
+  (d) **Minutes.** The Board shall keep written minutes of every meeting, recording: date, attendees, decisions made, the vote on each decision (including abstentions and recusals under B.4.3), and a summary of the reasoning for any decision governed by the Decision Principles Document (B.4.1). Minutes must be published to Active Contributors within **fourteen (14) days** of the meeting.
+
+  (e) **Confidential exception.** Minutes may redact specific figures or facts that would violate a Licensee's confidentiality (e.g., unpublished fee amounts under SCCL Article 4.7, a Licensee's Relationship Index score per B.6.1(c)) — but the redaction itself, and the general nature of the item discussed, must be noted rather than omitted silently.
+
+  (f) **Emergency exception.** A decision made outside a scheduled meeting under exigent circumstances (e.g., invoking immediate revocation under SCCL Article 6.4(b)/(c)) must be ratified by the full Board and documented in the minutes of the next meeting, no later than **thirty (30) days** after the fact.
+
 ### B.4 — Constraints on Board Power
 
 **B.4.1 Published Principles.** The Board must publish and maintain a **Decision Principles Document** that articulates the criteria used for discretionary decisions (licensing approvals, Revenue Basis selection, cure period duration, Relationship Index assessment). Decisions must be consistent with these published principles. This obligation applies at all Governance Stages.
@@ -159,6 +173,10 @@
   (c) Not disclose a Licensee's Index score to other Licensees or the public;
 
   (d) Upon written request from a Licensee, provide that Licensee with a summary of its own Index standing and the factors contributing to it.
+
+  (e) **Access control.** The Index for each Licensee may be viewed or edited only by sitting Board members and any staff/officer explicitly delegated Index-maintenance duties by Board resolution. A Board member who is recused from a Licensee's matters under B.4.3 also loses Index access for that Licensee for the duration of the recusal. Every view and edit is logged (accessor identity, timestamp, and — for edits — the prior and new value) in an append-only audit log retained for no less than **seven (7) years**.
+
+  (f) **Audit log oversight.** The independent auditor engaged under B.5.6 shall review the Index access log as part of its periodic review and report any irregular access pattern (e.g., access by a person without delegated duties, edits without a corresponding B.6.1(b) annual review) to the full Board.
 
 **B.6.2 License Registry.** The Organization shall maintain a public registry of: (a) all active commercial licenses (Licensee name and effective date); (b) all revocation decisions (grounds and summary, per SCCL Article 6.5c); (c) all terminations. The registry does not disclose fee amounts or Relationship Index scores.
 
