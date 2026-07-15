@@ -163,7 +163,21 @@ async def on_confirmation_response(
         return
 
     if pending.approved_tasks:
-        result = await app.dispatch.send_tasks(pending.approved_tasks)
+        # Scope the dispatch to the owning goal and link the returned PIDs back
+        # to it, exactly as the direct path does (dispatch_flow.py:361-368).
+        # Without this, tasks that went through a confirmation are detached from
+        # their goal and every signal they produce logs "No goal found for PID"
+        # and falls back to full root context (#190).
+        result = await app.dispatch.send_tasks(
+            pending.approved_tasks, session_id=pending.session_id
+        )
+
+        if pending.session_id:
+            from .dispatch_flow import _extract_pids_from_result
+
+            pids = _extract_pids_from_result(result)
+            if pids:
+                app.goals.link_tasks(pending.session_id, pids)
 
         context = build_root_context(app, logger)
 
