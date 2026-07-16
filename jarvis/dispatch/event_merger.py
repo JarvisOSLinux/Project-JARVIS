@@ -50,6 +50,9 @@ _INLINE_SIGNAL_TYPES = frozenset({"INIT", "WAIT"})
 class EventType(Enum):
     USER_INPUT = "user_input"
     DISPATCH_SIGNAL = "dispatch_signal"
+    # A merged fire_wake=false group delivered by dispatch as one batch, handled
+    # as a single ROOT turn (#189). data is a list of signal dicts.
+    DISPATCH_SIGNAL_BATCH = "dispatch_signal_batch"
     CONFIRMATION_RESPONSE = "confirmation_response"
     SHUTDOWN = "shutdown"
 
@@ -69,6 +72,10 @@ class Event:
     @staticmethod
     def dispatch_signal(signal: Dict[str, Any]) -> "Event":
         return Event(type=EventType.DISPATCH_SIGNAL, data=signal)
+
+    @staticmethod
+    def dispatch_signals(signals: List[Dict[str, Any]]) -> "Event":
+        return Event(type=EventType.DISPATCH_SIGNAL_BATCH, data=signals)
 
     @staticmethod
     def confirmation_response(data: Dict[str, Any]) -> "Event":
@@ -336,68 +343,105 @@ class EventMerger:
 
             await asyncio.sleep(self._poll_interval)
 
-    def _ingest_one(self, sig: Dict[str, Any]) -> bool:
-        """Dedup, filter, boundary-verify, and enqueue a single signal.
+    def _prepare_signal(self, sig: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Dedup, INLINE-filter, and boundary-verify one signal.
 
-        Shared by the polling loop and the push path (enqueue_pushed_signal).
-        Signals are keyed by (pid, type, timestamp); one already in the seen-set
-        is dropped, so a signal observed by both push and poll is delivered
-        exactly once. INIT/WAIT are handled inline elsewhere and never enqueued.
+        Returns the signal to deliver, or None if it should be dropped. Signals
+        are keyed by (pid, type, timestamp); one already in the seen-set is
+        dropped, so a signal observed by both push and poll is delivered exactly
+        once. INIT/WAIT are handled inline elsewhere and never enqueued.
         EXIT/TIMEOUT bodies are checked against dispatch's output-provenance
-        boundary (#165) and flagged in-band if unverified. Returns True if the
-        signal was enqueued.
+        boundary (#165) and flagged in-band if unverified.
         """
         key = self._signal_key(sig)
         if key in self._seen:
-            return False
+            return None
         self._seen.add(key)
 
-        # INIT and WAIT are always handled inline; skip delivery.
         if sig.get("type") in _INLINE_SIGNAL_TYPES:
-            return False
+            return None
 
-        # Verify dispatch's output-provenance boundary (#165): an EXIT body must
-        # be wrapped by the nonce dispatch assigned to that PID. A missing or
-        # mismatched tag means the output did not come through dispatch's
-        # boundary (or was tampered) — flag it in-band so ROOT treats it as
-        # untrusted rather than acting on it.
         if sig.get("type") in ("EXIT", "TIMEOUT") and verify_and_mark(sig):
             logger.warning(
                 "EventMerger: output-provenance boundary FAILED for "
                 f"pid={sig.get('pid')} ({sig.get('_boundary_reason')}) "
                 "— marked UNVERIFIED"
             )
+        return sig
 
+    def _ingest_one(self, sig: Dict[str, Any]) -> bool:
+        """Prepare and enqueue a single signal as one event. Shared by the poll
+        loop and the single-signal push path. Returns True if enqueued.
+        """
+        prepared = self._prepare_signal(sig)
+        if prepared is None:
+            return False
         try:
-            self._queue.put_nowait(Event.dispatch_signal(sig))
+            self._queue.put_nowait(Event.dispatch_signal(prepared))
             logger.debug(
                 f"EventMerger: Queued signal "
-                f"type={sig.get('type')}, pid={sig.get('pid')}"
+                f"type={prepared.get('type')}, pid={prepared.get('pid')}"
             )
             return True
         except asyncio.QueueFull:
             logger.warning(
                 f"EventMerger: Queue full, dropping signal "
-                f"type={sig.get('type')}, pid={sig.get('pid')}"
+                f"type={prepared.get('type')}, pid={prepared.get('pid')}"
             )
             return False
 
+    def enqueue_pushed(self, payload: Any) -> None:
+        """Sink for signals PUSHED by dispatch (notifications/message).
+
+        A dict is a single ``fire_wake=true`` signal → one event → one ROOT turn.
+        A list is a merged ``fire_wake=false`` batch dispatch already grouped →
+        one event → one ROOT turn (#189). ``fire_wake`` is the only thing that
+        decides merging; the daemon never coalesces on its own.
+        """
+        if isinstance(payload, list):
+            self.enqueue_pushed_batch(payload)
+        elif isinstance(payload, dict) and payload:
+            self.enqueue_pushed_signal(payload)
+
     def enqueue_pushed_signal(self, sig: Dict[str, Any]) -> None:
-        """Ingest a signal PUSHED by dispatch via notifications/message (#26).
+        """Ingest a single pushed dispatch signal (#26).
 
-        Called from the dispatch MCP session's logging handler, which runs on
-        this event loop, so it goes through the same dedup/boundary/enqueue path
-        as the poll loop. Push and poll share the seen-set, so whichever observes
-        a given (pid, type, timestamp) first wins and the other is a no-op.
-
-        Unlike the poll loop, pushes are never gated on the seen-set init: a
-        pushed signal is always live (dispatch emits only on a fresh event and
-        its orchestrator starts empty each session), so there are no stale
-        cross-session replays to skip here.
+        Runs on this event loop (called from the MCP session's logging handler),
+        so it goes through the same dedup/boundary/enqueue path as the poll loop.
+        Push and poll share the seen-set, so whichever observes a given
+        (pid, type, timestamp) first wins and the other is a no-op.
         """
         if not sig:
             return
         self._ingest_one(sig)
+
+    def enqueue_pushed_batch(self, signals: List[Dict[str, Any]]) -> None:
+        """Ingest a merged ``fire_wake=false`` group as ONE event (#189).
+
+        Each signal is still deduped and boundary-verified individually, but the
+        survivors ride as a single ``DISPATCH_SIGNAL_BATCH`` event so ROOT sees
+        the whole group's outcomes and answers once, instead of one turn per
+        signal.
+        """
+        prepared: List[Dict[str, Any]] = []
+        for sig in signals:
+            if not sig:
+                continue
+            ready = self._prepare_signal(sig)
+            if ready is not None:
+                prepared.append(ready)
+        if not prepared:
+            return
+        try:
+            self._queue.put_nowait(Event.dispatch_signals(prepared))
+            logger.debug(
+                f"EventMerger: Queued batch of {len(prepared)} signal(s) "
+                f"pids={[s.get('pid') for s in prepared]}"
+            )
+        except asyncio.QueueFull:
+            logger.warning(
+                f"EventMerger: Queue full, dropping batch of {len(prepared)} signal(s)"
+            )
 
     @staticmethod
     def _signal_key(sig: Dict[str, Any]) -> str:

@@ -25,6 +25,11 @@ def _raw_exit(pid=1, nonce="abc123", ts="2026-07-13T12:00:00-07:00"):
     }
 
 
+def _norm_exit(pid, nonce, ts):
+    """A normalized EXIT signal as the sink receives it (post transport)."""
+    return _normalize_pushed_signal(_raw_exit(pid, nonce, ts))
+
+
 def test_normalize_maps_kind_and_message():
     raw = _raw_exit()
     norm = _normalize_pushed_signal(raw)
@@ -117,6 +122,87 @@ def test_unverified_exit_is_marked_in_band():
         event = await merger._queue.get()
         assert event.data.get("_boundary_verified") is False
         assert event.data["data"].startswith("[⚠ UNVERIFIED")
+
+    asyncio.run(run())
+
+
+# --- #189: merged fire_wake=false batch → one event ---------------------------
+
+
+def test_pushed_batch_becomes_one_event():
+    async def run():
+        merger = EventMerger()
+        merger.enqueue_pushed_batch(
+            [_norm_exit(1, "aaa111", "t1"), _norm_exit(2, "bbb222", "t2")]
+        )
+        assert merger._queue.qsize() == 1
+        event = await merger._queue.get()
+        assert event.type == EventType.DISPATCH_SIGNAL_BATCH
+        assert [s["pid"] for s in event.data] == [1, 2]
+
+    asyncio.run(run())
+
+
+def test_enqueue_pushed_routes_dict_and_list():
+    async def run():
+        merger = EventMerger()
+        merger.enqueue_pushed(_norm_exit(1, "aaa111", "t1"))  # dict -> single
+        merger.enqueue_pushed(  # list -> batch
+            [_norm_exit(2, "bbb222", "t2"), _norm_exit(3, "ccc333", "t3")]
+        )
+        e1 = await merger._queue.get()
+        e2 = await merger._queue.get()
+        assert e1.type == EventType.DISPATCH_SIGNAL
+        assert e2.type == EventType.DISPATCH_SIGNAL_BATCH
+        assert [s["pid"] for s in e2.data] == [2, 3]
+
+    asyncio.run(run())
+
+
+def test_batch_dedups_against_seen_set():
+    async def run():
+        merger = EventMerger()
+        sig = _norm_exit(1, "aaa111", "t1")
+        merger.enqueue_pushed_signal(sig)  # single, now in seen-set
+        merger.enqueue_pushed_batch([dict(sig), _norm_exit(2, "bbb222", "t2")])
+        e1 = await merger._queue.get()
+        e2 = await merger._queue.get()
+        assert e1.type == EventType.DISPATCH_SIGNAL
+        assert e2.type == EventType.DISPATCH_SIGNAL_BATCH
+        # sig1 was already seen -> only the fresh sig2 rides in the batch.
+        assert [s["pid"] for s in e2.data] == [2]
+
+    asyncio.run(run())
+
+
+def test_batch_filters_inline_types_and_empty():
+    async def run():
+        merger = EventMerger()
+        init = {"type": "INIT", "pid": 9, "data": "x", "timestamp": "t0"}
+        merger.enqueue_pushed_batch([init, _norm_exit(1, "aaa111", "t1")])
+        event = await merger._queue.get()
+        assert [s["pid"] for s in event.data] == [1]  # INIT filtered out
+        # An all-filtered batch enqueues nothing.
+        merger.enqueue_pushed_batch([init])
+        assert merger._queue.empty()
+
+    asyncio.run(run())
+
+
+def test_batch_unverified_exit_marked_in_band():
+    async def run():
+        merger = EventMerger()
+        bad = {
+            "type": "EXIT",
+            "pid": 2,
+            "data": "[hash=deadbeef] 200 unwrapped",
+            "timestamp": "t2",
+            "nonce": "deadbeef",
+        }
+        merger.enqueue_pushed_batch([bad])
+        event = await merger._queue.get()
+        assert event.data[0].get("_boundary_verified") is False
+        assert event.data[0]["data"].startswith("[⚠ UNVERIFIED")
 
     asyncio.run(run())
 
