@@ -108,8 +108,10 @@ async def start_runtime_services(app: Any, logger: Logger) -> dict[str, Any]:
     )
     # Route signals PUSHED by dispatch (notifications/message) into the same
     # merged event queue as polled signals, so ROOT is woken on task completion
-    # without waiting for a poll (#26). Deduplicated against the poll fallback.
-    app.dispatch.set_signal_sink(app.events.enqueue_pushed_signal)
+    # without waiting for a poll (#26). A single signal becomes one turn; a
+    # merged fire_wake=false batch becomes one turn for the group (#189).
+    # Deduplicated against the poll fallback.
+    app.dispatch.set_signal_sink(app.events.enqueue_pushed)
 
     app.output_manager.set_state_callback(
         lambda state: _notify_voice_output_state(app, state)

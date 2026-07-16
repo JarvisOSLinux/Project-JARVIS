@@ -120,6 +120,60 @@ async def on_dispatch_signal(app: Any, logger: Logger, signal: dict[str, Any]) -
     await app._act_on_root_response(response)
 
 
+async def on_dispatch_signals(
+    app: Any, logger: Logger, signals: list[dict[str, Any]]
+) -> None:
+    """Handle a merged fire_wake=false batch as ONE ROOT turn (#189).
+
+    dispatch delivers these together because they belong to one settled session,
+    so ROOT sees every outcome at once and answers once — no per-signal turns
+    guessing about siblings they weren't handed.
+    """
+    if not signals:
+        return
+
+    pids = [s.get("pid") for s in signals]
+    logger.info(
+        f"JARVIS: Dispatch batch: {len(signals)} signal(s), pids={pids}, "
+        f"types={[s.get('type') for s in signals]}"
+    )
+    emit_activity(app, f"Dispatch batch: {len(signals)} result(s)", kind="dispatch")
+
+    if app.llm is None:
+        logger.warning("Dispatch batch received but no LLM configured — ignoring")
+        return
+
+    for sig in signals:
+        app.goals.update_from_signal(sig)
+
+    # A fire_wake=false batch is one session, so all PIDs share a goal; scope the
+    # context to it. Fall back to full root context if none owns the PIDs.
+    owning_goal = None
+    for pid in pids:
+        if pid is not None:
+            owning_goal = app.goals.find_goal_by_task_pid(pid)
+            if owning_goal:
+                break
+
+    if owning_goal:
+        goal_ctx = app.goals.get_goal_context(owning_goal.id)
+        parts = []
+        if goal_ctx:
+            parts.append(f"INTENT: {owning_goal.description}")
+            parts.append(f"GOAL_STATE: {compact_payload_for_llm(goal_ctx)}")
+        parts.append(f"SIGNALS: {json.dumps(signals)}")
+        summary = app.sessions.load_summary()
+        if summary:
+            parts.append(f"CONVERSATION_SUMMARY: {summary}")
+        context = "\n".join(parts)
+    else:
+        context = build_root_context(app, logger)
+        context += f"\nSIGNALS: {json.dumps(signals)}"
+
+    response = await ask_llm(app, logger, context, tag="root", mode="root")
+    await app._act_on_root_response(response)
+
+
 async def on_confirmation_response(
     app: Any, logger: Logger, data: dict[str, Any]
 ) -> None:

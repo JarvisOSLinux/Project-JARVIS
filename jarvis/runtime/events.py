@@ -11,6 +11,7 @@ from ..dispatch.event_merger import Event, EventType
 from .root_handlers import (
     on_confirmation_response,
     on_dispatch_signal,
+    on_dispatch_signals,
     on_user_input,
 )
 
@@ -23,6 +24,8 @@ async def handle_event(app: Any, event: Event) -> None:
         await on_user_input(app, logger, event.data)
     elif event.type == EventType.DISPATCH_SIGNAL:
         await on_dispatch_signal(app, logger, event.data)
+    elif event.type == EventType.DISPATCH_SIGNAL_BATCH:
+        await on_dispatch_signals(app, logger, event.data)
     elif event.type == EventType.CONFIRMATION_RESPONSE:
         await on_confirmation_response(app, logger, event.data)
 
