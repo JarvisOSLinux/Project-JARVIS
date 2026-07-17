@@ -7,6 +7,7 @@ import os
 import shutil
 import socket
 import stat
+import struct
 import subprocess
 import time
 from pathlib import Path
@@ -86,6 +87,107 @@ class LinuxPlatform(BasePlatform):
             return p.stat().st_uid == os.getuid()
         except OSError:
             return False
+
+    async def ipc_verify_peer(self, reader: Any, writer: Any) -> bool:
+        sock = writer.get_extra_info("socket")
+        if sock is None:
+            # Not a real transport (e.g. under test) — the 0600 file
+            # permission from ipc_secure() is still the primary boundary.
+            return True
+        try:
+            creds = sock.getsockopt(
+                socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")
+            )
+            pid, uid, gid = struct.unpack("3i", creds)
+            return uid == os.getuid()
+        except (OSError, AttributeError):
+            return False
+
+    def system_ipc_candidates(self) -> list[str]:
+        return ["/run/jarvis/input.sock"]
+
+    # -- Sidecar resolution ----------------------------------------------------
+
+    def sidecar_search_dirs(self) -> list[Path]:
+        home = Path.home()
+        return [
+            home / ".local" / "bin",
+            Path("/usr/local/bin"),
+            Path("/usr/bin"),
+        ]
+
+    # -- Privilege elevation -----------------------------------------------------
+
+    def privileged_prefixes(self) -> tuple[str, ...]:
+        return (
+            "pacman",
+            "apt",
+            "apt-get",
+            "dnf",
+            "yum",
+            "zypper",
+            "systemctl enable",
+            "systemctl disable",
+            "systemctl start",
+            "systemctl stop",
+            "systemctl restart",
+            "systemctl mask",
+            "systemctl unmask",
+            "systemctl daemon-reload",
+            "modprobe",
+            "rmmod",
+            "insmod",
+            "sysctl -w",
+            "useradd",
+            "userdel",
+            "groupadd",
+            "groupdel",
+            "usermod",
+            "timedatectl set",
+            "localectl set",
+            "hostnamectl set",
+            "ip link set",
+            "ip addr add",
+            "tee /etc",
+            "tee /usr",
+            "tee /var",
+        )
+
+    def askpass_helpers(self) -> tuple[str, ...]:
+        return (
+            "/usr/bin/ksshaskpass",
+            "/usr/lib/ssh/ksshaskpass",
+            "ssh-askpass",
+            "lxqt-openssh-askpass",
+            "x11-ssh-askpass",
+        )
+
+    def elevate(self, command: str) -> str:
+        if not self.find_askpass():
+            raise RuntimeError(
+                "No GUI askpass helper found (tried: "
+                f"{', '.join(self.askpass_helpers())}). Install one of these "
+                "to allow privileged commands to prompt via a GUI dialog."
+            )
+        return f"sudo -A {command}"
+
+    def grant_privilege(self) -> bool:
+        from ..core import sudo_manager
+
+        return sudo_manager.enable_sudo()
+
+    def revoke_privilege(self) -> bool:
+        from ..core import sudo_manager
+
+        return sudo_manager.disable_sudo()
+
+    def is_privilege_granted(self) -> bool:
+        from ..core import sudo_manager
+
+        return sudo_manager.is_sudo_enabled()
+
+    def open_command(self, target: str) -> list[str]:
+        return ["xdg-open", target]
 
     # -- Notifications -------------------------------------------------------
 

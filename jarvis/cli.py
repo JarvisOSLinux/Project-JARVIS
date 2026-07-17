@@ -61,7 +61,7 @@ def _find_ipc_endpoint() -> "str | None":
     """
     from .platform import current as platform
 
-    candidates = [Config.JARVIS_INPUT_SOCKET, "/run/jarvis/input.sock"]
+    candidates = [Config.JARVIS_INPUT_SOCKET, *platform.system_ipc_candidates()]
     path = None
     for p in candidates:
         if p and _ipc_endpoint_exists(p):

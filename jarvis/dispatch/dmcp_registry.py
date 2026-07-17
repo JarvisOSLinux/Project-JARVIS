@@ -6,6 +6,8 @@ import ast
 import asyncio
 import json
 import os
+import subprocess
+import sys
 from logging import Logger
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -341,6 +343,35 @@ async def list_server_tools(logger: Logger, server_id: str) -> Dict[str, Any]:
 
 
 def _dmcp_base_dir() -> Path:
+    """dmcp's own per-OS data directory (its Rust ``directories``-crate layout).
+
+    Hardcoding the XDG path here silently pointed at the wrong directory on
+    macOS/Windows even though dmcp itself already gets this right (#171).
+    Ask dmcp directly first so this stays correct if its layout ever
+    changes; fall back to the `directories`-crate convention it uses
+    (``ProjectDirs::from("", "", "dmcp").data_dir()``) if the binary isn't
+    on PATH yet or is too old to support `paths --json`.
+    """
+    try:
+        result = subprocess.run(
+            ["dmcp", "paths", "--json"],
+            capture_output=True,
+            timeout=3,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            data = json.loads(result.stdout)
+            if data.get("data_dir"):
+                return Path(data["data_dir"])
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        pass
+
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "dmcp"
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))
+        return Path(base) / "dmcp" / "data"
     data_home = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
     return data_home / "mcp"
 

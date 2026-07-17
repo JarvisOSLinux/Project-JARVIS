@@ -16,8 +16,16 @@ else:
 
 
 class Config:
-    # Models base directory
-    MODELS_DIR = os.getenv("MODELS_DIR", "models")
+    from .platform import current as _platform
+
+    # Models base directory. Accepts the legacy MODELS_DIR name and the
+    # JARVIS_MODELS_DIR name packaging/jarvis.service actually sets (#171 —
+    # those two were never the same var, so the systemd-installed daemon
+    # never saw its model dir). Defaults to the platform data dir rather
+    # than a cwd-relative "models", which broke depending on launch cwd.
+    MODELS_DIR = os.getenv("MODELS_DIR") or os.getenv("JARVIS_MODELS_DIR") or str(
+        _platform.data_dir() / "models"
+    )
 
     # Voice Provider Configuration
     STT_PROVIDER = os.getenv("STT_PROVIDER", "vosk")  # "vosk" (add more later)

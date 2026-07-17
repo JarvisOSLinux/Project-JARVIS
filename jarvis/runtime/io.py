@@ -45,6 +45,14 @@ async def handle_socket_connection(
     writer: asyncio.StreamWriter,
 ) -> None:
     """Handle one input socket connection; route lines into the event loop."""
+    if not await platform.ipc_verify_peer(reader, writer):
+        logger.warning("JARVIS: Rejected socket connection — peer verification failed")
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+        return
     try:
         while app._running:
             line = await reader.readline()
@@ -270,6 +278,15 @@ async def handle_gui_connection(
     writer: asyncio.StreamWriter,
 ) -> None:
     """Handle a bidirectional GUI client connection."""
+    if not await platform.ipc_verify_peer(reader, writer):
+        logger.warning("JARVIS: Rejected GUI connection — peer verification failed")
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+        return
+
     app._gui_clients[writer] = DEFAULT_CLIENT_LABEL
     logger.info(f"JARVIS: GUI client connected ({len(app._gui_clients)} total)")
 
