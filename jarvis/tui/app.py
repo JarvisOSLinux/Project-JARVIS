@@ -354,8 +354,8 @@ class JarvisTUI(App):
 
         self.push_screen(ConfigModal(initial_tab=tab), _on_config)
 
-    async def _tui_confirm(self, request_id: str, tool_names: list[str]) -> bool:
-        return await self.push_screen_wait(ConfirmModal(request_id, tool_names))
+    async def _tui_confirm(self, request_id: str, tools_detail: list) -> bool:
+        return await self.push_screen_wait(ConfirmModal(request_id, tools_detail))
 
     def _export_transcript_to_disk(self, filename: Optional[str]) -> None:
         """Save plain transcript as Markdown under ``JARVIS_DATA_DIR/transcripts``."""

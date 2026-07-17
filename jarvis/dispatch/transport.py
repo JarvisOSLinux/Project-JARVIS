@@ -9,6 +9,58 @@ from typing import Any, Callable, Dict, List, Optional
 
 from ..config import Config
 
+# The logger name dispatch stamps on pushed-signal notifications (#26).
+_PUSH_SIGNAL_LOGGER = "dispatch.signal"
+
+
+def _normalize_pushed_signal(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Map dispatch's raw SignalEntry to the daemon's canonical signal shape.
+
+    Dispatch serializes signals as ``kind``/``message``; the daemon (EventMerger,
+    goal_manager, boundary verification) reads ``type``/``data``. Translate here
+    so a pushed signal is indistinguishable from a polled one downstream.
+    """
+    norm: Dict[str, Any] = {
+        "type": raw.get("kind"),
+        "pid": raw.get("pid"),
+        "data": raw.get("message"),
+        "timestamp": raw.get("timestamp"),
+    }
+    if raw.get("nonce") is not None:
+        norm["nonce"] = raw.get("nonce")
+    if raw.get("payload") is not None:
+        norm["payload"] = raw.get("payload")
+    return norm
+
+
+def _make_logging_callback(adapter: Any, logger: Logger):
+    """Build the MCP logging-notification handler for pushed dispatch signals.
+
+    dispatch pushes each wakeup-worthy signal as a ``notifications/message`` with
+    ``logger="dispatch.signal"``; we normalize it and hand it to the adapter's
+    signal sink (EventMerger.enqueue_pushed_signal). The sink is read at call
+    time, so it may be unset during early connect — such signals are dropped and
+    the poll fallback still catches up (#26).
+    """
+
+    async def _on_log_message(params: Any) -> None:
+        try:
+            if getattr(params, "logger", None) != _PUSH_SIGNAL_LOGGER:
+                return
+            raw = getattr(params, "data", None)
+            if not isinstance(raw, dict):
+                logger.debug("Dispatch: pushed signal had no dict payload — ignoring")
+                return
+            sink = getattr(adapter, "_signal_sink", None)
+            if sink is None:
+                logger.debug("Dispatch: pushed signal dropped — sink not registered")
+                return
+            sink(_normalize_pushed_signal(raw))
+        except Exception as e:  # never let a bad push break the session
+            logger.error(f"Dispatch: error handling pushed signal: {e}")
+
+    return _on_log_message
+
 
 async def connect(adapter: Any, logger: Logger) -> None:
     """Connect DispatchAdapter to dispatch serve over stdio MCP."""
@@ -28,7 +80,14 @@ async def connect(adapter: Any, logger: Logger) -> None:
         )
         adapter._client = stdio_client(params)
         read, write = await adapter._client.__aenter__()
-        adapter.session = ClientSession(read, write)
+        # Register the logging handler so dispatch's pushed signals
+        # (notifications/message, logger="dispatch.signal") wake ROOT the moment
+        # a task completes, rather than waiting for the next poll (#26).
+        adapter.session = ClientSession(
+            read,
+            write,
+            logging_callback=_make_logging_callback(adapter, logger),
+        )
         await adapter.session.__aenter__()
         await adapter.session.initialize()
         adapter._connected = True

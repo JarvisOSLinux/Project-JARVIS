@@ -126,6 +126,27 @@ async def _handle_confirmation_query(
         )
         return True
 
+    if msg_type == "partial_approve_confirmation":
+        # Per-task decision (#187): approve a subset of a batched confirmation
+        # by index; the rest are denied. `approved_indices` is a list of ints
+        # into the confirmation's items (as sent in the request `details`).
+        indices = msg.get("approved_indices", [])
+        app.events.inject_confirmation_response(
+            {
+                "type": "confirmation_response",
+                "id": msg.get("id", ""),
+                "approved_indices": indices,
+            }
+        )
+        await _gui_write(
+            writer,
+            {
+                "type": "ack",
+                "message": f"Resolved {msg.get('id', '')} ({len(indices)} approved)",
+            },
+        )
+        return True
+
     if msg_type == "approve_all_confirmations":
         ids = [c["id"] for c in app.confirmation.list_pending()]
         for cid in ids:

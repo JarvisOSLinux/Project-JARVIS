@@ -5,11 +5,14 @@ Merges multiple input sources into a single event stream:
 1. User input (voice, stdin, socket, or injected)
 2. Dispatch signals (task completions, reminders, etc.)
 
-The signal reader runs as a background asyncio Task, polling the dispatch
-signal window every 0.5 s. Each signal is fingerprinted by
-(pid, type, timestamp) and tracked in a seen-set; duplicates are silently
-dropped so the same signal is never delivered twice even if it stays in the
-Rust window for multiple polls.
+Dispatch signals arrive by two paths that share one ingest (_ingest_one):
+- PUSH (primary, #26): dispatch emits a notifications/message the moment a
+  task completes or a reminder fires; the MCP session's logging handler calls
+  enqueue_pushed_signal, so ROOT is woken on completion without polling.
+- POLL (fallback): a background asyncio Task polls the dispatch signal window
+  as a catch-up net. Each signal is fingerprinted by (pid, type, timestamp)
+  and tracked in a seen-set; duplicates are silently dropped, so a signal
+  observed by both push and poll is delivered exactly once.
 
 On the first poll, all already-present signals are marked seen without being
 enqueued — this prevents stale signals from a previous JARVIS session being
@@ -303,56 +306,28 @@ class EventMerger:
                         if s.get("type") in ("EXIT", "TIMEOUT") and "pid" in s
                     }
                     for sig in signals:
-                        key = self._signal_key(sig)
-                        if key in self._seen:
-                            continue
-                        self._seen.add(key)
-
-                        # INIT and WAIT are always handled inline; skip delivery.
-                        if sig.get("type") in _INLINE_SIGNAL_TYPES:
-                            continue
-
-                        # Verify dispatch's output-provenance boundary (#165): an
-                        # EXIT body must be wrapped by the nonce dispatch assigned
-                        # to that PID. A missing/mismatched tag means the output
-                        # did not come through dispatch's boundary (or was
-                        # tampered) — flag it in-band so ROOT treats it as
-                        # untrusted rather than acting on it.
-                        if sig.get("type") in ("EXIT", "TIMEOUT") and verify_and_mark(
-                            sig
+                        # REMIND+EXIT merging needs the batch snapshot, so it
+                        # happens here (the push path sees signals one at a time
+                        # and can't merge). Only enrich a first-seen REMIND whose
+                        # task has already exited, so ROOT gets the full picture
+                        # in one LLM turn.
+                        if (
+                            sig.get("type") == "REMIND"
+                            and sig.get("pid") in exits_by_pid
+                            and self._signal_key(sig) not in self._seen
                         ):
-                            logger.warning(
-                                "EventMerger: output-provenance boundary FAILED for "
-                                f"pid={sig.get('pid')} ({sig.get('_boundary_reason')}) "
-                                "— marked UNVERIFIED"
-                            )
-
-                        if sig.get("type") == "REMIND":
                             pid = sig.get("pid")
-                            if pid in exits_by_pid:
-                                # Task already finished — merge exit info so
-                                # ROOT gets the full picture in one LLM turn.
-                                verify_and_mark(exits_by_pid[pid])
-                                sig = {
-                                    **sig,
-                                    "_remind_completed": True,
-                                    "_exit": exits_by_pid[pid],
-                                }
-                                logger.info(
-                                    f"EventMerger: REMIND+EXIT merged for pid={pid}"
-                                )
-
-                        logger.debug(
-                            f"EventMerger: Queued signal "
-                            f"type={sig.get('type')}, pid={sig.get('pid')}"
-                        )
-                        try:
-                            self._queue.put_nowait(Event.dispatch_signal(sig))
-                        except asyncio.QueueFull:
-                            logger.warning(
-                                f"EventMerger: Queue full, dropping signal "
-                                f"type={sig.get('type')}, pid={sig.get('pid')}"
+                            verify_and_mark(exits_by_pid[pid])
+                            sig = {
+                                **sig,
+                                "_remind_completed": True,
+                                "_exit": exits_by_pid[pid],
+                            }
+                            logger.info(
+                                f"EventMerger: REMIND+EXIT merged for pid={pid}"
                             )
+
+                        self._ingest_one(sig)
 
             except asyncio.CancelledError:
                 break
@@ -360,6 +335,69 @@ class EventMerger:
                 logger.error(f"EventMerger: Signal reader error: {e}")
 
             await asyncio.sleep(self._poll_interval)
+
+    def _ingest_one(self, sig: Dict[str, Any]) -> bool:
+        """Dedup, filter, boundary-verify, and enqueue a single signal.
+
+        Shared by the polling loop and the push path (enqueue_pushed_signal).
+        Signals are keyed by (pid, type, timestamp); one already in the seen-set
+        is dropped, so a signal observed by both push and poll is delivered
+        exactly once. INIT/WAIT are handled inline elsewhere and never enqueued.
+        EXIT/TIMEOUT bodies are checked against dispatch's output-provenance
+        boundary (#165) and flagged in-band if unverified. Returns True if the
+        signal was enqueued.
+        """
+        key = self._signal_key(sig)
+        if key in self._seen:
+            return False
+        self._seen.add(key)
+
+        # INIT and WAIT are always handled inline; skip delivery.
+        if sig.get("type") in _INLINE_SIGNAL_TYPES:
+            return False
+
+        # Verify dispatch's output-provenance boundary (#165): an EXIT body must
+        # be wrapped by the nonce dispatch assigned to that PID. A missing or
+        # mismatched tag means the output did not come through dispatch's
+        # boundary (or was tampered) — flag it in-band so ROOT treats it as
+        # untrusted rather than acting on it.
+        if sig.get("type") in ("EXIT", "TIMEOUT") and verify_and_mark(sig):
+            logger.warning(
+                "EventMerger: output-provenance boundary FAILED for "
+                f"pid={sig.get('pid')} ({sig.get('_boundary_reason')}) "
+                "— marked UNVERIFIED"
+            )
+
+        try:
+            self._queue.put_nowait(Event.dispatch_signal(sig))
+            logger.debug(
+                f"EventMerger: Queued signal "
+                f"type={sig.get('type')}, pid={sig.get('pid')}"
+            )
+            return True
+        except asyncio.QueueFull:
+            logger.warning(
+                f"EventMerger: Queue full, dropping signal "
+                f"type={sig.get('type')}, pid={sig.get('pid')}"
+            )
+            return False
+
+    def enqueue_pushed_signal(self, sig: Dict[str, Any]) -> None:
+        """Ingest a signal PUSHED by dispatch via notifications/message (#26).
+
+        Called from the dispatch MCP session's logging handler, which runs on
+        this event loop, so it goes through the same dedup/boundary/enqueue path
+        as the poll loop. Push and poll share the seen-set, so whichever observes
+        a given (pid, type, timestamp) first wins and the other is a no-op.
+
+        Unlike the poll loop, pushes are never gated on the seen-set init: a
+        pushed signal is always live (dispatch emits only on a fresh event and
+        its orchestrator starts empty each session), so there are no stale
+        cross-session replays to skip here.
+        """
+        if not sig:
+            return
+        self._ingest_one(sig)
 
     @staticmethod
     def _signal_key(sig: Dict[str, Any]) -> str:

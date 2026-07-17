@@ -18,7 +18,7 @@ do what they're told.
 """
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from ..config import Config
 from ..core.logger import get_logger
@@ -62,6 +62,15 @@ class DispatchAdapter:
         self.session = None
         self._client = None
         self._connected = False
+        # Sink for signals PUSHED by dispatch (notifications/message, #26).
+        # Set by the runtime to EventMerger.enqueue_pushed_signal once the
+        # merger exists; the MCP logging handler in transport reads it at call
+        # time, so it is safe for it to be None during early connect.
+        self._signal_sink: Optional[Callable[[Dict[str, Any]], None]] = None
+
+    def set_signal_sink(self, sink: Optional[Callable[[Dict[str, Any]], None]]) -> None:
+        """Register where pushed dispatch signals are delivered (#26)."""
+        self._signal_sink = sink
 
     async def connect(self):
         """Connect to the dispatch binary via stdio MCP."""

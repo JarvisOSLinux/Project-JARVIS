@@ -150,7 +150,11 @@ class ComponentFactory:
     def create_event_merger() -> EventMerger:
         """Create EventMerger for dual-input event loop."""
         logger.info("Initiating Event merger...")
-        return EventMerger()
+        # Push is the primary delivery path (#26): dispatch wakes ROOT the
+        # moment a task completes. The poll is now a slow catch-up net, so it
+        # runs infrequently to avoid contending with dispatch calls on the
+        # shared MCP session.
+        return EventMerger(poll_interval=3.0)
 
     @staticmethod
     def create_contextor(embeddings=None) -> ContextorAdapter:
