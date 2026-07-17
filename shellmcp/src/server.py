@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """ShellMCP — MCP server for shell command execution.
 
-Privileged commands (pacman, systemctl, etc.) are run via
-`sudo -A` with SUDO_ASKPASS=ksshaskpass, triggering the KWallet
-GUI password dialog to maintain the autonomous + secure architecture.
+Privileged commands (pacman, systemctl, etc.) are run via `sudo -A` with
+SUDO_ASKPASS pointed at a GUI password dialog helper — a real credential
+prompt is the security boundary on every OS, never a silent NOPASSWD.
+Which helper and which commands count as "privileged" are selected per OS
+(Project-JARVIS #173): this used to be hardwired to KDE's ksshaskpass and
+an Arch/systemd command table, so elevation silently failed everywhere else.
 """
 
 import asyncio
@@ -14,9 +17,13 @@ import sys
 import urllib.parse
 import urllib.request
 
-# Commands that require root — prefix with sudo -A
-PRIVILEGED_PREFIXES = (
+_LINUX_PRIVILEGED_PREFIXES = (
     "pacman",
+    "apt",
+    "apt-get",
+    "dnf",
+    "yum",
+    "zypper",
     "systemctl enable",
     "systemctl disable",
     "systemctl start",
@@ -43,6 +50,98 @@ PRIVILEGED_PREFIXES = (
     "tee /usr",
     "tee /var",
 )
+
+_MACOS_PRIVILEGED_PREFIXES = (
+    "launchctl",
+    "sysadminctl",
+    "dscl",
+    "networksetup",
+    "installer",
+    "systemsetup",
+    "pfctl",
+    "sysctl -w",
+    "tee /etc",
+    "tee /usr",
+    "tee /Library",
+    # brew must never be sudo-wrapped — it refuses to run as root.
+)
+
+_WINDOWS_PRIVILEGED_PREFIXES = (
+    "reg add",
+    "reg delete",
+    "net user",
+    "net localgroup",
+    "sc config",
+    "sc create",
+    "sc delete",
+    "sc start",
+    "sc stop",
+    "netsh",
+    "bcdedit",
+    "diskpart",
+)
+
+if sys.platform == "darwin":
+    PRIVILEGED_PREFIXES = _MACOS_PRIVILEGED_PREFIXES
+elif sys.platform == "win32":
+    PRIVILEGED_PREFIXES = _WINDOWS_PRIVILEGED_PREFIXES
+else:
+    PRIVILEGED_PREFIXES = _LINUX_PRIVILEGED_PREFIXES
+
+# GUI askpass helpers to probe, in priority order. macOS has no CLI askpass
+# binary, so an osascript-based shim is written out and probed like any
+# other helper (see _ensure_macos_askpass_shim).
+_ASKPASS_CANDIDATES_LINUX = (
+    "/usr/bin/ksshaskpass",
+    "/usr/lib/ssh/ksshaskpass",
+    "ssh-askpass",
+    "lxqt-openssh-askpass",
+    "x11-ssh-askpass",
+)
+_MACOS_ASKPASS_SHIM = "/usr/local/libexec/jarvis-osascript-askpass"
+_MACOS_ASKPASS_SHIM_SCRIPT = """#!/bin/sh
+exec osascript -e 'Tell application "System Events" to display dialog \\
+  "sudo needs your password:" default answer "" with hidden answer \\
+  buttons {"Cancel", "OK"} default button "OK"' \\
+  -e 'text returned of result'
+"""
+
+
+def _ensure_macos_askpass_shim() -> str | None:
+    try:
+        if not (
+            os.path.isfile(_MACOS_ASKPASS_SHIM)
+            and os.access(_MACOS_ASKPASS_SHIM, os.X_OK)
+        ):
+            os.makedirs(os.path.dirname(_MACOS_ASKPASS_SHIM), exist_ok=True)
+            with open(_MACOS_ASKPASS_SHIM, "w") as f:
+                f.write(_MACOS_ASKPASS_SHIM_SCRIPT)
+            os.chmod(_MACOS_ASKPASS_SHIM, 0o755)
+        return _MACOS_ASKPASS_SHIM
+    except OSError:
+        return None
+
+
+def find_askpass() -> str | None:
+    """Return the first available GUI askpass helper for this OS, or None."""
+    if sys.platform == "darwin":
+        return _ensure_macos_askpass_shim()
+    if sys.platform == "win32":
+        # No CLI askpass concept on Windows; elevation there is a UAC
+        # consent prompt per action, not a sudo -A wrapper (tracked
+        # separately, Project-JARVIS #171/#173 follow-up).
+        return None
+    for candidate in _ASKPASS_CANDIDATES_LINUX:
+        if os.path.isabs(candidate):
+            if os.path.exists(candidate):
+                return candidate
+        else:
+            from shutil import which
+
+            found = which(candidate)
+            if found:
+                return found
+    return None
 
 
 def needs_sudo(command: str) -> bool:
@@ -77,10 +176,21 @@ def _display_env() -> dict:
     return env
 
 
+def _open_command(target: str) -> str:
+    """Per-OS command to open a file/URL/app (never elevated)."""
+    if sys.platform == "darwin":
+        return f"open {shlex.quote(target)}"
+    if sys.platform == "win32":
+        # `start` needs an explicit empty title arg or it misreads a
+        # quoted target as the title.
+        return f'cmd /c start "" {shlex.quote(target)}'
+    return f"xdg-open {shlex.quote(target)}"
+
+
 async def open_app(target: str) -> str:
-    """Open a file, URL, or application via xdg-open (never elevated)."""
-    env = _display_env()
-    cmd = f"xdg-open {shlex.quote(target)}"
+    """Open a file, URL, or application via the OS's default opener."""
+    env = _display_env() if sys.platform not in ("darwin", "win32") else os.environ.copy()
+    cmd = _open_command(target)
     try:
         proc = await asyncio.create_subprocess_shell(
             cmd,
@@ -92,7 +202,7 @@ async def open_app(target: str) -> str:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=5)
             err = stderr.decode(errors="replace").strip()
             if proc.returncode not in (0, None):
-                return f"xdg-open failed (exit {proc.returncode}): {err}"
+                return f"Open failed (exit {proc.returncode}): {err}"
             return f"Opened: {target}"
         except asyncio.TimeoutError:
             # GUI app forked and detached — expected
@@ -174,11 +284,10 @@ async def web_search(query: str, max_results: int = 5) -> str:
 
 async def run_command(command: str, timeout: int = 120) -> str:
     cmd = build_command(command)
-    env = _display_env()
-    for askpass in ("/usr/bin/ksshaskpass", "/usr/lib/ssh/ksshaskpass"):
-        if os.path.exists(askpass):
-            env["SUDO_ASKPASS"] = askpass
-            break
+    env = _display_env() if sys.platform != "win32" else os.environ.copy()
+    askpass = find_askpass()
+    if askpass:
+        env["SUDO_ASKPASS"] = askpass
     try:
         proc = await asyncio.create_subprocess_shell(
             cmd,
@@ -209,7 +318,7 @@ TOOLS = [
             "system info (CPU, memory, disk, GPU model/VRAM), "
             "file operations, package management, network, and any system task. "
             "Privileged commands (pacman, systemctl, etc.) automatically "
-            "request elevation via a GUI password dialog (KWallet/ksshaskpass)."
+            "request elevation via a GUI password dialog (per-OS askpass helper)."
         ),
         "inputSchema": {
             "type": "object",
