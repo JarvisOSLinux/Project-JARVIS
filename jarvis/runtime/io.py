@@ -88,6 +88,24 @@ async def handle_socket_connection(
             pass
 
 
+def enrich_pending_with_goals(app: Any) -> list[dict[str, Any]]:
+    """list_pending() plus each item's owning goal description (#192).
+
+    ``session_id`` is the goal id (#190); resolve it here rather than in
+    ConfirmationManager, which has no GoalManager reference.
+    """
+    pending = app.confirmation.list_pending()
+    goals = getattr(app, "goals", None)
+    for item in pending:
+        goal = (
+            goals.get_goal(item["session_id"])
+            if goals and item.get("session_id")
+            else None
+        )
+        item["goal_description"] = goal.description if goal else None
+    return pending
+
+
 async def _handle_confirmation_query(
     app: Any, msg: dict, writer: asyncio.StreamWriter
 ) -> bool:
@@ -103,7 +121,7 @@ async def _handle_confirmation_query(
             writer,
             {
                 "type": "confirmation_list",
-                "confirmations": app.confirmation.list_pending(),
+                "confirmations": enrich_pending_with_goals(app),
             },
         )
         return True

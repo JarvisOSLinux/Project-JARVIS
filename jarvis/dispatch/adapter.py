@@ -210,6 +210,62 @@ class DispatchAdapter:
     async def get_signal_window(self) -> List[Dict[str, Any]]:
         return await transport_get_signal_window(self, logger)
 
+    async def get_task_status(self) -> List[Dict[str, Any]]:
+        """Read the live task list via dispatch's 'status' tool (#191).
+
+        dispatch's status response has no MCP structuredContent — its JSON
+        rides in content[0].text as a pretty-printed array — so
+        _extract_content's json.loads fallback parses it but wraps the list
+        under "output" (only dicts pass through as-is). Unwrap both shapes so
+        callers get a plain list of {pid, type, server/tool or label/fires_in,
+        state} regardless of whether a future dispatch version starts
+        returning structuredContent directly.
+        """
+        if not require_connection(self, logger, "get_task_status"):
+            return []
+
+        result = await transport_call_tool(
+            self,
+            logger,
+            tool_name="status",
+            params={},
+            op_name="get_task_status",
+            timeout_error="status timed out after {timeout}s",
+            failure_prefix="Failed to get task status",
+            extractor=self._extract_content,
+        )
+        if isinstance(result, dict):
+            tasks = result.get("output", result.get("tasks", []))
+            if isinstance(tasks, list):
+                return tasks
+        return []
+
+    async def get_task_output(self, pids: List[int]) -> str:
+        """Read held/completed output for PIDs via dispatch's 'get_output' tool.
+
+        Same content-shape caveat as get_task_status: the useful text is the
+        human-readable "PID N [hash=...]\\n<output>" block joined under
+        "output" by the json.loads fallback (get_output's content isn't valid
+        JSON, so it never becomes a dict with an "outputs" key here).
+        """
+        if not require_connection(self, logger, "get_task_output"):
+            return ""
+
+        result = await transport_call_tool(
+            self,
+            logger,
+            tool_name="get_output",
+            params={"pids": pids},
+            op_name="get_task_output",
+            timeout_error="get_output timed out after {timeout}s",
+            failure_prefix="Failed to get task output",
+            extractor=self._extract_content,
+        )
+        if isinstance(result, dict):
+            output = result.get("output", "")
+            return output if isinstance(output, str) else ""
+        return ""
+
     def _extract_content(self, result) -> Dict[str, Any]:
         if (
             hasattr(result, "structuredContent")

@@ -111,8 +111,20 @@ def _ipc_endpoint_exists(path: str) -> bool:
     return os.path.exists(path) or os.path.exists(path + ".port")
 
 
+def _format_age(created_at: float) -> str:
+    """Render a confirmation's age as e.g. '40s ago', '5m ago', '2h ago'."""
+    import time
+
+    delta = max(0, time.time() - created_at)
+    if delta < 60:
+        return f"{int(delta)}s ago"
+    if delta < 3600:
+        return f"{int(delta // 60)}m ago"
+    return f"{int(delta // 3600)}h ago"
+
+
 def _cmd_confirmations() -> None:
-    """List or resolve pending tool confirmations on a running JARVIS instance."""
+    """List or resolve pending tool confirmations on a running JARVIS instance (#192)."""
     from .platform import current as platform
 
     if len(sys.argv) == 2:
@@ -122,14 +134,34 @@ def _cmd_confirmations() -> None:
         if subcmd == "approve-all":
             request = {"type": "approve_all_confirmations"}
         elif subcmd in ("approve", "deny") and len(sys.argv) >= 4:
-            request = {
-                "type": (
-                    "approve_confirmation"
-                    if subcmd == "approve"
-                    else "deny_confirmation"
-                ),
-                "id": sys.argv[3],
-            }
+            confirmation_id = sys.argv[3]
+            # Optional 4th arg: comma-separated indices for a per-task decision
+            # within a batch (#187) — "approve <id> 0,2" approves items 0 and 2,
+            # denies the rest of that batch. Whole-batch approve/deny (no
+            # indices) stays all-or-nothing, as before.
+            if len(sys.argv) >= 5:
+                try:
+                    indices = [int(i) for i in sys.argv[4].split(",") if i.strip()]
+                except ValueError:
+                    print(f"Error: invalid index list '{sys.argv[4]}' (want e.g. 0,2)")
+                    sys.exit(1)
+                if subcmd == "deny":
+                    print("Error: index list only applies to 'approve' (per-task pick)")
+                    sys.exit(1)
+                request = {
+                    "type": "partial_approve_confirmation",
+                    "id": confirmation_id,
+                    "approved_indices": indices,
+                }
+            else:
+                request = {
+                    "type": (
+                        "approve_confirmation"
+                        if subcmd == "approve"
+                        else "deny_confirmation"
+                    ),
+                    "id": confirmation_id,
+                }
         else:
             _show_confirmations_usage()
             sys.exit(1)
@@ -167,8 +199,19 @@ def _cmd_confirmations() -> None:
             return
         print(f"Pending confirmations ({len(confirmations)}):")
         for c in confirmations:
-            tools = ", ".join(c.get("tool_names", []))
-            print(f"  [{c['id']}] {tools}")
+            goal_desc = c.get("goal_description")
+            session = c.get("session_id")
+            age = _format_age(c["created_at"]) if c.get("created_at") else "?"
+            header = f'  [{c["id"]}] '
+            if goal_desc:
+                header += f'goal "{goal_desc}"  '
+            if session:
+                header += f"(session {session}, {age})"
+            else:
+                header += f"({age})"
+            print(header)
+            for i, line in enumerate(c.get("tool_lines") or c.get("tool_names", [])):
+                print(f"        [{i}] {line}")
     elif response.get("type") == "ack":
         print(response.get("message", "Done."))
     else:
@@ -178,10 +221,11 @@ def _cmd_confirmations() -> None:
 
 def _show_confirmations_usage() -> None:
     print("Usage:")
-    print("  jarvis confirmations               # List pending confirmations")
-    print("  jarvis confirmations approve <id>  # Approve one")
-    print("  jarvis confirmations deny <id>      # Deny one")
-    print("  jarvis confirmations approve-all    # Approve all pending")
+    print("  jarvis confirmations                     # List pending, by goal/session")
+    print("  jarvis confirmations approve <id>        # Approve the whole batch")
+    print("  jarvis confirmations approve <id> 0,2    # Approve only items 0 and 2")
+    print("  jarvis confirmations deny <id>            # Deny the whole batch")
+    print("  jarvis confirmations approve-all          # Approve all pending")
 
 
 def set_output_mode(mode: str) -> None:

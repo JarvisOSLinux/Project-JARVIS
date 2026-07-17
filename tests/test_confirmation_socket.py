@@ -38,7 +38,14 @@ class TestHandleConfirmationQuery:
             writer,
             {
                 "type": "confirmation_list",
-                "confirmations": [{"id": "a", "tool_names": ["x"], "created_at": 1.0}],
+                "confirmations": [
+                    {
+                        "id": "a",
+                        "tool_names": ["x"],
+                        "created_at": 1.0,
+                        "goal_description": None,
+                    }
+                ],
             },
         )
 

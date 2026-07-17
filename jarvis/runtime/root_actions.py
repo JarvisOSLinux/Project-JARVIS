@@ -299,6 +299,49 @@ async def _handle_configure_server(
     await app._act_on_root_response(response, depth + 1)
 
 
+async def _handle_status(
+    app: Any,
+    logger: Logger,
+    parsed: dict,
+    depth: int,
+    max_chain_depth: int,
+) -> None:
+    """Read-only task/goal introspection (#191) — no dispatch, no side effects.
+
+    Lets ROOT answer "what's the status?" by actually looking, instead of
+    firing a no-op task just to read the signal window back.
+    """
+    goal_id = parsed.get("goal_id")
+    emit_activity(app, "Checking task status…", kind="dispatch")
+
+    tasks = await app.dispatch.get_task_status()
+
+    goal = app.goals.get_goal(goal_id) if goal_id else None
+    if goal:
+        tasks = [t for t in tasks if t.get("pid") in goal.task_pids]
+
+    held_pids = [
+        t["pid"]
+        for t in tasks
+        if t.get("state") not in ("running", None) and "pid" in t
+    ]
+    held_output = await app.dispatch.get_task_output(held_pids) if held_pids else ""
+
+    context = build_root_context(app, logger)
+    if goal:
+        context += f'\nSTATUS_RESULT (goal [{goal.id}] "{goal.description}"):'
+    else:
+        context += "\nSTATUS_RESULT (all active tasks):"
+    context += f"\n{compact_payload_for_llm(tasks)}"
+    if held_output:
+        context += f"\nHELD_OUTPUT:\n{held_output}"
+    if not tasks:
+        context += "\n(no running or held tasks)"
+
+    response = await ask_llm(app, logger, context, tag="root-status", mode="root")
+    await app._act_on_root_response(response, depth + 1)
+
+
 async def act_on_root_response(
     app: Any,
     logger: Logger,
@@ -369,6 +412,10 @@ async def act_on_root_response(
 
     if action == "configure_server":
         await _handle_configure_server(app, logger, parsed, depth, max_chain_depth)
+        return
+
+    if action == "status":
+        await _handle_status(app, logger, parsed, depth, max_chain_depth)
         return
 
     if action == "respond":

@@ -131,6 +131,9 @@ class PendingConfirmation:
     confirm_details: List[Dict[str, Any]] = field(default_factory=list)
     # Dispatch sub-chain context to resume after confirmation.
     dispatch_context: Optional[Dict[str, Any]] = None
+    # The owning goal's id (dispatch session_id) so the resume path can scope the
+    # dispatch to the goal and link the returned PIDs back to it (#190).
+    session_id: Optional[str] = None
     # Retained so a later list_pending() query can describe what's waiting --
     # the original request only computes these locally otherwise.
     tool_names: List[str] = field(default_factory=list)
@@ -235,6 +238,7 @@ class ConfirmationManager:
         dispatch_context: Optional[Dict[str, Any]] = None,
         notification_silent: bool = False,
         timeout: float = DEFAULT_TIMEOUT,
+        session_id: Optional[str] = None,
     ) -> None:
         """Send confirmation notification and return immediately.
 
@@ -265,6 +269,7 @@ class ConfirmationManager:
             approved_tasks=list(approved_tasks),
             denied_tools=list(denied_tools),
             dispatch_context=dispatch_context,
+            session_id=session_id,
             tool_names=tool_names,
             tool_lines=tool_lines,
             confirm_details=list(tools_needing_confirmation),
@@ -298,13 +303,20 @@ class ConfirmationManager:
             )
 
     def list_pending(self) -> List[Dict[str, Any]]:
-        """Summaries of currently pending confirmations, for CLI/socket review."""
+        """Summaries of currently pending confirmations, for CLI/socket review.
+
+        ``session_id`` is the owning goal's id (#190 carries it into
+        ``PendingConfirmation`` at request time) — callers resolve it to a
+        goal description via ``GoalManager`` (#192), this manager has no
+        goal-tree access of its own.
+        """
         return [
             {
                 "id": p.request_id,
                 "tool_names": p.tool_names,
                 "tool_lines": p.tool_lines,
                 "created_at": p.created_at,
+                "session_id": p.session_id,
             }
             for p in self._pending.values()
         ]

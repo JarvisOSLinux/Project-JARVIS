@@ -578,6 +578,7 @@ async def dispatch_send(
         dispatch_context=dispatch_context,
         notification_silent=notification_silent,
         timeout=Config.CONFIRMATION_TIMEOUT,
+        session_id=session_id,
     )
 
     tool_names = [t["tool_name"] for t in tools_needing_confirmation]

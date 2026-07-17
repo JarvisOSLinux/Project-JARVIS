@@ -38,24 +38,35 @@ def _make_logging_callback(adapter: Any, logger: Logger):
 
     dispatch pushes each wakeup-worthy signal as a ``notifications/message`` with
     ``logger="dispatch.signal"``; we normalize it and hand it to the adapter's
-    signal sink (EventMerger.enqueue_pushed_signal). The sink is read at call
-    time, so it may be unset during early connect — such signals are dropped and
-    the poll fallback still catches up (#26).
+    signal sink (EventMerger.enqueue_pushed) — a dict for a single ``fire_wake=true``
+    signal, a list for a merged ``fire_wake=false`` batch (#189). The sink is read
+    at call time, so it may be unset during early connect — such signals are
+    dropped and the poll fallback still catches up (#26).
     """
 
     async def _on_log_message(params: Any) -> None:
         try:
             if getattr(params, "logger", None) != _PUSH_SIGNAL_LOGGER:
                 return
-            raw = getattr(params, "data", None)
-            if not isinstance(raw, dict):
-                logger.debug("Dispatch: pushed signal had no dict payload — ignoring")
-                return
             sink = getattr(adapter, "_signal_sink", None)
             if sink is None:
                 logger.debug("Dispatch: pushed signal dropped — sink not registered")
                 return
-            sink(_normalize_pushed_signal(raw))
+            raw = getattr(params, "data", None)
+            if isinstance(raw, list):
+                # A merged fire_wake=false batch: hand the whole group over as
+                # one unit so ROOT runs it as a single turn (#189).
+                batch = [
+                    _normalize_pushed_signal(s) for s in raw if isinstance(s, dict)
+                ]
+                if batch:
+                    sink(batch)
+            elif isinstance(raw, dict):
+                sink(_normalize_pushed_signal(raw))
+            else:
+                logger.debug(
+                    "Dispatch: pushed signal had no dict/list payload — ignoring"
+                )
         except Exception as e:  # never let a bad push break the session
             logger.error(f"Dispatch: error handling pushed signal: {e}")
 

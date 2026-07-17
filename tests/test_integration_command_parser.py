@@ -154,6 +154,28 @@ class TestWaitActionParsing:
 
 
 @pytest.mark.integration
+class TestStatusActionParsing:
+    """Test parsing of status actions (#191)."""
+
+    def test_parse_status_action_no_goal(self):
+        parser = TaskParser()
+        response = {"action": "status"}
+        result = parser.parse(response)
+
+        assert result["action"] == "status"
+        assert result["goal_id"] is None
+        assert result["goal_updates"] == []
+
+    def test_parse_status_action_with_goal(self):
+        parser = TaskParser()
+        response = {"action": "status", "goal_id": "abc123"}
+        result = parser.parse(response)
+
+        assert result["action"] == "status"
+        assert result["goal_id"] == "abc123"
+
+
+@pytest.mark.integration
 class TestKillActionParsing:
     """Test parsing of kill actions."""
 
