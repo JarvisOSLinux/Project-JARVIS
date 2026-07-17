@@ -8,7 +8,7 @@ from logging import Logger
 from typing import Any
 
 from ..core.voice_state import VoiceState
-from .io import broadcast_to_gui_clients, set_gui_state
+from .io import broadcast_to_gui_clients, enrich_pending_with_goals, set_gui_state
 from .llm_bridge import ask_llm
 from .output_hooks import emit_activity
 from .root_context import build_root_context, compact_payload_for_llm
@@ -197,7 +197,7 @@ async def on_confirmation_response(
                 app,
                 {
                     "type": "confirmation_list",
-                    "confirmations": app.confirmation.list_pending(),
+                    "confirmations": enrich_pending_with_goals(app),
                 },
             )
         )

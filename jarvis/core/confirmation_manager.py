@@ -303,13 +303,20 @@ class ConfirmationManager:
             )
 
     def list_pending(self) -> List[Dict[str, Any]]:
-        """Summaries of currently pending confirmations, for CLI/socket review."""
+        """Summaries of currently pending confirmations, for CLI/socket review.
+
+        ``session_id`` is the owning goal's id (#190 carries it into
+        ``PendingConfirmation`` at request time) — callers resolve it to a
+        goal description via ``GoalManager`` (#192), this manager has no
+        goal-tree access of its own.
+        """
         return [
             {
                 "id": p.request_id,
                 "tool_names": p.tool_names,
                 "tool_lines": p.tool_lines,
                 "created_at": p.created_at,
+                "session_id": p.session_id,
             }
             for p in self._pending.values()
         ]

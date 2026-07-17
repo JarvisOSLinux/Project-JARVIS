@@ -304,6 +304,8 @@ Valid formats:
 
 {{"action": "list_memory", "goal_updates": []}}
 
+{{"action": "status", "goal_id": "<optional goal id, omit for all>", "goal_updates": []}}
+
 {{"action": "done", "summary": "result summary"}}
 
 The very first character must be {{ and the very last must be }}.
@@ -321,6 +323,10 @@ store — Remember a personal fact or preference.
 recall — Recall stored facts by exact theme name.
 search_memory — Search all memories by meaning. Use when you need context.
 list_memory — List all stored memory themes.
+status — Check live/held task state instead of guessing. Use before claiming a task
+  "is still running" or "finished" without a signal, and to check on a fire_wake=false
+  batch's slow straggler without dispatching a no-op task. Omit "goal_id" for every
+  active goal, or pass one (from GOALS/GOAL_STATE) to scope the read.
 {data_consent_note}
 --- Tool use (multi-step) ---
 
@@ -437,8 +443,15 @@ dispatch — Execute tool calls. Only after seeing SERVER_DOCS.
     "goal_updates": []
 }}
 
+{{
+    "action": "status",
+    "goal_id": "<optional goal id from GOALS, omit for all active goals>",
+    "goal_updates": []
+}}
+
 --- Context ---
-You receive: GOALS (with IDs), NEW INPUT, SEARCH_RESULTS, SERVER_DOCS, DISPATCH_RESULT, WAIT_RESULT.
+You receive: GOALS (with IDs), NEW INPUT, SEARCH_RESULTS, SERVER_DOCS, DISPATCH_RESULT, WAIT_RESULT,
+STATUS_RESULT (from the status action — live task state, plus HELD_OUTPUT for anything done-but-held).
 Memory results: STORE_RESULT, RECALL_RESULT, SEARCH_MEMORY_RESULT, LIST_MEMORY_RESULT.
 RELEVANT MEMORIES may be included automatically (RAG).
 Include goal_updates in respond: "completed" or "failed" with result.
@@ -487,6 +500,10 @@ OS: {system} {release} ({machine}), Shell: {shell}
 
 respond — Direct reply. Use for chat, greetings, or after a result comes back.
 Memory is disabled. Do not use store, recall, search_memory, or list_memory.
+status — Check live/held task state instead of guessing. Use before claiming a task
+  "is still running" or "finished" without a signal, and to check on a fire_wake=false
+  batch's slow straggler without dispatching a no-op task. Omit "goal_id" for every
+  active goal, or pass one (from GOALS/GOAL_STATE) to scope the read.
 
 --- Tool use (multi-step) ---
 
@@ -568,8 +585,15 @@ dispatch — Execute tool calls. Only after seeing SERVER_DOCS.
     "goal_updates": []
 }}
 
+{{
+    "action": "status",
+    "goal_id": "<optional goal id from GOALS, omit for all active goals>",
+    "goal_updates": []
+}}
+
 --- Context ---
-You receive: GOALS (with IDs), NEW INPUT, SEARCH_RESULTS, SERVER_DOCS, DISPATCH_RESULT, WAIT_RESULT.
+You receive: GOALS (with IDs), NEW INPUT, SEARCH_RESULTS, SERVER_DOCS, DISPATCH_RESULT, WAIT_RESULT,
+STATUS_RESULT (from the status action — live task state, plus HELD_OUTPUT for anything done-but-held).
 Include goal_updates in respond: "completed" or "failed" with result.
 DISPATCH_RESULT shows only the signals for YOUR CURRENT BATCH. EXIT signals in it confirm
 success or failure. No EXIT yet means tasks are still running.
