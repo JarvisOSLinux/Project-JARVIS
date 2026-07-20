@@ -96,12 +96,16 @@ class TestDispatchActionParsing:
 
         assert result["tasks"][0]["remind_after"] == 60
 
-    def test_parse_dispatch_empty_tasks_returns_error(self):
+    def test_parse_dispatch_empty_tasks_becomes_wait(self):
+        # An empty task list is no longer a hard error: the LLM has nothing to
+        # dispatch right now, so it's treated as a benign wait rather than being
+        # bounced back as a format error that forces a retry loop (#198).
         parser = TaskParser()
         response = {"action": "dispatch", "tasks": []}
         result = parser.parse(response)
 
-        assert "error" in result
+        assert "error" not in result
+        assert result["action"] == "wait"
 
     def test_parse_dispatch_missing_tasks_returns_error(self):
         parser = TaskParser()

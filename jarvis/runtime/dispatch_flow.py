@@ -18,9 +18,6 @@ from .root_context import build_root_context, compact_payload_for_llm
 
 # Signal window text line: "[14:11:04] PID 2 INIT server tool {...}"
 _PID_INIT_RE = re.compile(r"PID (\d+) INIT")
-_PID_ANY_RE = re.compile(r"PID (\d+)")
-# Signal lines always start with a timestamp bracket "[HH:MM:SS]"
-_SIGNAL_LINE_RE = re.compile(r"^\[")
 
 
 def _extract_pids_from_result(result: Any) -> list[int]:
@@ -81,80 +78,6 @@ def _find_exits_for_pids(window: list[dict], pids: list[int]) -> list[dict]:
         for s in window
         if s.get("type") in ("EXIT", "TIMEOUT") and s.get("pid") in pid_set
     ]
-
-
-def _trim_to_current_batch(result: Any, num_tasks: int) -> Any:
-    """Return a version of result whose signal window shows only current-batch signals.
-
-    The dispatch binary accumulates signals since startup. This trims the window
-    to only the N current-batch PIDs (allocated monotonically — highest PIDs are
-    newest), preserving each signal's full multi-line EXIT body.
-
-    Signal lines start with a timestamp "[HH:MM:SS] PID N …". Body lines that
-    carry error details (e.g. a JSON enum list) have no timestamp and belong to
-    the immediately preceding signal line. We group by timestamp boundary so body
-    lines are never stripped.
-
-    Old EXIT signals from previous batches (whose INIT may have already scrolled
-    off the window) are excluded even when their EXIT line appears after the
-    current batch's INIT lines — the previous slice-from-first-INIT approach
-    incorrectly included those.
-    """
-    if not isinstance(result, dict) or num_tasks <= 0:
-        return result
-    output = result.get("output", "")
-    if not isinstance(output, str) or "Signal window" not in output:
-        return result
-
-    lines = output.splitlines()
-
-    # Collect all INIT PIDs to determine the current-batch set.
-    init_pids: list[int] = []
-    for line in lines:
-        m = _PID_INIT_RE.search(line)
-        if m:
-            init_pids.append(int(m.group(1)))
-
-    if not init_pids:
-        return result
-
-    # Current batch = the num_tasks highest PIDs (dispatch allocates PIDs monotonically).
-    current_pid_set: set[int] = set(sorted(init_pids)[-num_tasks:])
-
-    # Group lines into signal blocks. A new block begins at each timestamp line
-    # ("[HH:MM:SS] …"). Non-timestamp lines are the body of the current block.
-    # Lines before the first timestamp are the header ("Signal window (last N):").
-    blocks: list[tuple[int | None, list[str]]] = []
-    current_pid: int | None = None
-    current_block: list[str] = []
-    in_signals = False
-
-    for line in lines:
-        if _SIGNAL_LINE_RE.match(line):
-            # Flush previous block
-            if current_block:
-                blocks.append((current_pid, current_block))
-            m = _PID_ANY_RE.search(line)
-            current_pid = int(m.group(1)) if m else None
-            current_block = [line]
-            in_signals = True
-        elif not in_signals:
-            # Pre-signal header — skip (we replace it with our own header)
-            pass
-        else:
-            # Body line belonging to the current signal block
-            current_block.append(line)
-
-    if current_block:
-        blocks.append((current_pid, current_block))
-
-    # Keep only blocks whose PID is in the current batch.
-    kept = [f"Signal window (current batch, {num_tasks} task(s)):"]
-    for pid, block_lines in blocks:
-        if pid in current_pid_set:
-            kept.extend(block_lines)
-
-    return {"output": "\n".join(kept)}
 
 
 async def run_dispatch_subchain(
@@ -615,35 +538,31 @@ async def get_tool_metadata(
     return {}
 
 
-_AUTH_ERROR_PATTERNS = (
-    "subscription_token_invalid",
-    "invalid_api_key",
-    "invalid_token",
-    "token_invalid",
-    "unauthorized",
-    "authentication",
-)
-
-
-def _contains_auth_error(text: str) -> bool:
-    text_lower = text.lower()
-    return any(p in text_lower for p in _AUTH_ERROR_PATTERNS)
-
-
 async def dispatch_execute_tasks(
     app: Any,
     logger: Logger,
     tasks: list[dict[str, Any]],
     depth: int,
 ) -> None:
-    """Handle a dispatch action that already has concrete tasks (from root)."""
+    """Handle a dispatch action that already has concrete tasks (from root).
+
+    The success path is silent: the tasks' EXIT signals (on_dispatch_signal /
+    on_dispatch_signals) drive the next ROOT turn once real results exist.
+    Asking here would only show an INIT-only window and duplicate that turn (#195).
+    """
     if not app.dispatch.is_connected:
         app.output_manager.handle_response(
             {"output": "I can't execute tools right now — dispatch is not connected."}
         )
         return
 
-    result = await dispatch_send(app, logger, tasks)
+    # Scope the dispatch to the active goal so its PIDs link back to it and every
+    # signal turn is goal-scoped, instead of logging "No goal found for PID" and
+    # falling back to full-root context (#196).
+    active = app.goals.get_active_goals()
+    goal_id = active[-1].id if active else None
+
+    result = await dispatch_send(app, logger, tasks, session_id=goal_id)
 
     if isinstance(result, dict) and result.get("awaiting_confirmation"):
         logger.info(
@@ -652,47 +571,20 @@ async def dispatch_execute_tasks(
         )
         return
 
-    pids = _extract_pids_from_result(result)
-    if pids:
-        active = app.goals.get_active_goals()
-        if active:
-            app.goals.link_tasks(active[-1].id, pids)
-
-    app.llm.switch_mode("root")
-    context = build_root_context(app, logger)
     if isinstance(result, dict) and "error" in result:
+        # A synchronous send error produces no EXIT signal — surface it now,
+        # otherwise the goal would stall waiting for a wakeup that never comes.
+        app.llm.switch_mode("root")
+        context = build_root_context(app, logger)
         context += f"\nDISPATCH_ERROR: {compact_payload_for_llm(result)}"
-    else:
-        trimmed = _trim_to_current_batch(result, len(tasks))
-        result_text = compact_payload_for_llm(trimmed)
-        context += f"\nDISPATCH_RESULT: {result_text}"
+        response = await ask_llm(app, logger, context, tag="root-dispatch-result")
+        await app._act_on_root_response(response, depth + 1)
+        return
 
-        # When the exit payload contains auth/token errors, surface the exact
-        # env-var key names from each server's configurableProperties. Without
-        # this the LLM guesses the key from the error wording (e.g.
-        # "subscription_token" instead of "BRAVE_API_KEY").
-        if _contains_auth_error(result_text):
-            server_ids = {
-                t["server"] for t in tasks if isinstance(t, dict) and t.get("server")
-            }
-            for sid in server_ids:
-                manifest = await app.dispatch.get_server_manifest(sid)
-                props = manifest.get("configurableProperties") or []
-                if props:
-                    required_keys = [
-                        p["key"] for p in props if isinstance(p, dict) and p.get("key")
-                    ]
-                    if required_keys:
-                        key_list = ", ".join(required_keys)
-                        example = ", ".join(f'"{k}": "<value>"' for k in required_keys)
-                        context += (
-                            f"\nCONFIG_HINT: {sid} requires configuration."
-                            f"\n  Required key(s): {key_list}"
-                            f'\n  Call: {{"action": "configure_server", "server_id": "{sid}", "config": {{{example}}}}}'
-                        )
-
-    response = await ask_llm(app, logger, context, tag="root-dispatch-result")
-    await app._act_on_root_response(response, depth + 1)
+    pids = _extract_pids_from_result(result)
+    if pids and goal_id:
+        app.goals.link_tasks(goal_id, pids)
+    emit_activity(app, "Tasks dispatched; awaiting results…", kind="dispatch")
 
 
 async def do_kill(app: Any, logger: Logger, pids: Any) -> None:

@@ -327,8 +327,11 @@ async def act_on_root_response(
             "Fix the JSON and try again. Reminder:\n"
             '  {"action": "search_tools", "capability": "<domain or service needed>", "goal_updates": []}\n'
             '  {"action": "get_server_docs", "server_id": "<id from SEARCH_RESULTS>", "goal_updates": []}\n'
+            '  {"action": "dispatch", "tasks": [{"server": "<id>", "tool": "<tool>", "params": {"command": "..."}}], "goal_updates": []}\n'
             '  {"action": "respond", "output": "<message>", "goal_updates": []}\n'
-            "Do NOT wrap fields in a 'params' object. Output exactly one JSON object."
+            "Put action fields at the top level. For a dispatch task, keep the "
+            "tool's arguments inside that task's \"params\" object. "
+            "Output exactly one JSON object."
         )
         retry_response = await ask_llm(
             app, logger, context, tag="root-retry-parse", mode="root"

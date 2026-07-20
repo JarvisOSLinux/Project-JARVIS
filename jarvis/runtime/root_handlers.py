@@ -233,9 +233,19 @@ async def on_confirmation_response(
             if pids:
                 app.goals.link_tasks(pending.session_id, pids)
 
-        context = build_root_context(app, logger)
+        send_error = isinstance(result, dict) and "error" in result
+        # On the clean happy path (tasks accepted, nothing denied) go silent —
+        # the tasks' EXIT signals drive the next ROOT turn once real results
+        # exist. Only drive a turn here for what the signals won't carry: a
+        # synchronous send error, or denied tools the user should hear about (#195).
+        if not send_error and not pending.denied_tools:
+            emit_activity(
+                app, "Running approved tools; awaiting results…", kind="dispatch"
+            )
+            return
 
-        if isinstance(result, dict) and "error" in result:
+        context = build_root_context(app, logger)
+        if send_error:
             context += f"\nDISPATCH_ERROR: {compact_payload_for_llm(result)}"
         else:
             context += f"\nDISPATCH_RESULT: {compact_payload_for_llm(result)}"

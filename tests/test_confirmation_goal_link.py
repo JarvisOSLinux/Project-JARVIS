@@ -88,6 +88,7 @@ def test_confirmation_resume_links_pids_to_goal(tmp_path, monkeypatch):
 
     # Keep the test to the linkage: stub context building and the LLM call.
     monkeypatch.setattr(root_handlers, "build_root_context", lambda a, l, **k: "")
+    monkeypatch.setattr(root_handlers, "emit_activity", lambda *a, **k: None)
 
     async def _fake_ask(a, l, c, **k):
         return {"action": "respond", "output": "ok"}
@@ -117,6 +118,7 @@ def test_confirmation_resume_without_goal_does_not_crash(tmp_path, monkeypatch):
     )
     app = _FakeApp(goals, conf)
     monkeypatch.setattr(root_handlers, "build_root_context", lambda a, l, **k: "")
+    monkeypatch.setattr(root_handlers, "emit_activity", lambda *a, **k: None)
 
     async def _fake_ask(a, l, c, **k):
         return {"action": "respond", "output": "ok"}
@@ -129,4 +131,6 @@ def test_confirmation_resume_without_goal_does_not_crash(tmp_path, monkeypatch):
         )
     )
     assert app.dispatch.session_id is None
-    assert app.acted == {"action": "respond", "output": "ok"}
+    # Clean happy path (approved, nothing denied) is now silent — the EXIT
+    # signals drive the next ROOT turn, so no immediate turn fires here (#195).
+    assert app.acted is None

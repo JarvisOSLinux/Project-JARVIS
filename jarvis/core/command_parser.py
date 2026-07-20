@@ -247,7 +247,18 @@ def _parse_dispatch(response: Dict[str, Any]) -> Dict[str, Any]:
             "goal_updates": response.get("goal_updates", []),
         }
 
-    if not isinstance(tasks, list) or not tasks:
+    if isinstance(tasks, list) and not tasks:
+        # Empty task list with no routing intent: the LLM has nothing to dispatch
+        # right now (commonly woken by a signal with no follow-up work). Treat it
+        # as a benign wait rather than a hard parse error that forces a
+        # retry-with-correction loop — the ROOT router applies goal_updates and
+        # ends the turn quietly (#198).
+        return {
+            "action": "wait",
+            "goal_updates": response.get("goal_updates", []),
+        }
+
+    if not isinstance(tasks, list):
         return {
             "error": "Dispatch action requires 'intent' (routing) or non-empty 'tasks' (execution)",
             "raw": response,
