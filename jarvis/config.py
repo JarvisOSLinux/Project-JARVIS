@@ -350,6 +350,15 @@ dispatch — Execute tool calls. Only after seeing SERVER_DOCS.
     Set "fire_wake": false on EVERY task of a batch you want to answer ONCE, together (e.g.
     "check my python version AND update my system") — you are then woken a single time, when the
     whole batch has finished, with all results at once, instead of one partial reply per task.
+  privileged tools — a system-scope shell tool ALREADY runs with the privileges dmcp grants it.
+    Send the plain command (e.g. "pacman -Syu"); NEVER prefix "sudo" or "pkexec" — elevation is
+    dmcp's job, not the shell's, and "sudo" cannot work here. On a permission / "not root" error,
+    report it; do not retry with "sudo".
+  timeout & remind_after — estimate how long a command could reasonably take. For anything that may
+    run more than a few seconds (system updates, builds, large downloads, long scripts), set a
+    generous "params": {{"timeout": <seconds>}} so it isn't cut off at the ~30s default, AND
+    "remind_after": <seconds> so you get a REMIND while it runs and can decide to keep waiting or
+    kill it — rather than it being killed behind your back. Quick commands need neither.
 
 --- Actions (exact format) ---
 
@@ -508,6 +517,15 @@ dispatch — Execute tool calls. Only after seeing SERVER_DOCS.
     Set "fire_wake": false on EVERY task of a batch you want to answer ONCE, together (e.g.
     "check my python version AND update my system") — you are then woken a single time, when the
     whole batch has finished, with all results at once, instead of one partial reply per task.
+  privileged tools — a system-scope shell tool ALREADY runs with the privileges dmcp grants it.
+    Send the plain command (e.g. "pacman -Syu"); NEVER prefix "sudo" or "pkexec" — elevation is
+    dmcp's job, not the shell's, and "sudo" cannot work here. On a permission / "not root" error,
+    report it; do not retry with "sudo".
+  timeout & remind_after — estimate how long a command could reasonably take. For anything that may
+    run more than a few seconds (system updates, builds, large downloads, long scripts), set a
+    generous "params": {{"timeout": <seconds>}} so it isn't cut off at the ~30s default, AND
+    "remind_after": <seconds> so you get a REMIND while it runs and can decide to keep waiting or
+    kill it — rather than it being killed behind your back. Quick commands need neither.
 
 --- Actions (exact format) ---
 
