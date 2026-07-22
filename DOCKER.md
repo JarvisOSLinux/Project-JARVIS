@@ -11,6 +11,18 @@ Complete guide for running Project JARVIS in Docker for cross-platform testing a
 2. Ollama running: `ollama serve`
 3. LLM model: `ollama pull qwen3:4b` (or your preferred model)
 
+### **Configure an LLM provider (first run)**
+
+A fresh container has no provider configured — the model/endpoint come from
+`~/.config/jarvis/providers.json`, not env vars. Persist the config in a
+volume and add a provider once:
+
+```bash
+docker run -it --rm -v jarvis-config:/home/jarvisuser/.config/jarvis \
+  jarvis-ai:latest jarvis providers add --type ollama --model qwen3:4b
+# then reuse the same volume for every run: -v jarvis-config:/home/jarvisuser/.config/jarvis
+```
+
 ### **Build & Run**
 
 **Linux/Mac:**
@@ -96,8 +108,10 @@ docker run -it --rm \
 
 **Text Chat Mode:**
 ```bash
-docker run -it --rm \
-  -e OLLAMA_HOST=http://host.docker.internal:11434 \
+docker run -it --rm -v jarvis-config:/home/jarvisuser/.config/jarvis \
+  jarvis-ai:latest jarvis providers add --type ollama --model qwen3:4b \
+    --url http://host.docker.internal:11434   # once
+docker run -it --rm -v jarvis-config:/home/jarvisuser/.config/jarvis \
   jarvis-ai:latest python -m jarvis.main chat
 ```
 
@@ -163,7 +177,7 @@ Override config at runtime:
 ```bash
 docker run -it --rm \
   --network host \
-  -e LLM_MODEL=qwen3:4b \
+  -v jarvis-config:/home/jarvisuser/.config/jarvis \
   -e OUTPUT_MODE=text \
   -e WAKE_WORDS="jarvis,hey jarvis" \
   jarvis-ai:latest
@@ -173,10 +187,12 @@ docker run -it --rm \
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OLLAMA_HOST` | `http://host.docker.internal:11434` | Ollama API endpoint |
-| `LLM_MODEL` | (from .env) | LLM model name |
 | `OUTPUT_MODE` | `voice` | `voice` or `text` |
 | `WAKE_WORDS` | `jarvis,hey jarvis,okay jarvis` | Wake words (comma-separated) |
+
+Model and endpoint selection are **not** env vars: they come from the provider
+pool (`jarvis providers add --type ollama --model <m> [--url <u>]`, stored in
+`providers.json`). `OLLAMA_HOST`/`LLM_MODEL` are not read by the daemon.
 
 ---
 
@@ -194,7 +210,7 @@ The Docker image runs JARVIS in **conversation-only mode** when the `dispatch` a
 
 **Solutions:**
 - **Linux**: Use `--network host` or ensure Ollama listens on `0.0.0.0:11434`
-- **Mac/Windows**: Use `-e OLLAMA_HOST=http://host.docker.internal:11434`
+- **Mac/Windows**: point the provider at the host: `jarvis providers add --type ollama --model qwen3:4b --url http://host.docker.internal:11434`
 - **Test**: `curl http://localhost:11434/api/version`
 
 ### **No audio devices**
@@ -232,3 +248,9 @@ The Docker image runs JARVIS in **conversation-only mode** when the `dispatch` a
 - [Docker Compose](https://docs.docker.com/compose/)
 - [Ollama Docs](https://ollama.com/)
 - [Project JARVIS README](README.md)
+
+---
+
+## Changelog — corrected claims
+
+*2026-07-22:* first-run provider configuration added (fresh containers have no provider; `providers.json` is the only model/endpoint source); `LLM_MODEL`/`OLLAMA_HOST` env guidance removed — neither is read by the daemon; examples updated to persist `~/.config/jarvis` in a volume.
