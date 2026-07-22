@@ -14,10 +14,13 @@ Project-JARVIS (Python)     — daemon, LLM orchestration, interfaces
   jarvis/dispatch/          — Python adapter wrapping the Rust dispatch binary
   jarvis/core/              — security, confirmation, logging, I/O
   jarvis/tui/               — Textual TUI (decomposed into ~12 modules)
-  jarvis/llm/               — LLM client (Ollama)
+  jarvis/llm/               — provider-agnostic LLM layer (Ollama local + OpenAI-compatible API providers, ProviderPool failover)
   jarvis/voice/             — STT (Vosk) + TTS (Piper)
   jarvis/sessions/          — session persistence
   jarvis/runtime/           — event loop, action handlers
+  jarvis/contextor/         — adapter + embeddings for the Rust contextor memory binary
+  jarvis/platform/          — OS abstraction (Linux/macOS/Windows: data dirs, IPC hardening)
+  shellmcp/                 — bundled shell MCP server (run_command, open_app, web_search)
 
 deps/rust/dispatch          — Rust signal-driven MCP task orchestrator
 deps/rust/dmcp              — Rust MCP server manager (package manager for MCP)
@@ -60,14 +63,19 @@ Key: the LLM derives *capability*, not keywords. "check my python version" →
 
 ## Security Architecture
 
-### 4-Tier Action Policy
+### TLA (Threat Level Access) — 4-tier policy
+
+Behaviour in `smart` mode, per `confirmation_manager.should_confirm`:
 
 | Tier | Behaviour |
 |------|-----------|
-| SAFE | Run silently |
-| ELEVATED | Run + audit log entry |
-| DANGEROUS | Block until explicit user confirmation |
-| FORBIDDEN | Hard block unconditionally |
+| SAFE | Runs without prompting |
+| ELEVATED | Blocked pending user confirmation |
+| DANGEROUS | Blocked pending user confirmation |
+| FORBIDDEN | Blocked pending user confirmation |
+
+There is no separate audit log and no unconditional FORBIDDEN block:
+`allow_all` bypasses ALL tiers including FORBIDDEN (documented risk).
 
 ### Confirmation Modes
 
@@ -75,8 +83,8 @@ Key: the LLM derives *capability*, not keywords. "check my python version" →
 
 | Mode | Behaviour |
 |------|-----------|
-| `allow_all` | No prompts, everything auto-approved |
-| `smart` | Only ask when tool declares `confirmation_required: true` |
+| `allow_all` | No prompts, everything auto-approved (bypasses all tiers) |
+| `smart` | Ask when the TLA classifier rates the call >= ELEVATED: max(host floor for always-dangerous tools, manifest-declared `threat_level` / legacy `confirmation_required`, dangerous-payload scan of params) |
 | `ask_all` | Confirm every tool call |
 
 ### Confirmation Channels
@@ -98,10 +106,27 @@ set it > 0 to restore auto-deny for unattended/headless setups.
 
 ### Socket Security
 
-`socket_security.py` hardens the IPC socket (`/tmp/jarvis.sock`):
-- `harden_socket_path()` — sets 0600 permissions
+`socket_security.py` hardens the three IPC endpoints under `JARVIS_DATA_DIR`
+(platform data dir, e.g. `~/.jarvis/`): `input.sock`, `output.sock`, and
+`jarvis.sock` (GUI) — overridable via `JARVIS_INPUT_SOCKET` /
+`JARVIS_OUTPUT_SOCKET` / `JARVIS_GUI_SOCKET`:
+- `harden_socket_path()` — platform-delegated (0600 on Linux/macOS, localhost TCP on Windows)
 - `verify_socket_ownership()` — checks UID before connecting
 - `warn_if_allow_all()` — logs warning when confirmation is disabled
+
+### Output-Provenance Boundary (Prompt Injection)
+
+dispatch wraps every tool output in a per-task 128-bit CSPRNG-nonce-keyed tag
+(`[hash=<H>] <<H>>...</<H>>`); the daemon verifies EXIT bodies via
+`jarvis/dispatch/boundary.py:verify_boundary()` and treats missing or
+mismatched wrappers as untrusted (Threat #2 mitigation, #165).
+
+### Sudo Management
+
+`jarvis sudo enable/disable` (`jarvis/core/sudo_manager.py`, #158) manages a
+password-required, visudo-validated `/etc/sudoers.d/jarvis` drop-in (atomic
+install). The bundled `shellmcp` server escalates privileged commands via
+`sudo -A` + ksshaskpass so the GUI password prompt remains the boundary.
 
 ---
 
@@ -111,23 +136,28 @@ set it > 0 to restore auto-deny for unattended/headless setups.
 
 | Extra | What it adds |
 |-------|-------------|
-| `jarvis-ai` | Core daemon (text I/O, LLM, dispatch) |
-| `jarvis-ai[tui]` | Textual TUI (`jarvis tui`) |
-| `jarvis-ai[voice]` | Vosk STT + Piper TTS |
-| `jarvis-ai[voice-aec]` | Voice + acoustic echo cancellation (native-compiled, barge-in fix) |
-| `jarvis-ai[dev]` | pytest, black, isort, flake8, mypy, pre-commit |
-| `jarvis-ai[all]` | Everything above |
+| `project-jarvis` | Core daemon (text I/O, LLM, dispatch) |
+| `project-jarvis[tui]` | Textual TUI (`jarvis tui`) |
+| `project-jarvis[voice-input]` | Vosk STT only |
+| `project-jarvis[voice-output]` | Piper TTS only |
+| `project-jarvis[voice]` | Vosk STT + Piper TTS |
+| `project-jarvis[voice-aec]` | Voice + acoustic echo cancellation (native-compiled, barge-in fix) |
+| `project-jarvis[dev]` | pytest, black, isort, flake8, mypy, pre-commit |
+| `project-jarvis[docs]` | Documentation tools (sphinx) |
+| `project-jarvis[all]` | tui + voice-aec + dev + docs |
 
 ### Rust Dependencies
 
 Submodules under `deps/rust/` — dispatch, dmcp, contextor. Build with
 `cargo build --release` in each directory. Binaries must be on PATH.
 
-## Planned Work
+## LLM Providers
 
-### API Recycling (#78)
-
-Provider failover pool with priority ordering and automatic cooldown/recovery.
+Shipped (#78): `ProviderPool` (`jarvis/llm/provider_pool.py`) is built from
+`providers.json` at startup (`ComponentFactory._build_provider_pool()`), walks
+providers in priority order, and fails over with per-error cooldowns
+(429 → 60 s, 402 → 1 h, 401/403 → permanent, 5xx/timeout → 30 s) plus
+automatic restore when a cooldown expires.
 
 ---
 
@@ -163,6 +193,8 @@ make check                  # Format + lint + typecheck + tests
 | `jarvis/tui/provider_modal.py` | Provider add/edit modal |
 | `jarvis/core/confirmation_manager.py` | Multi-channel confirmation gate |
 | `jarvis/core/socket_security.py` | Socket hardening |
+| `jarvis/core/sudo_manager.py` | `jarvis sudo` — sudoers drop-in management (#158) |
+| `jarvis/dispatch/boundary.py` | Output-provenance boundary verification (#165) |
 | `jarvis/core/command_parser.py` | LLM response parser + action registry |
 | `jarvis/core/voice_state.py` | `VoiceState` — formal voice/response session state machine |
 | `jarvis/voice/chime.py` | Wake-word earcon: path validation + best-effort playback |
@@ -180,3 +212,9 @@ make check                  # Format + lint + typecheck + tests
 | `jarvis/runtime/root_context.py` | Context assembly for ROOT-mode prompts |
 | `jarvis/runtime/llm_bridge.py` | `ask_llm()` — the sole locked/mode-atomic LLM call site |
 | `jarvis/runtime/events.py` | Event routing + per-event task tracking (concurrent goals) |
+
+---
+
+## Changelog — corrected claims
+
+*2026-07-22:* extras renamed to `project-jarvis` and completed (voice-input/voice-output/docs); tier table rewritten to match `should_confirm` (ELEVATED confirms, no audit log, no unconditional FORBIDDEN — `allow_all` bypasses all tiers); `smart` mode described as the TLA classifier (max of host floor, manifest level, payload scan); LLM layer documented as provider-agnostic with the shipped failover pool (#78 moved out of Planned Work); socket security corrected to the three `JARVIS_DATA_DIR` endpoints; added Output-Provenance Boundary (#165), Sudo Management (#158), `jarvis/contextor/`, `jarvis/platform/`, and `shellmcp/`.
