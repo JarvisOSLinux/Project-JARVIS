@@ -4,7 +4,7 @@
 **Subject:** Nous Research **Hermes Agent** (`NousResearch/hermes-agent`, MIT) vs. **Project-JARVIS** — the core AI agent (`pip install project-jarvis`), *not* the JarvisOS distribution. Both are model-agnostic agent cores; JarvisOS is merely one place Project-JARVIS is embodied and is out of scope here.
 **Method:** Hermes facts are from its primary sources (repo README, `website/docs/`, `optional-mcps/` manifests), adversarially verified; claims that couldn't be confirmed are quarantined in [§ Unverified](#unverified--corrected-claims). Project-JARVIS facts are from this repository + `dmcp`/`dispatch`/`contextor`.
 
-> **Changelog:** the first draft of this doc mistakenly compared *JarvisOS (the distro)* to Hermes and stated Project-JARVIS was "local-only by thesis." That was wrong. Project-JARVIS's core is **model-agnostic and does not enforce local-only execution** — corrected throughout.
+> **Changelog:** the first draft of this doc mistakenly compared *JarvisOS (the distro)* to Hermes and stated Project-JARVIS was "local-only by thesis." That was wrong. Project-JARVIS's core is **model-agnostic and does not enforce local-only execution** — corrected throughout. *2026-07-22:* taxonomy references updated six → **seven** threats per the 2026-07 split of Bloated Context (constraints crowded out; partially mitigated) and Forgetful Context (constraints never durably stored; unmitigated, novel) into distinct entries.
 
 ---
 
@@ -22,7 +22,7 @@
 
 **Hermes Agent** — Nous Research's open-source (MIT) agent, *"the agent that grows with you,"* with a *"built-in learning loop"* (autonomous skill creation, self-improving skills, memory nudges, cross-session recall). Runs as a terminal app + gateway. Model-agnostic across 40+ backends, switchable with `hermes model`; the *recommended* path is the cloud **Nous Portal** (300+ models + a Tool Gateway for web/image/TTS/browser), though you can bring your own keys.
 
-**Project-JARVIS** — a model-agnostic AI agent core: a Python daemon plus specialized components — `dmcp` (dual-scope MCP manager/client), `dispatch` (signal-driven parallel orchestrator), `contextor` (SQLite vector memory) — coordinating tools discovered from a **community-vetted registry** with a real supply-chain trust model. Installed with `pip install project-jarvis`. It is the flagship agent of JarvisOS but runs as an ordinary package on any host. Its research contribution is a **six-threat taxonomy** for privileged LLM agents (incl. *Bloated Context* as a discrete threat) plus mitigations (Cryptographic Boundary Protocol, TLA + PolicyKit sudo gating, dispatch rolling window + contextor pruning).
+**Project-JARVIS** — a model-agnostic AI agent core: a Python daemon plus specialized components — `dmcp` (dual-scope MCP manager/client), `dispatch` (signal-driven parallel orchestrator), `contextor` (SQLite vector memory) — coordinating tools discovered from a **community-vetted registry** with a real supply-chain trust model. Installed with `pip install project-jarvis`. It is the flagship agent of JarvisOS but runs as an ordinary package on any host. Its research contribution is a **seven-threat taxonomy** for privileged LLM agents (incl. *Bloated Context* as a discrete threat and the unmitigated novel *Forgetful Context*) plus mitigations (Cryptographic Boundary Protocol, TLA + PolicyKit sudo gating, dispatch rolling window + contextor pruning).
 
 ---
 
@@ -39,7 +39,7 @@
 | **Orchestration** | Subagents + `delegate_task`; single synchronous agent loop | `dispatch` — signal-driven *"one brain, many hands"* parallel execution (INIT/EXIT/**REMIND**/WAIT/KILL, `fire_wake`, `remind_after`); non-blocking long-running tasks with progress signals |
 | **Memory / context** | Bounded agent-curated Markdown (`MEMORY.md` ~800 tok, `USER.md` ~500 tok) + SQLite FTS5 `session_search`; **default context strategy is lossy summarization** (lossless DAG is a *pluggable community plugin*, not built-in) | `contextor` — purpose-built SQLite **vector** store (cosine similarity, sessions w/ rolling summaries, 13-command protocol), embeddings via the daemon |
 | **Privilege / sudo** | `sudo -A` + per-OS GUI askpass (ksshaskpass/osascript/UAC) auto-wrapping privileged commands | **TLA confirmation gate** (human-in-the-loop, logged) + **PolicyKit/pkexec** enforcement; dual-scope user/system servers. Privilege is a first-class researched concern (threats 4 & 5) |
-| **Security model** | Documented **eight-layer** defense-in-depth (authorization, dangerous-command approval, file-write safety, container isolation, MCP env filtering, injection scanning, cross-session isolation, input sanitization) | **Six-threat taxonomy** + mitigations; Cryptographic Boundary Protocol wraps tool output so injected content can't spoof status |
+| **Security model** | Documented **eight-layer** defense-in-depth (authorization, dangerous-command approval, file-write safety, container isolation, MCP env filtering, injection scanning, cross-session isolation, input sanitization) | **Seven-threat taxonomy** + mitigations; Cryptographic Boundary Protocol wraps tool output so injected content can't spoof status |
 
 ---
 
@@ -49,7 +49,7 @@
 2. **Context economy by design.** Semantic search means unused servers never enter the window — Hermes registers all configured servers at startup. This is *Bloated Context* (Threat 6) mitigated architecturally, not bolted on.
 3. **Federated, user-controlled registries.** `sources.list` opts into any community or custom registry with a real supply-chain trust model (integrity hashes, `trustStatus`, revocation, pinned clones) — vs. one in-repo catalog.
 4. **Parallel orchestration as a first-class layer.** `dispatch` runs long tasks non-blocking with REMIND/wait/kill — proven end-to-end running a multi-minute `pacman -Syu` while streaming progress to the user.
-5. **Privilege + security as the research core.** The TLA/PolicyKit gate and the six-threat taxonomy (incl. Bloated Context) are a novel academic contribution.
+5. **Privilege + security as the research core.** The TLA/PolicyKit gate and the seven-threat taxonomy (incl. Bloated Context and the unmitigated Forgetful Context) are a novel academic contribution.
 
 ## Where Hermes leads
 
@@ -65,7 +65,7 @@
 Hermes's advantage is **surface area**, and nearly all of it wraps an established open-source upstream — so the gap closes primarily through **vetting**, not net-new engineering. The registry covers the developer core (shell, filesystem, git, GitHub, fetch, Brave search, SQLite, time) but has **none of the interactive or personal-life surfaces**. Tracked as the capability-gap epic + child issues in `mcp-registry`:
 
 - **On-device media (privacy edge — regardless of LLM choice, tool data stays local):** Piper TTS, ComfyUI image-gen, Ollama vision.
-- **Interactive surfaces (highest agent-value, highest risk):** Playwright browser automation, `computer-use-linux` (Wayland/KDE control), Home Assistant. *Each expands exactly the attack surface the six-threat taxonomy studies — tier via the trust model, gate privileged ones via TLA.*
+- **Interactive surfaces (highest agent-value, highest risk):** Playwright browser automation, `computer-use-linux` (Wayland/KDE control), Home Assistant. *Each expands exactly the attack surface the seven-threat taxonomy studies — tier via the trust model, gate privileged ones via TLA.*
 - **Personal productivity + data:** Obsidian, email (IMAP/SMTP), CalDAV, Postgres, n8n (Hermes catalog parity), Slack, Blender (parity), sequential-thinking, KG-memory.
 
 > **On privacy, precisely:** because both cores are model-agnostic, privacy *from the LLM provider* is a deployment choice for either (run local models = private; use a cloud API = not). Project-JARVIS's distinct win is that its **on-device MCP servers** (Piper/ComfyUI/Ollama-vision) keep *tool-side* data local even when Hermes's equivalents route through the cloud Nous Portal.
