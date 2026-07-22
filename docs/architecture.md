@@ -58,10 +58,11 @@ Concretely: goal A calls the LLM (brief, lock held), then spends most of its tim
 | `provider_pool.py` | Priority-ordered pool with per-provider cooldown and automatic failover |
 | `base.py` | `BaseLLMProvider` ABC — `chat(messages) -> str`, token tracking |
 | `providers/ollama.py` | Ollama client; lazy init, auto-start, auto-pull |
-| `chat.py` | Streaming/retry wrapper used by ROOT and DISPATCH LLM calls |
+| `providers/api.py` | OpenAI-compatible API provider (OpenAI, Claude via compat layer, OpenRouter — any `/v1/chat/completions` endpoint); pooled alongside Ollama for failover |
+| `chat.py` | Retry/JSON-extraction wrapper around the provider pool used by ROOT LLM calls (non-streaming) |
 | `context_manager.py` | Trims conversation history to stay within context window |
 
-**Provider configuration:** `~/.config/jarvis/providers.json` (managed by `jarvis /providers add` or F2 → Providers tab in TUI). The legacy single-provider `.env` approach was removed in v1.0.0.
+**Provider configuration:** `~/.config/jarvis/providers.json` (managed by `jarvis providers add --type <ollama|api> --model <model>` in the CLI, or F2 → Providers tab / `/providers add` in the TUI). The legacy single-provider `.env` approach was removed in v1.0.0.
 
 **Ollama auto-start:** When `OLLAMA_AUTO_START=true` (default), `ollama.py` attempts `systemctl --user start ollama` → `systemctl start ollama` → direct `Popen("ollama serve")` before the first request. Rate-limited to one attempt per 60 seconds per host. Skipped for remote Ollama instances.
 
@@ -84,6 +85,10 @@ The runtime translates ROOT LLM JSON actions into side effects.
 | `goal_updates.py` | Applies `goal_updates` from ROOT response to the goal manager |
 | `llm_bridge.py` | Wraps LLM provider pool, injects ROOT prompt, handles JSON extraction |
 | `sync_ask.py` | Synchronous `jarvis ask` — one-shot query without the full event loop |
+| `events.py` | Event dispatch + per-event task tracking (concurrent goals) |
+| `session_commands.py` | Daemon-side session slash-commands (`/new`, `/sessions`, `/switch`, `/rename`, `/delete`) |
+| `output_hooks.py` | Activity lines, transcript persistence |
+| `voice_activation_thread.py` | Wake-word/STT background thread |
 
 **ROOT LLM prompt:** Defined in `Config.LLM_ROOT_PROMPT` (`config.py`). Two variants — with and without contextor — selected by `ComponentFactory`. The prompt includes OS info, current date, and a strict JSON schema for all actions.
 
@@ -102,6 +107,7 @@ The Python dispatch layer bridges the ROOT LLM to the Rust `dispatch` binary.
 | `dmcp_registry.py` | `dmcp` CLI wrappers: install, uninstall, list-tools, get-docs, configure |
 | `event_merger.py` | `asyncio.Queue`-backed merger of voice/CLI/socket/dispatch/TUI events |
 | `goal_manager.py` | In-memory goal tracker; persists active goals across ROOT turns |
+| `boundary.py` | Output-provenance boundary verification — dispatch wraps EXIT output in a per-task 128-bit CSPRNG nonce (`[hash=H] <H>...</H>`); unverified output is marked UNVERIFIED in-band (#165) |
 | `transport.py` | Low-level subprocess I/O with the dispatch binary |
 
 **Two things named "dispatch":** The Python `jarvis/dispatch/` is the adapter; the Rust `deps/rust/dispatch` binary is the engine. See `CLAUDE.md § Dispatch` for the distinction.
@@ -130,8 +136,11 @@ The Python dispatch layer bridges the ROOT LLM to the Rust `dispatch` binary.
 | `params_store.py` | Persistent key-value store for runtime params (e.g. output mode) |
 | `providers.py` | Provider pool config load/save; `~/.config/jarvis/providers.json` I/O |
 | `system_info.py` | OS/shell detection injected into ROOT prompt |
+| `threat_level.py` | Host-side TLA threat classification (4 tiers, dangerous-tool floors, dangerous-payload heuristics) |
+| `sudo_manager.py` | Enable/disable the `jarvis` sudoers drop-in (sudo capability toggle, #158) |
+| `voice_state.py` | `VoiceState` — formal voice/response session state machine |
 
-**Confirmation system:** 4-tier policy (SAFE/ELEVATED/DANGEROUS/FORBIDDEN) is enforced in `jarvis_policy.c` in the kernel; at the daemon level, `ConfirmationManager` handles tool-level confirmation per `CONFIRMATION_MODE`. Channels in priority order: TUI modal > desktop notification (`notify-send` on Linux, `osascript` on macOS) > output socket > CLI stdin.
+**Confirmation system:** 4-tier threat classification (SAFE/ELEVATED/DANGEROUS/FORBIDDEN) is enforced in userspace by the TLA gate (`jarvis/core/threat_level.py` + `ConfirmationManager`) per `CONFIRMATION_MODE`. The kernel policy engine (`jarvis_policy.c`, `/dev/jarvis`) mirrors the same tiers OS-side but is not consulted from the daemon's execution path today (`KernelClient.policy_check` has no callers). Channels in priority order: TUI modal > desktop notification (`notify-send` on Linux, `osascript` on macOS) > output socket > CLI stdin.
 
 ---
 
@@ -155,7 +164,7 @@ Built on [Textual](https://textual.textualize.io/). All platform-agnostic.
 | `local_input.py` | Text input widget |
 | `slash_commands_doc.py` | Slash command registry shown in help |
 
-**Key TUI commands:** `/providers` (or F2 → Providers tab), `/settings` (or F2 → Config tab), `/rename`, `/sessions`, `/voice`, `/text`, `/help`.
+**Key TUI commands:** `/providers` (or F2 → Providers tab), `/settings` (or F2 → Config tab), `/new`, `/sessions`, `/switch`, `/rename`, `/delete`, `/model`, `/status`, `/export`, `/clear`, `/help`. (Voice/text output modes are CLI subcommands — `jarvis voice`, `jarvis text` — not slash commands.)
 
 ---
 
@@ -172,7 +181,7 @@ Built on [Textual](https://textual.textualize.io/). All platform-agnostic.
 | `activation/` | Wake-word detection (Vosk-based) |
 | `aec/` | Acoustic echo cancellation provider (WebRTC-backed) |
 
-Voice runs in a background thread (`voice_activation_thread.py` in `runtime/`). When a wake word fires: the daemon unconditionally broadcasts `{"type": "wake_word_detected"}` over the GUI socket, transitions to `VoiceState.WOKEN`, plays the wake chime (blocking — see below), then opens the STT capture window and injects a `VOICE_INPUT` event into `EventMerger` once an utterance completes. If the user says nothing within `VOICE_ACTIVATION_TIMEOUT` seconds, capture is abandoned and control returns to wake-word mode without processing anything; the timeout is disabled the moment speech is detected, so mid-sentence pauses never cut a command off early.
+Voice runs in a background thread (`voice_activation_thread.py` in `runtime/`). When a wake word fires: the daemon unconditionally broadcasts `{"type": "wake_word_detected"}` over the GUI socket, transitions to `VoiceState.WOKEN`, plays the wake chime (blocking — see below), then opens the STT capture window and injects the utterance into `EventMerger` as a `USER_INPUT` event (via `inject_user_input`) once it completes. If the user says nothing within `VOICE_ACTIVATION_TIMEOUT` seconds, capture is abandoned and control returns to wake-word mode without processing anything; the timeout is disabled the moment speech is detected, so mid-sentence pauses never cut a command off early.
 
 ### Concurrent goals + barge-in
 
@@ -300,7 +309,16 @@ Every transition broadcasts over the GUI socket as a structured event: `{"type":
 | `manager.py` | Creates/loads/renames sessions; rolling summary on session close |
 | `model.py` | `Session` dataclass: id, name, messages, summary |
 
-Sessions persist conversation history to `JARVIS_DATA_DIR/sessions/`. The rolling summary keeps context compact across long sessions. `MAX_GOALS_IN_CONTEXT` (default 20) caps the number of active goals injected into the ROOT prompt.
+Session records, messages, and rolling summaries persist in the Rust contextor binary's SQLite store (`~/.local/share/contextor/contextor.db`); `SessionManager` is a stateless facade over it, and sessions are unavailable when contextor is disabled. The rolling summary keeps context compact across long sessions. `MAX_GOALS_IN_CONTEXT` (default 20) caps the number of active goals injected into the ROOT prompt.
+
+---
+
+## Memory (`jarvis/contextor/`)
+
+| File | Role |
+|------|------|
+| `adapter.py` | `ContextorAdapter` — spawns/talks to the Rust contextor binary (store, recall, semantic_search, session CRUD over the child-process JSON protocol) |
+| `embeddings.py` | `OllamaEmbeddings` — computes vectors daemon-side (`nomic-embed-text`) before sending to contextor |
 
 ---
 
@@ -311,7 +329,7 @@ Added in v1.0.0. Auto-detects OS at import time.
 | File | Role |
 |------|------|
 | `__init__.py` | `current` singleton — `LinuxPlatform`, `MacOSPlatform`, or `WindowsPlatform` |
-| `base.py` | `PlatformBase` ABC: `create_ipc_server`, `ipc_connect`, `ipc_secure`, `ipc_verify_owner`, `ipc_cleanup`, `config_dir`, `data_dir`, `notify`, `has_notifications`, `start_service`, `install_signal_handlers` |
+| `base.py` | `PlatformBase` ABC: `create_ipc_server`, `ipc_connect`, `ipc_secure`, `ipc_verify_owner`, `ipc_cleanup`, `config_dir`, `data_dir`, `send_desktop_notification`, `has_desktop_notifications`, `try_start_service`, `install_signal_handlers` |
 | `linux.py` | `AF_UNIX`, XDG paths, `notify-send`, `systemctl` |
 | `macos.py` | `AF_UNIX`, `~/Library/Application Support/`, `osascript`, `launchctl` |
 | `windows.py` | TCP `127.0.0.1` + port lockfile, `%APPDATA%`, PowerShell toast, direct spawn |
@@ -326,12 +344,13 @@ See `docs/SECURITY-ARCHITECTURE.md` for the full threat model and CVE context.
 
 **Layers:**
 
-1. **Kernel** — `jarvis_policy.c` in `linux-jarvisos` enforces 4-tier action policy (SAFE / ELEVATED / DANGEROUS / FORBIDDEN) with rate limiting via `/dev/jarvis` and `/sys/class/misc/jarvis/policy/`
-2. **Daemon** — `ConfirmationManager` gates tool-level actions; `CONFIRMATION_MODE` controls when prompts appear
+1. **Daemon (TLA)** — `threat_level.py` classifies every tool call (max of host floor, manifest level, payload scan); `ConfirmationManager` gates >= ELEVATED calls per `CONFIRMATION_MODE`
+2. **Boundary** — dispatch wraps tool output in a per-task 128-bit CSPRNG nonce; the daemon verifies the wrapper (`jarvis/dispatch/boundary.py`) and treats unverified output as untrusted
 3. **IPC** — Unix sockets hardened to `0600` (Linux/macOS); ownership verified before connecting (`socket_security.py`)
 4. **PolicyKit** — `jarvis-jarvis.rules` grants `jarvis` user privilege escalation for specific `dmcp` operations (see `packages/polkit/`)
+5. **Kernel (OS-embodiment)** — `jarvis_policy.c` in `linux-jarvisos` mirrors the 4-tier policy with rate limiting via `/dev/jarvis` and `/sys/class/misc/jarvis/policy/`; not consulted from the daemon's execution path today
 
-**Threat taxonomy** (from research, `docs/research.md`): 7 threats documented during live operation, including "forgetful context" (#7) — LLM silently dropping security constraints mid-session. Active mitigations in progress: persistent constraint register in daemon, GPG verification for `dmcp` server manifests, path-based rules in `jarvis_policy.c` for `/etc`/`/usr`/`/boot` writes.
+**Threat taxonomy** (from research, `docs/research.md`): seven threats documented during live operation, including **Bloated Context** (#6, context-window saturation) and the novel **Forgetful Context** (#7) — the daemon never durably stores security constraints, so a context refresh loses them structurally. See `docs/SECURITY-ARCHITECTURE.md` for canonical per-threat implementation status. Active mitigations in progress: persistent constraint register in the daemon, path-based rules in `jarvis_policy.c` for `/etc`/`/usr`/`/boot` writes. (SHA-256 integrity verification of `dmcp` server manifests and setup scripts is already implemented in `dmcp install` — there is no GPG signing.)
 
 ---
 
@@ -353,3 +372,9 @@ ROOT: dispatch([{server: "brave-search", tool: "search", params: {query: "..."}}
 ```
 
 The LLM derives a **capability** (domain/service), not keywords or implementation details. The registry (`mcp-registry`) contains installable servers covering web, GitHub, email, databases, home automation, and more — the LLM should search the registry rather than falling back to shell commands.
+
+---
+
+## Changelog — corrected claims
+
+*2026-07-22:* kernel policy engine documented as OS-side mirror, not the daemon's enforcement path (TLA in `threat_level.py`/`ConfirmationManager` is; `KernelClient.policy_check` has no callers); added `boundary.py` (output-provenance nonce verification, #165) to the dispatch table and security layers; LLM layer completed with `providers/api.py` (OpenAI-compatible, pooled failover) and non-streaming `chat.py`; provider CLI syntax corrected (no slash form in shell); sessions persist in contextor's SQLite store, not `JARVIS_DATA_DIR/sessions/`; core/runtime tables completed (`threat_level`, `sudo_manager`, `voice_state`, `events`, `session_commands`, `output_hooks`, `voice_activation_thread`); added `jarvis/contextor/` section; TUI slash-command list corrected (`/voice`/`/text` are CLI subcommands); platform ABC method names corrected; voice injects `USER_INPUT` (no `VOICE_INPUT` type); taxonomy paragraph updated to canonical seven-threat naming (Bloated #6, Forgetful #7) and GPG claim replaced with the implemented SHA-256 verification.
