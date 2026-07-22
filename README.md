@@ -2,12 +2,14 @@
 
 **An open-source, privacy-first AI assistant system with dynamic capability discovery.**
 
-[![CI](https://github.com/YakupAtahanov/Project-JARVIS/actions/workflows/ci.yml/badge.svg)](https://github.com/YakupAtahanov/Project-JARVIS/actions/workflows/ci.yml)
+[![CI](https://github.com/JarvisOSLinux/Project-JARVIS/actions/workflows/ci.yml/badge.svg)](https://github.com/JarvisOSLinux/Project-JARVIS/actions/workflows/ci.yml)
 
 Project JARVIS is a modular AI assistant that combines voice and text interfaces
 with dynamic tool discovery through MCP (Model Context Protocol) orchestration.
-It runs entirely on local hardware — no cloud dependencies, no data leaving your
-device.
+It runs fully locally by default via Ollama — no cloud dependency required.
+Optionally, remote OpenAI-compatible API providers (OpenAI, OpenRouter, etc.)
+can be added to the provider failover pool; when a remote provider is used,
+prompts are sent to that provider.
 
 ---
 
@@ -46,8 +48,8 @@ used independently or composed together:
 [**JARVIS OS**](https://github.com/JarvisOSLinux/jarvisos) is one
 *implementation* — a complete Linux distribution that instantiates the system at
 the OS level, with kernel-integrated policy enforcement and hardware monitoring.
-But the system runs standalone on any platform: `pip install jarvis-ai` on any
-Linux, macOS, or Windows machine.
+But the system runs standalone on any platform: `pip install project-jarvis` on
+any Linux, macOS, or Windows machine.
 
 ---
 
@@ -56,10 +58,10 @@ Linux, macOS, or Windows machine.
 - **Voice-First Interface**: Real-time speech recognition and synthesis
 - **Wake Word Detection**: Always-listening voice activation with customizable wake words
 - **CLI Support**: Text-based interface with `jarvis ask` command for scripting and accessibility
-- **Hierarchical Orchestration**: ROOT mode handles dialogue/memory, DISPATCH mode handles tool execution
+- **Unified Orchestration**: a single ROOT loop handles dialogue, memory, tool discovery (semantic search over the MCP registry), and concurrent tool dispatch — no separate dispatch sub-chain
 - **AI-Driven Tool Discovery**: Embedding-based semantic search across the MCP registry
 - **Dynamic Capability Extension**: Add new tools without code changes via MCP servers
-- **Local Processing**: All operations run locally — no data leaves your device
+- **Local-First Processing**: STT, TTS, memory, and orchestration run locally; LLM inference is local via Ollama by default, with optional remote API providers
 - **Cross-Platform**: Windows, Linux, macOS
 - **Event-Driven Execution**: One event queue merges voice, CLI, socket, and dispatch signals
 - **Flexible Output**: Text or voice responses
@@ -74,23 +76,23 @@ For text-only mode without voice features:
 
 ```bash
 # Install core package
-pip install jarvis-ai
+pip install project-jarvis
 
 # Install Ollama and pull an LLM model
 # Install Ollama from https://ollama.com/
 ollama pull qwen3:4b
 
 # Add an LLM provider and run
-jarvis /providers add          # interactive — or:
-# jarvis providers add --type ollama --model qwen3:4b
+jarvis providers add --type ollama --model qwen3:4b
+# (or run `jarvis tui` and type /providers add for a guided interactive form)
 jarvis
 ```
 
 ### Full Installation with Voice Features
 
-1. **Clone the repository with SuperMCP submodule**:
+1. **Clone the repository with the Rust submodules (dispatch, dmcp, contextor)**:
    ```bash
-   git clone --recursive https://github.com/YakupAtahanov/Project-JARVIS.git
+   git clone --recursive https://github.com/JarvisOSLinux/Project-JARVIS.git
    cd Project-JARVIS
    ```
 
@@ -115,7 +117,7 @@ jarvis
    
    **Option A: Install with voice support (recommended)**:
    ```bash
-   pip install jarvis-ai[voice]
+   pip install "project-jarvis[voice]"
    ```
    
    **Option B: Install from source with voice support**:
@@ -125,15 +127,15 @@ jarvis
    
    **Option C: Install minimal (CLI/Text only)**:
    ```bash
-   pip install jarvis-ai
+   pip install project-jarvis
    # or from source:
    pip install -e .
    ```
    
    **Option D: Install specific voice features**:
    ```bash
-   pip install jarvis-ai[voice-input]   # Speech-to-text only
-   pip install jarvis-ai[voice-output] # Text-to-speech only
+   pip install "project-jarvis[voice-input]"   # Speech-to-text only
+   pip install "project-jarvis[voice-output]"  # Text-to-speech only
    ```
 
 6. **Install Ollama and pull an LLM model**:
@@ -144,8 +146,9 @@ jarvis
 
 7. **Configure LLM provider**:
    ```bash
-   jarvis /providers add
+   jarvis providers add --type ollama --model qwen3:4b
    ```
+   (Or run `jarvis tui` and type `/providers add` for a guided interactive form.)
    Providers (Ollama, OpenAI-compatible APIs) are stored in `~/.config/jarvis/providers.json`.
    Voice, logging, and other settings can be customized in `~/.config/jarvis/jarvis.conf`
    (see `jarvis/.env.example` for all available options).
@@ -159,13 +162,15 @@ jarvis
 
 JARVIS supports optional dependencies for flexible installation:
 
-- **`jarvis-ai`** - Core package (CLI/Text mode only)
-- **`jarvis-ai[voice-input]`** - Add speech-to-text support
-- **`jarvis-ai[voice-output]`** - Add text-to-speech support  
-- **`jarvis-ai[voice]`** - Full voice support (input + output)
-- **`jarvis-ai[dev]`** - Development tools (pytest, black, etc.)
-- **`jarvis-ai[docs]`** - Documentation tools (sphinx, etc.)
-- **`jarvis-ai[all]`** - Everything (voice + dev + docs)
+- **`project-jarvis`** - Core package (CLI/Text mode only)
+- **`project-jarvis[voice-input]`** - Add speech-to-text support
+- **`project-jarvis[voice-output]`** - Add text-to-speech support
+- **`project-jarvis[voice]`** - Full voice support (input + output)
+- **`project-jarvis[tui]`** - Interactive terminal UI (`jarvis tui`)
+- **`project-jarvis[voice-aec]`** - Acoustic echo cancellation for barge-in (includes voice; needs a C++ toolchain)
+- **`project-jarvis[dev]`** - Development tools (pytest, black, etc.)
+- **`project-jarvis[docs]`** - Documentation tools (sphinx, etc.)
+- **`project-jarvis[all]`** - Everything (tui + voice-aec/voice + dev + docs)
 
 **Note**: Voice features require audio devices. The system will gracefully degrade to text mode if audio is unavailable.
 
@@ -256,6 +261,11 @@ jarvis
 | `jarvis history-reset on` | Enable history reset after each response |
 | `jarvis history-reset off` | Disable history reset (maintain context) |
 | `jarvis history-reset` | Show current history reset setting |
+| `jarvis tui` | Interactive terminal UI with session sidebar (needs `[tui]` extra) |
+| `jarvis providers ...` | Manage the LLM provider failover pool (list/add/remove/move/edit) |
+| `jarvis confirmations [approve <id>\|deny <id>\|approve-all]` | List/resolve pending TLA tool confirmations |
+| `jarvis sudo [enable\|disable]` | Manage sudo access for privileged tools |
+| `jarvis auto-pull [on\|off]` | Auto-pull missing Ollama models |
 | `jarvis --help` | Show help message |
 
 ### **Dual Input (Two Terminals)**
@@ -287,13 +297,13 @@ $ jarvis voice
 $ jarvis ask "read me the news"
 [TTS speaks the response]
 
-# Maintain conversation context
+# Maintain conversation context (default)
 $ jarvis history-reset off
 $ jarvis ask "My name is John"
 $ jarvis ask "What's my name?"
 # JARVIS remembers: "Your name is John"
 
-# Reset context after each response (default)
+# Reset context after each response
 $ jarvis history-reset on
 $ jarvis ask "What's my name?"
 # JARVIS doesn't remember previous context
@@ -317,7 +327,7 @@ WAKE_WORDS=jarvis,hey jarvis,okay jarvis
 VOICE_ACTIVATION_SENSITIVITY=0.8
 
 # Vosk model path
-VOSK_MODEL_PATH=models/vosk-model-small-en-us-0.15
+VOSK_MODEL_PATH=models/vosk/vosk-model-small-en-us-0.15
 
 # Logging configuration (optional)
 LOG_LEVEL=INFO                # DEBUG, INFO, WARNING, ERROR, CRITICAL
@@ -360,7 +370,7 @@ LOG_COLORS=true               # Colored console output
 - **Audio Hardware**: Microphone (for voice input) and speakers/headphones (for voice output)
 - **Memory**: 8GB RAM (16GB recommended for larger models)
 - **GPU**: Optional, for acceleration of Ollama or Piper TTS models
-- **Additional Packages**: Install with `pip install jarvis-ai[voice]`
+- **Additional Packages**: Install with `pip install "project-jarvis[voice]"`
 
 **Note**: JARVIS works perfectly fine without audio hardware - it will automatically use text mode.
 
@@ -388,8 +398,9 @@ JARVIS is designed as a conversational controller that can either answer directl
 
 ### **For Technical Details**
 If you want internals (state machine, dispatch loop, signal model, confirmation flow), see:
-- `docs/jarvis-workflow-investigation.md`
-- `docs/README-dispatch-2.md`
+- `docs/architecture.md` — state machine, event loop, module map
+- `docs/dispatch-design.md` — dispatch loop and signal model
+- `docs/tla-confirmation-design.md` — confirmation flow
 
 ---
 
@@ -399,7 +410,7 @@ Project JARVIS is also a security research platform, built to study what happens
 
 **TLA (Threat Level Access)** is the core enforcement mechanism: a userspace, non-blocking, human-in-the-loop confirmation gate (`jarvis/core/confirmation_manager.py`, `jarvis/runtime/dispatch_flow.py`) that requires explicit out-of-band user approval before privileged tool calls execute. The LLM is deliberately kept out of the confirmation loop so it cannot misrepresent an action.
 
-Six threats identified through live operation, and their current status:
+Seven threats identified through live operation, and their current status:
 
 | Threat | Status |
 |---|---|
@@ -408,19 +419,18 @@ Six threats identified through live operation, and their current status:
 | Misleading MCP server usage | partial — official-tier review of tool descriptions + structured schema |
 | Unauthorized sudo via MCP | implemented, with a known gap — bundled `shellmcp` doesn't declare `confirmation_required` on `run_command`, so it's gated only by the sudo prompt, not TLA (#159) |
 | Sudo capability exploitation | implemented, same gap — TLA is goal-scoped |
-| Bloated context | partial — dispatch rolling window + contextor pruning; persistent constraint preservation not implemented |
+| Bloated context | partial — dispatch rolling window + contextor pruning |
+| Forgetful context (novel) | not yet mitigated — no persistent constraint register in the daemon |
 
-A seventh, novel finding — **"forgetful context"**, where the LLM silently drops security constraints stated earlier in a session — has no mitigation yet; it's the highest-priority open item. Full taxonomy and academic writeup: `docs/research.md`.
+**Forgetful context** — the daemon never durably stores security constraints, so a context refresh loses them structurally rather than incidentally — is the standout novel finding (split from Bloated Context in 2026-07) and the highest-priority open item. Full taxonomy and academic writeup: `docs/research.md`.
 
 **JARVIS OS** (the Linux distribution built on this system) adds a kernel-level 4-tier policy engine (`/dev/jarvis`, SAFE/ELEVATED/DANGEROUS/FORBIDDEN) as a separate OS-embodiment layer — it is not yet consulted from this daemon's execution path.
 
 Report vulnerabilities per [`SECURITY.md`](SECURITY.md); do not open public issues for unpatched findings.
 
 ### **Example MCP Servers**
-- **ShellMCP**: Terminal command execution
-- **CodeAnalysisMCP**: Code repository analysis and file operations
-- **EchoMCP**: Testing and validation
-- **FileSystemMCP**: Advanced file system operations
+- **ShellMCP** (bundled): shell command execution, app launch, web search
+- **Registry catalog**: `jarvis-shell`, `brave-search`, `server-filesystem`, `sqlite-mcp`, `mcp-github`, `time-mcp` — installable from the community [mcp-registry](https://github.com/JarvisOSLinux/mcp-registry) via `dmcp`
 - **[Extensible]**: Add custom MCP servers dynamically
 
 ---
@@ -432,7 +442,6 @@ To keep Project JARVIS clean, consistent, and professional:
 - Contribution guide: [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - Engineering standards: [`docs/engineering-standards.md`](docs/engineering-standards.md)
 - Security reporting policy: [`SECURITY.md`](SECURITY.md)
-- Cleanup roadmap: [`docs/clean-and-professional-plan-04-19-26.md`](docs/clean-and-professional-plan-04-19-26.md)
 
 ### Local Quality Commands
 
@@ -454,3 +463,7 @@ python -m venv .venv
 When opening PRs or issues, use the repository templates for faster triage and review quality.
 
 ---
+
+## Changelog — corrected claims
+
+*2026-07-22:* PyPI name corrected everywhere (`jarvis-ai` → `project-jarvis`, matching `pyproject.toml`); local-only wording softened to local-first with optional OpenAI-compatible providers in the failover pool; `jarvis /providers add` → `jarvis providers add ...` (the slash form is TUI-only); submodule note corrected (dispatch/dmcp/dmcp/contextor, no "SuperMCP") and repo URLs moved to the JarvisOSLinux org; `history-reset` default corrected (context is maintained by default); CLI table extended with implemented commands (`tui`, `providers`, `confirmations`, `sudo`, `auto-pull`); dependency-group list extended (`tui`, `voice-aec`); dead doc links replaced with existing docs; example MCP servers now list real bundled/registry servers (former list was test fixtures); taxonomy formalized to seven threats with Forgetful Context split from Bloated Context (2026-07); Vosk path corrected to `models/vosk/...`.

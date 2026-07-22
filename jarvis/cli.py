@@ -556,7 +556,7 @@ def main() -> None:
             from .tui import run_tui
         except ImportError as e:
             print("Error: TUI dependencies are not installed.")
-            print("  Install with: pip install 'jarvis-ai[tui]'")
+            print("  Install with: pip install 'project-jarvis[tui]'")
             print(f"  (missing: {e.name if hasattr(e, 'name') else e})")
             sys.exit(1)
         try:
