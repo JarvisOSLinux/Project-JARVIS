@@ -51,15 +51,15 @@ MCP Servers (git, shell, browser, ...)
 
 ## Requirements
 
-- [dmcp](https://github.com/YakupAtahanov/dmcp) installed and on PATH
+- [dmcp](https://github.com/JarvisOSLinux/dmcp) installed and on PATH
 - Rust toolchain (for building from source)
 
 ```bash
 # Install dmcp first
-cargo install --git https://github.com/YakupAtahanov/dmcp
+cargo install --git https://github.com/JarvisOSLinux/dmcp
 
 # Install dispatch
-cargo install --git https://github.com/YakupAtahanov/dispatch
+cargo install --git https://github.com/JarvisOSLinux/dispatch
 ```
 
 ---
@@ -83,11 +83,25 @@ The LLM sends a structured task list to `dispatch` via MCP tool call:
       "server": "browser",
       "tool": "search",
       "params": { "query": "Rust async patterns" },
-      "remind_after": 15
+      "remind_after": 15,
+      "fire_wake": false,
+      "defer_output": true
     }
-  ]
+  ],
+  "strategy": "Update the repo, then summarize findings",
+  "session_id": "goal-42"
 }
 ```
+
+Per-task options beyond `server`/`tool`/`params`/`remind_after`:
+
+- **`fire_wake`** (default `true`) — when `false`, the task's EXIT does not wake the LLM by itself; EXITs from `fire_wake: false` tasks are coalesced into one batch notification once the batch completes.
+- **`defer_output`** (default `false`) — when `true`, the task's output is stored out-of-band and the EXIT shows `200 (deferred)`; retrieve it later with `get_output`.
+
+Top-level options:
+
+- **`strategy`** — a free-text plan persisted by dispatch and prepended (`Current strategy: ...`) to every subsequent wakeup, so plans survive across wakeup cycles.
+- **`session_id`** — scopes the signal window to this session's PIDs, so historical entries from other goals never pollute context.
 
 After dispatching, the LLM goes idle. It does not poll. It does not wait. It sleeps until `dispatch` sends it a signal.
 
@@ -109,9 +123,11 @@ Every event in the system is a signal. Signals are structured log entries that f
 ```
 [14:02:01] PID 1001 INIT    git pull https://github.com/...
 [14:02:01] PID 1002 INIT    browser search "Rust async patterns"
-[14:02:03] PID 1001 EXIT    Already up to date.
-[14:02:05] PID 1002 EXIT    Found 12 results: [1] "Tokio MCP tutorial"...
+[14:02:03] PID 1001 EXIT    [hash=a3f2c1...] 200 <a3f2c1...>Already up to date.</a3f2c1...>
+[14:02:05] PID 1002 EXIT    [hash=9b7e04...] 200 <9b7e04...>Found 12 results: [1] "Tokio MCP tutorial"...</9b7e04...>
 ```
+
+**Output provenance:** every MCP task's EXIT body is wrapped in a boundary tag keyed by a per-task 128-bit CSPRNG nonce — success is `[hash=h] 200 <h>output</h>` (or `200 (deferred)` with `defer_output`), failure is `[hash=h] 500 <h>error</h>`. The consuming client verifies the tag against the nonce it was given, so injected tool output cannot forge trusted-looking signals.
 
 | Signal | Meaning | Triggered by |
 |--------|---------|-------------|
@@ -123,18 +139,18 @@ Every event in the system is a signal. Signals are structured log entries that f
 
 ### 4. LLM Wakeup
 
-When a signal arrives that the LLM should see, `dispatch` sends a **signal window** — the last 20 signal entries — as context. The LLM reconstructs the current state from this window and decides what to do next.
+The `dispatch` and `timer` tool calls are fire-and-return: they synchronously enqueue INIT signals and immediately return the current **signal window** (last 20 entries) plus the assigned PIDs. Subsequent completion/reminder signals are *pushed* to the client as MCP logging notifications (logger `dispatch.signal`) — individually for `fire_wake: true` tasks, and as one coalesced batch for a group of `fire_wake: false` tasks. The LLM reconstructs the current state from the window and decides what to do next.
 
 The LLM responds with one of:
 
 | Action | Meaning | Example |
 |--------|---------|---------|
 | `dispatch` | Start new tasks | `{"action": "dispatch", "tasks": [...]}` |
-| `respond` | Done, deliver answer to user | `{"action": "respond", "message": "Here's what I found..."}` |
+| `respond` | Done, deliver answer to user | `{"action": "respond", "output": "Here's what I found..."}` |
 | `wait` | Acknowledged reminder, keep task running | `{"action": "wait", "pids": [1003]}` |
 | `kill` | Terminate specific tasks | `{"action": "kill", "pids": [1003, 1005]}` |
 
-Any action can include an optional `message` field. If present, the client application should deliver it to the user immediately (e.g., "I'm looking into that, one moment."). This enables the LLM to communicate while tasks are still running.
+The full action vocabulary is defined by the client application, not by dispatch — the reference client (project-jarvis) parses `respond` from an `output` key and adds its own actions on top of this set.
 
 ### 5. Reminders
 
@@ -164,7 +180,7 @@ Reminder intervals are set per-task by the LLM at dispatch time. The LLM chooses
 
 Rather than maintaining a growing conversation history, the LLM works from a **rolling signal window** — the last 20 signal entries across all tasks. This keeps context size bounded and predictable regardless of how many tasks have run.
 
-The window is the LLM's only state. It does not receive its own previous responses back. It reconstructs its understanding of the situation purely from the signal log.
+The window — plus the optional persisted `strategy` string, which dispatch prepends to every wakeup so plans survive across cycles — is the LLM's state. It does not receive its own previous responses back; it reconstructs its understanding of the situation from the signal log. When a `session_id` was set at dispatch time, the window is scoped to that session's PIDs so historical entries never pollute context.
 
 ```
 Signal window (last 20):
@@ -197,17 +213,13 @@ PIDs are assigned incrementally by `dispatch` per session. They are not OS-level
 
 `dispatch` does not maintain its own server registry. It delegates discovery entirely to `dmcp`.
 
-For LLM-driven discovery, the recommended pattern is keyword-based browsing rather than full listing. This prevents context window pollution when hundreds or thousands of MCP servers are installed:
+For LLM-driven discovery, the implemented path is vector-based semantic search through dispatch's own discovery tools rather than full listing. This prevents context window pollution when hundreds or thousands of MCP servers are installed:
 
-```json
-{
-  "tasks": [
-    { "server": "dmcp", "tool": "browse", "params": { "keywords": ["git", "version control"] } }
-  ]
-}
-```
+1. Call `embedding_spec` to learn the registry's embedding model.
+2. Embed the capability query (client-side) and call `browse_servers` with `vector`/`top_k`/`min_score` — or `browse_servers_batch` with multiple vectors for a multi-sub-task plan.
+3. Use `server_count` to decide whether vector search is worth it for the catalog size.
 
-The browse results appear in the signal window as an `EXIT` signal, and the LLM now knows which servers are relevant. It dispatches actual tool calls in the next cycle.
+The results tell the LLM which servers are relevant; it dispatches actual tool calls in the next cycle.
 
 A small set of always-available servers (e.g., `dmcp` itself, `shell`) can be listed in the client's system prompt so the LLM can browse and execute basic commands without a discovery round-trip.
 
@@ -225,11 +237,19 @@ dispatch serve
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
-| `dispatch` | Dispatch a list of tasks for concurrent execution | `tasks: [{server, tool, params, remind_after?}]` |
+| `dispatch` | Dispatch a list of tasks for concurrent execution | `tasks: [{server, tool, params, remind_after?, fire_wake?, defer_output?}]`, `strategy?`, `session_id?` |
 | `kill` | Terminate running tasks by PID | `pids: [int]` |
 | `wait` | Acknowledge reminder, keep tasks running | `pids: [int]` |
 | `status` | Get current state of all active tasks | — |
 | `log` | Get the signal window (last N entries) | `count?: int` (default: 20) |
+| `get_output` | Retrieve stored out-of-band output of deferred tasks | `pids: [int]` |
+| `timer` | Set a one-shot timer that fires a REMIND signal | `label`, `duration`, `metadata?` |
+| `browse_servers` | Vector semantic search over the dmcp registry index | `vector`, `top_k`, `min_score` |
+| `browse_servers_batch` | Batch vector search (one call, many queries) | `vectors`, `top_k`, `min_score` |
+| `server_count` | Number of servers in the registry index | — |
+| `embedding_spec` | Embedding model/version the index expects | — |
+| `sync_index` | Sync the local vector index with installed servers | — |
+| `index_server` | Add/update one server in the vector index | `server_id`, `server vector` |
 
 ### Client Configuration
 
@@ -255,7 +275,7 @@ Add to your MCP client config:
 When an MCP server fails, the task produces an `EXIT` signal with the error as output. This is normal operation — the LLM sees the error and decides what to do (retry, try a different server, report to user).
 
 ```
-[14:02:05] PID 1004 EXIT    Error: repository not found (404)
+[14:02:05] PID 1004 EXIT    [hash=c41d88...] 500 <c41d88...>Error: repository not found (404)</c41d88...>
 ```
 
 ### dispatch Errors
@@ -293,7 +313,7 @@ When an MCP server fails, the task produces an `EXIT` signal with the error as o
 
 ```
 src/
-├── main.rs          # CLI entry point (dispatch serve, dispatch status)
+├── main.rs          # CLI entry point (dispatch serve, dispatch help)
 ├── lib.rs           # Library root
 ├── orchestrator.rs  # Core event loop: receive dispatch, spawn tasks, route signals
 ├── task.rs          # Task struct, state machine (Init → Running → Exit/Killed)
@@ -302,6 +322,7 @@ src/
 ├── reminder.rs      # Timer-based reminder system
 ├── mcp_client.rs    # Client for calling dmcp / MCP servers
 ├── mcp_server.rs    # MCP server interface (dispatch serve)
+├── nonce.rs         # Output-provenance nonce generation (128-bit boundary tokens)
 └── error.rs         # Error types and handling
 ```
 
@@ -323,13 +344,13 @@ User asks their LLM assistant: *"Update my repo, check if there are any open iss
 ```
 [14:02:00] ← LLM dispatches 3 tasks
 
+[14:02:00] — LLM finds a docs server first: browse_servers(vector for "api documentation") → openapi-mcp
+
 [14:02:00] PID 1 INIT    git pull origin main
 [14:02:00] PID 2 INIT    github issues list --state open
-[14:02:00] PID 3 INIT    dmcp browse keywords=["api", "documentation"]
 
-[14:02:01] PID 3 EXIT    Found: openapi-mcp (validate, generate, serve)
-[14:02:02] PID 1 EXIT    Updated. 3 files changed, 14 insertions.
-[14:02:03] PID 2 EXIT    4 open issues: #12 "Fix auth", #15 "Add tests", ...
+[14:02:02] PID 1 EXIT    [hash=…] 200 <…>Updated. 3 files changed, 14 insertions.</…>
+[14:02:03] PID 2 EXIT    [hash=…] 200 <…>4 open issues: #12 "Fix auth", #15 "Add tests", ...</…>
 
 [14:02:03] → dispatch wakes LLM with signal window
 
@@ -355,6 +376,12 @@ Tasks that ran in parallel: 3.
 
 ## References
 
-- [dmcp — MCP server manager](https://github.com/YakupAtahanov/dmcp)
+- [dmcp — MCP server manager](https://github.com/JarvisOSLinux/dmcp)
 - [Model Context Protocol](https://modelcontextprotocol.io/)
 - [Tokio — async runtime for Rust](https://tokio.rs/)
+
+---
+
+## Changelog — corrected claims
+
+*2026-07-22:* MCP tool table extended from 5 to the full 13 tools (get_output, timer, and the registry vector-search tools); dispatch schema extended with `fire_wake`/`defer_output`/`strategy`/`session_id`; EXIT examples updated to the 128-bit nonce boundary format with an output-provenance note; wakeup delivery corrected (fire-and-return + pushed `dispatch.signal` notifications, batch coalescing for `fire_wake: false`); Server Discovery rewritten around the implemented vector flow (the `dmcp browse` dispatch example could not work); repo URLs moved to the JarvisOSLinux org; `respond` uses `output` and the action set is client-defined; project tree includes `nonce.rs` and drops the nonexistent `dispatch status` subcommand.
