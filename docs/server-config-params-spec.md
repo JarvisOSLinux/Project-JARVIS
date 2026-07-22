@@ -104,7 +104,7 @@ entirely and go straight to install.
 LLM: {"action": "install_server", "server_id": "io.github.brave.brave-search-mcp-server"}
   │
   ▼
-1. dmcp install --no_setup
+1. dmcp install --no-setup <server_id>
    Copies files, writes manifest — does NOT run the setup script yet.
   │
   ▼
@@ -130,7 +130,7 @@ LLM: {"action": "install_server", "server_id": "io.github.brave.brave-search-mcp
   └─ User confirms (all required fields filled) ────────────────┤
   │                                                             │
   ▼                                                             │
-5. dmcp config set KEY value  (one per field)
+5. dmcp config <server_id> set KEY value  (one per field)
    → stores values in manifest.config before setup runs
   │
   ▼
@@ -140,8 +140,8 @@ LLM: {"action": "install_server", "server_id": "io.github.brave.brave-search-mcp
    → server developer owns all setup logic; JARVIS is just the conduit
   │
   ├─ Setup fails ───────────────────────────────────────────────┤
-  │     → Show error to user directly in TUI (not via LLM)      │
-  │     → LLM gets: INSTALL_ERROR: <reason>                     │
+  │     → LLM gets: INSTALL_ERROR: setup failed — <reason>      │
+  │       and explains it to the user                           │
   │                                                             │
   └─ Setup succeeds ────────────────────────────────────────────┘
   │
@@ -182,6 +182,11 @@ LLM: configure_server → system writes to jarvis_params.toml + dmcp config set
   → LLM retries get_server_docs → tools appear → dispatch
 ```
 
+Two guardrails apply on the `configure_server` path: placeholder-looking values
+are rejected (`CONFIGURE_BLOCKED` → the LLM must ask the user for the real
+value), and config keys are normalized to env-var form (e.g. `--brave-api-key`
+→ `BRAVE_API_KEY`) before `dmcp config set` / `jarvis_params.toml`.
+
 ---
 
 ## UI: ServerConfigModal
@@ -193,10 +198,13 @@ is a Textual `ModalScreen`. The backend pauses via a plain `asyncio.Future`:
 
 ```python
 future = asyncio.get_event_loop().create_future()
-app.tui_callback("open_config_modal", fields=configurable_properties, future=future)
+await app.config_modal_callback(server_id, server_name, server_desc, props, saved, future)
 result = await future   # coroutine suspends; Textual event loop stays free
                         # modal calls future.set_result(ConfigModalResult(...)) on submit/cancel
 ```
+
+(`tui/lifecycle.py` assigns `jarvis.config_modal_callback = app._open_config_modal`
+— there is no generic `tui_callback` registry.)
 
 `await future` does not block the event loop — Textual continues rendering and
 handling input. No new manager class or event type needed; just a registered
@@ -265,7 +273,7 @@ TUI callback (same pattern already used in `lifecycle.py`).
 | `jarvis/runtime/root_actions.py` | `_handle_install_server`: read manifest, open modal, dmcp config set, dmcp setup |
 | `jarvis/dispatch/dmcp_registry.py` | New fn `get_server_manifest(server_id)`: read installed manifest; fall back to registry clone |
 | `jarvis/dispatch/dmcp_registry.py` | New fn `run_server_setup(server_id)`: call `dmcp setup <id>`, capture stderr |
-| `jarvis/tui/lifecycle.py` | Register `open_config_modal` TUI callback |
+| `jarvis/tui/lifecycle.py` | Assign `jarvis.config_modal_callback = app._open_config_modal` |
 | `mcp-registry/servers/*/manifest.json` | Add `configurableProperties` to servers that require config |
 | `dmcp/src/models.rs` | **Done** — `ConfigurableProperty` struct + field on `Manifest` |
 
@@ -273,9 +281,10 @@ TUI callback (same pattern already used in `lifecycle.py`).
 
 ```python
 class ParamsStore:
-    def get(self, server_id: str) -> dict[str, str]: ...
-    def set(self, server_id: str, key: str, value: str) -> None: ...
-    def set_many(self, server_id: str, values: dict[str, str]) -> None: ...
+    def __init__(self, server_id: str): ...
+    def get(self) -> dict[str, str]: ...
+    def set(self, key: str, value: str) -> None: ...
+    def set_many(self, values: dict[str, str]) -> None: ...
 ```
 
 Atomic writes: write to temp file → rename.
@@ -298,3 +307,7 @@ class ConfigModalResult:
 - Standalone "manage saved params" screen
 - Multi-user / per-session param scoping
 - Format validation beyond "non-empty required"
+
+## Changelog — corrected claims
+
+*2026-07-22:* CLI corrected to `dmcp install --no-setup` and `dmcp config <server_id> set` (the underscore spelling also fixed in `dmcp_registry.py`); ParamsStore snippet matches the constructor-bound implementation; async bridge uses `config_modal_callback` (no generic tui_callback registry); setup-failure branch reports via the LLM only; configure_server guardrails documented (CONFIGURE_BLOCKED on placeholders, env-var key normalization).

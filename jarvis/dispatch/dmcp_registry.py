@@ -165,9 +165,9 @@ async def search_servers(logger: Logger, keywords: List[str]) -> Dict[str, Any]:
 
 
 async def install_server(logger: Logger, server_id: str) -> Dict[str, Any]:
-    """Install an MCP server without running its setup script (`dmcp install --no_setup`)."""
+    """Install an MCP server without running its setup script (`dmcp install --no-setup`)."""
     logger.info(f"Dispatch: Installing MCP server '{server_id}' (no setup)")
-    raw = await run_dmcp(logger, "install", "--no_setup", server_id)
+    raw = await run_dmcp(logger, "install", "--no-setup", server_id)
     if raw is None:
         return {"error": f"Failed to install server '{server_id}'"}
     return {"installed": server_id, "output": raw.strip()}
