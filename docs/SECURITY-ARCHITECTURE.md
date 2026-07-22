@@ -11,22 +11,25 @@ AI agent to trigger a major public security incident (early 2026).
 
 ---
 
-## Six-Threat Taxonomy — Implementation Status
+## Seven-Threat Taxonomy — Implementation Status
 
 **This table is the canonical status of each research threat's mitigation.**
 Where the website or the paper states a mitigation in the present tense, it must
 match the status here. `implemented` = enforced in code; `partial` = present but
 with a stated gap; `proposed` = designed, not built; `OS-side` = owned by the
-OS embodiment, not the core.
+OS embodiment, not the core. (Bloated Context and Forgetful Context were split
+into distinct threats in 2026-07: Bloated = constraints crowded out of a full
+window; Forgetful = constraints never durably stored in the first place.)
 
 | # | Threat | Enforcement point | Status |
 |---|--------|-------------------|--------|
 | 1 | Malicious MCP Servers | registry vetting + `dmcp` manifest-hash verify + agent source-confinement | **implemented** (official tier not yet populated) |
-| 2 | Prompt Injection | dispatch 128-bit boundary nonce + `input_guard` on direct input | **partial** — dispatch tags output; the daemon does not yet verify the tag |
+| 2 | Prompt Injection | dispatch 128-bit boundary nonce, verified by the daemon (`jarvis/dispatch/boundary.py`, #165) | **implemented** — the daemon verifies the tag on every EXIT/TIMEOUT and marks failures UNVERIFIED in-band; system prompts instruct the LLM to treat boundary content as data-only |
 | 3 | Misleading MCP Server Usage | official-tier review of tool descriptions + structured schema | **partial** |
-| 4 | Unauthorized Sudo via MCP | userspace Threat-Level-Access confirmation gate | **implemented**, with the `shellmcp` gap (#159) |
-| 5 | Sudo Capability Exploitation | same confirmation gate, goal-scoped | **implemented**, same gap |
-| 6 | Bloated Context | daemon two-tier context + dispatch rolling window + contextor pruning | **partial** — constraint preservation not implemented |
+| 4 | Unauthorized Sudo via MCP | userspace Threat-Level-Access confirmation gate with host-floor classification (`jarvis/core/threat_level.py`) | **implemented** — command-execution tools and dangerous payloads are force-confirmed regardless of manifest flags (#159/#162 closed) |
+| 5 | Sudo Capability Exploitation | same confirmation gate | **implemented** |
+| 6 | Bloated Context | daemon two-tier context + dispatch rolling window + contextor pruning | **partial** |
+| 7 | Forgetful Context (novel) | — | **not yet mitigated** — no persistent constraint register in the daemon; highest-priority open item |
 | — | Kernel 4-tier policy engine (`/dev/jarvis`) | linux-jarvisos + daemon `KernelClient` | **OS-side** — not consulted from the daemon today |
 
 ### On the "TLA" acronym (important for the paper)
@@ -60,6 +63,7 @@ Access" is now the canonical expansion.)
 | Contextor memory store | Memory poisoning, RAG manipulation |
 | MCP server processes | Lateral movement, capability escalation |
 | Unix input socket | Unauthorised command injection |
+| Unix GUI socket (`jarvis.sock`) | Unauthorised command injection + TLA confirmation control (approve/deny) |
 
 ### Attacker Profiles
 
@@ -106,8 +110,9 @@ the same design decision.
 **OpenClaw:** Default configuration listened on TCP port 18789 with no
 authentication.
 
-**JARVIS:** Uses Unix domain sockets at `~/.jarvis/input.sock` and
-`~/.jarvis/output.sock`.  These are file-system objects — not TCP ports
+**JARVIS:** Uses Unix domain sockets under `$JARVIS_DATA_DIR` (Linux default
+`~/.local/share/jarvis/`): `input.sock`, `output.sock`, and the bidirectional
+GUI socket `jarvis.sock`.  These are file-system objects — not TCP ports
 — and are not reachable from the network.  `jarvis/core/socket_security.py`
 hardens their permissions to `0600` (owner-only) at creation time.
 
@@ -139,7 +144,9 @@ Slack tokens, and months of complete chat histories.
 **JARVIS:**
 - Default provider is local Ollama — no API key required.
 - `.env` is in `.gitignore` and never emitted to logs.
-- Chat history lives in `~/.jarvis/` (local, not served).
+- Chat history and sessions live in the contextor SQLite store
+  (`$JARVIS_DATA_DIR/memory/`, Linux default `~/.local/share/jarvis/memory/`;
+  local, not served).
 - Output socket broadcasts only to processes that explicitly connect.
 
 - Status: ✅ No default cloud exposure · ⚠️ Users adding API providers
@@ -166,30 +173,27 @@ instructed.  A malicious document could embed instruction text that the
 LLM interprets as a user command and routes to `shellmcp`.
 
 **Current mitigations:**
-- `CONFIRMATION_MODE=smart` (default) — tools that declare
-  `confirmation_required: true` prompt the user before execution.
-  **Gap (Project-JARVIS #159):** the bundled `shellmcp` server does **not**
-  declare `confirmation_required` on `run_command` (which runs `sudo -A`), so
-  under the default `smart` mode a privileged shell command is *not* gated by
-  the confirmation layer — only by the ksshaskpass sudo password prompt. The
-  planned fix has the host force-confirm privileged / `scope: system` tools
-  regardless of the manifest flag, so a tool author cannot opt out of gating a
-  dangerous tool.
-- `jarvis/core/input_guard.py` — scans direct user input for known
-  injection patterns and logs a WARNING.  (Does not yet scan LLM-processed
-  content from external sources.)
-- **MCP output containment hashing — implemented in dispatch; daemon
-  verification pending.** Tool output is wrapped in a boundary tag keyed by a
-  **128-bit CSPRNG nonce** (`dispatch/src/nonce.rs`), emitted in the EXIT
-  signal as `[hash=h] 200 <h>...raw MCP server output...</h>`
-  (`dispatch/src/orchestrator.rs`). The intent is that the system prompt
-  instructs the LLM to treat tagged content as data only.
-  **Gap:** the daemon does not yet verify or act on the boundary tag, and the
-  system prompt (`jarvis/config.py`) does not yet carry the injection-hardening
-  instruction — so the boundary currently *delimits* untrusted output but
-  nothing on the consuming side *enforces* it. Remaining hardening (out-of-band
-  default, moving the `(Error)` sentinel out of the untrusted stream) and
-  daemon-side verification are tracked in **dispatch #19**.
+- `CONFIRMATION_MODE=smart` (default) — the host assigns a minimum threat
+  level to every tool call: `classify()` = max(host floor for
+  command-execution tools, manifest-declared level, dangerous-payload scan of
+  params), and anything >= ELEVATED is blocked pending user confirmation.
+  A tool author cannot opt out of gating a dangerous tool — the former
+  `shellmcp` gap (#159/#162) is closed by the host floor in
+  `jarvis/core/threat_level.py`.
+- `jarvis/core/threat_level.py` — scans dispatched tool *parameters* for
+  dangerous payloads (sudo, `rm -rf`, pipe-to-shell, …) and raises the
+  confirmation threat level accordingly. (There is no scanner on direct user
+  input.)
+- **MCP output containment hashing — implemented end-to-end (#165).** Tool
+  output is wrapped in a boundary tag keyed by a **128-bit CSPRNG nonce**
+  (`dispatch/src/nonce.rs`), emitted in the EXIT signal as
+  `[hash=h] 200 <h>...raw MCP server output...</h>`
+  (`dispatch/src/orchestrator.rs`). The daemon verifies the tag against the
+  trusted per-task nonce on every EXIT/TIMEOUT
+  (`jarvis/dispatch/boundary.py`; `EventMerger` calls `verify_and_mark`) and
+  prepends an in-band UNVERIFIED marker on failure; all system prompts
+  (`jarvis/config.py`) instruct the LLM to treat boundary-tagged content as
+  data only.
 
 **Not yet mitigated:**
 - Injection arriving through LLM-processed external content (web pages,
@@ -202,7 +206,11 @@ where JARVIS has web-browsing or file-reading capabilities.
 ### 2. Same-User Unix Socket Injection
 
 **Risk:** Any process running as the same OS user can connect to
-`~/.jarvis/input.sock` and inject commands into the JARVIS event loop.
+`$JARVIS_DATA_DIR/input.sock` (or the GUI socket `jarvis.sock`) and inject
+commands into the JARVIS event loop.  Both the input and GUI sockets also
+accept TLA confirmation-control messages (`approve_confirmation`,
+`approve_all_confirmations`, …), so socket compromise defeats the
+confirmation gate as well.
 
 **Current mitigations:**
 - `jarvis/core/socket_security.py` sets socket permissions to `0600` —
@@ -241,7 +249,8 @@ be picked up if `dispatch` or `dmcp` auto-discovered arbitrary processes.
 into future LLM contexts through RAG retrieval.
 
 **Current mitigations:**
-- Contextor stores data at `~/.jarvis/` with user-only file permissions.
+- Contextor stores data at `$JARVIS_DATA_DIR/memory/` (Linux default
+  `~/.local/share/jarvis/memory/`) with user-only file permissions.
 - `DATA_CONSENT=false` disables proactive memory, reducing the attack
   window to only explicit `remember this` commands.
 
@@ -255,6 +264,7 @@ into future LLM contexts through RAG retrieval.
 | Setting | Safe default | Risk if changed |
 |---|---|---|
 | `CONFIRMATION_MODE` | `smart` | `allow_all` disables all tool confirmation |
+| `CONFIRMATION_TIMEOUT` | `0` (never auto-deny; confirmations stay pending until answered, #185) | a positive value auto-denies unanswered confirmations after N seconds — safer for unattended/headless hosts, at the cost of killing unattended legitimate work |
 | `JARVIS_SUDO_ENABLED` | `false` | `true` grants shell access to privileged commands |
 | `providers.json` | (empty) | API providers store keys in this file |
 | `NOTIFICATION_SILENT` | `false` | `true` suppresses desktop confirmation UI |
@@ -267,3 +277,9 @@ into future LLM contexts through RAG retrieval.
 Security issues should be reported via the process described in
 `SECURITY.md`.  Please do not open public GitHub issues for unpatched
 vulnerabilities.
+
+---
+
+## Changelog — corrected claims
+
+*2026-07-22:* taxonomy formalized to seven threats (Forgetful Context split from Bloated Context, 2026-07); Threat 2 upgraded to implemented — the daemon now verifies the dispatch boundary nonce (`jarvis/dispatch/boundary.py`, #165) and system prompts carry the data-only instruction; Threats 4/5 upgraded to implemented — the host floor in `threat_level.py` force-confirms exec tools regardless of manifest (#159/#162 closed); nonexistent `input_guard.py` replaced with the real payload scanner in `threat_level.py`; `~/.jarvis/` paths corrected to `$JARVIS_DATA_DIR` (Linux default `~/.local/share/jarvis/`, contextor at `.../memory/`); GUI socket (`jarvis.sock`) added to assets and the same-user risk analysis (both sockets carry TLA confirmation control); `CONFIRMATION_TIMEOUT` added to the configuration reference.
