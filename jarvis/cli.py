@@ -357,6 +357,8 @@ def _cmd_providers() -> None:
                 print(f"      api_key: {'set' if p.get('api_key') else '(not set)'}")
             if p.get("temperature") is not None:
                 print(f"      temperature: {p['temperature']}")
+            if p.get("vision"):
+                print("      vision: true")
             print()
         print(f"  File: {Config.PROVIDERS_FILE}")
         return
@@ -364,13 +366,16 @@ def _cmd_providers() -> None:
     subcmd = sys.argv[2]
 
     if subcmd == "add":
-        flags = parse_flags(sys.argv[3:])
+        args = sys.argv[3:]
+        vision = "--vision" in args
+        flags = parse_flags([a for a in args if a != "--vision"])
         ptype = flags.get("type", "")
         model = flags.get("model", "")
         if not ptype or not model:
             print("Usage: jarvis providers add --type <ollama|api> --model <model>")
             print(
-                "  Optional: --name <label> --url <url> --key <api_key> --temperature <0.0-2.0>"
+                "  Optional: --name <label> --url <url> --key <api_key> "
+                "--temperature <0.0-2.0> --vision"
             )
             sys.exit(1)
         temp = None
@@ -390,6 +395,7 @@ def _cmd_providers() -> None:
                 url=flags.get("url"),
                 api_key=flags.get("key"),
                 temperature=temp,
+                vision=vision,
             )
             print(f"Added provider '{name}' ({ptype}/{model}) at position {position}")
         except ValueError as e:
@@ -427,11 +433,14 @@ def _cmd_providers() -> None:
     elif subcmd == "edit":
         if len(sys.argv) < 4:
             print("Usage: jarvis providers edit <name> --field <value>")
-            print("  Fields: --model, --url, --key, --type")
+            print("  Fields: --model, --url, --key, --type, --vision <true|false>")
             sys.exit(1)
         flags = parse_flags(sys.argv[4:])
         if not flags:
-            print("Error: No fields to update. Use --model, --url, --key, or --type")
+            print(
+                "Error: No fields to update. Use --model, --url, --key, --type, "
+                "or --vision <true|false>"
+            )
             sys.exit(1)
         try:
             updated = edit_provider(sys.argv[3], **flags)

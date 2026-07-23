@@ -299,6 +299,88 @@ async def _handle_configure_server(
     await app._act_on_root_response(response, depth + 1)
 
 
+VISION_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+VISION_MAX_IMAGE_BYTES = 20 * 1024 * 1024
+
+
+async def _handle_analyze_image(
+    app: Any,
+    logger: Logger,
+    parsed: dict,
+    depth: int,
+    max_chain_depth: int,
+) -> None:
+    import asyncio
+    import os
+
+    from ..llm.provider_pool import NoVisionProviderError
+
+    path = parsed["path"]
+    query = parsed["query"]
+
+    if not Config.VISION_ENABLED:
+        await feed_root_summary(
+            app,
+            logger,
+            "VISION_ERROR",
+            "vision is disabled (set VISION_ENABLED=true to allow image analysis)",
+            depth,
+        )
+        return
+
+    if not os.path.isfile(path):
+        await feed_root_summary(
+            app, logger, "VISION_ERROR", f"file not found: {path}", depth
+        )
+        return
+
+    suffix = os.path.splitext(path)[1].lower()
+    if suffix not in VISION_IMAGE_SUFFIXES:
+        await feed_root_summary(
+            app,
+            logger,
+            "VISION_ERROR",
+            f"unsupported type '{suffix or path}' — supported: png, jpg, jpeg, webp, gif",
+            depth,
+        )
+        return
+
+    size = os.path.getsize(path)
+    if size > VISION_MAX_IMAGE_BYTES:
+        await feed_root_summary(
+            app,
+            logger,
+            "VISION_ERROR",
+            f"image too large ({size} bytes; max {VISION_MAX_IMAGE_BYTES})",
+            depth,
+        )
+        return
+
+    emit_activity(app, f"Analyzing image {os.path.basename(path)}…", kind="llm")
+    message = {"role": "user", "content": query, "images": [path]}
+    try:
+        result = await asyncio.to_thread(
+            app.llm.provider.chat, [message], require_vision=True
+        )
+    except NoVisionProviderError:
+        await feed_root_summary(
+            app,
+            logger,
+            "VISION_ERROR",
+            "no vision-capable provider configured — add one with "
+            "'jarvis providers add --type ollama --model llama3.2-vision --vision'",
+            depth,
+        )
+        return
+    except Exception as e:
+        logger.warning(f"JARVIS: analyze_image '{path}' failed: {e}")
+        await feed_root_summary(app, logger, "VISION_ERROR", str(e), depth)
+        return
+
+    logger.info(f"JARVIS: analyze_image '{path}' → {len(result)} char(s)")
+    await feed_root_summary(app, logger, "VISION_RESULT", result, depth)
+
+
 async def act_on_root_response(
     app: Any,
     logger: Logger,
@@ -372,6 +454,10 @@ async def act_on_root_response(
 
     if action == "configure_server":
         await _handle_configure_server(app, logger, parsed, depth, max_chain_depth)
+        return
+
+    if action == "analyze_image":
+        await _handle_analyze_image(app, logger, parsed, depth, max_chain_depth)
         return
 
     if action == "respond":

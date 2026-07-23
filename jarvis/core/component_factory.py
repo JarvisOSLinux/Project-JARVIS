@@ -69,7 +69,13 @@ class ComponentFactory:
                     provider = create_llm_provider(
                         provider=ptype, model=model, **kwargs
                     )
-                    entries.append(ProviderEntry(provider=provider, name=name))
+                    entries.append(
+                        ProviderEntry(
+                            provider=provider,
+                            name=name,
+                            vision=bool(spec.get("vision", False)),
+                        )
+                    )
                     logger.info(f"  [{len(entries)}] {name}: {ptype}/{model}")
                 except Exception as e:
                     logger.warning(f"Failed to create provider '{name}': {e}")

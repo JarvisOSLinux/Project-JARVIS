@@ -7,8 +7,31 @@ from typing import Any, Dict, List, Optional
 
 from ...core.logger import get_logger
 from ..base import BaseLLMProvider
+from ..images import encode_image_base64
 
 logger = get_logger(__name__)
+
+
+def _convert_image_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Rewrite messages carrying image paths into Ollama's native format.
+
+    Ollama accepts a per-message ``images`` array of base64 strings. Messages
+    without images pass through untouched — including the list itself when
+    nothing needs rewriting — so text-only payloads stay byte-identical.
+    """
+    if not any(m.get("images") for m in messages):
+        return messages
+    converted = []
+    for m in messages:
+        images = m.get("images")
+        if not images:
+            converted.append(m)
+            continue
+        rewritten = {k: v for k, v in m.items() if k != "images"}
+        rewritten["images"] = [encode_image_base64(p) for p in images]
+        converted.append(rewritten)
+    return converted
+
 
 LLM_TIMEOUT = 60  # seconds — prevents indefinite hangs on cloud API
 
@@ -131,7 +154,7 @@ class OllamaProvider(BaseLLMProvider):
 
         kwargs: Dict[str, object] = {
             "model": self.model,
-            "messages": messages,
+            "messages": _convert_image_messages(messages),
             "options": options or None,
         }
         if self.strict_json:

@@ -29,6 +29,10 @@ COOLDOWN_SERVER_ERROR = 30
 COOLDOWN_NETWORK = 30
 
 
+class NoVisionProviderError(RuntimeError):
+    """No vision-capable provider is configured or currently available."""
+
+
 @dataclass
 class ProviderEntry:
     """A provider in the pool with runtime state."""
@@ -39,6 +43,7 @@ class ProviderEntry:
     cooldown_until: Optional[datetime] = None
     failure_count: int = 0
     last_error: Optional[str] = None
+    vision: bool = False
 
 
 class ProviderPool(BaseLLMProvider):
@@ -50,13 +55,21 @@ class ProviderPool(BaseLLMProvider):
         super().__init__(entries[0].provider.model)
         self._entries = entries
 
-    def chat(self, messages: List[Dict[str, str]]) -> str:
+    def chat(self, messages: List[Dict[str, str]], require_vision: bool = False) -> str:
         now = datetime.now()
         self._restore_cooled_down(now)
+
+        if require_vision and not any(e.vision for e in self._entries):
+            raise NoVisionProviderError(
+                "No vision-capable provider configured. Add one with: "
+                "jarvis providers add --type ollama --model llama3.2-vision --vision"
+            )
 
         errors: List[tuple[str, str]] = []
         for entry in self._entries:
             if entry.status != "active":
+                continue
+            if require_vision and not entry.vision:
                 continue
             try:
                 result = entry.provider.chat(messages)
@@ -88,6 +101,10 @@ class ProviderPool(BaseLLMProvider):
                 line += f" — {entry.last_error}"
             status_lines.append(line)
 
+        if require_vision:
+            raise NoVisionProviderError(
+                "No vision-capable provider available:\n" + "\n".join(status_lines)
+            )
         raise RuntimeError(
             "All LLM providers are unavailable:\n" + "\n".join(status_lines)
         )

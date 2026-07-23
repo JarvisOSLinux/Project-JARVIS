@@ -4,8 +4,40 @@ from typing import Any, Dict, List, Optional
 
 from ...core.logger import get_logger
 from ..base import BaseLLMProvider
+from ..images import detect_image_format, encode_image_base64
 
 logger = get_logger(__name__)
+
+
+def _convert_image_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Rewrite messages carrying image paths into OpenAI content-parts.
+
+    Images become ``image_url`` parts with base64 data URLs. Messages without
+    images pass through untouched — including the list itself when nothing
+    needs rewriting — so text-only payloads stay byte-identical.
+    """
+    if not any(m.get("images") for m in messages):
+        return messages
+    converted = []
+    for m in messages:
+        images = m.get("images")
+        if not images:
+            converted.append(m)
+            continue
+        parts: List[Dict[str, Any]] = [{"type": "text", "text": m.get("content", "")}]
+        for path in images:
+            fmt = detect_image_format(path)
+            data = encode_image_base64(path)
+            parts.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/{fmt};base64,{data}"},
+                }
+            )
+        rewritten = {k: v for k, v in m.items() if k != "images"}
+        rewritten["content"] = parts
+        converted.append(rewritten)
+    return converted
 
 
 class APIProvider(BaseLLMProvider):
@@ -61,7 +93,7 @@ class APIProvider(BaseLLMProvider):
 
         payload = {
             "model": self.model,
-            "messages": messages,
+            "messages": _convert_image_messages(messages),
             "stream": False,
         }
 

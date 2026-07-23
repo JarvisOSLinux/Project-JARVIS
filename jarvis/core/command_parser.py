@@ -4,7 +4,8 @@ Task parser for JARVIS hierarchical prompt system.
 Validates and parses LLM responses into structured actions.
 
 ROOT mode actions:  respond, dispatch (route),
-                    store, recall, search_memory, list_memory (memory)
+                    store, recall, search_memory, list_memory (memory),
+                    analyze_image (vision)
 DISPATCH mode actions: plan, search, list_tools, install, dispatch (tasks),
                        wait, kill, defer, done
 """
@@ -30,6 +31,8 @@ VALID_ACTIONS = {
     "recall",
     "search_memory",
     "list_memory",
+    # Root — vision (delegates to a vision-capable provider in the pool)
+    "analyze_image",
     # Dispatch subsystem
     "plan",
     "search",
@@ -138,6 +141,8 @@ class TaskParser:
             query = result.get("query", "")[:40]
             offset = result.get("offset", 0)
             return f", query='{query}', top_k={result.get('top_k', 5)}, offset={offset}"
+        if action == "analyze_image":
+            return f", path={result.get('path')}"
         return ""
 
 
@@ -483,5 +488,23 @@ def _parse_search_memory(response: Dict[str, Any]) -> Dict[str, Any]:
 def _parse_list_memory(response: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "action": "list_memory",
+        "goal_updates": response.get("goal_updates", []),
+    }
+
+
+# ------------------------------------------------------------------
+# ROOT-level vision action (direct operation, no sub-chain)
+# ------------------------------------------------------------------
+
+
+@_parser("analyze_image")
+def _parse_analyze_image(response: Dict[str, Any]) -> Dict[str, Any]:
+    path = response.get("path", "")
+    if not path:
+        return {"error": "analyze_image requires 'path'", "raw": response}
+    return {
+        "action": "analyze_image",
+        "path": str(path),
+        "query": str(response.get("query") or "Describe this image in detail."),
         "goal_updates": response.get("goal_updates", []),
     }

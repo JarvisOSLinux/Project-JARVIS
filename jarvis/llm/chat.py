@@ -152,7 +152,7 @@ class LLM:
         "root": (
             'Valid actions: "respond", "search_tools", "get_server_docs", '
             '"install_server", "configure_server", "dispatch", '
-            '"store", "recall", "search_memory", "list_memory".\n'
+            '"store", "recall", "search_memory", "list_memory", "analyze_image".\n'
             'Example: {"action": "search_tools", "capability": "execute shell commands"}'
         ),
         "dispatch": (

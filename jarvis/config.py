@@ -138,6 +138,12 @@ class Config:
     # - false: Disable memory — ROOT only has respond and dispatch
     CONTEXTOR_ENABLED = os.getenv("CONTEXTOR_ENABLED", "true").lower() == "true"
 
+    # Vision (image analysis)
+    # - true: analyze_image may send image files to vision-capable providers
+    # - false: analyze_image always refuses — guarantees images never reach
+    #   any provider (privacy: API vision providers send images off-device)
+    VISION_ENABLED = os.getenv("VISION_ENABLED", "true").lower() == "true"
+
     # Sudo Access Configuration
     # Note: This is a preference setting. Actual sudo access is managed by sudo_manager
     # This setting tracks whether sudo should be enabled (for installation/configuration purposes)
@@ -284,6 +290,8 @@ Valid formats:
 
 {{"action": "list_memory", "goal_updates": []}}
 
+{{"action": "analyze_image", "path": "/absolute/image/path.png", "query": "what to look for", "goal_updates": []}}
+
 {{"action": "done", "summary": "result summary"}}
 
 The very first character must be {{ and the very last must be }}.
@@ -360,6 +368,10 @@ dispatch — Execute tool calls. Only after seeing SERVER_DOCS.
     "remind_after": <seconds> so you get a REMIND while it runs and can decide to keep waiting or
     kill it — rather than it being killed behind your back. Quick commands need neither.
 
+analyze_image — Analyze an image with a vision-capable model; use when the user
+  references an image file or a task needs to see one.
+  {{"action": "analyze_image", "path": "<absolute image path>", "query": "<what to look for>"}}
+
 --- Actions (exact format) ---
 
 {{
@@ -396,6 +408,13 @@ dispatch — Execute tool calls. Only after seeing SERVER_DOCS.
 {{
     "action": "dispatch",
     "tasks": [{{"server": "<server_id>", "tool": "<tool_name>", "params": {{}}}}],
+    "goal_updates": []
+}}
+
+{{
+    "action": "analyze_image",
+    "path": "<absolute image path>",
+    "query": "<what to look for>",
     "goal_updates": []
 }}
 
@@ -527,6 +546,10 @@ dispatch — Execute tool calls. Only after seeing SERVER_DOCS.
     "remind_after": <seconds> so you get a REMIND while it runs and can decide to keep waiting or
     kill it — rather than it being killed behind your back. Quick commands need neither.
 
+analyze_image — Analyze an image with a vision-capable model; use when the user
+  references an image file or a task needs to see one.
+  {{"action": "analyze_image", "path": "<absolute image path>", "query": "<what to look for>"}}
+
 --- Actions (exact format) ---
 
 {{
@@ -563,6 +586,13 @@ dispatch — Execute tool calls. Only after seeing SERVER_DOCS.
 {{
     "action": "dispatch",
     "tasks": [{{"server": "<server_id>", "tool": "<tool_name>", "params": {{}}}}],
+    "goal_updates": []
+}}
+
+{{
+    "action": "analyze_image",
+    "path": "<absolute image path>",
+    "query": "<what to look for>",
     "goal_updates": []
 }}
 
