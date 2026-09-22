@@ -84,7 +84,7 @@ There is no separate audit log and no unconditional FORBIDDEN block:
 | Mode | Behaviour |
 |------|-----------|
 | `allow_all` | No prompts, everything auto-approved (bypasses all tiers) |
-| `smart` | Ask when the TLA classifier rates the call >= ELEVATED: max(host floor for always-dangerous tools, manifest-declared `threat_level` / legacy `confirmation_required`, dangerous-payload scan of params, registry-tier floor — ELEVATED unless the server's install-time tier is `official`/`community` AND the tool is manifest-declared, #223) |
+| `smart` | Ask when the TLA classifier rates the call >= ELEVATED: max(host floor for always-dangerous tools, manifest-declared `threat_level` / legacy `confirmation_required`, dangerous-payload scan of params, privileged-command prefix scan of params — per-OS elevation-implying verbs like `pacman`/`systemctl stop`/`reg delete`, #208, registry-tier floor — ELEVATED unless the server's install-time tier is `official`/`community` AND the tool is manifest-declared, #223) |
 | `ask_all` | Confirm every tool call |
 
 ### Confirmation Channels
@@ -181,10 +181,19 @@ daemon's reach (a flag JARVIS could write would be a self-escalation path).
 `BasePlatform` still carries a `sudo -A` askpass surface from the bundled
 shell server that was retired in `357aeca` — `find_askpass()`,
 `askpass_helpers()`, `elevate()`, `grant_privilege()`/`revoke_privilege()`/
-`is_privilege_granted()`, `privileged_prefixes()`, `open_command()`. **None of
-these has a caller outside `jarvis/platform/` today** (verified by grep,
-including tests). They are retained per-OS scaffolding, not a live mechanism;
-do not describe them as the boundary. See #208 for the wire-or-drop decision.
+`is_privilege_granted()`, `open_command()`. **None of these has a caller
+outside `jarvis/platform/` today** (verified by grep, including tests). They
+are retained per-OS scaffolding, not a live mechanism; do not describe them as
+the boundary.
+
+`privileged_prefixes()` is the one method of that surface with a live caller:
+`threat_level.py`'s fifth `classify()` input (#208) folds it in as a
+raise-only DANGEROUS floor — a command-ish parameter naming an
+elevation-implying subsystem verb (`pacman`, `systemctl stop`, `reg delete`,
+…) raises even when the tool name is unknown to the host floor and the string
+trips no payload-scan signature. It no longer has anything to do with
+elevation *execution* (that's dmcp scope, above); it is pure TLA
+classification signal now.
 
 The IPC half of the platform layer *is* live: `ipc_verify_peer()` (accept-time
 peer credential check, `runtime/io.py`) and `system_ipc_candidates()`
@@ -283,6 +292,8 @@ make check                  # Format + lint + typecheck + tests
 ---
 
 ## Changelog — corrected claims
+
+*2026-09-21:* `privileged_prefixes()` is folded into `classify()` as a fifth, raise-only floor (#208 resolution). Previously it and the rest of the retired-shellmcp elevation surface (`find_askpass`/`elevate`/`grant_privilege`/etc.) had zero callers outside `jarvis/platform/`; the design question #208 left open — fold the per-OS prefix table into TLA classification, or retire it as superseded by dmcp scope-based elevation — was decided in favor of folding, since it catches command-ish parameters under unknown tool names that evade both the host-name floor and the (deliberately narrow) payload-scan regexes. Same DANGEROUS severity as the payload scan. `resolve_sidecar()`/`sidecar_search_dirs()` stay as documented below (kept, not dropped) — that box was already resolved when this section's "keep it until packaging lands" line landed in `a8ffcf1`.
 
 *2026-09-01:* `jarvis confirm` is no longer socket-only (#224 follow-up). The Confirmation Channels paragraph described a review queue that survives a restart, but the only way to review it exited 1 whenever `_find_ipc_endpoint()` found nothing or `ipc_connect` was refused — so the queue was unreachable in exactly the window it was built for, between restarts. `_cmd_confirm` now falls back to the store file for listing (the renderer was extracted to `_print_confirmation_list` so live and offline output is the same code, not a lookalike) and appends decisions to `$JARVIS_DATA_DIR/confirmation_decisions.json`. `_find_ipc_endpoint(quiet=True)` suppresses only the not-found message: a failed ownership check still prints its error loudly before the fallback runs, because a socket that is not ours is a security signal rather than a stopped daemon — but the review itself continues offline, since the queue is a same-user file our own daemon will read. The four decision branches of `io._handle_confirmation_query` were extracted to `io.apply_confirmation_decision()`, which the startup replay calls, so there is one translation from wire protocol to `CONFIRMATION_RESPONSE` events rather than a second copy that can drift. Verified red-then-green in `tests/test_confirmation_offline_queue.py` (20 tests): offline list from the store on an absent endpoint and on a refused connect, each protocol shape queued exactly, replacement per id, unknown id refused without writing, a reachable daemon writing nothing at all, startup replay resuming through `root_handlers.on_confirmation_response` with the queue file cleared and the summary logged, a stale id warn-skipping while the file still clears, and a corrupt queue quarantined as `.bad` without breaking startup.
 

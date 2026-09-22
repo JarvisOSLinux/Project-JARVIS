@@ -9,6 +9,7 @@ tool, so a dangerous tool cannot opt out of gating.
 import pytest
 
 import jarvis.core.confirmation_manager as cm
+import jarvis.platform as platform_mod
 from jarvis.core.confirmation_manager import ConfirmationManager
 from jarvis.core.threat_level import ThreatLevel, classify
 
@@ -301,6 +302,72 @@ class TestTierFloor:
             "threat_level": "safe",
         }
         assert classify("run_command", meta) == ThreatLevel.DANGEROUS
+
+
+class _FakePlatform:
+    def __init__(self, prefixes):
+        self._prefixes = prefixes
+
+    def privileged_prefixes(self):
+        return self._prefixes
+
+
+@pytest.mark.unit
+class TestPrivilegedFloor:
+    """The privileged-command prefix floor (#208): a command-ish parameter
+    naming an elevation-implying subsystem verb raises to DANGEROUS even when
+    the tool name is unknown to the host floor and the string trips no
+    payload-scan signature. Raise-only, same severity as the payload scan.
+    """
+
+    def test_unnamed_tool_with_privileged_command_is_dangerous(self, monkeypatch):
+        monkeypatch.setattr(
+            platform_mod, "current", _FakePlatform(("pacman", "systemctl stop"))
+        )
+        assert (
+            classify("do_thing", {}, {"command": "pacman -Syu"})
+            == ThreatLevel.DANGEROUS
+        )
+        assert (
+            classify("do_thing", {}, {"command": "systemctl stop firewalld"})
+            == ThreatLevel.DANGEROUS
+        )
+
+    def test_unrelated_command_stays_safe(self, monkeypatch):
+        monkeypatch.setattr(platform_mod, "current", _FakePlatform(("pacman",)))
+        assert classify("do_thing", {}, {"command": "echo hi"}) == ThreatLevel.SAFE
+
+    def test_prefix_does_not_match_inside_another_word(self, monkeypatch):
+        # "apt" must not fire on "apartment" — word-boundary matching only.
+        monkeypatch.setattr(platform_mod, "current", _FakePlatform(("apt",)))
+        assert (
+            classify("web_search", {}, {"query": "apartment for rent"})
+            == ThreatLevel.SAFE
+        )
+
+    def test_empty_prefix_table_never_raises(self, monkeypatch):
+        monkeypatch.setattr(platform_mod, "current", _FakePlatform(()))
+        assert classify("do_thing", {}, {"command": "pacman -Syu"}) == ThreatLevel.SAFE
+
+    def test_none_and_non_string_params_are_safe(self, monkeypatch):
+        monkeypatch.setattr(platform_mod, "current", _FakePlatform(("pacman",)))
+        assert classify("do_thing", {}, None) == ThreatLevel.SAFE
+        assert classify("do_thing", {}, {"count": 5, "flag": True}) == ThreatLevel.SAFE
+
+    def test_privileged_floor_never_lowers_a_declared_level(self, monkeypatch):
+        monkeypatch.setattr(platform_mod, "current", _FakePlatform(("pacman",)))
+        # A manifest declaring 'safe' cannot pull this back down.
+        assert (
+            classify("do_thing", {"threat_level": "safe"}, {"command": "pacman -Syu"})
+            == ThreatLevel.DANGEROUS
+        )
+
+    def test_host_floor_still_governs_known_names(self, monkeypatch):
+        monkeypatch.setattr(platform_mod, "current", _FakePlatform(("pacman",)))
+        assert (
+            classify("run_command", {}, {"command": "pacman -Syu"})
+            == ThreatLevel.DANGEROUS
+        )
 
 
 @pytest.mark.unit
