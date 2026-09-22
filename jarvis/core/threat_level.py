@@ -28,13 +28,27 @@ lower itself below ELEVATED by self-declaring ``safe``. Metadata WITHOUT the
 ``registry_tier`` key is out-of-dispatch context and gets no tier floor, so
 bare-metadata callers keep their contract. Raise-only like every other input.
 
+The fifth input is the *privileged-command prefix table* (#208): each
+``BasePlatform`` subclass carries a per-OS list of command prefixes that
+imply elevation (``pacman``, ``systemctl stop``, ``reg delete``, …), built
+for the retired ``shellmcp`` askpass path and otherwise orphaned once dmcp's
+scope model took over deciding elevation. Its signal outlives that path: a
+tool with a command-ish parameter but no shell-ish *name* evades the host
+floor, and a privileged subsystem verb like ``pacman -Syu`` or ``systemctl
+stop firewalld`` trips none of the (deliberately narrow) payload regexes
+either. Raise-only, folded in at the same DANGEROUS severity as the payload
+scan's own escalation signatures (``sudo``, ``rm -rf``, …).
+
 The four tiers mirror the kernel policy engine's vocabulary so the userspace
 gate and the OS embodiment speak the same language.
 """
 
 import re
 from enum import IntEnum
+from functools import lru_cache
 from typing import Any, Dict, Optional
+
+import jarvis.platform as _platform_mod
 
 
 class ThreatLevel(IntEnum):
@@ -181,20 +195,44 @@ def _payload_floor(params: Any) -> ThreatLevel:
     return ThreatLevel.SAFE
 
 
+@lru_cache(maxsize=None)
+def _privileged_pattern(prefixes: tuple) -> "re.Pattern":
+    alternation = "|".join(re.escape(prefix) for prefix in prefixes)
+    return re.compile(rf"\b(?:{alternation})\b", re.IGNORECASE)
+
+
+def _privileged_floor(params: Any) -> ThreatLevel:
+    if not params:
+        return ThreatLevel.SAFE
+    prefixes = tuple(_platform_mod.current.privileged_prefixes())
+    if not prefixes:
+        return ThreatLevel.SAFE
+    pattern = _privileged_pattern(prefixes)
+    for text in _iter_strings(params):
+        if pattern.search(text):
+            return ThreatLevel.DANGEROUS
+    return ThreatLevel.SAFE
+
+
 def classify(
     tool_name: Optional[str],
     tool_metadata: Optional[Dict[str, Any]] = None,
     params: Any = None,
 ) -> ThreatLevel:
-    """Effective threat level = ``max(host floor, manifest, payload, tier)``.
+    """Effective threat level = ``max(host floor, manifest, payload,
+    privileged-command, tier)``.
 
     The manifest may raise a tool's level but can never lower it below the host
     floor, and a dangerous *payload* raises the level even for a host-safe tool
     — so neither a permissive manifest nor a benign tool identity can hide a
-    destructive parameter. The registry-tier floor (#223) raises an unreviewed
-    tool to ELEVATED: only a declaration that passed the registry's gate
-    (tier ``official``/``community``) classifies below that. All four inputs
-    raise only; none can lower another.
+    destructive parameter. The privileged-command floor (#208) catches the gap
+    between those two: a command-ish parameter naming an elevation-implying
+    subsystem verb (``pacman``, ``systemctl stop``, ``reg delete``, …) that
+    matches no payload signature and arrives under a tool name the host floor
+    doesn't know. The registry-tier floor (#223) raises an unreviewed tool to
+    ELEVATED: only a declaration that passed the registry's gate (tier
+    ``official``/``community``) classifies below that. All five inputs raise
+    only; none can lower another.
     """
     metadata = tool_metadata or {}
     return ThreatLevel(
@@ -202,6 +240,7 @@ def classify(
             int(_host_floor(tool_name)),
             int(_declared(metadata)),
             int(_payload_floor(params)),
+            int(_privileged_floor(params)),
             int(_tier_floor(metadata)),
         )
     )
