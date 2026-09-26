@@ -285,11 +285,16 @@ class DispatchAdapter:
         return ""
 
     def _extract_content(self, result) -> Dict[str, Any]:
-        if (
-            hasattr(result, "structuredContent")
-            and result.structuredContent is not None
-        ):
-            return result.structuredContent
+        # The MCP Python SDK names this field `structured_content`; the wire
+        # format spells it `structuredContent`. Only the snake_case attribute
+        # exists on CallToolResult, so testing the camelCase spelling alone made
+        # this branch unreachable and every reply fell through to the text path
+        # below (#240). Both are checked now because the spelling is an SDK
+        # detail, not a contract we control.
+        for attr in ("structured_content", "structuredContent"):
+            structured = getattr(result, attr, None)
+            if structured is not None:
+                return structured
 
         if hasattr(result, "content") and result.content:
             texts = []
@@ -483,14 +488,22 @@ class DispatchAdapter:
                         f"{len(entries)} hit(s) via embedding"
                     )
                     return {"results": entries, "mode": "embedding"}
-                logger.info(
-                    f"Dispatch: search_by_capability '{capability}' — "
-                    "embedding returned nothing, falling back to keyword"
+                # Warning, not info: a silent downgrade here is what let the
+                # primary discovery path stay broken for months (#240). Keyword
+                # matching cannot rank -- every entry it returns scores 0.0 --
+                # so this is a real loss of quality, not an equivalent route.
+                logger.warning(
+                    f"Dispatch: search_by_capability '{capability}' — embedding "
+                    "search returned no hits; DOWNGRADING to unranked keyword "
+                    "match. Expected when no server matches, but a persistent "
+                    "downgrade means semantic discovery is not working."
                 )
             except Exception as e:
                 logger.warning(
-                    f"Dispatch: search_by_capability embedding failed: {e}, "
-                    "falling back to keyword"
+                    f"Dispatch: search_by_capability embedding search FAILED "
+                    f"({type(e).__name__}: {e}); downgrading to unranked keyword "
+                    f"match. This is a fault, not a miss — semantic discovery is "
+                    f"unavailable until it is fixed."
                 )
 
         # Keyword fallback — split capability into words, strip short tokens

@@ -59,7 +59,7 @@ async def _handle_search_tools(
     )
 
     context = build_root_context(app, logger)
-    context += "\n" + format_search_results(capability, entries)
+    context += "\n" + format_search_results(capability, entries, mode)
     response = await ask_llm(app, logger, context, tag="root-search-tools", mode="root")
     await app._act_on_root_response(response, depth + 1)
 
