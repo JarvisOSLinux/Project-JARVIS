@@ -150,7 +150,11 @@ def build_root_context(
     return "\n".join(parts) if parts else "No active context."
 
 
-def format_search_results(capability: str, results: List[Dict[str, Any]]) -> str:
+def format_search_results(
+    capability: str,
+    results: List[Dict[str, Any]],
+    mode: str = "embedding",
+) -> str:
     """Format vector/keyword search results into a SEARCH_RESULTS context block.
 
     Each entry shows server id, installed status, and a one-line description.
@@ -159,7 +163,17 @@ def format_search_results(capability: str, results: List[Dict[str, Any]]) -> str
     if not results:
         return f'SEARCH_RESULTS: No servers found for "{capability}".'
 
-    lines = [f'SEARCH_RESULTS (top {len(results)} for "{capability}"):']
+    # Say which mechanism produced these. Keyword matching returns every server
+    # containing one of the words, unranked (score 0.0), so "best fits the task"
+    # below is advice the model can only follow if it knows the list is not
+    # already ordered by fit.
+    heading = f'SEARCH_RESULTS (top {len(results)} for "{capability}")'
+    if mode != "embedding":
+        heading += (
+            f" — matched by {mode}, NOT semantic similarity. These are unranked:"
+            " read every summary rather than trusting the order"
+        )
+    lines = [heading + ":"]
     for r in results:
         sid = r.get("server_id", r.get("id", "unknown"))
         name = r.get("server_name", r.get("name", sid))

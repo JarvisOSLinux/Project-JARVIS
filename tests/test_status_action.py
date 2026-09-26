@@ -34,7 +34,7 @@ class TestAdapterStatusNotConnected:
 @pytest.mark.integration
 class TestAdapterStatusConnected:
     """dispatch's status/get_output tools return their JSON via content[0].text,
-    not structuredContent, so _extract_content's json.loads fallback wraps it
+    not structured content, so _extract_content's json.loads fallback wraps it
     under "output" — get_task_status/get_task_output must unwrap that shape.
     """
 
@@ -43,6 +43,12 @@ class TestAdapterStatusConnected:
         adapter._connected = True
         adapter.session = MagicMock()
         result = MagicMock()
+        # Both spellings, and both must be None. The MCP SDK's attribute is
+        # `structured_content`; `structuredContent` is only the wire spelling.
+        # A MagicMock auto-creates any attribute that is read, so leaving the
+        # snake_case one unset would hand _extract_content a truthy mock and
+        # this double would stop modelling the real CallToolResult (#240).
+        result.structured_content = None
         result.structuredContent = None
         block = MagicMock()
         block.text = tool_text

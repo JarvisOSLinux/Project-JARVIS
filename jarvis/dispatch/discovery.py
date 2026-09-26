@@ -112,6 +112,37 @@ async def sync_index(adapter: Any, logger: Logger) -> Dict[str, Any]:
         return {"error": f"sync_index failed: {e}"}
 
 
+def _as_results(payload: Any, empty: Any) -> Dict[str, Any]:
+    """Normalise a vector-search reply into ``{"results": ...}``.
+
+    The two transports disagree about shape and neither matches what callers
+    read, which is how semantic discovery came to be dead in the product (#240):
+
+    - MCP: dispatch puts the array in ``content[0].text`` and also sets a
+      top-level ``results`` key, but that key is not part of the MCP tool-result
+      schema so the SDK drops it. ``_extract_content`` parses the text, finds a
+      list rather than a dict, and hands back ``{"output": [...]}``.
+    - CLI: ``dmcp browse --vector --json`` prints a bare JSON array, so
+      ``json.loads`` yields a list with no ``.get`` at all.
+
+    Callers then read ``.get("results", [])`` and get nothing, or an
+    AttributeError that a blanket except turns into nothing. Normalising here
+    means there is one shape to read and one place to fix it again.
+    """
+    if isinstance(payload, list):
+        return {"results": payload}
+    if isinstance(payload, dict):
+        for key in ("results", "output"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                return {"results": value}
+        # An explicit error from the transport is worth preserving rather than
+        # flattening into "no matches" -- that conflation is the bug above.
+        if "error" in payload:
+            return {"results": empty, "error": payload["error"]}
+    return {"results": empty}
+
+
 async def browse_vector(
     adapter: Any,
     logger: Logger,
@@ -135,7 +166,7 @@ async def browse_vector(
         if raw is None:
             return {"results": []}
         try:
-            return json.loads(raw)
+            return _as_results(json.loads(raw), [])
         except json.JSONDecodeError:
             return {"results": []}
 
@@ -151,7 +182,7 @@ async def browse_vector(
             ),
             timeout=adapter.timeout,
         )
-        return adapter._extract_content(result)
+        return _as_results(adapter._extract_content(result), [])
     except Exception as e:
         logger.warning(f"Dispatch: browse_vector failed: {e}")
         return {"results": []}
@@ -180,7 +211,7 @@ async def browse_vectors_batch(
         if raw is None:
             return {"results": [[] for _ in vectors]}
         try:
-            return json.loads(raw)
+            return _as_results(json.loads(raw), [[] for _ in vectors])
         except json.JSONDecodeError:
             return {"results": [[] for _ in vectors]}
 
@@ -196,7 +227,9 @@ async def browse_vectors_batch(
             ),
             timeout=adapter.timeout,
         )
-        return adapter._extract_content(result)
+        return _as_results(
+            adapter._extract_content(result), [[] for _ in vectors]
+        )
     except Exception as e:
         logger.warning(f"Dispatch: browse_vectors_batch failed: {e}")
         return {"results": [[] for _ in vectors]}
