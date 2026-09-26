@@ -227,9 +227,7 @@ async def browse_vectors_batch(
             ),
             timeout=adapter.timeout,
         )
-        return _as_results(
-            adapter._extract_content(result), [[] for _ in vectors]
-        )
+        return _as_results(adapter._extract_content(result), [[] for _ in vectors])
     except Exception as e:
         logger.warning(f"Dispatch: browse_vectors_batch failed: {e}")
         return {"results": [[] for _ in vectors]}

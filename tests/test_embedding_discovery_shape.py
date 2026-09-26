@@ -17,7 +17,6 @@ import pytest
 
 from jarvis.dispatch.discovery import _as_results
 
-
 HITS = [
     {"server_id": "com.example.mcp.weather", "server_name": "Weather", "score": 0.7398},
     {"server_id": "com.example.mcp.caldav", "server_name": "CalDAV", "score": 0.48},
