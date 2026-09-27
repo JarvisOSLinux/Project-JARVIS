@@ -17,7 +17,24 @@ from ..core.providers import (
 )
 from ..core.voice_state import VoiceState
 from ..platform import current as platform
+from ..platform.base import IPCEndpointBusy
 from ..voice.chime import validate_chime_path
+
+
+async def _serve_endpoint(logger: Logger, path: str, handler: Any) -> Any:
+    """Bind *path*, or return None when another JARVIS is already serving it.
+
+    A busy endpoint disables this socket for this process rather than killing
+    the daemon: the rest of it still works headlessly, and the instance that
+    owns the endpoint keeps owning it. Returning None (instead of raising past
+    the caller) also keeps us out of the caller's ``finally``, which would
+    otherwise unlink the *other* daemon's endpoint on the way out.
+    """
+    try:
+        return await platform.create_ipc_server(path, handler)
+    except IPCEndpointBusy as e:
+        logger.error("JARVIS: %s Socket disabled for this process.", e)
+        return None
 
 
 async def run_socket_listener(app: Any, logger: Logger) -> None:
@@ -25,9 +42,11 @@ async def run_socket_listener(app: Any, logger: Logger) -> None:
     path = Config.JARVIS_INPUT_SOCKET
     if not path:
         return
-    server = await platform.create_ipc_server(
-        path, lambda r, w: handle_socket_connection(app, logger, r, w)
+    server = await _serve_endpoint(
+        logger, path, lambda r, w: handle_socket_connection(app, logger, r, w)
     )
+    if server is None:
+        return
     try:
         await asyncio.Future()
     except asyncio.CancelledError:
@@ -223,9 +242,11 @@ async def run_output_socket_listener(app: Any, logger: Logger) -> None:
     path = Config.JARVIS_OUTPUT_SOCKET
     if not path:
         return
-    server = await platform.create_ipc_server(
-        path, lambda r, w: handle_output_connection(app, logger, r, w)
+    server = await _serve_endpoint(
+        logger, path, lambda r, w: handle_output_connection(app, logger, r, w)
     )
+    if server is None:
+        return
     try:
         await asyncio.Future()
     except asyncio.CancelledError:
@@ -282,9 +303,11 @@ async def run_gui_socket_listener(app: Any, logger: Logger) -> None:
     path = Config.JARVIS_GUI_SOCKET
     if not path:
         return
-    server = await platform.create_ipc_server(
-        path, lambda r, w: handle_gui_connection(app, logger, r, w)
+    server = await _serve_endpoint(
+        logger, path, lambda r, w: handle_gui_connection(app, logger, r, w)
     )
+    if server is None:
+        return
     try:
         await asyncio.Future()
     except asyncio.CancelledError:

@@ -732,6 +732,7 @@ async def dispatch_send(
         timeout=Config.CONFIRMATION_TIMEOUT,
         session_id=session_id,
         fingerprint=fingerprint,
+        chat_session_id=getattr(getattr(app, "sessions", None), "current_id", None),
     )
 
     tool_names = [t["tool_name"] for t in tools_needing_confirmation]

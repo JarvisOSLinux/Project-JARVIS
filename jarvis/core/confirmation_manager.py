@@ -51,6 +51,16 @@ messages a live client would send, and the daemon replays them at startup
 (``runtime/lifecycle.apply_queued_confirmation_decisions``).  The queue file's
 protection is the same same-user filesystem boundary the local socket model
 relies on — see ``decision_queue_path()``.
+
+**Resolved history (#235):**
+
+``resolve()`` is the one place an entry leaves ``_pending``, so it is also
+where a record of the outcome is appended to a bounded ring at
+``$JARVIS_DATA_DIR/confirmations_history.json``.  That makes "what did I
+approve earlier?" answerable after the entry itself is gone, in every review
+surface at once rather than only in whichever UI happened to be open.  The ring
+is capped (``HISTORY_LIMIT``) because this is a review aid, not an audit log —
+see ``_append_history()``.
 """
 
 import asyncio
@@ -156,6 +166,11 @@ class PendingConfirmation:
     # The owning goal's id (dispatch session_id) so the resume path can scope the
     # dispatch to the goal and link the returned PIDs back to it (#190).
     session_id: Optional[str] = None
+    # The CHAT session this was raised in. Distinct from session_id above, which
+    # is a goal id — Goal carries no back-reference to the conversation, so
+    # without this field there is no route from a confirmation to the chat that
+    # produced it, and a review surface cannot scope to "this session" (#235).
+    chat_session_id: Optional[str] = None
     # The full-batch dispatch fingerprint the repeat guard counted for this batch
     # (dispatch_flow._batch_fingerprint). Carried so the resume path can re-link
     # the approved PIDs to it and a later EXIT can reset the repeat window — the
@@ -176,11 +191,22 @@ class PendingConfirmation:
 
 STORE_FILENAME = "confirmations.json"
 DECISION_QUEUE_FILENAME = "confirmation_decisions.json"
+HISTORY_FILENAME = "confirmations_history.json"
+
+# Resolved entries kept for review. A cap rather than unbounded growth because
+# this answers "what did I approve earlier?", which is a recent-memory question
+# — it is not the audit log, and nothing depends on an entry still being here.
+HISTORY_LIMIT = 200
 
 
 def store_path() -> Path:
     """Where the daemon mirrors its pending list."""
     return Path(Config.JARVIS_DATA_DIR) / STORE_FILENAME
+
+
+def history_path() -> Path:
+    """Where resolved confirmations are ringed for after-the-fact review."""
+    return Path(Config.JARVIS_DATA_DIR) / HISTORY_FILENAME
 
 
 def decision_queue_path() -> Path:
@@ -242,6 +268,7 @@ def _summarize(p: PendingConfirmation) -> Dict[str, Any]:
         "tool_lines": p.tool_lines,
         "created_at": p.created_at,
         "session_id": p.session_id,
+        "chat_session_id": p.chat_session_id,
     }
 
 
@@ -258,6 +285,24 @@ def load_pending_summaries(path: Path) -> List[Dict[str, Any]]:
         return [_summarize(p) for p in _read_store(path).values()]
     except Exception as e:
         logger.warning("Could not read pending confirmations from %s: %s", path, e)
+        return []
+
+
+def load_history(path: Path) -> List[Dict[str, Any]]:
+    """Resolved confirmations, newest first; ``[]`` when absent or unreadable.
+
+    Read by the same review surfaces that call ``load_pending_summaries`` —
+    including with no daemon running, since this is a plain file too.
+    """
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, list):
+            raise ValueError("history is not a list of resolved records")
+        return [r for r in data if isinstance(r, dict) and r.get("id")]
+    except Exception as e:
+        logger.warning("Could not read confirmation history from %s: %s", path, e)
         return []
 
 
@@ -334,6 +379,13 @@ class ConfirmationManager:
         # None = memory-only: no restore, no writes, no filesystem contact.
         self._store_path: Optional[Path] = (
             Path(store_path).expanduser() if store_path else None
+        )
+        # The resolved ring sits beside the store, so a memory-only manager has
+        # no history file either — one switch decides all filesystem contact.
+        self._history_path: Optional[Path] = (
+            self._store_path.with_name(HISTORY_FILENAME)
+            if self._store_path is not None
+            else None
         )
         # External output callback (set by Jarvis to broadcast via socket).
         self._output_callback: Optional[Callable[[Dict[str, Any]], None]] = None
@@ -412,6 +464,46 @@ class ConfirmationManager:
                 self._store_path,
                 e,
             )
+
+    def _append_history(
+        self,
+        pending: PendingConfirmation,
+        outcome: str,
+        approved_indices: Optional[List[int]] = None,
+    ) -> None:
+        """Record a resolved confirmation in the bounded ring (#235).
+
+        Called from ``resolve()``, the single point an entry leaves
+        ``_pending``, so every channel and the auto-deny timer land here
+        without each having to remember to.
+
+        Best-effort like ``_persist()``: a failed write is logged, never
+        raised. Losing a history line is a degraded review view; letting it
+        propagate would fail a resolve whose approval has already been applied.
+        """
+        if self._history_path is None:
+            return
+        record = _summarize(pending)
+        record["outcome"] = outcome
+        record["resolved_at"] = time.time()
+        if approved_indices is not None:
+            record["approved_indices"] = sorted(approved_indices)
+        try:
+            existing = load_history(self._history_path)
+            # Newest first, so the cap drops the oldest.
+            _atomic_write_json(self._history_path, [record, *existing][:HISTORY_LIMIT])
+        except Exception as e:
+            logger.warning(
+                "Could not record resolved confirmation to %s: %s",
+                self._history_path,
+                e,
+            )
+
+    def list_history(self) -> List[Dict[str, Any]]:
+        """Resolved confirmations, newest first — empty when memory-only."""
+        if self._history_path is None:
+            return []
+        return load_history(self._history_path)
 
     # ------------------------------------------------------------------
     # Setup
@@ -495,6 +587,7 @@ class ConfirmationManager:
         timeout: float = DEFAULT_TIMEOUT,
         session_id: Optional[str] = None,
         fingerprint: Optional[str] = None,
+        chat_session_id: Optional[str] = None,
     ) -> None:
         """Send confirmation notification and return immediately.
 
@@ -516,6 +609,9 @@ class ConfirmationManager:
             fingerprint: Repeat-guard batch fingerprint, stored so the resume
                 path can re-link approved PIDs and let a later EXIT reset the
                 repeat window (#205).
+            chat_session_id: The conversation this was raised in, for review
+                surfaces that scope to one session (#235). Purely descriptive —
+                the resume path never reads it.
         """
         # Build a human-readable summary of tools needing confirmation. The
         # summary now carries the actual command (#186), not just the tool name,
@@ -530,6 +626,7 @@ class ConfirmationManager:
             denied_tools=list(denied_tools),
             dispatch_context=dispatch_context,
             session_id=session_id,
+            chat_session_id=chat_session_id,
             fingerprint=fingerprint,
             tool_names=tool_names,
             tool_lines=tool_lines,
@@ -630,6 +727,16 @@ class ConfirmationManager:
                 len(approved_set),
                 len(pending.confirm_details),
             )
+            # "partial" only when the subset really is one — an approved_indices
+            # response that happens to cover everything (or nothing) reads the
+            # same to a user as a plain approve/deny, so record it that way.
+            if not approved_set:
+                outcome = "denied"
+            elif len(approved_set) >= len(pending.confirm_details):
+                outcome = "approved"
+            else:
+                outcome = "partial"
+            self._append_history(pending, outcome, sorted(approved_set))
             return pending
 
         approved = response.get("approved", False)
@@ -640,6 +747,7 @@ class ConfirmationManager:
             pending.approved_tasks = list(pending.tasks)
             pending.denied_tools = []
             logger.info(f"Confirmation approved: id={req_id}")
+            self._append_history(pending, "approved")
         else:
             # All tools that needed confirmation are denied.
             # approved_tasks stays as-is (tools that didn't need confirmation).
@@ -649,6 +757,7 @@ class ConfirmationManager:
                     if tool_name not in pending.denied_tools:
                         pending.denied_tools.append(tool_name)
             logger.info(f"Confirmation denied: id={req_id}")
+            self._append_history(pending, "denied")
 
         return pending
 

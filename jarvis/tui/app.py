@@ -3,22 +3,27 @@ Textual TUI app for JARVIS.
 
 Layout:
 
-    ┌─ JARVIS ──────────────────────────────────────────┐
-    │ Sessions         │ Chat                           │
-    │ ──────────────── │ ─────────────────────────────  │
-    │ > a1b2  Bug fix  │ you> …                         │
-    │   c3d4  Refactor │ jarvis> …                      │
-    │                  │                                │
-    │                  │ ─────────────────────────────  │
-    │                  │ ❯ …                            │
-    ├───────────────────────────────────────────────────┤
-    │ ● model: qwen3:4b   session: a1b2   Ctrl+Q quit   │
-    └───────────────────────────────────────────────────┘
+    ┌─ JARVIS ─────────────────────────────────────────────────────────┐
+    │ Sessions         │ Chat                    │ Confirmations (F3)  │
+    │ ──────────────── │ ─────────────────────── │ ─────────────────── │
+    │ > a1b2  Bug fix  │ you> …                  │  All  s → session   │
+    │   c3d4  Refactor │ jarvis> …               │ ── Pending (1) ──   │
+    │                  │                         │ ▾ 3f9a  2 tools  4m │
+    │                  │ ─────────────────────── │   [x] 0 shell.run:… │
+    │                  │ ❯ …                     │ ── History ──       │
+    ├──────────────────────────────────────────────────────────────────┤
+    │ ● model: qwen3:4b   session: a1b2   ⚠ 1 pending (F3)  Ctrl+Q quit│
+    └──────────────────────────────────────────────────────────────────┘
+
+The confirmations panel (#235) is hidden until F3 and is the *review* half of
+the confirmation UI — ``ConfirmModal`` remains the *interrupt* half. See
+``confirmations_panel`` for why both exist.
 
 Keybindings:
     Ctrl+N  — new session
     Ctrl+Q  — quit
     Ctrl+,  — settings (read-only config viewer)
+    F3      — show/hide the confirmations panel (keys are listed in it)
     Ctrl+L  — focus chat log (scroll with arrows / PgUp)
     Ctrl+I  — focus message input
     Ctrl+Shift+C — clear on-screen transcript (export buffer only; not memory)
@@ -33,7 +38,10 @@ Keybindings:
 
 Architecture:
     * A ``Jarvis(tui_mode=True)`` engine is created on mount and run as
-      an asyncio task alongside the Textual app (same event loop).
+      an asyncio task alongside the Textual app (same event loop).  The TUI
+      therefore *is* a daemon rather than a client of one — there is no
+      attach step, and no ``/start``: see ``lifecycle.enter_offline_mode``
+      for what happens when that engine cannot be built (#236).
     * User input from the ``Input`` widget is routed through
       ``jarvis.events.inject_user_input()`` — the same pipe that voice
       and the Unix socket use.
@@ -76,6 +84,7 @@ from . import status_bar as tui_status_bar
 from .command_input import CommandDropdown, CommandInput
 from .config_modal import ConfigModal, ConfigModalResult
 from .confirm_modal import ConfirmModal
+from .confirmations_panel import ConfirmationsPanel, read_confirmations, submit_decision
 from .local_input import export_transcript_to_disk, handle_local_input
 from .session_sidebar import on_session_selected as handle_session_selected
 from .session_sidebar import refresh_sidebar
@@ -147,6 +156,10 @@ class JarvisTUI(App):
         padding: 0 1;
     }
 
+    #confirmations-panel:focus-within {
+        border-left: solid $accent;
+    }
+
     SessionItem {
         padding: 0 1;
     }
@@ -164,6 +177,7 @@ class JarvisTUI(App):
         Binding("ctrl+i", "focus_input", "Input", show=True),
         Binding("f1", "help", "Help", show=True, priority=True),
         Binding("f2", "settings", "Settings", show=True, priority=True),
+        Binding("f3", "confirmations", "Confirms", show=True, priority=True),
         Binding("ctrl+shift+c", "clear_transcript", "Clear log", show=False),
         Binding("ctrl+shift+e", "export_transcript", "Export", show=False),
     ]
@@ -184,6 +198,14 @@ class JarvisTUI(App):
         self._pending_delete_session_id: Optional[str] = None
         # First user message in a session — used to auto-name default titles.
         self._pending_autoname_text: Optional[str] = None
+        # Set when the engine could not start (#236). The TUI stays usable:
+        # sessions render from disk and confirmations from their store file.
+        self.engine_error: Optional[str] = None
+        # Session the user is browsing while there is no engine to own one.
+        self._offline_session_id: Optional[str] = None
+        # Read-only session view used only in engine-less mode.
+        self._offline_sessions = None
+        self._offline_contextor = None
 
     # ------------------------------------------------------------------
     # Layout
@@ -202,6 +224,9 @@ class JarvisTUI(App):
                     placeholder="Message, /help, /export, /sessions, /new…",
                     id="input",
                 )
+            panel = ConfirmationsPanel(id="confirmations-panel")
+            panel.display = False
+            yield panel
         yield Static(self.status_text, id="status-bar")
         yield Footer()
 
@@ -237,9 +262,17 @@ class JarvisTUI(App):
             return
 
         if self.jarvis is None:
-            self._append_log(
-                "[yellow]JARVIS is still starting up — try again in a second.[/yellow]"
-            )
+            if self.engine_error is not None:
+                self._append_log(
+                    "[yellow]No engine — chat is unavailable.[/yellow] "
+                    f"Startup failed with: {tui_output.escape(self.engine_error)}\n"
+                    "Confirmations are still reviewable with [bold]F3[/bold]."
+                )
+            else:
+                self._append_log(
+                    "[yellow]JARVIS is still starting up — try again in a second."
+                    "[/yellow]"
+                )
             return
 
         self._append_log(f"[bold cyan]you[/bold cyan] > {tui_output.escape(text)}")
@@ -345,6 +378,33 @@ class JarvisTUI(App):
     def action_settings(self) -> None:
         if len(self.screen_stack) <= 1:
             self._open_config("settings")
+
+    def action_confirmations(self) -> None:
+        """Show/hide the review panel; showing it also moves focus there."""
+        tui_actions.toggle_confirmations(self, ConfirmationsPanel)
+
+    # ------------------------------------------------------------------
+    # Confirmations panel data (works with or without an engine)
+    # ------------------------------------------------------------------
+
+    def read_confirmations(self) -> tuple[list, list]:
+        return read_confirmations(self)
+
+    def session_manager(self):
+        """The live engine's session manager, or the offline read-only one."""
+        if self.jarvis is not None:
+            return self.jarvis.sessions
+        return self._offline_sessions
+
+    def current_session_id(self) -> Optional[str]:
+        if self.jarvis is not None:
+            return self.jarvis.sessions.current_id
+        return self._offline_session_id
+
+    def submit_confirmation_decision(self, message: Dict[str, Any]) -> None:
+        self._append_log(
+            f"[cyan]{tui_output.escape(submit_decision(self, message))}[/cyan]"
+        )
 
     def _open_config(self, tab: str = "settings") -> None:
         from .local_input import _apply_in_memory

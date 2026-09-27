@@ -10,6 +10,26 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 
+class IPCEndpointBusy(RuntimeError):
+    """Raised when an IPC endpoint is already being served by a live process.
+
+    Binding anyway is what the unconditional-unlink used to do, and it silently
+    took the endpoint away from whoever held it: the previous owner keeps a
+    listening fd nobody can reach any more, while every client — and every
+    write to the shared confirmation store — quietly lands on the new process
+    instead. Refusing is the only outcome that stays truthful about which
+    daemon is serving.
+    """
+
+    def __init__(self, path: str) -> None:
+        super().__init__(
+            f"IPC endpoint {path} is already served by a running JARVIS. "
+            "Stop it first, or point this instance at a different "
+            "JARVIS_DATA_DIR."
+        )
+        self.path = path
+
+
 class BasePlatform(ABC):
     """Interface that each OS backend implements."""
 
@@ -36,6 +56,33 @@ class BasePlatform(ABC):
     @abstractmethod
     def ipc_connect(self, path: str) -> Any:
         """Return a connected socket to the IPC endpoint at *path*."""
+
+    def ipc_endpoint_live(self, path: str) -> bool:
+        """True when something is already accepting connections at *path*.
+
+        Distinguishes a live owner from the leftovers of one that died: a stale
+        unix socket file still exists but refuses connections, and a stale
+        Windows port file names a port nobody is listening on. Only a
+        successful connect means somebody is really there.
+        """
+        try:
+            sock = self.ipc_connect(path)
+        except Exception:
+            return False
+        try:
+            sock.close()
+        except Exception:
+            pass
+        return True
+
+    def ipc_claim_endpoint(self, path: str) -> None:
+        """Refuse a live endpoint, clear a stale one. Call before binding.
+
+        Raises ``IPCEndpointBusy`` when another process is serving *path*.
+        """
+        if self.ipc_endpoint_live(path):
+            raise IPCEndpointBusy(path)
+        self.ipc_cleanup(path)
 
     @abstractmethod
     def ipc_cleanup(self, path: str) -> None:

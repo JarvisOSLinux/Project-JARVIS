@@ -261,10 +261,12 @@ make check                  # Format + lint + typecheck + tests
 | `jarvis/config.py` | Global configuration |
 | `jarvis/tui/app.py` | Textual app shell |
 | `jarvis/tui/lifecycle.py` | App startup/shutdown, callback registration |
-| `jarvis/tui/confirm_modal.py` | Tool confirmation modal |
+| `jarvis/tui/confirm_modal.py` | Tool confirmation modal (the *interrupt* case) |
+| `jarvis/tui/confirmations_panel.py` | F3 review panel — pending + history, All/session scope, per-task keyboard approve (#235); reads the store directly when there is no engine |
 | `jarvis/tui/config_modal.py` | Tabbed config/provider settings modal (F2 / /settings) |
 | `jarvis/tui/provider_modal.py` | Provider add/edit modal |
-| `jarvis/core/confirmation_manager.py` | Multi-channel confirmation gate; pending list persisted to `$JARVIS_DATA_DIR/confirmations.json` when built with a store path (#224) |
+| `jarvis/core/confirmation_manager.py` | Multi-channel confirmation gate; pending list persisted to `$JARVIS_DATA_DIR/confirmations.json` when built with a store path (#224), resolved entries ringed to `confirmations_history.json` (#235) |
+| `jarvis/platform/base.py` | `IPCEndpointBusy` + `ipc_claim_endpoint()` — refuse a live endpoint, clear a stale one |
 | `jarvis/core/constraint_store.py` | Standing path-prefix deny constraints (#214), enforced in `dispatch_flow` ahead of the confirmation mode |
 | `jarvis/core/socket_security.py` | Socket hardening |
 | `jarvis/core/sudo_manager.py` | `jarvis sudo` — sudoers drop-in management (#158) |
@@ -292,6 +294,15 @@ make check                  # Format + lint + typecheck + tests
 ---
 
 ## Changelog — corrected claims
+
+*2026-09-27:* three corrections landed with the TUI confirmations panel (#235) and the engine-less TUI (#236).
+
+1. **`jarvis tui` does not connect to a daemon — it constructs its own `Jarvis(tui_mode=True)` in-process** (`tui/lifecycle.py`), sockets and all; `tui_mode` only suppresses the stdin reader and console logging. #236 was written as though the TUI attaches to a separate daemon and asked for a `/start` command; there is no second process to start, so that part is dropped and the issue's real content is "do not become a dead shell when the engine fails to build". `enter_offline_mode()` now keeps the transcript, opens a read-only session view by spawning contextor alone, serves the confirmations panel from `confirmations.json`, and queues decisions to `confirmation_decisions.json` exactly as `jarvis confirm` does.
+
+2. **`create_ipc_server` stole live endpoints.** All three backends unlinked whatever was at the path (Windows: overwrote the port file) and bound over it, so opening `jarvis tui` beside a running daemon silently took `input.sock`, `output.sock` and `jarvis.sock`: the first process kept a listening fd nobody could reach, every client landed on the second, and both mirrored `_pending` to the same store with last-writer-wins. `ipc_claim_endpoint()` now probes with a real connect — a successful one raises `IPCEndpointBusy`, a refused one means stale and is unlinked as before. `runtime/io.py` logs and disables that one socket rather than killing the daemon, and returns *before* its `finally`, which would otherwise have unlinked the other daemon's endpoint on the way out.
+
+3. **A confirmation's `session_id` is the owning goal id, not the chat session** (`dispatch_flow.py` passes `goal.id`), and `Goal` carries no back-reference to the conversation. #235's "entries carry `session_id`; filter on the active session" would therefore have matched nothing. `PendingConfirmation` gains a separate `chat_session_id`, set at request time and purely descriptive — the resume path never reads it. Stores written before this field restore with `None`, and the panel's session scope keeps such entries rather than hiding them, since an unattributable confirmation vanishing from the only filtered view is the worse failure.
+
 
 *2026-09-21:* `privileged_prefixes()` is folded into `classify()` as a fifth, raise-only floor (#208 resolution). Previously it and the rest of the retired-shellmcp elevation surface (`find_askpass`/`elevate`/`grant_privilege`/etc.) had zero callers outside `jarvis/platform/`; the design question #208 left open — fold the per-OS prefix table into TLA classification, or retire it as superseded by dmcp scope-based elevation — was decided in favor of folding, since it catches command-ish parameters under unknown tool names that evade both the host-name floor and the (deliberately narrow) payload-scan regexes. Same DANGEROUS severity as the payload scan. `resolve_sidecar()`/`sidecar_search_dirs()` stay as documented below (kept, not dropped) — that box was already resolved when this section's "keep it until packaging lands" line landed in `a8ffcf1`.
 

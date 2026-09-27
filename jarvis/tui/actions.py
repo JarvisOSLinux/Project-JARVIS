@@ -72,6 +72,30 @@ def focus_input(app: Any) -> None:
         pass
 
 
+def toggle_confirmations(app: Any, panel_cls: Any) -> None:
+    """Show/hide the confirmations panel (#235).
+
+    Showing it focuses its list, because the panel exists to be driven from the
+    keyboard; hiding it hands focus back to the message line rather than
+    leaving it on a widget that is no longer on screen.
+    """
+    try:
+        panel = app.query_one("#confirmations-panel", panel_cls)
+    except Exception:
+        return
+    panel.display = not panel.display
+    if panel.display:
+        panel.refresh_entries()
+        try:
+            from textual.widgets import ListView
+
+            panel.query_one("#confirmations-list", ListView).focus()
+        except Exception:
+            pass
+    else:
+        focus_input(app)
+
+
 def open_help(app: Any, bindings: Any) -> None:
     """Open the help modal (Esc / F1 closes while help is focused)."""
     app.push_screen(HelpScreen(build_help_markdown(bindings)))

@@ -22,13 +22,30 @@ def schedule_sidebar_refresh(app: Any) -> None:
         asyncio.create_task(app._refresh_sidebar())
 
 
+async def _render_placeholder(app: Any, markup: str) -> None:
+    """Replace the session list with a single explanatory row."""
+    try:
+        list_view = app.query_one("#session-list", ListView)
+    except Exception:
+        return
+    await list_view.clear()
+    await list_view.append(ListItem(Label(markup)))
+
+
 async def refresh_sidebar(app: Any, session_item_cls: Any, logger: Any) -> None:
     """Refresh sidebar session rows while handling races and duplicates."""
     async with app._sidebar_refresh_lock:
-        if app.jarvis is None:
+        manager = app.session_manager()
+        if manager is None:
+            # Engine-less with no contextor either: say so rather than showing
+            # an empty list that looks like "you have no sessions".
+            if app.engine_error is not None:
+                await _render_placeholder(
+                    app, "[dim](no engine — sessions hidden)[/dim]"
+                )
             return
         try:
-            sessions = app.jarvis.sessions.list(limit=50)
+            sessions = manager.list(limit=50)
         except Exception as e:
             logger.debug(f"TUI: session list failed: {e}")
             sessions = []
@@ -42,7 +59,7 @@ async def refresh_sidebar(app: Any, session_item_cls: Any, logger: Any) -> None:
             unique_sessions.append(s)
         sessions = unique_sessions
 
-        current_id = app.jarvis.sessions.current_id
+        current_id = app.current_session_id()
         if (
             app._pending_delete_session_id is not None
             and app._pending_delete_session_id not in seen_ids
@@ -67,9 +84,11 @@ async def refresh_sidebar(app: Any, session_item_cls: Any, logger: Any) -> None:
 
 async def _load_session_history(app: Any, session_id: str) -> None:
     """Load stored conversation entries and render them into the RichLog."""
-    if app.jarvis is None:
-        return
-    ctx = getattr(app.jarvis, "contextor", None)
+    ctx = (
+        getattr(app.jarvis, "contextor", None)
+        if app.jarvis is not None
+        else getattr(app, "_offline_contextor", None)
+    )
     if ctx is None or not getattr(ctx, "is_connected", False):
         return
     try:
@@ -106,15 +125,20 @@ async def _load_session_history(app: Any, session_id: str) -> None:
 async def on_session_selected(app: Any, event: Any) -> None:
     """Handle user selection of a session in the sidebar list."""
     item = event.item
-    if not hasattr(item, "session_id") or app.jarvis is None:
+    manager = app.session_manager()
+    if not hasattr(item, "session_id") or manager is None:
         return
-    if item.session_id == app.jarvis.sessions.current_id:
+    if item.session_id == app.current_session_id():
         return
     app._pending_delete_session_id = None
-    session = app.jarvis.sessions.switch(item.session_id)
+    session = manager.switch(item.session_id)
     if session is None:
         app._append_log(f"[red]Could not switch to {item.session_id[:8]}[/red]")
         return
+    if app.jarvis is None:
+        # No engine owns a "current session", so the panel's session scope
+        # follows what the user is browsing instead.
+        app._offline_session_id = session.id
 
     # Clear transcript and reload history for the selected session.
     try:

@@ -41,11 +41,7 @@ class LinuxPlatform(BasePlatform):
         client_handler: Callable[[asyncio.StreamReader, asyncio.StreamWriter], Any],
     ) -> asyncio.AbstractServer:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        if os.path.exists(path):
-            try:
-                os.unlink(path)
-            except OSError:
-                pass
+        self.ipc_claim_endpoint(path)
         server = await asyncio.start_unix_server(client_handler, path=path)
         self.ipc_secure(path)
         return server

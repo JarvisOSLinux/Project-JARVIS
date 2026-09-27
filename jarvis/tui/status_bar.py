@@ -11,6 +11,18 @@ from ..config import Config
 
 def update_status(app: Any) -> None:
     parts = []
+
+    if getattr(app, "engine_error", None) is not None:
+        # One unmistakable line rather than a row of "(none)" fields that read
+        # like a slow startup. The panel still works, so say that too.
+        pending, _ = app.read_confirmations()
+        waiting = f"{len(pending)} pending" if pending else "none pending"
+        app.status_text = (
+            f"⚠ engine offline — confirmations reviewable ({waiting}), "
+            "decisions queue  |  F3 confirmations · F1 help · Ctrl+Q quit"
+        )
+        return
+
     if app.jarvis is not None and app.jarvis.sessions.current:
         parts.append(f"session: {app.jarvis.sessions.current.short_id()}")
     else:
@@ -39,9 +51,16 @@ def update_status(app: Any) -> None:
             else:
                 parts.append(f"ctx: {prompt_toks}tk")
 
+    try:
+        pending, _ = app.read_confirmations()
+    except Exception:
+        pending = []
+    if pending:
+        parts.append(f"⚠ {len(pending)} pending (F3)")
+
     parts.append(
         "Ctrl+N new · Ctrl+D delete · Ctrl+Q quit · Ctrl+L log · Ctrl+I input · F1 help · "
-        "Ctrl+Shift+C clear · Ctrl+Shift+E export"
+        "F3 confirms · Ctrl+Shift+C clear · Ctrl+Shift+E export"
     )
 
     app.status_text = "  |  ".join(parts)

@@ -84,6 +84,10 @@ class WindowsPlatform(BasePlatform):
         client_handler: Callable[[asyncio.StreamReader, asyncio.StreamWriter], Any],
     ) -> asyncio.AbstractServer:
         os.makedirs(os.path.dirname(path), exist_ok=True)
+        # The port file is this platform's endpoint: overwriting one that a
+        # live daemon published redirects every client to us just as surely as
+        # unlinking a unix socket would.
+        self.ipc_claim_endpoint(path)
         server = await asyncio.start_server(client_handler, host="127.0.0.1", port=0)
         port = server.sockets[0].getsockname()[1]
         port_file = path + _PORT_FILE_SUFFIX

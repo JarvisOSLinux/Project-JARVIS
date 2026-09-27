@@ -28,8 +28,7 @@ async def start_jarvis(app: Any, logger: Any) -> None:
         jarvis = Jarvis(tui_mode=True)
     except Exception as e:  # pragma: no cover - surfaced to the user
         logger.error(f"TUI: Failed to construct Jarvis: {e}", exc_info=True)
-        app._append_log(f"[red]Failed to start JARVIS: {e}[/red]")
-        app._set_status(f"startup error: {e}")
+        await enter_offline_mode(app, logger, str(e))
         return
 
     app.jarvis = jarvis
@@ -64,6 +63,55 @@ async def start_jarvis(app: Any, logger: Any) -> None:
     app.query_one("#input", Input).focus()
 
 
+async def enter_offline_mode(app: Any, logger: Any, reason: str) -> None:
+    """Keep the TUI useful when the engine could not start (#236).
+
+    An engine-less TUI used to be a dead shell: an error line, an empty
+    sidebar, and an input that answered "still starting up" forever. The two
+    things that do not need an engine still work here — reading the session
+    history that lives in contextor, and reviewing the confirmation store,
+    whose decisions queue for the next start exactly as ``jarvis confirm``
+    queues them.
+
+    There is deliberately no ``/start``: this TUI *embeds* its engine rather
+    than attaching to a separate daemon, so there is no second process to
+    launch. What failed here is this process's own construction, and the fix
+    is whatever the reason line names.
+    """
+    app.engine_error = reason
+    app._append_log(
+        f"[red]JARVIS engine did not start:[/red] {app._escape(reason)}\n"
+        "[yellow]Running without an engine.[/yellow] Chat is unavailable, but "
+        "you can review confirmations ([bold]F3[/bold]) — decisions are queued "
+        "and applied the next time the engine starts."
+    )
+    await _attach_offline_sessions(app, logger)
+    await app._refresh_sidebar()
+    app._update_status()
+
+
+async def _attach_offline_sessions(app: Any, logger: Any) -> None:
+    """Open a read-only view of session history without a full engine.
+
+    Sessions live in the contextor binary, not a JSON file, so this spawns
+    just that one sidecar — no LLM, no dispatch, no sockets. If contextor is
+    itself missing, the sidebar simply says so; the confirmations panel does
+    not depend on any of this.
+    """
+    try:
+        from ..contextor.adapter import ContextorAdapter
+        from ..sessions.manager import SessionManager
+
+        contextor = ContextorAdapter(embeddings=None)
+        if not contextor.connect():
+            logger.info("TUI: contextor unavailable; sessions hidden in offline mode")
+            return
+        app._offline_sessions = SessionManager(contextor)
+        app._offline_contextor = contextor
+    except Exception as e:
+        logger.info(f"TUI: could not open offline session view: {e}")
+
+
 async def run_engine(app: Any, logger: Any) -> None:
     try:
         await app.jarvis.run()
@@ -76,6 +124,12 @@ async def run_engine(app: Any, logger: Any) -> None:
 
 
 async def on_unmount(app: Any) -> None:
+    contextor = getattr(app, "_offline_contextor", None)
+    if contextor is not None:
+        try:
+            contextor.disconnect()
+        except Exception:
+            pass
     if app.jarvis is not None:
         try:
             if app._output_cb is not None:
