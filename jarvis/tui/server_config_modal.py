@@ -298,7 +298,11 @@ class ServerConfigModal(ModalScreen[ConfigModalResult]):
         self.query_one("#btn-install", Button).disabled = (
             not self._all_required_filled()
         )
-        # Auto-save every keystroke
+        # Auto-saved so a reinstall pre-fills the form -- but never a secret.
+        # Saving here wrote each keystroke of a masked field to the plaintext
+        # params file; dmcp's config is the one place a secret belongs (#242).
+        if any(p["key"] == event.key and p.get("sensitive") for p in self._props):
+            return
         from ..core.params_store import ParamsStore
 
         ParamsStore(self._server_id).set(event.key, event.value)

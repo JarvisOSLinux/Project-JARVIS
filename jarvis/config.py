@@ -428,9 +428,11 @@ uninstall_server — Remove an installed MCP server from the system.
 
 configure_server — Set required config values on an installed server.
   Use when SERVER_DOCS indicates "server requires configuration" (e.g. missing API key).
-  If you do not know the required value, use respond to ask the user for it first.
-  Never invent or guess API keys — always ask the user when the value is unknown.
-  {{"action": "configure_server", "server_id": "<id>", "config": {{"KEY": "value"}}}}
+  Secrets (API keys, tokens, passwords — marked in SERVER_DOCS): NEVER ask the user to type
+  them in chat. Pass the key with an empty value; JARVIS opens a secure form and you never
+  see what the user enters. Non-secret values (a URL, a username) may be asked for in chat.
+  Never invent or guess a value.
+  {{"action": "configure_server", "server_id": "<id>", "config": {{"API_KEY": "", "BASE_URL": "<value>"}}}}
 
 dispatch — Execute tool calls. Only after seeing SERVER_DOCS.
   Use exact tool names and server id from SERVER_DOCS.
@@ -663,7 +665,10 @@ update_server — Re-install a server the registry marks [update available].
   {{"action": "update_server", "server_id": "<id>", "goal_updates": []}}
 
 configure_server — Set required config values on an installed server.
-  {{"action": "configure_server", "server_id": "<id>", "config": {{"KEY": "value"}}}}
+  Secrets (API keys, tokens, passwords — marked in SERVER_DOCS): NEVER ask the user to type
+  them in chat. Pass the key with an empty value; JARVIS opens a secure form and you never
+  see what the user enters.
+  {{"action": "configure_server", "server_id": "<id>", "config": {{"API_KEY": "", "BASE_URL": "<value>"}}}}
 
 dispatch — Execute tool calls. Only after seeing SERVER_DOCS.
   ⚠ RULE — PARALLEL EXECUTION: Every task in one dispatch call starts at the same instant.

@@ -8,6 +8,7 @@ import re
 from logging import Logger
 from typing import Any
 
+from ..core.secret_scrubber import redact_secrets, redaction_notice
 from ..core.voice_state import VoiceState
 from .io import broadcast_to_gui_clients, enrich_pending_with_goals, set_gui_state
 from .llm_bridge import ask_llm
@@ -15,6 +16,7 @@ from .output_hooks import emit_activity
 from .root_context import (
     build_root_context,
     compact_payload_for_llm,
+    configure_call_hint,
     required_config_keys,
 )
 from .session_commands import handle_slash_command
@@ -26,7 +28,12 @@ _NO_LLM_MSG = (
 
 
 async def on_user_input(app: Any, logger: Logger, text: str) -> None:
-    logger.info(f"JARVIS: User input: '{text}'")
+    # Scrubbed before anything below can keep it: the goal tree is archived to
+    # disk, contextor's memory is searched on every later prompt, and the model
+    # may be hosted. Slash commands get the raw text -- they never reach memory
+    # or the model, and are where a secret could legitimately be entered (#242).
+    clean, redacted = redact_secrets(text)
+    logger.info(f"JARVIS: User input: '{clean}'")
 
     # Single funnel for every input source (voice, GUI/CLI socket, stdin) --
     # the GUI "message" handler already broadcasts this for its own path,
@@ -50,8 +57,12 @@ async def on_user_input(app: Any, logger: Logger, text: str) -> None:
             return
 
     if app.llm is None:
-        app.output_manager.display({"output": _NO_LLM_MSG})
+        app.output_manager.handle_response({"output": _NO_LLM_MSG})
         return
+
+    if redacted:
+        app.output_manager.handle_response({"output": redaction_notice(redacted)})
+    text = clean
 
     app.sessions.ensure_session()
     app.goals.add_goal(text)
@@ -164,18 +175,14 @@ async def _config_hint_for_signals(
         except Exception as e:  # a hint is best-effort; never break the turn
             logger.debug(f"Could not fetch manifest for {sid}: {e}")
             continue
-        required_keys = required_config_keys(
-            (manifest or {}).get("configurableProperties")
-        )
+        props = (manifest or {}).get("configurableProperties")
+        required_keys = required_config_keys(props)
         if not required_keys:
             continue
-        key_list = ", ".join(required_keys)
-        example = ", ".join(f'"{k}": "<value>"' for k in required_keys)
         hint += (
             f"\nCONFIG_HINT: {sid} requires configuration."
-            f"\n  Required key(s): {key_list}"
-            f'\n  Call: {{"action": "configure_server", "server_id": "{sid}", '
-            f'"config": {{{example}}}}}'
+            f"\n  Required key(s): {', '.join(required_keys)}\n"
+            + "\n".join(configure_call_hint(sid, props))
         )
     return hint
 

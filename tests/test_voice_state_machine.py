@@ -79,14 +79,20 @@ class TestSetGuiState:
 class TestOnUserInputBroadcastsProcessing:
     @pytest.mark.asyncio
     async def test_broadcasts_processing_even_when_llm_unconfigured(self):
-        app = SimpleNamespace(llm=None, output_manager=Mock())
+        # spec'd: this used to assert on `output_manager.display`, a method
+        # OutputManager does not have. A bare Mock accepted it, so the test
+        # passed while the real handler raised AttributeError and the user was
+        # never told that no model is configured (#242).
+        app = SimpleNamespace(llm=None, output_manager=Mock(spec=OutputManager))
         with patch.object(
             root_handlers, "set_gui_state", new=AsyncMock()
         ) as mock_state:
             await root_handlers.on_user_input(app, Mock(), "hello")
 
         mock_state.assert_awaited_once_with(app, VoiceState.PROCESSING)
-        app.output_manager.display.assert_called_once()
+        app.output_manager.handle_response.assert_called_once_with(
+            {"output": root_handlers._NO_LLM_MSG}
+        )
 
     @pytest.mark.asyncio
     async def test_broadcasts_processing_before_slash_command_handling(self):
