@@ -379,6 +379,9 @@ def test_the_configure_hint_leaves_secrets_empty():
 
 @pytest.mark.unit
 def test_the_tui_form_does_not_save_secret_keystrokes(params_file):
+    # The TUI is an optional extra and CI's test job does not install it --
+    # the same skip tests/test_tui_input.py uses.
+    pytest.importorskip("textual")
     from jarvis.tui.server_config_modal import ServerConfigModal
 
     modal = object.__new__(ServerConfigModal)
