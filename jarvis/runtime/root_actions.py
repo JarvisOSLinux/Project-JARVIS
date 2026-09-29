@@ -8,6 +8,7 @@ from typing import Any
 
 from ..config import Config
 from ..core.skill_store import delete_skill, save_skill
+from ..dispatch import sign_in as sign_in_flow
 from .goal_updates import apply_goal_updates
 from .llm_bridge import ask_llm
 from .output_hooks import emit_activity, get_embeddings, persist_assistant_turn
@@ -108,16 +109,25 @@ async def _handle_get_server_docs(
     tools_error = tools_result.get("error") if isinstance(tools_result, dict) else None
     logger.info(f"JARVIS: get_server_docs '{server_id}' → {len(tools)} tool(s)")
 
+    # One best-effort read: the docs are still worth having without it.
+    try:
+        manifest = await app.dispatch.get_server_manifest(server_id)
+    except Exception as e:
+        logger.debug(f"Could not read manifest for {server_id}: {e}")
+        manifest = {}
+
     # When the server fails to start due to missing config, surface the exact
     # env-var key names from configurableProperties so the LLM doesn't guess.
     configurable_props = None
     if not tools and tools_error:
-        manifest = await app.dispatch.get_server_manifest(server_id)
-        configurable_props = manifest.get("configurableProperties") or None
+        configurable_props = _props_without_account_keys(manifest) or None
 
     docs_block = format_server_docs(
         server_id, tools, error=tools_error, configurable_props=configurable_props
     )
+    account_note = sign_in_flow.sign_in_note_for_docs(manifest)
+    if account_note:
+        docs_block += "\n" + account_note
 
     state = await _registry_state_note(app, logger, server_id)
     if state == "revoked":
@@ -141,6 +151,16 @@ async def _handle_get_server_docs(
         app, logger, context, tag="root-get-server-docs", mode="root"
     )
     await app._act_on_root_response(response, depth + 1)
+
+
+def _props_without_account_keys(manifest: Any) -> list:
+    """configurableProperties minus the keys a signed-in account fills (#229)."""
+    from_account = sign_in_flow.credential_keys(manifest)
+    return [
+        p
+        for p in (manifest or {}).get("configurableProperties") or []
+        if not (isinstance(p, dict) and p.get("key") in from_account)
+    ]
 
 
 def _sensitive_keys(props: Any) -> set:
@@ -234,7 +254,9 @@ async def _handle_install_server(
 
     # Step 2: check for configurable properties
     manifest = await app.dispatch.get_server_manifest(server_id)
-    props = manifest.get("configurableProperties", [])
+    # Keys a signed-in account fills are not asked for: the sign-in supplies
+    # them, and a form would invite pasting a token instead (#229).
+    props = _props_without_account_keys(manifest)
 
     if props:
         store = ParamsStore(server_id)
@@ -289,7 +311,7 @@ async def _handle_install_server(
     tools = tools_result.get("tools", []) if isinstance(tools_result, dict) else []
     tools_error = tools_result.get("error") if isinstance(tools_result, dict) else None
 
-    install_configurable_props = manifest.get("configurableProperties") or None
+    install_configurable_props = _props_without_account_keys(manifest) or None
     context = build_root_context(app, logger)
     context += f"\nINSTALL_RESULT: {server_id} installed successfully."
     context += "\n" + format_server_docs(
@@ -298,6 +320,10 @@ async def _handle_install_server(
         error=tools_error,
         configurable_props=install_configurable_props,
     )
+    for provider in sign_in_flow.declared_credentials(manifest):
+        context += "\n" + sign_in_flow.sign_in_hint(
+            server_id, manifest, provider, "no_account"
+        )
     response = await ask_llm(
         app, logger, context, tag="root-install-result", mode="root"
     )
@@ -470,6 +496,77 @@ async def _handle_configure_server(
     response = await ask_llm(
         app, logger, context, tag="root-configure-server", mode="root"
     )
+    await app._act_on_root_response(response, depth + 1)
+
+
+async def _handle_sign_in(
+    app: Any,
+    logger: Logger,
+    parsed: dict,
+    depth: int,
+    max_chain_depth: int,
+) -> None:
+    """Run a sign-in through dmcp and tell the model only how it ended (#229).
+
+    The code goes to the user through the output manager and nowhere else: not
+    the model's context, not the session history, not memory. This waits for
+    the whole device flow, which is fine because each event runs as its own
+    task — the user can keep talking to JARVIS meanwhile.
+    """
+    server_id = parsed["server_id"]
+    provider = parsed["provider"]
+    manifest = await app.dispatch.get_server_manifest(server_id)
+
+    in_flight = getattr(app, "_sign_ins_in_flight", None)
+    if in_flight is None:
+        in_flight = app._sign_ins_in_flight = set()
+    key = (server_id, provider)
+
+    if provider not in sign_in_flow.declared_credentials(manifest):
+        label = (
+            f"SIGN_IN_ERROR: {server_id} does not use a {provider} account, so there is "
+            "nothing to sign in to. Check the server id and SIGN_IN_NEEDED."
+        )
+    elif key in in_flight:
+        label = (
+            f"SIGN_IN_PENDING: a {provider} sign-in for {server_id} is already waiting for "
+            "the user. Do not start another; wait for its result."
+        )
+    else:
+        in_flight.add(key)
+        emit_activity(app, f"Waiting for {provider} sign-in…", kind="dispatch")
+
+        def show_code(event: dict) -> None:
+            app.output_manager.handle_response(
+                {"output": sign_in_flow.device_code_message(event, server_id)}
+            )
+
+        try:
+            result = await sign_in_flow.run_sign_in(
+                logger, provider, server_id, show_code
+            )
+        finally:
+            in_flight.discard(key)
+        status = result.get("status")
+        if status == "signed_in":
+            label = (
+                f"SIGN_IN_RESULT: the user signed in to {provider} as "
+                f"{result.get('account', 'their account')}; {server_id} can use it now. "
+                "Retry the call that needed it."
+            )
+        elif status == "denied":
+            label = f"SIGN_IN_RESULT: the user declined the {provider} sign-in."
+        elif status == "expired":
+            label = (
+                f"SIGN_IN_RESULT: the {provider} code expired before the user entered it. "
+                "Ask whether they want to try again."
+            )
+        else:
+            label = f"SIGN_IN_ERROR: {result.get('message', 'the sign-in failed')}"
+
+    context = build_root_context(app, logger)
+    context += f"\n{label}"
+    response = await ask_llm(app, logger, context, tag="root-sign-in", mode="root")
     await app._act_on_root_response(response, depth + 1)
 
 
@@ -762,6 +859,10 @@ async def act_on_root_response(
 
     if action == "configure_server":
         await _handle_configure_server(app, logger, parsed, depth, max_chain_depth)
+        return
+
+    if action == "sign_in":
+        await _handle_sign_in(app, logger, parsed, depth, max_chain_depth)
         return
 
     if action == "analyze_image":

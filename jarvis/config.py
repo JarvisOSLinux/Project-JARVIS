@@ -361,6 +361,8 @@ Valid formats:
 
 {{"action": "configure_server", "server_id": "some-server", "config": {{"KEY": "value"}}, "goal_updates": []}}
 
+{{"action": "sign_in", "server_id": "some-server", "provider": "github", "goal_updates": []}}
+
 {{"action": "dispatch", "tasks": [{{"server": "s", "tool": "t", "params": {{}}}}], "goal_updates": []}}
 
 {{"action": "store", "theme": "topic", "content": "fact", "goal_updates": []}}
@@ -433,6 +435,11 @@ configure_server — Set required config values on an installed server.
   see what the user enters. Non-secret values (a URL, a username) may be asked for in chat.
   Never invent or guess a value.
   {{"action": "configure_server", "server_id": "<id>", "config": {{"API_KEY": "", "BASE_URL": "<value>"}}}}
+
+sign_in — Let a server use the user's account (GitHub, …) when SIGN_IN_NEEDED says so.
+  JARVIS shows the user a code to enter on the provider's own page; you never see the code
+  or any token, only whether it worked. Never ask for tokens, passwords or codes in chat.
+  {{"action": "sign_in", "server_id": "<id>", "provider": "<provider from SIGN_IN_NEEDED>"}}
 
 dispatch — Execute tool calls. Only after seeing SERVER_DOCS.
   Use exact tool names and server id from SERVER_DOCS.
@@ -523,6 +530,13 @@ skill_write — Save your own how-to for ONE MCP server, so a task you repeat go
     "action": "configure_server",
     "server_id": "<server id>",
     "config": {{"KEY": "value"}},
+    "goal_updates": []
+}}
+
+{{
+    "action": "sign_in",
+    "server_id": "<server id>",
+    "provider": "<provider>",
     "goal_updates": []
 }}
 
@@ -670,6 +684,11 @@ configure_server — Set required config values on an installed server.
   see what the user enters.
   {{"action": "configure_server", "server_id": "<id>", "config": {{"API_KEY": "", "BASE_URL": "<value>"}}}}
 
+sign_in — Let a server use the user's account (GitHub, …) when SIGN_IN_NEEDED says so.
+  JARVIS shows the user a code to enter on the provider's own page; you never see the code
+  or any token, only whether it worked. Never ask for tokens, passwords or codes in chat.
+  {{"action": "sign_in", "server_id": "<id>", "provider": "<provider from SIGN_IN_NEEDED>"}}
+
 dispatch — Execute tool calls. Only after seeing SERVER_DOCS.
   ⚠ RULE — PARALLEL EXECUTION: Every task in one dispatch call starts at the same instant.
   Before batching two tasks, ask yourself: "Does task 2 need task 1 to finish first?"
@@ -758,6 +777,13 @@ skill_write — Save your own how-to for ONE MCP server, so a task you repeat go
     "action": "configure_server",
     "server_id": "<server id>",
     "config": {{"KEY": "value"}},
+    "goal_updates": []
+}}
+
+{{
+    "action": "sign_in",
+    "server_id": "<server id>",
+    "provider": "<provider>",
     "goal_updates": []
 }}
 
