@@ -32,23 +32,33 @@ def _load() -> Dict[str, Dict[str, str]]:
     try:
         with open(path, "rb") as f:
             data = tomllib.load(f)
-        return {
-            section: {k: str(v) for k, v in values.items()}
+        # Only string values are ever written. Anything else came from the old
+        # unquoted headers, which TOML read as nested tables, and stringifying
+        # those dicts is what wrote `github = "{'missionsquad': ...}"` back out.
+        loaded = {
+            section: {k: v for k, v in values.items() if isinstance(v, str)}
             for section, values in data.items()
             if isinstance(values, dict)
         }
+        return {section: values for section, values in loaded.items() if values}
     except Exception:
         return {}
+
+
+def _toml_string(text: str) -> str:
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
 def _save(data: Dict[str, Dict[str, str]]) -> None:
     path = _params_path()
     lines: list[str] = []
     for section, values in data.items():
-        lines.append(f"[{section}]")
+        # Quoted, so a reverse-DNS server id stays one table. Bare, TOML reads
+        # [io.github.x.y] as four nested tables, and the store has never
+        # round-tripped a single server as a result (#242).
+        lines.append(f"[{_toml_string(section)}]")
         for key, value in values.items():
-            escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-            lines.append(f'{key} = "{escaped}"')
+            lines.append(f"{_toml_string(key)} = {_toml_string(value)}")
         lines.append("")
     content = "\n".join(lines)
     # Atomic write: temp file → rename

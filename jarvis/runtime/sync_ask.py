@@ -6,13 +6,19 @@ from logging import Logger
 from typing import Any, Dict
 
 from ..config import Config
+from ..core.secret_scrubber import redact_secrets, redaction_notice
 from .llm_bridge import ask_llm_sync
 from .output_hooks import persist_assistant_turn
 
 
 def sync_ask(app: Any, logger: Logger, prompt: str) -> Dict[str, Any]:
     """Synchronous single-prompt interface for one-shot CLI usage."""
+    # The same scrub as the daemon's input funnel: this path stores and sends
+    # the prompt too, and would otherwise be the one way around it (#242).
+    prompt, redacted = redact_secrets(prompt)
     logger.info(f"JARVIS: Processing: '{prompt}'")
+    if redacted:
+        app.output_manager.handle_response({"output": redaction_notice(redacted)})
 
     app.sessions.ensure_session()
     if app.contextor:

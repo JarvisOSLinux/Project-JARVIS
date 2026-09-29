@@ -3,6 +3,8 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+from .secret_scrubber import REDACTING_FILTER
+
 
 class ColoredFormatter(logging.Formatter):
     COLORS = {
@@ -104,6 +106,9 @@ class JarvisLogger:
         )
         cls._file_handler.setLevel(logging.DEBUG)
         cls._file_handler.setFormatter(_FILE_FORMATTER)
+        # On the handler as well as each logger: jarvis.log is the copy that
+        # persists, so it is scrubbed whichever logger a record came from (#242).
+        cls._file_handler.addFilter(REDACTING_FILTER)
 
     @classmethod
     def get_logger(cls, name: str) -> logging.Logger:
@@ -116,6 +121,10 @@ class JarvisLogger:
         logger = logging.getLogger(name)
         logger.setLevel(cls._log_level)
         logger.handlers.clear()
+        # Credentials are scrubbed before any handler sees the record, so the
+        # console and the log file agree and neither ever holds a secret (#242).
+        if REDACTING_FILTER not in logger.filters:
+            logger.addFilter(REDACTING_FILTER)
 
         if cls._console_enabled:
             console_handler = logging.StreamHandler(sys.stdout)

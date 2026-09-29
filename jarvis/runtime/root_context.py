@@ -212,6 +212,36 @@ _CONFIG_ERROR_HINTS = (
 )
 
 
+def configure_call_hint(server_id: str, props: Any) -> List[str]:
+    """How the model should call configure_server, with secrets left empty.
+
+    Shared by SERVER_DOCS and CONFIG_HINT for the same reason as
+    ``required_config_keys``. A sensitive key is shown empty because the model
+    must never supply it -- naming it is what opens the secure form. Showing
+    "<value>" there, as both surfaces used to, invited the model to ask for the
+    secret in chat (#242).
+    """
+    keys = required_config_keys(props)
+    secret = {
+        p["key"]
+        for p in props or []
+        if isinstance(p, dict) and p.get("key") and p.get("sensitive")
+    }
+    example = ", ".join(
+        f'"{k}": ""' if k in secret else f'"{k}": "<value>"' for k in keys
+    )
+    lines = [
+        f'  Call: {{"action": "configure_server", "server_id": "{server_id}", "config": {{{example}}}}}'
+    ]
+    named = [k for k in keys if k in secret]
+    if named:
+        lines.append(
+            f"  Secret key(s) {', '.join(named)}: leave the value empty. JARVIS asks the user "
+            "for them in a secure form you never see. Never ask for a secret in chat."
+        )
+    return lines
+
+
 def format_server_docs(
     server_id: str,
     tools: List[Dict[str, Any]],
@@ -233,12 +263,10 @@ def format_server_docs(
                 ]
                 required_keys = required_config_keys(configurable_props)
                 if required_keys:
-                    key_list = ", ".join(required_keys)
-                    example = ", ".join(f'"{k}": "<value>"' for k in required_keys)
-                    lines.append(f"  Required config key(s): {key_list}")
                     lines.append(
-                        f'  Call: {{"action": "configure_server", "server_id": "{server_id}", "config": {{{example}}}}}'
+                        f"  Required config key(s): {', '.join(required_keys)}"
                     )
+                    lines.extend(configure_call_hint(server_id, configurable_props))
                 else:
                     lines.append("  Use configure_server to set the required value(s).")
                 lines.append("  Then retry get_server_docs to verify it starts.")
