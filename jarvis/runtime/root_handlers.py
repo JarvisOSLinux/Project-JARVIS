@@ -10,6 +10,7 @@ from typing import Any
 
 from ..core.secret_scrubber import redact_secrets, redaction_notice
 from ..core.voice_state import VoiceState
+from ..dispatch import sign_in as sign_in_flow
 from .io import broadcast_to_gui_clients, enrich_pending_with_goals, set_gui_state
 from .llm_bridge import ask_llm
 from .output_hooks import emit_activity
@@ -146,26 +147,36 @@ def _server_ids_for_signals(app: Any, signals: list[dict[str, Any]], owning_goal
     return server_ids
 
 
-async def _config_hint_for_signals(
+async def _failure_hints(
     app: Any,
     logger: Logger,
     signals: list[dict[str, Any]],
     owning_goal: Any,
     signal_text: str,
 ) -> str:
-    """CONFIG_HINT block naming the exact config keys an auth-failing server needs.
+    """What the model needs to fix a failed call: SIGN_IN_NEEDED or CONFIG_HINT.
 
-    Re-homed into the EXIT-signal path: the dispatch result no longer flows back
-    through dispatch_flow (#195 made the confirmed/dispatched path go silent and
-    let EXIT signals drive the next ROOT turn), so without this a bad API key
-    returns the same error every cycle, the repeat window never resets, and the
-    #205 guard kills the goal instead of letting the LLM self-heal by calling
-    configure_server with the right key names.
+    CONFIG_HINT was re-homed into the EXIT-signal path: the dispatch result no
+    longer flows back through dispatch_flow (#195 made the confirmed/dispatched
+    path go silent and let EXIT signals drive the next ROOT turn), so without it
+    a bad API key returns the same error every cycle, the repeat window never
+    resets, and the #205 guard kills the goal instead of letting the LLM
+    self-heal by calling configure_server with the right key names.
+
+    A server that works in the user's account gets SIGN_IN_NEEDED instead (#229)
+    — never both, since configure_server is the wrong fix for keys the account
+    fills. That covers dmcp refusing the call (a ``credential_required`` line)
+    and the provider rejecting the token (an auth error from a revoked or
+    expired grant). The line is only a trigger (see ``dispatch.sign_in``): the
+    server is the one the failing PID belongs to, and the provider must be one
+    that server's installed manifest declares.
     """
     failures = [s for s in signals if s.get("type") in _FAILURE_SIGNAL_TYPES]
     if not failures:
         return ""
-    if not _contains_auth_error(signal_text):
+    claims = sign_in_flow.find_credential_required(failures)
+    auth_failed = _contains_auth_error(signal_text)
+    if not claims and not auth_failed:
         return ""
 
     hint = ""
@@ -174,6 +185,24 @@ async def _config_hint_for_signals(
             manifest = await app.dispatch.get_server_manifest(sid)
         except Exception as e:  # a hint is best-effort; never break the turn
             logger.debug(f"Could not fetch manifest for {sid}: {e}")
+            continue
+
+        declared = sign_in_flow.declared_credentials(manifest)
+        if declared:
+            reasons = {
+                c["provider"]: str(c.get("reason", ""))
+                for c in claims
+                if c.get("server") == sid and c.get("provider") in declared
+            }
+            if not reasons and auth_failed:
+                reasons = {provider: "rejected" for provider in declared}
+            for provider in sorted(reasons):
+                hint += "\n" + sign_in_flow.sign_in_hint(
+                    sid, manifest, provider, reasons[provider]
+                )
+            continue
+
+        if not auth_failed:
             continue
         props = (manifest or {}).get("configurableProperties")
         required_keys = required_config_keys(props)
@@ -247,9 +276,7 @@ async def on_dispatch_signal(app: Any, logger: Logger, signal: dict[str, Any]) -
         # (event_merger.py). Hint off the outcome, not off the wrapper.
         if isinstance(exit_data, dict):
             hint_signals = [exit_data]
-    context += await _config_hint_for_signals(
-        app, logger, hint_signals, owning_goal, signal_text
-    )
+    context += await _failure_hints(app, logger, hint_signals, owning_goal, signal_text)
 
     response = await ask_llm(app, logger, context, tag="root", mode="root")
     await app._act_on_root_response(response)
@@ -305,7 +332,7 @@ async def on_dispatch_signals(
         context = build_root_context(app, logger)
         context += f"\nSIGNALS: {json.dumps(signals)}"
 
-    context += await _config_hint_for_signals(
+    context += await _failure_hints(
         app, logger, signals, owning_goal, json.dumps(signals)
     )
 

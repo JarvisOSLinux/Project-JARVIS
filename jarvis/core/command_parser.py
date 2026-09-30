@@ -27,6 +27,7 @@ VALID_ACTIONS = {
     "update_server",
     "uninstall_server",
     "configure_server",
+    "sign_in",
     # Root — memory (direct operations, no sub-chain)
     "store",
     "recall",
@@ -261,6 +262,20 @@ def _parse_configure_server(response: Dict[str, Any]) -> Dict[str, Any]:
         "action": "configure_server",
         "server_id": str(server_id),
         "config": {str(k): str(v) for k, v in config.items()},
+        "goal_updates": response.get("goal_updates", []),
+    }
+
+
+@_parser("sign_in")
+def _parse_sign_in(response: Dict[str, Any]) -> Dict[str, Any]:
+    server_id = response.get("server_id", "")
+    provider = response.get("provider", "")
+    if not server_id or not provider:
+        return {"error": "sign_in requires 'server_id' and 'provider'", "raw": response}
+    return {
+        "action": "sign_in",
+        "server_id": str(server_id),
+        "provider": str(provider),
         "goal_updates": response.get("goal_updates", []),
     }
 
