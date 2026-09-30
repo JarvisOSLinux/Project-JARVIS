@@ -50,6 +50,28 @@ def declared_credentials(manifest: Any) -> Dict[str, Dict[str, Any]]:
     return out
 
 
+def hosted_sign_in_host(manifest: Any) -> Optional[str]:
+    """The host of a hosted server that signs its users in itself (MCP OAuth)."""
+    for transport in (manifest or {}).get("transports") or []:
+        if isinstance(transport, dict) and transport.get("auth") == "oauth":
+            url = str(transport.get("url") or "")
+            return url.split("://", 1)[-1].split("/", 1)[0] or url
+    return None
+
+
+def sign_in_providers(server_id: str, manifest: Any) -> Dict[str, Dict[str, Any]]:
+    """Every way this server may be signed in, by provider.
+
+    A registry provider it declares in ``credentials``, and — for a hosted
+    server with its own sign-in — the server itself, which is the "provider"
+    dmcp names in that case.
+    """
+    out = dict(declared_credentials(manifest))
+    if hosted_sign_in_host(manifest):
+        out[server_id] = {"hosted": True}
+    return out
+
+
 def credential_keys(manifest: Any) -> set:
     """Config keys a signed-in account fills, so no form should ask for them."""
     keys = set()
@@ -102,16 +124,27 @@ def find_credential_required(payload: Any) -> List[Dict[str, Any]]:
     return found
 
 
+_HOSTED_REASONS = {
+    "no_account": "nobody has signed in to it yet",
+    "expired": "its sign-in expired",
+    "rejected": "it rejected its sign-in",
+    "store_unavailable": "the keyring holding its sign-in could not be read",
+}
+
+
 def sign_in_hint(server_id: str, manifest: Any, provider: str, reason: str) -> str:
     """What the model is told when a server needs an account, built from local data only."""
-    why = _REASONS.get(reason, _REASONS["no_account"]).format(provider=provider)
+    if provider == server_id and hosted_sign_in_host(manifest):
+        why = _HOSTED_REASONS.get(reason, _HOSTED_REASONS["no_account"])
+    else:
+        why = _REASONS.get(reason, _REASONS["no_account"]).format(provider=provider)
     lines = [
         f"SIGN_IN_NEEDED: {server_id} cannot run because {why}.",
         f'  Call: {{"action": "sign_in", "server_id": "{server_id}", "provider": "{provider}"}}',
-        "  JARVIS shows the user a code to enter on the provider's own page; you never see it "
-        "or any token. Tell the user a sign-in is needed and why, then emit sign_in. Never "
-        "ask for a token, password or code in chat, and do not use configure_server for "
-        "the keys the account fills.",
+        "  JARVIS shows the user where to sign in (a code to enter, or a page to approve in "
+        "their browser); you never see it or any token. Tell the user a sign-in is needed and "
+        "why, then emit sign_in. Never ask for a token, password or code in chat, and do not "
+        "use configure_server for the keys the account fills.",
     ]
     tool = login_tool(manifest)
     if tool:
@@ -123,6 +156,12 @@ def sign_in_hint(server_id: str, manifest: Any, provider: str, reason: str) -> s
 
 def sign_in_note_for_docs(manifest: Any) -> str:
     """One SERVER_DOCS line naming the account a server works in."""
+    host = hosted_sign_in_host(manifest)
+    if host:
+        return (
+            f"  ACCOUNT: signs the user in itself, at {host}. If a call fails with "
+            "SIGN_IN_NEEDED, use sign_in."
+        )
     decls = declared_credentials(manifest)
     if not decls:
         return ""
@@ -134,12 +173,18 @@ def sign_in_note_for_docs(manifest: Any) -> str:
     )
 
 
-def device_code_message(event: Dict[str, Any], server_id: str) -> str:
+def prompt_message(event: Dict[str, Any], server_id: str) -> str:
     """The line the user sees. Only the user: it never enters the model's context."""
+    minutes = max(1, int(event.get("expires_in") or 0) // 60)
+    if event.get("type") == "authorize":
+        return (
+            f"To let {server_id} sign you in, approve it in your browser; it should open by "
+            f"itself, and if not, open {event.get('url', '')}. JARVIS waits about "
+            f"{minutes} minute(s)."
+        )
     name = event.get("provider_name") or event.get("provider") or "the provider"
     uri = event.get("verification_uri_complete") or event.get("verification_uri") or ""
     code = event.get("user_code") or ""
-    minutes = max(1, int(event.get("expires_in") or 0) // 60)
     return (
         f"To let {server_id} use your {name} account, open {uri} and enter the code "
         f"{code}. The code expires in about {minutes} minute(s)."
@@ -150,21 +195,24 @@ async def run_sign_in(
     logger: Logger,
     provider: str,
     server_id: str,
-    on_code: Callable[[Dict[str, Any]], None],
+    on_prompt: Callable[[Dict[str, Any]], None],
     *,
     timeout: float = SIGN_IN_TIMEOUT_SECS,
 ) -> Dict[str, Any]:
-    """Run ``dmcp login <provider> --for <server> --json`` to its end.
+    """Run ``dmcp login [<provider>] --for <server> --json`` to its end.
 
-    ``on_code`` receives the device-code event the moment dmcp prints it. The
-    return value is dmcp's result event (``status``: signed_in / denied /
+    A hosted server's own sign-in has the server as its provider, and dmcp
+    finds it from ``--for`` alone. ``on_prompt`` receives what the user must do
+    (a device code, or a browser page to approve) the moment dmcp prints it.
+    The return value is dmcp's result event (``status``: signed_in / denied /
     expired / error), or an error result when dmcp gave none.
     """
+    which = [] if provider == server_id else [provider]
     try:
         proc = await asyncio.create_subprocess_exec(
             Config.DMCP_BINARY,
             "login",
-            provider,
+            *which,
             "--for",
             server_id,
             "--json",
@@ -187,8 +235,8 @@ async def run_sign_in(
                 event = json.loads(line)
             except ValueError:
                 continue
-            if event.get("type") == "device_code":
-                on_code(event)
+            if event.get("type") in ("device_code", "authorize"):
+                on_prompt(event)
             elif event.get("type") == "result":
                 result = event
 

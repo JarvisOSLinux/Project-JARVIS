@@ -187,7 +187,7 @@ async def _failure_hints(
             logger.debug(f"Could not fetch manifest for {sid}: {e}")
             continue
 
-        declared = sign_in_flow.declared_credentials(manifest)
+        declared = sign_in_flow.sign_in_providers(sid, manifest)
         if declared:
             reasons = {
                 c["provider"]: str(c.get("reason", ""))

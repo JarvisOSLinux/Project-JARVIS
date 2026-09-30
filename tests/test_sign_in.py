@@ -56,6 +56,13 @@ _BRAVE_MANIFEST = {
 }
 
 _CODE = "WDJB-MJHT"
+_AUTH_URL = "https://mcp.example.invalid/authorize?state=s1&code_challenge=c1"
+_HOSTED = "com.example.hosted"
+_HOSTED_MANIFEST = {
+    "transports": [
+        {"type": "http", "url": "https://mcp.example.invalid/mcp", "auth": "oauth"}
+    ]
+}
 _URI = "https://github.com/login/device"
 
 
@@ -255,14 +262,21 @@ mode = os.environ.get("FAKE_DMCP_MODE", "ok")
 if mode == "crash":
     sys.stderr.write("Error: no configured registry declares a sign-in provider 'github'\n")
     sys.exit(1)
-print(json.dumps({{"type": "device_code", "provider": "github", "provider_name": "GitHub",
-                  "verification_uri": "{uri}", "user_code": "{code}", "expires_in": 900}}), flush=True)
+hosted = sys.argv[2] == "--for"
+server = sys.argv[sys.argv.index("--for") + 1]
+if hosted:
+    print(json.dumps({{"type": "authorize", "server": server,
+                      "url": "{auth_url}", "expires_in": 300}}), flush=True)
+else:
+    print(json.dumps({{"type": "device_code", "provider": "github", "provider_name": "GitHub",
+                      "verification_uri": "{uri}", "user_code": "{code}", "expires_in": 900}}), flush=True)
 if mode == "denied":
     print(json.dumps({{"type": "result", "status": "denied", "message": "sign-in was declined"}}))
     sys.exit(1)
-print(json.dumps({{"type": "result", "status": "signed_in", "provider": "github",
-                  "account": "octocat", "scopes": ["repo"], "store": "keyring",
-                  "granted_to": sys.argv[4]}}))
+print(json.dumps({{"type": "result", "status": "signed_in",
+                  "provider": server if hosted else "github",
+                  "account": "default" if hosted else "octocat", "scopes": ["repo"],
+                  "store": "keyring", "granted_to": server}}))
 """
 
 
@@ -285,7 +299,11 @@ def fake_dmcp(tmp_path, monkeypatch):
     if sys.platform == "win32":
         pytest.skip("the fake dmcp is a shebang script")
     path = tmp_path / "dmcp"
-    path.write_text(_FAKE_DMCP.format(python=sys.executable, uri=_URI, code=_CODE))
+    path.write_text(
+        _FAKE_DMCP.format(
+            python=sys.executable, uri=_URI, code=_CODE, auth_url=_AUTH_URL
+        )
+    )
     path.chmod(path.stat().st_mode | stat.S_IEXEC)
     argv_log = tmp_path / "argv.jsonl"
     monkeypatch.setattr(Config, "DMCP_BINARY", str(path))
@@ -412,9 +430,10 @@ async def _no_state(app, logger, server_id):
     return None
 
 
-def test_device_code_message_is_for_the_user():
-    msg = sign_in.device_code_message(
+def test_prompt_messages_are_for_the_user():
+    msg = sign_in.prompt_message(
         {
+            "type": "device_code",
             "provider_name": "GitHub",
             "verification_uri": _URI,
             "user_code": _CODE,
@@ -423,3 +442,74 @@ def test_device_code_message_is_for_the_user():
         _GH,
     )
     assert _CODE in msg and _URI in msg and "15 minute" in msg
+    msg = sign_in.prompt_message(
+        {"type": "authorize", "url": _AUTH_URL, "expires_in": 300}, _HOSTED
+    )
+    assert _AUTH_URL in msg and "browser" in msg and "5 minute" in msg
+
+
+# -- hosted servers: their own sign-in (MCP OAuth, dmcp#70) --------------------
+
+
+def _hosted_claim(reason="no_account", server=_HOSTED):
+    body = {
+        "server": server,
+        "provider": server,
+        "scopes": [],
+        "reason": reason,
+        "hosted": True,
+    }
+    return (
+        f"Error: Sign-in needed\n{sign_in.CREDENTIAL_REQUIRED_PREFIX}{json.dumps(body)}"
+    )
+
+
+def test_a_hosted_refusal_becomes_a_sign_in_hint(tmp_path, monkeypatch):
+    seen = _wire(monkeypatch)
+    app = _FakeApp(_goal(tmp_path, server=_HOSTED), {_HOSTED: _HOSTED_MANIFEST})
+    _signal(app, 7, _hosted_claim())
+    ctx = seen["context"]
+    assert "SIGN_IN_NEEDED" in ctx and "nobody has signed in to it yet" in ctx
+    assert f'"server_id": "{_HOSTED}", "provider": "{_HOSTED}"' in ctx
+
+
+def test_a_hosted_claim_from_a_server_without_its_own_sign_in_is_ignored(
+    tmp_path, monkeypatch
+):
+    """Only a manifest with an oauth transport makes the server its own provider."""
+    seen = _wire(monkeypatch)
+    app = _FakeApp(_goal(tmp_path, server=_BRAVE), {_BRAVE: _BRAVE_MANIFEST})
+    _signal(app, 7, _hosted_claim(server=_BRAVE))
+    assert "SIGN_IN_NEEDED" not in seen["context"]
+
+
+def test_a_hosted_sign_in_runs_dmcp_without_a_provider_and_shows_the_link(
+    fake_dmcp, monkeypatch
+):
+    seen = _wire(monkeypatch, root_actions)
+    app = _ActionApp({_HOSTED: _HOSTED_MANIFEST})
+    _act(app, server_id=_HOSTED, provider=_HOSTED)
+    assert json.loads(fake_dmcp.read_text()) == ["login", "--for", _HOSTED, "--json"]
+    assert len(app.output_manager.shown) == 1
+    assert _AUTH_URL in app.output_manager.shown[0]
+    ctx = seen["context"]
+    assert "SIGN_IN_RESULT" in ctx
+    assert _AUTH_URL not in ctx
+
+
+def test_a_hosted_install_ends_with_a_sign_in_hint(monkeypatch, tmp_path):
+    seen = _wire(monkeypatch, root_actions)
+    monkeypatch.setattr(root_actions, "get_embeddings", lambda app: None)
+    monkeypatch.setenv("JARVIS_DATA_DIR", str(tmp_path))
+    app = _ActionApp({_HOSTED: _HOSTED_MANIFEST})
+    app.dispatch = _InstallDispatch({_HOSTED: _HOSTED_MANIFEST})
+    asyncio.run(
+        root_actions._handle_install_server(app, _LOG, {"server_id": _HOSTED}, 0, 10)
+    )
+    assert "SIGN_IN_NEEDED" in seen["context"]
+    assert f'"provider": "{_HOSTED}"' in seen["context"]
+
+
+def test_hosted_server_docs_name_the_sign_in():
+    note = sign_in.sign_in_note_for_docs(_HOSTED_MANIFEST)
+    assert "signs the user in itself, at mcp.example.invalid" in note

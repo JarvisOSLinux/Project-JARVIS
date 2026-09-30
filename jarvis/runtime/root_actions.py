@@ -320,7 +320,7 @@ async def _handle_install_server(
         error=tools_error,
         configurable_props=install_configurable_props,
     )
-    for provider in sign_in_flow.declared_credentials(manifest):
+    for provider in sign_in_flow.sign_in_providers(server_id, manifest):
         context += "\n" + sign_in_flow.sign_in_hint(
             server_id, manifest, provider, "no_account"
         )
@@ -522,7 +522,7 @@ async def _handle_sign_in(
         in_flight = app._sign_ins_in_flight = set()
     key = (server_id, provider)
 
-    if provider not in sign_in_flow.declared_credentials(manifest):
+    if provider not in sign_in_flow.sign_in_providers(server_id, manifest):
         label = (
             f"SIGN_IN_ERROR: {server_id} does not use a {provider} account, so there is "
             "nothing to sign in to. Check the server id and SIGN_IN_NEEDED."
@@ -538,7 +538,7 @@ async def _handle_sign_in(
 
         def show_code(event: dict) -> None:
             app.output_manager.handle_response(
-                {"output": sign_in_flow.device_code_message(event, server_id)}
+                {"output": sign_in_flow.prompt_message(event, server_id)}
             )
 
         try:

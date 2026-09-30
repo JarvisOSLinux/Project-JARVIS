@@ -294,6 +294,10 @@ make check                  # Format + lint + typecheck + tests
 
 ## Changelog — corrected claims
 
+*2026-09-30:* hosted servers that sign users in themselves (MCP OAuth, dmcp#70; Notion is mcp-registry#105).
+- **What changed.** `dispatch/sign_in.sign_in_providers` adds the server itself as a provider when its manifest has an `auth: "oauth"` transport. That is the only way a `hosted: true` claim is accepted, and it is still only a trigger. `run_sign_in` runs `dmcp login --for <server> --json` with no provider for a hosted sign-in and forwards both prompt kinds. `prompt_message` replaces `device_code_message`: for a browser sign-in it tells the user to approve in the browser dmcp opens, with the link as a fallback, and the model sees neither. SIGN_IN_NEEDED, the install hint and the SERVER_DOCS `ACCOUNT:` line cover hosted servers.
+- **Verification.** 5 new tests in `tests/test_sign_in.py`; mutation checks on the provider rule, the argv and the prompt forwarding each turn a test red. A contract run against the real dmcp#70 binary and its fake hosted server, with a stand-in `xdg-open` playing the browser, went through: refused (exit 3), claim accepted, dmcp opened the browser at the URL the user was shown, `signed_in`, and the next call reached the server with the token.
+
 *2026-09-29:* servers that work in the user's account sign in instead of taking a pasted token (#229, JARVIS half; the registry and dmcp halves are mcp-registry#104 and dmcp#69).
 - **What dmcp does now.** A call whose server lacks its declared account is refused before spawn, and the error text carries a `credential_required: {json}` line.
 - **The hint.** `root_handlers._failure_hints` replaces `_config_hint_for_signals`. It makes one manifest read per failing server and gives either SIGN_IN_NEEDED (the server declares `credentials`) or CONFIG_HINT (it does not), never both. An auth error from an account server, such as a revoked token, also gets SIGN_IN_NEEDED.
