@@ -317,9 +317,11 @@ class DispatchAdapter:
     # MCP server discovery via dmcp (on-demand, keyword-based)
     # ------------------------------------------------------------------
 
-    async def _run_dmcp(self, *args: str) -> Optional[str]:
+    async def _run_dmcp(
+        self, *args: str, stdin_data: Optional[str] = None
+    ) -> Optional[str]:
         """Run a dmcp command and return stdout, or None on failure."""
-        return await registry_run_dmcp(logger, *args)
+        return await registry_run_dmcp(logger, *args, stdin_data=stdin_data)
 
     async def search_servers(self, keywords: List[str]) -> Dict[str, Any]:
         return await registry_search_servers(logger, keywords, self.update_cache)
@@ -377,7 +379,11 @@ class DispatchAdapter:
             if not value:
                 continue
             key = self._sanitize_config_key(raw_key)
-            result = await self._run_dmcp("config", server_id, "set", key, value)
+            # The value goes over stdin, not argv: argv is visible in the
+            # process list, and a value may be a token.
+            result = await self._run_dmcp(
+                "config", server_id, "set", key, stdin_data=f"{value}\n"
+            )
             if result is None:
                 raise RuntimeError(
                     f"dmcp config set failed for '{key}' on '{server_id}' — check dmcp logs"
