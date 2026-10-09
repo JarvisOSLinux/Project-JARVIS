@@ -266,6 +266,15 @@ can build an equivalent settings panel without a special-cased protocol:
 - `{"type": "add_provider", "ptype": ..., "model": ..., "name": ..., "url": ..., "api_key": ..., "temperature": ...}`, `{"type": "edit_provider", "name": ..., "fields": {...}}`, `{"type": "remove_provider", "name": ...}` — thin wrappers around `jarvis/core/providers.py`'s existing CRUD (already shared between CLI and TUI). A successful mutation broadcasts the refreshed `provider_list` to every GUI client (providers.json is shared daemon state, same rationale as session CRUD's `_reply_or_broadcast`); a `ValueError` (unknown type, missing required field, duplicate name, not found) replies `provider_error` to the requester only.
 - **Known limitation, not introduced by this protocol**: there is no live `ProviderPool` reload. Like the TUI's own provider modal, a provider add/edit/remove only takes effect for the *next* daemon start — `create_llm()` builds the pool once from `providers.json` at startup. Any settings-panel UI built on this should say so.
 
+### Status, history, activity, and the config-form relay (#236)
+
+The TUI is a client of this socket, so what it used to read from an in-process engine is askable over the wire. All four are additive; no existing message changed.
+
+- `{"type": "get_status"}` → `{"type": "status", "session": {"id", "short_id", "title"} | null, "llm_configured", "provider", "model", "prompt_tokens", "context_window"}` (requester only). A client re-asks after each response to keep its status line current.
+- `{"type": "get_history", "id"?: ..., "limit"?: ...}` → `{"type": "history", "session", "messages": [{"role", "content", "timestamp"}]}` (requester only). Defaults to the current session. Unlike `switch_session` it changes nothing and is not broadcast, so a client can attach and render a transcript without moving every other client.
+- `{"type": "activity", "text", "kind", "meta"?}` is broadcast for each runtime activity line (the narrative the TUI shows as `... Installing x…`).
+- **Config-form relay.** A client that lists `"config_form"` in `hello`'s `capabilities` is asked to collect a server's configuration when no in-process modal exists: the daemon sends `{"type": "config_request", "request_id", "server_id", "name", "description", "props", "saved"}` to those clients only, and the first `{"type": "config_response", "request_id", "confirmed", "values", "missing_required"}` from a client that was asked completes it. Secrets are typed into the client's form and travel over this same-user socket, never through the conversation (#242); the daemon does not log the values. If every client asked disconnects before answering, the request resolves as cancelled rather than hanging. It runs ahead of the Tk fallback, so an attached capable client is preferred over a desktop dialog.
+
 ### Connected-clients query + graceful shutdown (Project-JARVIS#146)
 
 `app._gui_clients` changed from a bare `set[StreamWriter]` to `dict[StreamWriter, str]` (writer → label), so a client can identify itself and every other connected client can see who's attached before requesting a shutdown:
