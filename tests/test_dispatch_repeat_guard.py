@@ -12,7 +12,6 @@ Also covers the secondary task_pids dedup fix (loop_body.md bottom section).
 
 import asyncio
 import logging
-
 from types import SimpleNamespace
 
 import pytest

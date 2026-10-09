@@ -8,8 +8,8 @@ server to the state-losing one-shot lifecycle (the navigate → about:blank bug)
 """
 
 import asyncio
-from types import SimpleNamespace
 import logging
+from types import SimpleNamespace
 
 from jarvis.runtime import dispatch_flow
 

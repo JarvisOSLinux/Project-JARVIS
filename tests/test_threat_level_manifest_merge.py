@@ -17,8 +17,8 @@ with it, DANGEROUS.
 """
 
 import asyncio
-from types import SimpleNamespace
 import logging
+from types import SimpleNamespace
 
 import pytest
 

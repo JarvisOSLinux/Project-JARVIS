@@ -73,8 +73,8 @@ from . import lifecycle as tui_lifecycle
 from . import output as tui_output
 from . import status_bar as tui_status_bar
 from .command_input import CommandDropdown, CommandInput
-from .confirmations_panel import ConfirmationsPanel
 from .config_modal import ConfigModal, ConfigModalResult
+from .confirmations_panel import ConfirmationsPanel
 from .daemon_client import DaemonClient
 from .local_input import export_transcript_to_disk, handle_local_input
 from .offline import OfflineStore
