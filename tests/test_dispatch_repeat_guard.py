@@ -13,6 +13,8 @@ Also covers the secondary task_pids dedup fix (loop_body.md bottom section).
 import asyncio
 import logging
 
+from types import SimpleNamespace
+
 import pytest
 
 from jarvis.config import Config
@@ -458,6 +460,7 @@ def test_confirmation_gated_poll_until_ready_does_not_trip(tmp_path, monkeypatch
             self.contextor = None
             self.llm = object()  # not None; happy path never calls it
             self._gui_clients = None
+            self.sessions = SimpleNamespace(current_id=None)
             self.output_manager = _OutputManager()
             self.acted = []
 
@@ -538,6 +541,7 @@ def test_gated_wizard_answers_survive_the_approval_cycle(tmp_path, monkeypatch):
             self.contextor = None
             self.llm = object()
             self._gui_clients = None
+            self.sessions = SimpleNamespace(current_id=None)
             self.output_manager = _OutputManager()
             self.acted = []
 

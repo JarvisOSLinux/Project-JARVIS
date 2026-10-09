@@ -11,7 +11,12 @@ from typing import Any
 from ..core.secret_scrubber import redact_secrets, redaction_notice
 from ..core.voice_state import VoiceState
 from ..dispatch import sign_in as sign_in_flow
-from .io import broadcast_to_gui_clients, enrich_pending_with_goals, set_gui_state
+from .io import (
+    broadcast_to_gui_clients,
+    confirmation_history_message,
+    enrich_pending_with_goals,
+    set_gui_state,
+)
 from .llm_bridge import ask_llm
 from .output_hooks import emit_activity
 from .root_context import (
@@ -366,6 +371,9 @@ async def on_confirmation_response(
                     "confirmations": enrich_pending_with_goals(app),
                 },
             )
+        )
+        asyncio.create_task(
+            broadcast_to_gui_clients(app, confirmation_history_message(app))
         )
 
     if app.llm is None:

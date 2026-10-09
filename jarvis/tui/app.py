@@ -73,6 +73,7 @@ from . import lifecycle as tui_lifecycle
 from . import output as tui_output
 from . import status_bar as tui_status_bar
 from .command_input import CommandDropdown, CommandInput
+from .confirmations_panel import ConfirmationsPanel
 from .config_modal import ConfigModal, ConfigModalResult
 from .daemon_client import DaemonClient
 from .local_input import export_transcript_to_disk, handle_local_input
@@ -126,6 +127,17 @@ class JarvisTUI(App):
     #chat-pane {
         padding: 0 1;
         layers: base dropdown;
+        width: 1fr;
+    }
+
+    #confirm-panel {
+        width: 46;
+        border-left: solid $primary;
+        padding: 0 1;
+        display: none;
+    }
+    #confirm-panel:focus {
+        border-left: thick $accent;
     }
 
     #chat-log {
@@ -182,6 +194,8 @@ class JarvisTUI(App):
         self.sessions: List[Dict[str, Any]] = []
         self.current_session_id: Optional[str] = None
         self.pending_confirmations: List[Dict[str, Any]] = []
+        # Recently resolved confirmations, newest first (#235).
+        self.confirmation_history: List[Dict[str, Any]] = []
         # Whether the transcript holds conversation (not just notices).
         self.has_conversation = False
         self.last_session_error: Optional[str] = None
@@ -214,6 +228,7 @@ class JarvisTUI(App):
                     placeholder="Message, /help, /export, /sessions, /new…",
                     id="input",
                 )
+            yield ConfirmationsPanel(id="confirm-panel")
         yield Static(self.status_text, id="status-bar")
         yield Footer()
 
@@ -373,8 +388,17 @@ class JarvisTUI(App):
     # Status bar
     # ------------------------------------------------------------------
 
+    def refresh_confirmations(self) -> None:
+        """Redraw the confirmations panel from ``pending_confirmations`` and
+        ``confirmation_history``."""
+        try:
+            self.query_one(ConfirmationsPanel).refresh_view()
+        except Exception:
+            pass
+
     def _update_status(self) -> None:
         tui_status_bar.update_status(self)
+        self.refresh_confirmations()
 
     def watch_status_text(self, value: str) -> None:
         tui_status_bar.watch_status_text(self, value)

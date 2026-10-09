@@ -164,7 +164,8 @@ The TUI is a **client of the daemon** (#236), not an engine of its own. `daemon_
 | `config_modal.py` | Tabbed settings modal (F2 / `/settings` / `/providers`) — config + providers tabs |
 | `provider_modal.py` | Provider add/edit form pushed from config_modal |
 | `server_config_modal.py` | MCP server configuration form (shown for a daemon `config_request`) |
-| `confirm_modal.py` | Tool confirmation dialog (`[Y/n]`) |
+| `confirm_modal.py` | Tool confirmation dialog (`[Y/n]`) for the interrupt case |
+| `confirmations_panel.py` / `confirmations_view.py` | Confirmations panel (#235): pending and recently resolved requests, `All` / `This session`, keyboard approve / deny / per-task selection. The view module is plain data (rows, decisions) so it is tested without Textual. Offline, a decision goes to the offline queue |
 | `help_screen.py` | `/help` overlay |
 | `session_sidebar.py` | Session list sidebar |
 | `local_input.py` | TUI-only slash commands |
@@ -277,6 +278,7 @@ The TUI is a client of this socket, so what it used to read from an in-process e
 
 - `{"type": "get_status"}` → `{"type": "status", "session": {"id", "short_id", "title"} | null, "llm_configured", "provider", "model", "prompt_tokens", "context_window"}` (requester only). A client re-asks after each response to keep its status line current.
 - `{"type": "get_history", "id"?: ..., "limit"?: ...}` → `{"type": "history", "session", "messages": [{"role", "content", "timestamp"}]}` (requester only). Defaults to the current session. Unlike `switch_session` it changes nothing and is not broadcast, so a client can attach and render a transcript without moving every other client.
+- `{"type": "list_confirmation_history"}` → `{"type": "confirmation_history", "history": [{"id", "tool_lines", "created_at", "resolved_at", "outcome": "approved"|"denied"|"partial", "approved", "total", "chat_session_id"}]}`, newest first (requester only). The same message is broadcast after every resolution, next to `confirmation_list`. Pending entries in `confirmation_list` now also carry `chat_session_id`, the chat session current when the request was made (distinct from `session_id`, the owning goal), so a client can show "this session".
 - `{"type": "activity", "text", "kind", "meta"?}` is broadcast for each runtime activity line (the narrative the TUI shows as `... Installing x…`).
 - **Config-form relay.** A client that lists `"config_form"` in `hello`'s `capabilities` is asked to collect a server's configuration when no in-process modal exists: the daemon sends `{"type": "config_request", "request_id", "server_id", "name", "description", "props", "saved"}` to those clients only, and the first `{"type": "config_response", "request_id", "confirmed", "values", "missing_required"}` from a client that was asked completes it. Secrets are typed into the client's form and travel over this same-user socket, never through the conversation (#242); the daemon does not log the values. If every client asked disconnects before answering, the request resolves as cancelled rather than hanging. It runs ahead of the Tk fallback, so an attached capable client is preferred over a desktop dialog.
 
