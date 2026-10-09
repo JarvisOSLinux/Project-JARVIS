@@ -6,44 +6,40 @@ from typing import Any
 
 from textual.widgets import Static
 
-from ..config import Config
-
 
 def update_status(app: Any) -> None:
-    parts = []
-    if app.jarvis is not None and app.jarvis.sessions.current:
-        parts.append(f"session: {app.jarvis.sessions.current.short_id()}")
-    else:
-        parts.append("session: (none)")
+    if not app.connected:
+        app.status_text = "  |  ".join(
+            [
+                f"● {app.offline_reason or 'connecting…'}",
+                "Ctrl+Q quit · F1 help",
+            ]
+        )
+        return
 
-    model = "(unset)"
-    provider = "(none)"
+    status = app.daemon_status or {}
+    session = status.get("session")
+    parts = [f"session: {session['short_id']}" if session else "session: (none)"]
+    parts.append(f"model: {status.get('model') or '(unset)'}")
+    parts.append(f"provider: {status.get('provider') or '(none)'}")
 
-    if app.jarvis is not None and hasattr(app.jarvis, "llm"):
-        pool = getattr(app.jarvis.llm, "provider", None)
-        if pool is not None and hasattr(pool, "active_provider_name"):
-            provider = pool.active_provider_name or provider
-            model = getattr(pool, "model", model)
+    tokens = status.get("prompt_tokens") or 0
+    if tokens > 0:
+        window = status.get("context_window") or 0
+        if window > 0:
+            parts.append(f"ctx: {tokens}/{window} ({int(tokens / window * 100)}%)")
+        else:
+            parts.append(f"ctx: {tokens}tk")
 
-    parts.append(f"model: {model}")
-    parts.append(f"provider: {provider}")
-
-    if app.jarvis is not None and hasattr(app.jarvis, "llm"):
-        raw_provider = getattr(app.jarvis.llm, "provider", None)
-        prompt_toks = getattr(raw_provider, "last_prompt_tokens", 0) or 0
-        if prompt_toks > 0:
-            window = getattr(Config, "LLM_CONTEXT_WINDOW", 0)
-            if window > 0:
-                pct = int(prompt_toks / window * 100)
-                parts.append(f"ctx: {prompt_toks}/{window} ({pct}%)")
-            else:
-                parts.append(f"ctx: {prompt_toks}tk")
+    if app.daemon_state not in ("idle", "listening"):
+        parts.append(app.daemon_state)
+    if app.pending_confirmations:
+        parts.append(f"{len(app.pending_confirmations)} awaiting approval")
 
     parts.append(
         "Ctrl+N new · Ctrl+D delete · Ctrl+Q quit · Ctrl+L log · Ctrl+I input · F1 help · "
         "Ctrl+Shift+C clear · Ctrl+Shift+E export"
     )
-
     app.status_text = "  |  ".join(parts)
 
 

@@ -7,7 +7,7 @@ from typing import Any, Optional
 
 from textual.widgets import Label, ListItem, ListView
 
-from . import output as tui_output
+from ..sessions.model import Session
 
 
 def schedule_sidebar_refresh(app: Any) -> None:
@@ -22,27 +22,17 @@ def schedule_sidebar_refresh(app: Any) -> None:
         asyncio.create_task(app._refresh_sidebar())
 
 
-async def refresh_sidebar(app: Any, session_item_cls: Any, logger: Any) -> None:
-    """Refresh sidebar session rows while handling races and duplicates."""
+async def refresh_sidebar(app: Any, session_item_cls: Any) -> None:
+    """Rebuild the session rows from ``app.sessions``, dropping duplicates."""
     async with app._sidebar_refresh_lock:
-        if app.jarvis is None:
-            return
-        try:
-            sessions = app.jarvis.sessions.list(limit=50)
-        except Exception as e:
-            logger.debug(f"TUI: session list failed: {e}")
-            sessions = []
-
         seen_ids: set[str] = set()
-        unique_sessions = []
-        for s in sessions:
-            if s.id in seen_ids:
+        sessions = []
+        for data in app.sessions:
+            if data.get("id") in seen_ids:
                 continue
-            seen_ids.add(s.id)
-            unique_sessions.append(s)
-        sessions = unique_sessions
+            seen_ids.add(data.get("id"))
+            sessions.append(Session.from_dict(data))
 
-        current_id = app.jarvis.sessions.current_id
         if (
             app._pending_delete_session_id is not None
             and app._pending_delete_session_id not in seen_ids
@@ -58,95 +48,44 @@ async def refresh_sidebar(app: Any, session_item_cls: Any, logger: Any) -> None:
             await list_view.append(ListItem(Label("[dim](no sessions yet)[/dim]")))
         else:
             for s in sessions:
-                item = session_item_cls(s, is_current=(s.id == current_id))
+                item = session_item_cls(s, is_current=(s.id == app.current_session_id))
                 if item.is_current:
                     item.add_class("-current")
                 await list_view.append(item)
-        app._update_status()
-
-
-async def _load_session_history(app: Any, session_id: str) -> None:
-    """Load stored conversation entries and render them into the RichLog."""
-    if app.jarvis is None:
-        return
-    ctx = getattr(app.jarvis, "contextor", None)
-    if ctx is None or not getattr(ctx, "is_connected", False):
-        return
-    try:
-        result = ctx.recall("conversation_log", limit=100, session_id=session_id)
-        entries = result.get("entries", [])
-    except Exception:
-        return
-
-    if not entries:
-        app._append_log("[dim](no messages in this session yet)[/dim]")
-        return
-
-    # Sort chronologically — contextor returns most-recent-first by default.
-    try:
-        entries.sort(key=lambda e: e.get("stored_at", ""))
-    except Exception:
-        pass
-
-    for entry in entries:
-        content = (entry.get("content") or "").strip()
-        if not content:
-            continue
-        meta = entry.get("metadata") or {}
-        entry_type = meta.get("type", "")
-        escaped = tui_output.escape(content)
-        if entry_type == "user_prompt":
-            app._append_log(f"[bold cyan]you[/bold cyan] > {escaped}")
-        elif entry_type == "assistant_reply":
-            app._append_log(f"[bold magenta]jarvis[/bold magenta] > {escaped}")
-        else:
-            app._append_log(escaped)
 
 
 async def on_session_selected(app: Any, event: Any) -> None:
     """Handle user selection of a session in the sidebar list."""
     item = event.item
-    if not hasattr(item, "session_id") or app.jarvis is None:
+    if not hasattr(item, "session_id"):
         return
-    if item.session_id == app.jarvis.sessions.current_id:
+    if item.session_id == app.current_session_id:
         return
     app._pending_delete_session_id = None
-    session = app.jarvis.sessions.switch(item.session_id)
-    if session is None:
-        app._append_log(f"[red]Could not switch to {item.session_id[:8]}[/red]")
+    if app.connected:
+        await app.client.send({"type": "switch_session", "id": item.session_id})
         return
 
-    # Clear transcript and reload history for the selected session.
-    try:
-        from textual.widgets import RichLog
+    from .messages import render_history
 
-        chat_log = app.query_one("#chat-log", RichLog)
-        chat_log.clear()
-        app._export_lines.clear()
-    except Exception:
-        pass
-
-    app._append_log(
-        f"[dim]— {session.short_id()} " f"('{session.title or 'untitled'}') —[/dim]"
-    )
-    await _load_session_history(app, session.id)
+    app.current_session_id = item.session_id
+    render_history(app, await app.offline.history(item.session_id))
     await app._refresh_sidebar()
 
 
-def get_delete_target_session(app: Any) -> Optional[Any]:
-    """Prefer highlighted sidebar session; fall back to current session."""
+def get_delete_target_session(app: Any) -> Optional[Session]:
+    """Prefer the highlighted sidebar session; fall back to the current one."""
     try:
-        list_view = app.query_one("#session-list", ListView)
-        highlighted = list_view.highlighted_child
+        highlighted = app.query_one("#session-list", ListView).highlighted_child
     except Exception:
         highlighted = None
 
-    if hasattr(highlighted, "session_id") and app.jarvis is not None:
-        sessions = app.jarvis.sessions.list(limit=500)
-        for s in sessions:
-            if s.id == highlighted.session_id:
-                return s
-        return None
-    if app.jarvis is not None:
-        return app.jarvis.sessions.current
+    target_id = (
+        highlighted.session_id
+        if hasattr(highlighted, "session_id")
+        else app.current_session_id
+    )
+    for data in app.sessions:
+        if data.get("id") == target_id:
+            return Session.from_dict(data)
     return None

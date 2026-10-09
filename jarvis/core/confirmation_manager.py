@@ -342,8 +342,8 @@ class ConfirmationManager:
         self._inject_confirmation: Optional[Callable[[Dict[str, Any]], None]] = None
         # Timeout tasks keyed by request id (so we can cancel on response).
         self._timeout_tasks: Dict[str, asyncio.Task] = {}
-        # TUI callback — async callable that pushes ConfirmModal and returns bool.
-        self._tui_callback: Optional[Callable[[str, List[str]], Any]] = None
+        # True when a connected client prompts for confirmations itself (the TUI).
+        self._has_interactive_clients: Optional[Callable[[], bool]] = None
         self._restore()
 
     # ------------------------------------------------------------------
@@ -421,23 +421,18 @@ class ConfirmationManager:
         self,
         callback: Callable[[Dict[str, Any]], None],
         has_clients: Optional[Callable[[], bool]] = None,
+        has_interactive_clients: Optional[Callable[[], bool]] = None,
     ) -> None:
-        """Register the output socket broadcast callback."""
+        """Register the output socket broadcast callback.
+
+        ``has_interactive_clients`` reports whether a connected client has
+        declared the ``confirmations`` capability, i.e. is showing its own
+        confirmation prompt (the TUI). Such a client is asked ahead of a
+        desktop notification.
+        """
         self._output_callback = callback
         self._has_socket_clients = has_clients
-
-    def set_tui_callback(
-        self,
-        callback: Callable[[str, List[Dict[str, Any]]], Any],
-    ) -> None:
-        """Register the TUI confirmation callback.
-
-        The callback receives (request_id, tools_detail) — the list of
-        ``{tool_name, task, params, ...}`` dicts — and must return a bool
-        (True = allow, False = deny).  It is awaited, so it can use Textual's
-        ``push_screen_wait``.
-        """
-        self._tui_callback = callback
+        self._has_interactive_clients = has_interactive_clients
 
     def set_event_injector(
         self,
@@ -671,9 +666,14 @@ class ConfirmationManager:
     ) -> None:
         """Fire notification on the best available channel."""
 
-        # 1. TUI modal — highest priority when Textual is running.
-        if self._tui_callback is not None:
-            asyncio.create_task(self._notify_tui(request_id, tools_detail))
+        # 1. A connected client that prompts for confirmations itself (the
+        #    TUI) -- highest priority, ahead of a desktop toast.
+        if (
+            self._output_callback
+            and self._has_interactive_clients
+            and self._has_interactive_clients()
+        ):
+            self._notify_socket(request_id, tool_names, tools_detail, timeout)
             return
 
         # 2. Desktop notification (unless silent).
@@ -703,26 +703,6 @@ class ConfirmationManager:
             f"No live confirmation channel available for id={request_id}; "
             "left pending for CLI/socket review"
         )
-
-    # -- TUI (ConfirmModal) --------------------------------------------
-
-    async def _notify_tui(
-        self, request_id: str, tools_detail: List[Dict[str, Any]]
-    ) -> None:
-        try:
-            approved = await self._tui_callback(request_id, tools_detail)
-        except Exception as e:
-            logger.warning(f"TUI confirmation callback failed: {e}")
-            approved = False
-
-        if self._inject_confirmation:
-            self._inject_confirmation(
-                {
-                    "type": "confirmation_response",
-                    "id": request_id,
-                    "approved": bool(approved),
-                }
-            )
 
     # -- Desktop (notify-send) -----------------------------------------
 

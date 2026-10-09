@@ -42,8 +42,12 @@ TUI_LOCAL_SLASH_HELP: tuple[tuple[str, str], ...] = (
     ),
     ("/clear", "Clear the chat view (on-screen only; session memory unchanged)."),
     ("/quit, /exit", "Exit the TUI."),
-    ("/status", "Show current provider, model, and session."),
-    ("/providers", "List configured providers with live pool status."),
+    (
+        "/start, /dstart, /daemonstart",
+        "Launch the daemon from here and attach (never sent to the model).",
+    ),
+    ("/status", "Show the daemon connection, provider, model, and session."),
+    ("/providers", "Open the providers editor."),
     ("/providers add", "Open guided modal to add a provider."),
     (
         "/providers add --type ... --model ...",

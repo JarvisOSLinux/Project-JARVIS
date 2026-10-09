@@ -128,7 +128,7 @@ The Python dispatch layer bridges the ROOT LLM to the Rust `dispatch` binary.
 
 | File | Role |
 |------|------|
-| `confirmation_manager.py` | Non-blocking TLA confirmation gate; routes to TUI modal / desktop notification / socket / CLI |
+| `confirmation_manager.py` | Non-blocking TLA confirmation gate; routes to an attached TUI / desktop notification / socket / CLI |
 | `socket_security.py` | IPC hardening — delegates to `platform` for ownership check + permission enforcement |
 | `command_parser.py` | Parses ROOT LLM JSON; validates schema; extracts action + params |
 | `component_factory.py` | Wires all subsystems; selects config variants at startup |
@@ -141,7 +141,7 @@ The Python dispatch layer bridges the ROOT LLM to the Rust `dispatch` binary.
 | `sudo_manager.py` | Enable/disable the `jarvis` sudoers drop-in (sudo capability toggle, #158) |
 | `voice_state.py` | `VoiceState` — formal voice/response session state machine |
 
-**Confirmation system:** 4-tier threat classification (SAFE/ELEVATED/DANGEROUS/FORBIDDEN) is enforced in userspace by the TLA gate (`jarvis/core/threat_level.py` + `ConfirmationManager`) per `CONFIRMATION_MODE`. The kernel policy engine (`jarvis_policy.c`, `/dev/jarvis`) mirrors the same tiers OS-side but is not consulted from the daemon's execution path today (`KernelClient.policy_check` has no callers). Channels in priority order: TUI modal > desktop notification (`notify-send` on Linux, `osascript` on macOS) > output socket > CLI stdin.
+**Confirmation system:** 4-tier threat classification (SAFE/ELEVATED/DANGEROUS/FORBIDDEN) is enforced in userspace by the TLA gate (`jarvis/core/threat_level.py` + `ConfirmationManager`) per `CONFIRMATION_MODE`. The kernel policy engine (`jarvis_policy.c`, `/dev/jarvis`) mirrors the same tiers OS-side but is not consulted from the daemon's execution path today (`KernelClient.policy_check` has no callers). Channels in priority order: an attached TUI (modal, over the GUI socket) > desktop notification (`notify-send` on Linux, `osascript` on macOS) > output socket > CLI stdin.
 
 ---
 
@@ -149,23 +149,28 @@ The Python dispatch layer bridges the ROOT LLM to the Rust `dispatch` binary.
 
 Built on [Textual](https://textual.textualize.io/). All platform-agnostic.
 
+The TUI is a **client of the daemon** (#236), not an engine of its own. `daemon_client.py` keeps one connection to the GUI socket, identifies itself (`hello`, label `jarvis-tui`, capabilities `config_form` and `confirmations`), answers pings, and retries every two seconds, so a daemon started anywhere is picked up. With no daemon the status bar says `daemon offline — /start to launch it`, and the sidebar and pending confirmations are read from disk (`offline.py`: contextor's session store and `confirmations.json`). `/start` launches `jarvis run` detached and attaches when its socket appears; if it dies, the daemon's own output is shown.
+
 | File | Role |
 |------|------|
-| `app.py` | `JarvisApp` — Textual app shell, screen composition |
-| `lifecycle.py` | Startup: registers callbacks (output, confirmation, TUI-specific commands) |
-| `actions.py` | Textual action handlers for slash commands and keyboard shortcuts |
-| `output.py` | Scrollable output widget with Markdown rendering |
-| `status_bar.py` | Bottom bar: model, token usage (`ctx: X/Y`), mode indicator |
+| `app.py` | `JarvisTUI` — Textual app shell, screen composition, state (connection, last status, sessions) |
+| `daemon_client.py` | Reconnecting GUI-socket client; `start_daemon()` |
+| `messages.py` | Protocol messages → state and widgets (responses, status, sessions, history, activity, confirmation modal, server-config form) |
+| `offline.py` | Read-only view of sessions, history, pending confirmations and the decision queue while no daemon runs |
+| `lifecycle.py` | Starts the client; `/start`; shutdown |
+| `actions.py` | Keybinding actions (new/delete session, help, export) |
+| `output.py` | Transcript helpers; session auto-naming |
+| `status_bar.py` | Bottom bar: connection, model, token usage (`ctx: X/Y`), pending approvals |
 | `config_modal.py` | Tabbed settings modal (F2 / `/settings` / `/providers`) — config + providers tabs |
 | `provider_modal.py` | Provider add/edit form pushed from config_modal |
-| `server_config_modal.py` | MCP server configuration form |
+| `server_config_modal.py` | MCP server configuration form (shown for a daemon `config_request`) |
 | `confirm_modal.py` | Tool confirmation dialog (`[Y/n]`) |
 | `help_screen.py` | `/help` overlay |
 | `session_sidebar.py` | Session list sidebar |
-| `local_input.py` | Text input widget |
+| `local_input.py` | TUI-only slash commands |
 | `slash_commands_doc.py` | Slash command registry shown in help |
 
-**Key TUI commands:** `/providers` (or F2 → Providers tab), `/settings` (or F2 → Config tab), `/new`, `/sessions`, `/switch`, `/rename`, `/delete`, `/model`, `/status`, `/export`, `/clear`, `/help`. (Voice/text output modes are CLI subcommands — `jarvis voice`, `jarvis text` — not slash commands.)
+**Key TUI commands:** `/start` (also `/dstart`, `/daemonstart`), `/providers` (or F2 → Providers tab), `/settings` (or F2 → Config tab), `/new`, `/sessions`, `/switch`, `/rename`, `/delete`, `/model`, `/status`, `/export`, `/clear`, `/help`. (Voice/text output modes are CLI subcommands — `jarvis voice`, `jarvis text` — not slash commands.)
 
 ---
 
