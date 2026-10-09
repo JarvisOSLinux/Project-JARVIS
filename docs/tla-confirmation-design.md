@@ -151,9 +151,15 @@ send the notification and inject the response back via EventMerger.
 
 ### 0. TUI Modal (highest priority)
 
-When the Textual TUI is running, confirmations render as a `ConfirmModal`
-(`push_screen_wait`, wired in `tui/lifecycle.py`) and the answer is injected
-as a `confirmation_response` event.
+When a Textual TUI is attached to the daemon over the GUI socket, it declares
+the `confirmations` capability in its `hello` and the daemon sends it a
+`confirmation_request` ahead of any desktop notification
+(`ConfirmationManager.set_output_callback(..., has_interactive_clients=...)`).
+The TUI shows a `ConfirmModal` (`tui/messages.py`) and answers with
+`approve_confirmation` / `deny_confirmation`, which are injected as a
+`confirmation_response` event like every other channel's answer. A request
+resolved elsewhere (the `confirmation_list` broadcast no longer holds it)
+closes the modal without sending anything.
 
 ### 1. Desktop Notification
 

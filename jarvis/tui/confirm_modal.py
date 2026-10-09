@@ -1,15 +1,17 @@
 """TUI confirmation modal — blocks for user approval when JARVIS needs to
 execute a tool in CONFIRMATION_MODE=smart or ask_all.
 
-In CLI / voice mode the ConfirmationManager uses desktop notifications or
-stdin prompts.  In TUI mode Textual owns the terminal so those channels
-are unavailable.  Instead, tui.lifecycle.start_jarvis registers
-``app._tui_confirm`` as the TUI callback on the ConfirmationManager;
-that callback pushes this modal onto the Textual screen stack and awaits
-the user's choice via ``push_screen_wait``.
+The TUI declares the ``confirmations`` capability when it connects, so the
+daemon sends it a ``confirmation_request`` ahead of any desktop notification.
+``tui.messages`` pushes this modal and answers with ``approve_confirmation`` or
+``deny_confirmation``. If the request is resolved elsewhere first (the
+``confirmation_list`` broadcast no longer holds it) the modal is dismissed with
+``None`` and nothing is sent.
 """
 
 from __future__ import annotations
+
+from typing import List, Optional
 
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -18,10 +20,11 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Label, Static
 
 
-class ConfirmModal(ModalScreen[bool]):
+class ConfirmModal(ModalScreen[Optional[bool]]):
     """Modal dialog for tool-execution confirmation.
 
-    Dismissed with ``True`` (Allow) or ``False`` (Deny).
+    Dismissed with ``True`` (Allow), ``False`` (Deny), or ``None`` when the
+    request was resolved elsewhere.
     """
 
     BINDINGS = [
@@ -69,14 +72,12 @@ class ConfirmModal(ModalScreen[bool]):
     }
     """
 
-    def __init__(self, request_id: str, tools_detail: list) -> None:
+    def __init__(self, request_id: str, commands: List[str]) -> None:
         super().__init__()
         self._request_id = request_id
-        # Each entry is a {tool_name, task, params, ...} dict; render the actual
-        # command so the user sees what will run, not just the tool name (#186).
-        from ..core.confirmation_manager import confirmation_line
-
-        self._tool_lines = [confirmation_line(d) for d in tools_detail]
+        # The rendered command, so the user sees what will run and not just a
+        # tool name (#186).
+        self._tool_lines = commands
 
     def compose(self) -> ComposeResult:
         tools_text = "\n".join(f"  • {line}" for line in self._tool_lines)

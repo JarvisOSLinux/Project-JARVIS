@@ -672,7 +672,7 @@ def _handle_get_history(app: Any, msg: dict) -> dict:
     return {
         "type": "history",
         "session": session.to_dict() if session and session.id == session_id else None,
-        "messages": _entries_to_messages(recall_result.get("entries", [])),
+        "messages": entries_to_messages(recall_result.get("entries", [])),
     }
 
 
@@ -790,7 +790,7 @@ def _session_error(message: str) -> dict:
     return {"type": "session_error", "message": message}
 
 
-def _entries_to_messages(entries: list) -> list:
+def entries_to_messages(entries: list) -> list:
     """Map conversation_log entries (chronological) to {role, content, timestamp}."""
     messages = []
     for entry in entries:
@@ -837,7 +837,7 @@ def _handle_switch_session(app: Any, msg: dict) -> dict:
     recall_result = app.contextor.recall(
         "conversation_log", limit=SESSION_HISTORY_LIMIT, session_id=session.id
     )
-    messages = _entries_to_messages(recall_result.get("entries", []))
+    messages = entries_to_messages(recall_result.get("entries", []))
     return {
         "type": "session_switched",
         "session": session.to_dict(),

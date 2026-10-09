@@ -28,7 +28,7 @@ class TestEntriesToMessages:
                 "stored_at": 2.0,
             },
         ]
-        messages = runtime_io._entries_to_messages(entries)
+        messages = runtime_io.entries_to_messages(entries)
         assert messages == [
             {"role": "user", "content": "hi", "timestamp": 1.0},
             {"role": "assistant", "content": "hello!", "timestamp": 2.0},
@@ -39,7 +39,7 @@ class TestEntriesToMessages:
             {"content": "noise", "metadata": {"type": "something_else"}},
             {"content": "no metadata at all"},
         ]
-        assert runtime_io._entries_to_messages(entries) == []
+        assert runtime_io.entries_to_messages(entries) == []
 
 
 @pytest.mark.unit

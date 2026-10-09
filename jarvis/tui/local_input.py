@@ -18,8 +18,11 @@ from ..core.providers import (
     remove_provider,
 )
 from .help_screen import HelpScreen
+from .lifecycle import start_daemon_command
 from .provider_modal import ProviderModal
 from .slash_commands_doc import build_help_markdown
+
+START_COMMANDS = ("/start", "/dstart", "/daemonstart")
 
 
 def handle_local_input(app: Any, text: str, bindings: Any) -> bool:
@@ -45,6 +48,10 @@ def handle_local_input(app: Any, text: str, bindings: Any) -> bool:
         app.exit()
         return True
 
+    if low in START_COMMANDS:
+        app.run_worker(start_daemon_command(app), name="start-daemon")
+        return True
+
     if low == "/status":
         _show_status(app)
         return True
@@ -66,69 +73,17 @@ def handle_local_input(app: Any, text: str, bindings: Any) -> bool:
 
 def _show_status(app: Any) -> None:
     """Display current provider, model, and session info."""
-    model = "(unset)"
-    provider_name = "(none)"
-
-    pool = None
-    if app.jarvis is not None and hasattr(app.jarvis, "llm"):
-        pool = getattr(app.jarvis.llm, "provider", None)
-
-    if pool is not None and hasattr(pool, "active_provider_name"):
-        provider_name = pool.active_provider_name or provider_name
-        model = getattr(pool, "model", model)
-
-    session_id = "(none)"
-    if app.jarvis is not None and app.jarvis.sessions.current:
-        session_id = app.jarvis.sessions.current.short_id()
-
+    if not app.connected:
+        app._append_log(f"[yellow]{app.offline_reason}[/yellow]")
+        return
+    status = app.daemon_status or {}
+    session = status.get("session")
     lines = [
         "[bold cyan]Status[/bold cyan]",
-        f"  provider: {provider_name}",
-        f"  model: {model}",
-        f"  session: {session_id}",
+        f"  provider: {status.get('provider') or '(none)'}",
+        f"  model: {status.get('model') or '(unset)'}",
+        f"  session: {session['short_id'] if session else '(none)'}",
     ]
-    app._append_log("\n".join(lines))
-
-
-def _show_providers(app: Any) -> None:
-    """Display configured providers with live pool status if available."""
-    pool_status = {}
-    if app.jarvis is not None and hasattr(app.jarvis, "llm"):
-        pool = getattr(app.jarvis.llm, "provider", None)
-        if pool is not None and hasattr(pool, "get_status"):
-            for info in pool.get_status():
-                pool_status[info["name"]] = info
-
-    providers = list_providers()
-    if not providers:
-        app._append_log(
-            "[dim]No providers configured. "
-            "Use /providers add or: jarvis providers add --type ollama --model qwen3:4b[/dim]"
-        )
-        return
-
-    lines = [f"[bold cyan]Provider pool[/bold cyan] ({len(providers)} providers)"]
-    for i, p in enumerate(providers):
-        name = p.get("name", f"provider-{i}")
-        ptype = p.get("type", "?")
-        model = p.get("model", "?")
-
-        status_str = ""
-        live = pool_status.get(name)
-        if live:
-            s = live["status"]
-            if s == "active":
-                status_str = " [green]active[/green]"
-            elif s in ("cooldown", "exhausted"):
-                remaining = live.get("cooldown_remaining", "?")
-                status_str = f" [yellow]{s} ({remaining}s)[/yellow]"
-            elif s == "error":
-                status_str = " [red]error[/red]"
-
-        temp = p.get("temperature")
-        temp_str = f" (temp={temp})" if temp is not None else ""
-        lines.append(f"  [{i + 1}] {name} — {ptype}/{model}{temp_str}{status_str}")
-
     app._append_log("\n".join(lines))
 
 
@@ -275,12 +230,7 @@ def _handle_model(app: Any, text: str) -> None:
     """Show or switch the current model."""
     parts = text.strip().split(maxsplit=1)
     if len(parts) == 1:
-        model = "(unset)"
-        pool = None
-        if app.jarvis is not None and hasattr(app.jarvis, "llm"):
-            pool = getattr(app.jarvis.llm, "provider", None)
-        if pool is not None:
-            model = getattr(pool, "model", model)
+        model = (app.daemon_status or {}).get("model") or "(unset)"
         app._append_log(f"[bold cyan]Model:[/bold cyan] {model}")
         return
 
@@ -329,9 +279,8 @@ def export_transcript_to_disk(app: Any, filename: Optional[str]) -> None:
         if not base.lower().endswith(".md"):
             base = f"{base}.md"
     else:
-        sid = "no-session"
-        if app.jarvis is not None and app.jarvis.sessions.current:
-            sid = app.jarvis.sessions.current.short_id()
+        session = (app.daemon_status or {}).get("session")
+        sid = session["short_id"] if session else "no-session"
         base = f"{sid}_{int(time.time())}.md"
 
     out_resolved = out_dir.resolve()
@@ -342,14 +291,9 @@ def export_transcript_to_disk(app: Any, filename: Optional[str]) -> None:
         app._append_log("[red]Export: path must stay under transcripts/.[/red]")
         return
 
-    sid2 = "none"
-    model = "(unset)"
-    if app.jarvis is not None and hasattr(app.jarvis, "llm"):
-        pool = getattr(app.jarvis.llm, "provider", None)
-        if pool is not None:
-            model = getattr(pool, "model", model)
-    if app.jarvis is not None and app.jarvis.sessions.current:
-        sid2 = app.jarvis.sessions.current.id
+    status = app.daemon_status or {}
+    model = status.get("model") or "(unset)"
+    sid2 = app.current_session_id or "none"
 
     header = "\n".join(
         [

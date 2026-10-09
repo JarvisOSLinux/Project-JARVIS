@@ -32,17 +32,16 @@ Keybindings:
     Click / arrows — switch session (in sidebar)
 
 Architecture:
-    * A ``Jarvis(tui_mode=True)`` engine is created on mount and run as
-      an asyncio task alongside the Textual app (same event loop).
-    * User input from the ``Input`` widget is routed through
-      ``jarvis.events.inject_user_input()`` — the same pipe that voice
-      and the Unix socket use.
-    * LLM responses are captured by registering a callback on
-      ``output_manager``.  The callback runs in the main asyncio loop
-      (same as Textual), so it can safely write to widgets.
-    * Slash commands (``/new``, ``/switch``, …) still work the old way
-      via main.py's handler; ``/help`` and ``/export`` are handled in the
-      TUI only.  The sidebar refreshes after every turn to stay in sync.
+    * The TUI is a client of the daemon (#236). ``tui.daemon_client`` keeps one
+      connection to its GUI socket and retries every two seconds, so a daemon
+      started elsewhere is picked up; ``/start`` launches one from here.
+    * Everything shown arrives as a protocol message (``tui.messages``). With
+      no daemon the sidebar and pending confirmations come from disk
+      (``tui.offline``) and the status bar says so.
+    * User input goes to the daemon as ``{"type": "message"}``, the same pipe
+      the desktop app uses; slash commands such as ``/new`` are handled there.
+      ``/help``, ``/export``, ``/start`` and the settings commands are handled
+      in the TUI only.
 """
 
 from __future__ import annotations
@@ -75,8 +74,9 @@ from . import output as tui_output
 from . import status_bar as tui_status_bar
 from .command_input import CommandDropdown, CommandInput
 from .config_modal import ConfigModal, ConfigModalResult
-from .confirm_modal import ConfirmModal
+from .daemon_client import DaemonClient
 from .local_input import export_transcript_to_disk, handle_local_input
+from .offline import OfflineStore
 from .session_sidebar import on_session_selected as handle_session_selected
 from .session_sidebar import refresh_sidebar
 from .session_sidebar import schedule_sidebar_refresh as queue_sidebar_refresh
@@ -172,10 +172,21 @@ class JarvisTUI(App):
 
     def __init__(self) -> None:
         super().__init__()
-        self.jarvis = None  # type: ignore[assignment]
-        self._jarvis_task: Optional[asyncio.Task] = None
-        self._output_cb = None
-        self._activity_cb = None
+        self.client: Optional[DaemonClient] = None
+        self.connected = False
+        self.offline_reason = "connecting…"
+        self.offline = OfflineStore()
+        # Last "status" message from the daemon, and its voice/response state.
+        self.daemon_status: Dict[str, Any] = {}
+        self.daemon_state = "idle"
+        self.sessions: List[Dict[str, Any]] = []
+        self.current_session_id: Optional[str] = None
+        self.pending_confirmations: List[Dict[str, Any]] = []
+        # Whether the transcript holds conversation (not just notices).
+        self.has_conversation = False
+        # request id -> the ConfirmModal showing it, so a request resolved
+        # elsewhere can close its modal.
+        self.confirm_screens: Dict[str, Any] = {}
         # Plain lines mirroring the RichLog (for Markdown export).
         self._export_lines: list[str] = []
         # Sidebar refresh can be requested from multiple timers/callbacks.
@@ -212,13 +223,6 @@ class JarvisTUI(App):
     async def on_mount(self) -> None:
         tui_lifecycle.on_mount(self)
 
-    async def _start_jarvis(self) -> None:
-        """Create the Jarvis engine and start its event loop."""
-        await tui_lifecycle.start_jarvis(self, logger)
-
-    async def _run_engine(self) -> None:
-        await tui_lifecycle.run_engine(self, logger)
-
     async def on_unmount(self) -> None:
         await tui_lifecycle.on_unmount(self)
 
@@ -236,18 +240,16 @@ class JarvisTUI(App):
         if handle_local_input(self, text, JarvisTUI.BINDINGS):
             return
 
-        if self.jarvis is None:
+        if not self.connected:
             self._append_log(
-                "[yellow]JARVIS is still starting up — try again in a second.[/yellow]"
+                f"[yellow]{self.offline_reason or 'not connected'}[/yellow]"
             )
             return
 
+        self.has_conversation = True
         self._append_log(f"[bold cyan]you[/bold cyan] > {tui_output.escape(text)}")
-
-        # Inject via the same path voice and sockets use.  Slash
-        # commands still work — main.py's handler catches them.
         self._pending_autoname_text = text
-        self.jarvis.events.inject_user_input(text)
+        await self.client.send({"type": "message", "content": text})
 
     @on(OptionList.OptionSelected, "#command-dropdown")
     def on_command_suggested(self, event: OptionList.OptionSelected) -> None:
@@ -257,32 +259,16 @@ class JarvisTUI(App):
         command_input.accept_command(event.option.id)
         command_input.focus()
 
-    def _on_jarvis_output(self, response: Dict[str, Any]) -> None:
-        """Output callback — called from the main asyncio loop by OutputManager."""
-        tui_output.on_jarvis_output(self, response)
-
-    def _on_jarvis_activity(self, event: Dict[str, Any]) -> None:
-        """Internal runtime narrative (LLM/dispatch status), not chat content."""
-        tui_output.on_jarvis_activity(self, event)
-
-    async def _open_config_modal(
-        self,
-        server_id: str,
-        server_name: str,
-        server_desc: str,
-        props: List[Dict[str, Any]],
-        saved: Dict[str, Any],
-        future: "asyncio.Future",
-    ) -> None:
-        """Push the server config modal and resolve *future* when the user submits."""
-        from .server_config_modal import ServerConfigModal
-
-        await self.push_screen(
-            ServerConfigModal(server_id, server_name, server_desc, props, saved, future)
-        )
-
     def _append_log(self, markup: str) -> None:
         tui_output.append_log(self, markup)
+
+    def clear_log(self) -> None:
+        """Empty the on-screen transcript and its export buffer."""
+        try:
+            self.query_one("#chat-log", RichLog).clear()
+        except Exception:
+            return
+        self._export_lines.clear()
 
     @staticmethod
     def _escape(text: str) -> str:
@@ -304,7 +290,7 @@ class JarvisTUI(App):
         queue_sidebar_refresh(self)
 
     async def _refresh_sidebar(self) -> None:
-        await refresh_sidebar(self, SessionItem, logger)
+        await refresh_sidebar(self, SessionItem)
 
     @on(ListView.Selected, "#session-list")
     async def on_session_selected(self, event: ListView.Selected) -> None:
@@ -361,17 +347,22 @@ class JarvisTUI(App):
                         applied.append(f"{key}={value}")
                     except Exception as e:
                         self._append_log(f"[red]Error setting {key}: {e}[/red]")
+                    if key == "CONFIRMATION_MODE" and self.connected:
+                        asyncio.ensure_future(
+                            self.client.send(
+                                {"type": "set_confirmation_mode", "mode": value}
+                            )
+                        )
                 if applied:
                     self._append_log(
-                        f"[green]Settings updated: {', '.join(applied)}[/green]"
+                        f"[green]Settings updated: {', '.join(applied)}[/green] "
+                        "[dim](the daemon applies all but the confirmation mode "
+                        "at its next start)[/dim]"
                     )
             if result.providers_changed:
                 self._append_log("[green]Provider config updated.[/green]")
 
         self.push_screen(ConfigModal(initial_tab=tab), _on_config)
-
-    async def _tui_confirm(self, request_id: str, tools_detail: list) -> bool:
-        return await self.push_screen_wait(ConfirmModal(request_id, tools_detail))
 
     def _export_transcript_to_disk(self, filename: Optional[str]) -> None:
         """Save plain transcript as Markdown under ``JARVIS_DATA_DIR/transcripts``."""

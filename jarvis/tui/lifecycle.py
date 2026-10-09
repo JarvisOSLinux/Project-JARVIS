@@ -1,96 +1,50 @@
-"""TUI lifecycle and engine boot/shutdown helpers."""
+"""TUI lifecycle: connect to the daemon, and stop cleanly."""
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
-from textual.widgets import Input, RichLog
+from textual.widgets import Input
+
+from . import messages
+from .daemon_client import DaemonClient, start_daemon
+
+CAPABILITIES = ("config_form", "confirmations")
 
 
 def on_mount(app: Any) -> None:
     app.title = "JARVIS"
     app.sub_title = "interactive chat"
+    app._append_log("[dim]Looking for the JARVIS daemon...[/dim]")
 
-    app._append_log("[dim]Booting JARVIS engine...[/dim]")
-
-    # Defer engine start off the Textual mount path so an Ollama
-    # connect or contextor spawn doesn't block the first paint.
-    app.run_worker(app._start_jarvis(), exclusive=True, name="jarvis-boot")
-
-
-async def start_jarvis(app: Any, logger: Any) -> None:
-    """Create the Jarvis engine and start its event loop."""
-    # Lazy import avoids pulling engine deps when only introspecting TUI.
-    from ..main import Jarvis
-
-    try:
-        jarvis = Jarvis(tui_mode=True)
-    except Exception as e:  # pragma: no cover - surfaced to the user
-        logger.error(f"TUI: Failed to construct Jarvis: {e}", exc_info=True)
-        app._append_log(f"[red]Failed to start JARVIS: {e}[/red]")
-        app._set_status(f"startup error: {e}")
-        return
-
-    app.jarvis = jarvis
-    app._output_cb = app._on_jarvis_output
-    app._activity_cb = app._on_jarvis_activity
-    jarvis.output_manager.add_output_callback(app._output_cb)
-    jarvis.output_manager.add_activity_callback(app._activity_cb)
-    jarvis.config_modal_callback = app._open_config_modal
-
-    if hasattr(jarvis, "confirmation"):
-        jarvis.confirmation.set_tui_callback(app._tui_confirm)
-
-    # Kick off the engine's event loop as an async task.
-    app._jarvis_task = asyncio.create_task(app._run_engine(), name="jarvis-run")
-
-    # Wait a beat for dispatch/contextor to come up, then seed the UI.
-    await asyncio.sleep(0.1)
-    await app._refresh_sidebar()
-    app._update_status()
-
-    if jarvis.llm is None:
-        app._append_log(
-            "[yellow]No LLM provider configured.[/yellow]\n"
-            "  Use [bold]/providers add[/bold] or open "
-            "[bold]Settings (F2)[/bold] to get started.\n"
-            "  After adding a provider, restart the TUI."
-        )
-    else:
-        app._append_log(
-            "[green]Ready.[/green] Type below or use Ctrl+N for a new chat."
-        )
+    app.client = DaemonClient(
+        lambda msg: messages.on_message(app, msg),
+        lambda up, why: messages.on_connection(app, up, why),
+        capabilities=CAPABILITIES,
+    )
+    app.run_worker(app.client.run(), name="daemon-client")
     app.query_one("#input", Input).focus()
 
 
-async def run_engine(app: Any, logger: Any) -> None:
-    try:
-        await app.jarvis.run()
-    except asyncio.CancelledError:
-        pass
-    except Exception as e:  # pragma: no cover
-        logger.error(f"TUI: Engine crashed: {e}", exc_info=True)
-        chat_log = app.query_one("#chat-log", RichLog)
-        chat_log.write(f"[red]Engine crashed: {e}[/red]")
+async def start_daemon_command(app: Any) -> None:
+    """``/start``: launch the daemon, then attach as soon as it is up.
+
+    UI chrome, not conversation: it is never sent to the daemon or recorded.
+    """
+    if app.connected:
+        app._append_log("[dim]The daemon is already running.[/dim]")
+        return
+    app._append_log("[dim]Starting the daemon...[/dim]")
+    ok, detail = await start_daemon()
+    if not ok:
+        app._append_log(
+            f"[red]Could not start the daemon:[/red]\n{app._escape(detail)}"
+        )
+        return
+    app.client.nudge()
 
 
 async def on_unmount(app: Any) -> None:
-    if app.jarvis is not None:
-        try:
-            if app._output_cb is not None:
-                app.jarvis.output_manager.remove_output_callback(app._output_cb)
-            if app._activity_cb is not None:
-                app.jarvis.output_manager.remove_activity_callback(app._activity_cb)
-        except Exception:
-            pass
-        try:
-            app.jarvis.stop()
-        except Exception:
-            pass
-    if app._jarvis_task is not None and not app._jarvis_task.done():
-        app._jarvis_task.cancel()
-        try:
-            await app._jarvis_task
-        except (asyncio.CancelledError, Exception):
-            pass
+    if app.client is not None:
+        app.client.stop()
+    await app.offline.close()

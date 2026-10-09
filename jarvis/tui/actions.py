@@ -13,35 +13,25 @@ from .slash_commands_doc import build_help_markdown
 
 
 async def new_session(app: Any) -> None:
-    if app.jarvis is None:
+    if not app.connected:
+        app._append_log("[yellow]daemon offline — /start to launch it[/yellow]")
         return
-    if not app.jarvis.sessions.available:
-        app._append_log("[yellow]Memory is disabled — sessions unavailable.[/yellow]")
-        return
-    session = app.jarvis.sessions.new_session()
-    if session:
-        app._pending_delete_session_id = None
-        app._append_log(f"[dim]— started new session {session.short_id()} —[/dim]")
-        await app._refresh_sidebar()
-    else:
-        app._append_log("[red]Could not create a new session.[/red]")
+    app._pending_delete_session_id = None
+    await app.client.send({"type": "create_session"})
 
 
 async def delete_selected_session(app: Any) -> None:
     """Delete the highlighted (or current) session with two-step confirm."""
-    if app.jarvis is None:
-        return
-    if not app.jarvis.sessions.available:
-        app._append_log("[yellow]Memory is disabled — sessions unavailable.[/yellow]")
+    if not app.connected:
+        app._append_log("[yellow]daemon offline — /start to launch it[/yellow]")
         return
     target = get_delete_target_session(app)
     if target is None:
         app._append_log("[yellow]No session selected to delete.[/yellow]")
         return
 
-    sid = target.id
-    if app._pending_delete_session_id != sid:
-        app._pending_delete_session_id = sid
+    if app._pending_delete_session_id != target.id:
+        app._pending_delete_session_id = target.id
         app._append_log(
             f"[yellow]Press Ctrl+D again to delete {target.short_id()} "
             f"('{target.title or 'untitled'}').[/yellow]"
@@ -49,11 +39,8 @@ async def delete_selected_session(app: Any) -> None:
         return
 
     app._pending_delete_session_id = None
-    if app.jarvis.sessions.delete(sid):
-        app._append_log(f"[dim]— deleted session {target.short_id()} —[/dim]")
-        await app._refresh_sidebar()
-    else:
-        app._append_log(f"[red]Delete failed for {target.short_id()}.[/red]")
+    await app.client.send({"type": "delete_session", "id": target.id})
+    app._append_log(f"[dim]— deleting session {target.short_id()} —[/dim]")
 
 
 def focus_chat(app: Any) -> None:

@@ -57,13 +57,16 @@ class DaemonClient:
         on_message: Callback,
         on_connection: Callback,
         retry_seconds: float = RETRY_SECONDS,
+        capabilities: Tuple[str, ...] = (),
     ) -> None:
         self._on_message = on_message
         self._on_connection = on_connection
+        self._capabilities = capabilities
         self._retry = retry_seconds
         self._writer: Optional[asyncio.StreamWriter] = None
         self._stopping = False
         self._up: Optional[bool] = None
+        self._nudged = asyncio.Event()
 
     @property
     def connected(self) -> bool:
@@ -80,8 +83,13 @@ class DaemonClient:
             return False
         return True
 
+    def nudge(self) -> None:
+        """Retry now instead of waiting out the interval (after /start)."""
+        self._nudged.set()
+
     def stop(self) -> None:
         self._stopping = True
+        self._nudged.set()
         writer = self._writer
         if writer is not None:
             writer.close()
@@ -91,7 +99,11 @@ class DaemonClient:
             reason = await self._session()
             await self._transition(False, reason)
             if not self._stopping:
-                await asyncio.sleep(self._retry)
+                try:
+                    await asyncio.wait_for(self._nudged.wait(), self._retry)
+                except asyncio.TimeoutError:
+                    pass
+                self._nudged.clear()
 
     async def _transition(self, up: bool, reason: str) -> None:
         if self._up is up:
@@ -113,7 +125,10 @@ class DaemonClient:
 
         self._writer = writer
         try:
-            await self.send({"type": "hello", "label": CLIENT_LABEL})
+            hello: dict = {"type": "hello", "label": CLIENT_LABEL}
+            if self._capabilities:
+                hello["capabilities"] = list(self._capabilities)
+            await self.send(hello)
             await self._transition(True, "connected")
             await self._read(reader)
         except (ConnectionError, OSError, asyncio.IncompleteReadError):

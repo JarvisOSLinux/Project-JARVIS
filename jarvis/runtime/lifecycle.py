@@ -280,6 +280,10 @@ async def start_runtime_services(app: Any, logger: Logger) -> dict[str, Any]:
         app.confirmation.set_output_callback(
             lambda message: _broadcast_confirmation_notice(app, message),
             has_clients=lambda: bool(app._output_clients) or bool(app._gui_clients),
+            has_interactive_clients=lambda: any(
+                "confirmations" in caps and writer in app._gui_clients
+                for writer, caps in app._gui_capabilities.items()
+            ),
         )
 
     update_sweep_task: Optional[asyncio.Task] = None

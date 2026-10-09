@@ -92,7 +92,7 @@ There is no separate audit log and no unconditional FORBIDDEN block:
 The `ConfirmationManager` (core) is interface-agnostic. It routes confirmation
 requests to the best available channel:
 
-1. **TUI modal** — `ConfirmModal` in Textual (Y/N inline)
+1. **Attached TUI** — a TUI connected over the GUI socket declares the `confirmations` capability and gets a `confirmation_request` ahead of any desktop notification; it shows `ConfirmModal` (Y/N) and answers over the socket
 2. **Desktop notification** — `notify-send` with Allow/Deny actions
 3. **Socket** — JSON over output socket for external clients
 4. **CLI prompt** — stdin `[y/N]` fallback
@@ -260,7 +260,10 @@ make check                  # Format + lint + typecheck + tests
 | `jarvis/cli.py` | CLI entry point |
 | `jarvis/config.py` | Global configuration |
 | `jarvis/tui/app.py` | Textual app shell |
-| `jarvis/tui/lifecycle.py` | App startup/shutdown, callback registration |
+| `jarvis/tui/lifecycle.py` | App startup/shutdown, `/start` |
+| `jarvis/tui/daemon_client.py` | Reconnecting GUI-socket client + `start_daemon()` (#236) |
+| `jarvis/tui/messages.py` | Daemon protocol messages → TUI state and widgets |
+| `jarvis/tui/offline.py` | Sessions/confirmations from disk while no daemon runs |
 | `jarvis/tui/confirm_modal.py` | Tool confirmation modal |
 | `jarvis/tui/config_modal.py` | Tabbed config/provider settings modal (F2 / /settings) |
 | `jarvis/tui/provider_modal.py` | Provider add/edit modal |
@@ -293,6 +296,8 @@ make check                  # Format + lint + typecheck + tests
 ---
 
 ## Changelog — corrected claims
+
+*2026-10-09:* the TUI is a client of the daemon (#236). It used to build its own in-process `Jarvis(tui_mode=True)` engine, so it could not attach to a running daemon or run without one. It now connects to the GUI socket (`tui/daemon_client.py`), renders protocol messages (`tui/messages.py`), and with no daemon shows sessions and pending confirmations from disk (`tui/offline.py`) and offers `/start`. The socket gained `get_status`, `get_history`, `activity`, and a `config_request`/`config_response` relay (secrets still typed into a form, never the conversation, #242); `ConfirmationManager.set_tui_callback` is gone, replaced by routing to clients that declare the `confirmations` capability. Not carried over: live provider-pool status in `/providers` (the pool lives in the daemon and the socket does not expose it), and provider or non-confirmation settings changes take effect at the daemon's next start.
 
 *2026-09-29:* servers that work in the user's account sign in instead of taking a pasted token (#229, JARVIS half; the registry and dmcp halves are mcp-registry#104 and dmcp#69).
 - **What dmcp does now.** A call whose server lacks its declared account is refused before spawn, and the error text carries a `credential_required: {json}` line.

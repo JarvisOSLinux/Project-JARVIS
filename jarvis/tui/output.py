@@ -24,28 +24,15 @@ def escape(text: str) -> str:
     return text.replace("[", r"\[")
 
 
-def on_jarvis_output(app: Any, response: dict[str, Any]) -> None:
-    """Output callback called from OutputManager on the main event loop."""
-    text = response.get("output", "")
-    if not text:
-        return
-    app._append_log(f"[bold magenta]jarvis[/bold magenta] > {escape(text)}")
-    _maybe_autoname_session(app)
-    # Session might have been auto-created on first message; refresh.
-    app.schedule_sidebar_refresh()
-
-
-def _maybe_autoname_session(app: Any) -> None:
-    """Rename session from timestamp default to first-message summary."""
+async def maybe_autoname_session(app: Any) -> None:
+    """Rename a timestamp-titled session after the first message's opening words."""
     pending = getattr(app, "_pending_autoname_text", None)
-    if not pending:
+    if not pending or not app.connected:
         return
-    if app.jarvis is None:
+    session = (app.daemon_status or {}).get("session")
+    if not session:
         return
-    session = app.jarvis.sessions.current
-    if session is None:
-        return
-    if not _DEFAULT_TITLE_RE.match(session.title or ""):
+    if not _DEFAULT_TITLE_RE.match(session.get("title") or ""):
         app._pending_autoname_text = None
         return
     words = pending.strip().split()
@@ -55,16 +42,9 @@ def _maybe_autoname_session(app: Any) -> None:
     if not new_title:
         return
     app._pending_autoname_text = None
-    app.jarvis.sessions.rename(new_title)
-    app.schedule_sidebar_refresh()
-
-
-def on_jarvis_activity(app: Any, event: dict[str, Any]) -> None:
-    """Internal runtime narrative (LLM/dispatch status), not chat content."""
-    text = str(event.get("text", "")).strip()
-    if not text:
-        return
-    app._append_log(f"[dim]... {escape(text)}[/dim]")
+    await app.client.send(
+        {"type": "rename_session", "id": session["id"], "title": new_title}
+    )
 
 
 def append_log(app: Any, markup: str) -> None:

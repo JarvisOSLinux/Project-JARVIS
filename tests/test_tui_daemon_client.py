@@ -114,6 +114,36 @@ def test_connects_identifies_itself_and_delivers_messages(sock_path):
     asyncio.run(go())
 
 
+def test_capabilities_are_declared_in_hello_and_nudge_skips_the_wait(sock_path):
+    async def go():
+        daemon = FakeDaemon(sock_path)
+        messages, transitions = [], []
+        client = DaemonClient(
+            lambda m: messages.append(m),
+            lambda up, why: transitions.append((up, why)),
+            retry_seconds=30,
+            capabilities=("config_form", "confirmations"),
+        )
+        task = asyncio.create_task(client.run())
+        await _until(lambda: transitions == [(False, "daemon offline")])
+        await daemon.start()
+        client.nudge()
+        await _until(lambda: (True, "connected") in transitions)
+        await _until(
+            lambda: {
+                "type": "hello",
+                "label": "jarvis-tui",
+                "capabilities": ["config_form", "confirmations"],
+            }
+            in daemon.received
+        )
+        client.stop()
+        await task
+        await daemon.stop()
+
+    asyncio.run(go())
+
+
 def test_ping_is_answered_and_not_surfaced(sock_path):
     async def go():
         daemon = FakeDaemon(sock_path)
