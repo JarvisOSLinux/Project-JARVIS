@@ -111,6 +111,10 @@ class Jarvis:
         # defaulting to DEFAULT_CLIENT_LABEL until a client identifies itself.
         self._gui_clients: Dict[asyncio.StreamWriter, str] = {}
         self._gui_state: str = "idle"
+        # writer -> capabilities the client declared in "hello" (e.g. "config_form").
+        self._gui_capabilities: Dict[asyncio.StreamWriter, set] = {}
+        # request_id -> (future, writers still asked) for config_request relays.
+        self._config_requests: Dict[str, tuple] = {}
 
         # Server docs scoped to the active dispatch chain — cleared on respond.
         self.mcp_dispatch_docs: dict = {}
@@ -333,6 +337,9 @@ class Jarvis:
 
     def _on_gui_output(self, response: Dict[str, Any]) -> None:
         runtime_io.on_gui_output(self, response)
+
+    def _on_gui_activity(self, event: Dict[str, Any]) -> None:
+        runtime_io.on_gui_activity(self, event)
 
     async def _await_user_input(self) -> str:
         return await runtime_events.await_user_input()

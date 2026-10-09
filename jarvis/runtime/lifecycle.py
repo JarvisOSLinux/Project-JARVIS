@@ -268,6 +268,7 @@ async def start_runtime_services(app: Any, logger: Logger) -> dict[str, Any]:
 
         harden_socket_path(Config.JARVIS_GUI_SOCKET)
         app.output_manager.add_output_callback(app._on_gui_output)
+        app.output_manager.add_activity_callback(app._on_gui_activity)
         gui_socket_task = asyncio.create_task(app._run_gui_socket_listener())
         logger.info(f"JARVIS: GUI socket at {Config.JARVIS_GUI_SOCKET}")
 
@@ -388,6 +389,7 @@ async def shutdown(app: Any, logger: Logger) -> None:
         logger.info(f"JARVIS: Archived {len(archived)} in-flight goal(s) on shutdown")
     app.output_manager.remove_output_callback(app._on_output_for_broadcast)
     app.output_manager.remove_output_callback(app._on_gui_output)
+    app.output_manager.remove_activity_callback(app._on_gui_activity)
     await app.events.stop()
     await app.dispatch.disconnect()
     if app.contextor:

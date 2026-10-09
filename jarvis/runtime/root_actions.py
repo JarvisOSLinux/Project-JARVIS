@@ -188,8 +188,9 @@ async def _collect_config_securely(
 
     Returns (status, values, missing): "collected", "cancelled" or
     "unavailable". The TUI supplies a modal. Anywhere else with a display --
-    the daemon, the desktop app -- gets the Tk dialog, which masks sensitive
-    fields; it existed already but was reachable only from the dead legacy
+    the daemon, the desktop app -- first asks a connected client that declared
+    the ``config_form`` capability, then falls back to the Tk dialog, which
+    masks sensitive fields; it existed already but was reachable only from the dead legacy
     dispatch sub-chain, so outside the TUI nothing collected secrets safely and
     the model asked for them in chat instead. With no display there is no
     safe way to ask here, and "unavailable" says so rather than falling back.
@@ -211,6 +212,21 @@ async def _collect_config_securely(
         if not result.confirmed:
             return "cancelled", {}, list(result.missing_required or [])
         return "collected", dict(result.values or {}), []
+
+    from . import io as runtime_io
+
+    relayed = await runtime_io.request_config_form(
+        app,
+        server_id,
+        manifest.get("name") or server_id,
+        manifest.get("description") or manifest.get("summary") or "",
+        props,
+        saved,
+    )
+    if relayed is not None:
+        if not relayed["confirmed"]:
+            return "cancelled", {}, list(relayed["missing_required"])
+        return "collected", dict(relayed["values"]), []
 
     if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
         return "unavailable", {}, []

@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import uuid
 from logging import Logger
-from typing import Any
+from typing import Any, Optional
 
 from ..config import Config
 from ..core.providers import (
@@ -291,6 +292,8 @@ async def run_gui_socket_listener(app: Any, logger: Logger) -> None:
         pass
     finally:
         app._gui_clients.clear()
+        app._gui_capabilities.clear()
+        cancel_all_config_requests(app)
         server.close()
         await server.wait_closed()
         platform.ipc_cleanup(path)
@@ -351,6 +354,8 @@ async def handle_gui_connection(
         pass
     finally:
         app._gui_clients.pop(writer, None)
+        app._gui_capabilities.pop(writer, None)
+        drop_config_waiter(app, writer)
         try:
             writer.close()
             await writer.wait_closed()
@@ -386,6 +391,20 @@ async def _process_gui_message(
         if label:
             app._gui_clients[writer] = label
             logger.info(f"JARVIS: GUI client identified as '{label}'")
+        capabilities = msg.get("capabilities")
+        if isinstance(capabilities, list):
+            app._gui_capabilities[writer] = {
+                c for c in capabilities if isinstance(c, str)
+            }
+
+    elif msg_type == "get_status":
+        await _gui_write(writer, build_status(app))
+
+    elif msg_type == "get_history":
+        await _gui_write(writer, _handle_get_history(app, msg))
+
+    elif msg_type == "config_response":
+        resolve_config_request(app, logger, msg, writer)
 
     elif msg_type == "list_clients":
         await _gui_write(
@@ -602,6 +621,160 @@ async def _reply_or_broadcast_providers(
         await _gui_write(writer, response)
     else:
         await broadcast_to_gui_clients(app, response)
+
+
+# ---------------------------------------------------------------------------
+# GUI socket — status, activity, history, and the server-config form relay
+# (#236: the TUI is a client of this socket, so what it used to read from the
+# in-process engine has to be askable over the wire.)
+# ---------------------------------------------------------------------------
+
+CONFIG_FORM_CAPABILITY = "config_form"
+
+
+def build_status(app: Any) -> dict:
+    """What a client shows in its status line: session, model, context use."""
+    session = app.sessions.current
+    llm = getattr(app, "llm", None)
+    provider = getattr(llm, "provider", None)
+    return {
+        "type": "status",
+        "session": (
+            {
+                "id": session.id,
+                "short_id": session.short_id(),
+                "title": session.title,
+            }
+            if session
+            else None
+        ),
+        "llm_configured": llm is not None,
+        "provider": getattr(provider, "active_provider_name", None),
+        "model": getattr(provider, "model", None),
+        "prompt_tokens": getattr(provider, "last_prompt_tokens", 0) or 0,
+        "context_window": getattr(Config, "LLM_CONTEXT_WINDOW", 0),
+    }
+
+
+def _handle_get_history(app: Any, msg: dict) -> dict:
+    """A session's transcript, to the requester only (unlike switch_session,
+    it changes no daemon state and is not broadcast)."""
+    if not app.sessions.available:
+        return _session_error("Sessions unavailable (memory disabled)")
+    session = app.sessions.current
+    session_id = msg.get("id") or (session.id if session else "")
+    if not session_id:
+        return {"type": "history", "session": None, "messages": []}
+    limit = msg.get("limit", SESSION_HISTORY_LIMIT)
+    recall_result = app.contextor.recall(
+        "conversation_log", limit=limit, session_id=session_id
+    )
+    return {
+        "type": "history",
+        "session": session.to_dict() if session and session.id == session_id else None,
+        "messages": _entries_to_messages(recall_result.get("entries", [])),
+    }
+
+
+def on_gui_activity(app: Any, event: dict[str, Any]) -> None:
+    """Forward a runtime activity line to GUI clients."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    message = {"type": "activity", **event}
+    loop.create_task(broadcast_to_gui_clients(app, message))
+
+
+async def request_config_form(
+    app: Any,
+    server_id: str,
+    name: str,
+    description: str,
+    props: list,
+    saved: dict,
+) -> Optional[dict]:
+    """Ask a client that declared the ``config_form`` capability to collect a
+    server's configuration, so secrets are typed into a form rather than the
+    conversation (#242).
+
+    Returns ``{"confirmed", "values", "missing_required"}`` once a client
+    answers, or None when no capable client is attached. Cancelled (not
+    hung) if every client asked disconnects before answering.
+    """
+    targets = {
+        w
+        for w, caps in app._gui_capabilities.items()
+        if CONFIG_FORM_CAPABILITY in caps and w in app._gui_clients
+    }
+    if not targets:
+        return None
+    request_id = uuid.uuid4().hex
+    future: asyncio.Future = asyncio.get_running_loop().create_future()
+    app._config_requests[request_id] = (future, targets)
+    message = {
+        "type": "config_request",
+        "request_id": request_id,
+        "server_id": server_id,
+        "name": name,
+        "description": description,
+        "props": props,
+        "saved": saved,
+    }
+    for writer in list(targets):
+        try:
+            await _gui_write(writer, message)
+        except (ConnectionError, OSError):
+            drop_config_waiter(app, writer)
+    try:
+        return await future
+    finally:
+        app._config_requests.pop(request_id, None)
+
+
+def resolve_config_request(
+    app: Any, logger: Logger, msg: dict, writer: asyncio.StreamWriter
+) -> None:
+    """Complete a pending config request from a ``config_response``.
+
+    The values are never logged. A response from a client that was not asked,
+    for an unknown id, or arriving after another client answered is ignored.
+    """
+    entry = app._config_requests.get(str(msg.get("request_id", "")))
+    if entry is None:
+        return
+    future, targets = entry
+    if writer not in targets or future.done():
+        return
+    values = msg.get("values")
+    missing = msg.get("missing_required")
+    future.set_result(
+        {
+            "confirmed": msg.get("confirmed") is True,
+            "values": values if isinstance(values, dict) else {},
+            "missing_required": missing if isinstance(missing, list) else [],
+        }
+    )
+    logger.info("JARVIS: config form answered by a GUI client")
+
+
+def _cancelled_form() -> dict:
+    return {"confirmed": False, "values": {}, "missing_required": []}
+
+
+def drop_config_waiter(app: Any, writer: asyncio.StreamWriter) -> None:
+    """A client left: stop waiting on it, and cancel any request it was the
+    last remaining target of."""
+    for future, targets in list(app._config_requests.values()):
+        targets.discard(writer)
+        if not targets and not future.done():
+            future.set_result(_cancelled_form())
+
+
+def cancel_all_config_requests(app: Any) -> None:
+    for future, _ in list(app._config_requests.values()):
+        if not future.done():
+            future.set_result(_cancelled_form())
 
 
 # ---------------------------------------------------------------------------

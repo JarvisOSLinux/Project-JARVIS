@@ -233,6 +233,8 @@ def _server_app(tmp_path, *, modal=None):
             _sanitize_config_key=lambda k: k,
         ),
         config_modal_callback=modal,
+        _gui_capabilities={},
+        _config_requests={},
         _act_on_root_response=AsyncMock(),
     )
 
