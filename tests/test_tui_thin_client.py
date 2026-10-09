@@ -426,3 +426,23 @@ async def test_attaching_closes_the_offline_store(isolated, monkeypatch):
         await until(lambda: app.connected)
         await until(lambda: closed)
     await daemon.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_repeated_session_error_is_shown_once(isolated):
+    daemon = FakeDaemon(isolated / "jarvis.sock")
+    await daemon.start()
+    app = JarvisTUI()
+    async with app.run_test():
+        await until(lambda: app.connected)
+        for _ in range(3):
+            await daemon.push(
+                {
+                    "type": "session_error",
+                    "message": "Sessions unavailable (memory disabled)",
+                }
+            )
+        await until(lambda: "Sessions unavailable" in log_text(app))
+        await asyncio.sleep(0.2)
+        assert log_text(app).count("Sessions unavailable") == 1
+    await daemon.stop()

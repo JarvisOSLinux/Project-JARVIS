@@ -184,6 +184,7 @@ class JarvisTUI(App):
         self.pending_confirmations: List[Dict[str, Any]] = []
         # Whether the transcript holds conversation (not just notices).
         self.has_conversation = False
+        self.last_session_error: Optional[str] = None
         # request id -> the ConfirmModal showing it, so a request resolved
         # elsewhere can close its modal.
         self.confirm_screens: Dict[str, Any] = {}

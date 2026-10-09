@@ -121,6 +121,7 @@ async def _status(app: Any, msg: Dict[str, Any]) -> None:
 
 
 async def _session_list(app: Any, msg: Dict[str, Any]) -> None:
+    app.last_session_error = None
     app.sessions = list(msg.get("sessions") or [])
     await app._refresh_sidebar()
 
@@ -137,7 +138,13 @@ async def _history(app: Any, msg: Dict[str, Any]) -> None:
 
 
 async def _session_error(app: Any, msg: Dict[str, Any]) -> None:
-    app._append_log(f"[red]{tui_output.escape(str(msg.get('message', '')))}[/red]")
+    """Show a session error once: with memory disabled, every list/history
+    request fails the same way and would otherwise repeat on each turn."""
+    text = str(msg.get("message", ""))
+    if text == app.last_session_error:
+        return
+    app.last_session_error = text
+    app._append_log(f"[red]{tui_output.escape(text)}[/red]")
 
 
 async def _activity(app: Any, msg: Dict[str, Any]) -> None:
