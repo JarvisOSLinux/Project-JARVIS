@@ -27,6 +27,7 @@ async def request_snapshot(app: Any) -> None:
     if not app.has_conversation:
         requests.append({"type": "get_history"})
     requests.append({"type": "list_confirmations"})
+    requests.append({"type": "list_confirmation_history"})
     for msg in requests:
         await app.client.send(msg)
 
@@ -58,6 +59,7 @@ async def load_offline_view(app: Any) -> None:
 
     app.sessions = await app.offline.sessions()
     app.pending_confirmations = offline.pending_confirmations()
+    app.confirmation_history = list(reversed(offline.resolved_history()))
     await app._refresh_sidebar()
     queued = offline.queued_decisions()
     if app.pending_confirmations:
@@ -166,6 +168,11 @@ async def _confirmation_list(app: Any, msg: Dict[str, Any]) -> None:
     app._update_status()
 
 
+async def _confirmation_history(app: Any, msg: Dict[str, Any]) -> None:
+    app.confirmation_history = list(msg.get("history") or [])
+    app.refresh_confirmations()
+
+
 async def _confirmation_request(app: Any, msg: Dict[str, Any]) -> None:
     request_id = str(msg.get("id", ""))
     if not request_id or request_id in app.confirm_screens:
@@ -228,6 +235,7 @@ _HANDLERS = {
     "activity": _activity,
     "DAEMON_SHUTDOWN": _shutdown,
     "confirmation_list": _confirmation_list,
+    "confirmation_history": _confirmation_history,
     "confirmation_request": _confirmation_request,
     "config_request": _config_request,
 }

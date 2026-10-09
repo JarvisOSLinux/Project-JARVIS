@@ -89,6 +89,11 @@ async def handle_socket_connection(
             pass
 
 
+def confirmation_history_message(app: Any) -> dict[str, Any]:
+    """Recently resolved confirmations, newest first (#235)."""
+    return {"type": "confirmation_history", "history": app.confirmation.list_history()}
+
+
 def enrich_pending_with_goals(app: Any) -> list[dict[str, Any]]:
     """list_pending() plus each item's owning goal description (#192).
 
@@ -125,6 +130,10 @@ async def _handle_confirmation_query(
                 "confirmations": enrich_pending_with_goals(app),
             },
         )
+        return True
+
+    if msg_type == "list_confirmation_history":
+        await _gui_write(writer, confirmation_history_message(app))
         return True
 
     ack = apply_confirmation_decision(app, msg)

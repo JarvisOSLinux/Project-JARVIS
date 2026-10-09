@@ -18,6 +18,7 @@ with it, DANGEROUS.
 
 import asyncio
 import logging
+from types import SimpleNamespace
 
 import pytest
 
@@ -84,6 +85,7 @@ class _App:
     def __init__(self, adapter, confirmation=None):
         self.dispatch = adapter
         self.confirmation = confirmation
+        self.sessions = SimpleNamespace(current_id=None)
 
 
 def _fresh_cache(monkeypatch):

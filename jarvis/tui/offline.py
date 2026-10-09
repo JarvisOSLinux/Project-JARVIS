@@ -13,7 +13,9 @@ from typing import Any, Dict, List, Optional
 
 from ..core.confirmation_manager import (
     decision_queue_path,
+    history_path,
     load_decision_queue,
+    load_history,
     load_pending_summaries,
     queue_decision,
     store_path,
@@ -77,6 +79,12 @@ class OfflineStore:
 def pending_confirmations() -> List[Dict[str, Any]]:
     """Pending confirmations as the daemon last persisted them."""
     return load_pending_summaries(store_path())
+
+
+def resolved_history() -> List[Dict[str, Any]]:
+    """Recently resolved confirmations as the daemon last persisted them,
+    oldest first."""
+    return load_history(history_path())
 
 
 def queued_decisions() -> List[Dict[str, Any]]:

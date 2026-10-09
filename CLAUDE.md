@@ -264,6 +264,7 @@ make check                  # Format + lint + typecheck + tests
 | `jarvis/tui/daemon_client.py` | Reconnecting GUI-socket client + `start_daemon()` (#236) |
 | `jarvis/tui/messages.py` | Daemon protocol messages → TUI state and widgets |
 | `jarvis/tui/offline.py` | Sessions/confirmations from disk while no daemon runs |
+| `jarvis/tui/confirmations_panel.py` | Confirmations panel (#235): review pending + resolved, keyboard approve/deny/per-task |
 | `jarvis/tui/confirm_modal.py` | Tool confirmation modal |
 | `jarvis/tui/config_modal.py` | Tabbed config/provider settings modal (F2 / /settings) |
 | `jarvis/tui/provider_modal.py` | Provider add/edit modal |
@@ -296,6 +297,8 @@ make check                  # Format + lint + typecheck + tests
 ---
 
 ## Changelog — corrected claims
+
+*2026-10-09 (later):* the confirmations panel (#235). Resolved confirmations used to vanish from `_pending` the moment they resolved, so "what did I approve earlier?" had no answer. `ConfirmationManager` now keeps the last 50 resolved (`confirmation_history.json` beside the store, atomic write, a write failure never blocks resolving) with their outcome (`approved`/`denied`/`partial n/m`); pending entries record the `chat_session_id` they were requested in, which the panel's `This session` tab filters on (the existing `session_id` is the goal, not the chat session). Entries from before this change have no chat session and show under `All` only. The TUI panel works attached (decisions go over the socket) and offline (read from disk; a decision goes to the offline queue the daemon replays at start, labelled `[queued: …]`).
 
 *2026-10-09:* the TUI is a client of the daemon (#236). It used to build its own in-process `Jarvis(tui_mode=True)` engine, so it could not attach to a running daemon or run without one. It now connects to the GUI socket (`tui/daemon_client.py`), renders protocol messages (`tui/messages.py`), and with no daemon shows sessions and pending confirmations from disk (`tui/offline.py`) and offers `/start`. The socket gained `get_status`, `get_history`, `activity`, and a `config_request`/`config_response` relay (secrets still typed into a form, never the conversation, #242); `ConfirmationManager.set_tui_callback` is gone, replaced by routing to clients that declare the `confirmations` capability. Not carried over: live provider-pool status in `/providers` (the pool lives in the daemon and the socket does not expose it), and provider or non-confirmation settings changes take effect at the daemon's next start.
 

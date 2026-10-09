@@ -124,9 +124,12 @@ class TestOnConfirmationResponseBroadcast:
             )
             await asyncio.sleep(0)  # let the scheduled create_task actually run
 
-        broadcast.assert_awaited_once_with(
+        assert broadcast.await_count == 2
+        broadcast.assert_any_await(
             app, {"type": "confirmation_list", "confirmations": []}
         )
+        sent = [c.args[1]["type"] for c in broadcast.await_args_list]
+        assert "confirmation_history" in sent
 
     @pytest.mark.asyncio
     async def test_no_broadcast_when_no_gui_clients(self):
@@ -216,3 +219,28 @@ class TestBroadcastConfirmationNotice:
 
         payload = broadcast.await_args_list[1].args[1]
         assert payload["confirmations"][0]["goal_description"] is None
+
+
+@pytest.mark.unit
+class TestConfirmationHistoryQuery:
+    @pytest.mark.asyncio
+    async def test_list_confirmation_history_replies_to_the_requester_only(self):
+        from jarvis.runtime import io as runtime_io
+
+        app = _make_app(confirmations=[], gui_clients={Mock()})
+        app.confirmation.list_history.return_value = [
+            {"id": "r1", "outcome": "approved"}
+        ]
+        writer = Mock()
+        with patch.object(runtime_io, "_gui_write", new=AsyncMock()) as gw:
+            handled = await runtime_io._handle_confirmation_query(
+                app, {"type": "list_confirmation_history"}, writer
+            )
+        assert handled is True
+        gw.assert_awaited_once_with(
+            writer,
+            {
+                "type": "confirmation_history",
+                "history": [{"id": "r1", "outcome": "approved"}],
+            },
+        )

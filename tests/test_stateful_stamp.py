@@ -9,6 +9,7 @@ server to the state-losing one-shot lifecycle (the navigate → about:blank bug)
 
 import asyncio
 import logging
+from types import SimpleNamespace
 
 from jarvis.runtime import dispatch_flow
 
@@ -51,6 +52,7 @@ class _App:
     def __init__(self, adapter, confirmation):
         self.dispatch = adapter
         self.confirmation = confirmation
+        self.sessions = SimpleNamespace(current_id=None)
 
 
 def _run_send(app, tasks):

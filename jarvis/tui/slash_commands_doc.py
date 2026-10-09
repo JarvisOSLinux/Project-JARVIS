@@ -72,6 +72,12 @@ EXTRA_KEYBOARD_HELP: tuple[tuple[str, str], ...] = (
     ("Ctrl+W", "Delete the word left of the cursor (Ctrl+Backspace where supported)."),
     ("Ctrl+Delete", "Delete the word right of the cursor."),
     ("Click / arrows", "Select a session in the sidebar."),
+    ("Tab", "Move focus to the confirmations panel when it is showing."),
+    (
+        "Confirmations panel",
+        "↑↓ or W/S move, ←→ or A/D switch All / This session, Space toggles a task, "
+        "Y or Enter applies, N denies the request, Esc returns to the input.",
+    ),
     ("Esc", "Close the suggestion list, or the help modal when it is focused."),
 )
 

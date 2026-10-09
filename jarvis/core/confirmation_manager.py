@@ -168,6 +168,10 @@ class PendingConfirmation:
     # Human-readable "tool: command" lines shown in every channel (#186).
     tool_lines: List[str] = field(default_factory=list)
     created_at: float = field(default_factory=time.time)
+    # The chat session that was current when this was requested, so a client
+    # can show only "this session"'s entries. Distinct from ``session_id``,
+    # which is the owning goal.
+    chat_session_id: Optional[str] = None
 
 
 # ----------------------------------------------------------------------
@@ -176,11 +180,19 @@ class PendingConfirmation:
 
 STORE_FILENAME = "confirmations.json"
 DECISION_QUEUE_FILENAME = "confirmation_decisions.json"
+HISTORY_FILENAME = "confirmation_history.json"
+# How many resolved confirmations are kept for "what did I approve earlier?".
+HISTORY_LIMIT = 50
 
 
 def store_path() -> Path:
     """Where the daemon mirrors its pending list."""
     return Path(Config.JARVIS_DATA_DIR) / STORE_FILENAME
+
+
+def history_path() -> Path:
+    """Where the daemon keeps its recently resolved confirmations."""
+    return Path(Config.JARVIS_DATA_DIR) / HISTORY_FILENAME
 
 
 def decision_queue_path() -> Path:
@@ -242,7 +254,49 @@ def _summarize(p: PendingConfirmation) -> Dict[str, Any]:
         "tool_lines": p.tool_lines,
         "created_at": p.created_at,
         "session_id": p.session_id,
+        "chat_session_id": p.chat_session_id,
     }
+
+
+def _history_entry(
+    p: PendingConfirmation, approved: int, total: int, resolved_at: float
+) -> Dict[str, Any]:
+    """One resolved confirmation as the review surfaces show it."""
+    if approved <= 0:
+        outcome = "denied"
+    elif approved >= total:
+        outcome = "approved"
+    else:
+        outcome = "partial"
+    return {
+        "id": p.request_id,
+        "tool_lines": p.tool_lines,
+        "created_at": p.created_at,
+        "resolved_at": resolved_at,
+        "outcome": outcome,
+        "approved": approved,
+        "total": total,
+        "chat_session_id": p.chat_session_id,
+    }
+
+
+def load_history(path: Path) -> List[Dict[str, Any]]:
+    """The resolved-confirmation history straight off disk, oldest first.
+
+    Like ``load_pending_summaries``, usable with no manager (and no daemon).
+    A missing or unreadable file is an empty history, not an error: history is
+    a convenience and must never block anything.
+    """
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return []
+    except Exception as e:
+        logger.warning("Could not read confirmation history from %s: %s", path, e)
+        return []
+    if not isinstance(data, list):
+        return []
+    return [e for e in data if isinstance(e, dict) and e.get("id")][-HISTORY_LIMIT:]
 
 
 def load_pending_summaries(path: Path) -> List[Dict[str, Any]]:
@@ -342,6 +396,8 @@ class ConfirmationManager:
         self._inject_confirmation: Optional[Callable[[Dict[str, Any]], None]] = None
         # Timeout tasks keyed by request id (so we can cancel on response).
         self._timeout_tasks: Dict[str, asyncio.Task] = {}
+        # Recently resolved confirmations, oldest first, capped at HISTORY_LIMIT.
+        self._history: List[Dict[str, Any]] = []
         # True when a connected client prompts for confirmations itself (the TUI).
         self._has_interactive_clients: Optional[Callable[[], bool]] = None
         self._restore()
@@ -364,6 +420,9 @@ class ConfirmationManager:
         starts empty rather than blocking startup. Nothing is lost that could
         run unapproved — the gated tasks were never dispatched.
         """
+        if self._store_path is not None:
+            self._history = load_history(self._history_file())
+
         if self._store_path is None or not self._store_path.exists():
             return
 
@@ -412,6 +471,27 @@ class ConfirmationManager:
                 self._store_path,
                 e,
             )
+
+    def _history_file(self) -> Path:
+        return self._store_path.with_name(HISTORY_FILENAME)
+
+    def _record_history(self, entry: Dict[str, Any]) -> None:
+        """Append to the history ring and mirror it to its sibling file.
+
+        A write failure is logged and dropped: history is a convenience, and
+        resolving a confirmation must not depend on it.
+        """
+        self._history = (self._history + [entry])[-HISTORY_LIMIT:]
+        if self._store_path is None:
+            return
+        try:
+            _atomic_write_json(self._history_file(), self._history)
+        except Exception as e:
+            logger.warning("Could not persist confirmation history: %s", e)
+
+    def list_history(self) -> List[Dict[str, Any]]:
+        """Recently resolved confirmations, newest first."""
+        return list(reversed(self._history))
 
     # ------------------------------------------------------------------
     # Setup
@@ -490,6 +570,7 @@ class ConfirmationManager:
         timeout: float = DEFAULT_TIMEOUT,
         session_id: Optional[str] = None,
         fingerprint: Optional[str] = None,
+        chat_session_id: Optional[str] = None,
     ) -> None:
         """Send confirmation notification and return immediately.
 
@@ -507,6 +588,8 @@ class ConfirmationManager:
             notification_silent: Suppress desktop notification.
             timeout: Seconds before auto-deny. 0 (the default) means never
                 auto-deny — the confirmation stays pending until answered (#185).
+            chat_session_id: The chat session current at request time, so a
+                client can filter to "this session".
             session_id: Owning goal id, stored so the resume path can rescope.
             fingerprint: Repeat-guard batch fingerprint, stored so the resume
                 path can re-link approved PIDs and let a later EXIT reset the
@@ -525,6 +608,7 @@ class ConfirmationManager:
             denied_tools=list(denied_tools),
             dispatch_context=dispatch_context,
             session_id=session_id,
+            chat_session_id=chat_session_id,
             fingerprint=fingerprint,
             tool_names=tool_names,
             tool_lines=tool_lines,
@@ -625,6 +709,14 @@ class ConfirmationManager:
                 len(approved_set),
                 len(pending.confirm_details),
             )
+            self._record_history(
+                _history_entry(
+                    pending,
+                    len(approved_set),
+                    len(pending.confirm_details),
+                    time.time(),
+                )
+            )
             return pending
 
         approved = response.get("approved", False)
@@ -645,6 +737,10 @@ class ConfirmationManager:
                         pending.denied_tools.append(tool_name)
             logger.info(f"Confirmation denied: id={req_id}")
 
+        total = len(pending.confirm_details) or len(pending.tool_lines) or 1
+        self._record_history(
+            _history_entry(pending, total if approved else 0, total, time.time())
+        )
         return pending
 
     def has_pending(self, request_id: str) -> bool:
