@@ -9,6 +9,7 @@ from typing import Any, Dict, List
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, ScrollableContainer, Vertical
+from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, Static
 
@@ -75,7 +76,9 @@ class _FieldRow(Vertical):
                 password=self._sensitive,
                 id=f"input-{self._key}",
             )
-            inp.add_class(self._css_class())
+            css_class = self._css_class()
+            if css_class:
+                inp.add_class(css_class)
             yield inp
             if self._sensitive:
                 yield Button("show", id=f"toggle-{self._key}", variant="default")
@@ -99,7 +102,7 @@ class _FieldRow(Vertical):
         inp.remove_class("required-empty", "required-filled", "saved")
         if self._required:
             inp.add_class("required-filled" if val.strip() else "required-empty")
-        self.app.post_message(_FieldChanged(self._key, val))
+        self.post_message(_FieldChanged(self._key, val))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id != f"toggle-{self._key}":
@@ -114,17 +117,9 @@ class _FieldRow(Vertical):
         return self.query_one(f"#input-{self._key}", Input).value
 
 
-class _FieldChanged(asyncio.Event.__class__):
-    """Internal message posted when a field value changes."""
-
-    # Using Textual's message system instead
-    pass
-
-
-from textual.message import Message
-
-
 class _FieldChanged(Message):
+    """Posted by a field row; bubbles up to the modal."""
+
     def __init__(self, key: str, value: str) -> None:
         super().__init__()
         self.key = key
