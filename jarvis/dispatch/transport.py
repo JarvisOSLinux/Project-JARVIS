@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from logging import Logger
 from typing import Any, Callable, Dict, List, Optional
@@ -73,6 +74,25 @@ def _make_logging_callback(adapter: Any, logger: Logger):
     return _on_log_message
 
 
+# The SDK's default environment is HOME, LOGNAME, PATH, SHELL and USER only.
+# Servers dispatch runs through dmcp also need the desktop session: a sign-in
+# wrapper opens its link in the browser (DISPLAY / WAYLAND_DISPLAY) and keeps
+# tokens in the keyring over the session bus. Without these, no browser opened
+# and secret-tool failed ("Cannot autolaunch D-Bus without X11 $DISPLAY"), so
+# tokens fell back to a file.
+_DESKTOP_SESSION_VARS = (
+    "DISPLAY",
+    "WAYLAND_DISPLAY",
+    "XAUTHORITY",
+    "XDG_RUNTIME_DIR",
+    "DBUS_SESSION_BUS_ADDRESS",
+)
+
+
+def _desktop_session_env() -> Dict[str, str]:
+    return {k: os.environ[k] for k in _DESKTOP_SESSION_VARS if os.environ.get(k)}
+
+
 async def connect(adapter: Any, logger: Logger) -> None:
     """Connect DispatchAdapter to dispatch serve over stdio MCP."""
     try:
@@ -87,7 +107,11 @@ async def connect(adapter: Any, logger: Logger) -> None:
             # replacing it: a bare env= drops PATH, so the spawned process
             # resolves binaries against os.defpath only and can't find
             # ~/.local/bin or Homebrew installs (#170).
-            env={**get_default_environment(), "RUST_LOG": "dispatch=warn"},
+            env={
+                **get_default_environment(),
+                **_desktop_session_env(),
+                "RUST_LOG": "dispatch=warn",
+            },
         )
         client = stdio_client(params)
         read, write = await client.__aenter__()
