@@ -129,19 +129,8 @@ class Jarvis:
 
         loop = asyncio.get_running_loop()
         install_signal_handlers(loop, partial(request_stop, self))
-        await connect_dispatch_nonfatal(self.dispatch, logger)
-        await bootstrap_tool_index_nonfatal(self.dispatch, self._embeddings, logger)
 
-        runtime_tasks = await start_runtime_services(self, logger)
-        socket_task = runtime_tasks["input_socket"]
-        output_task = runtime_tasks["output_socket"]
-        gui_task = runtime_tasks["gui_socket"]
-        update_sweep_task = runtime_tasks["update_sweep"]
-        voice_thread = runtime_tasks["voice_thread"]
-        openai_server = runtime_tasks["openai_server"]
-
-        logger.info("JARVIS: Event loop started")
-
+        runtime_tasks: dict[str, Any] = {}
         # Each merged event (user input, dispatch signal, confirmation
         # response) is dispatched as its own task rather than awaited inline,
         # so a wake-word-triggered second goal gets a real turn as soon as
@@ -152,7 +141,15 @@ class Jarvis:
         # tool execution, not the LLM inference moments themselves.
         event_tasks: set[asyncio.Task] = set()
 
+        # Startup is inside the try: a stop or cancel while it runs (quitting
+        # the TUI during boot) must still reach shutdown(), which closes the
+        # dispatch connection opened here.
         try:
+            await connect_dispatch_nonfatal(self.dispatch, logger)
+            await bootstrap_tool_index_nonfatal(self.dispatch, self._embeddings, logger)
+            runtime_tasks = await start_runtime_services(self, logger)
+            logger.info("JARVIS: Event loop started")
+
             async for event in self.events:
                 task = asyncio.create_task(self._handle_event(event))
                 runtime_events.track_event_task(event_tasks, task, logger)
@@ -163,12 +160,12 @@ class Jarvis:
             # cancelling it clears self._gui_clients in its own cleanup, so
             # anything broadcast after that point reaches nobody (#146).
             await broadcast_shutdown_notice(self, logger)
-            cancel_task_if_running(socket_task)
-            cancel_task_if_running(output_task)
-            cancel_task_if_running(gui_task)
-            cancel_task_if_running(update_sweep_task)
-            join_voice_thread_if_running(voice_thread)
-            stop_openai_server_if_running(openai_server)
+            cancel_task_if_running(runtime_tasks.get("input_socket"))
+            cancel_task_if_running(runtime_tasks.get("output_socket"))
+            cancel_task_if_running(runtime_tasks.get("gui_socket"))
+            cancel_task_if_running(runtime_tasks.get("update_sweep"))
+            join_voice_thread_if_running(runtime_tasks.get("voice_thread"))
+            stop_openai_server_if_running(runtime_tasks.get("openai_server"))
             if event_tasks:
                 logger.info(
                     f"JARVIS: Waiting for {len(event_tasks)} in-flight goal(s) to finish..."

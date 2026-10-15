@@ -89,18 +89,29 @@ async def connect(adapter: Any, logger: Logger) -> None:
             # ~/.local/bin or Homebrew installs (#170).
             env={**get_default_environment(), "RUST_LOG": "dispatch=warn"},
         )
-        adapter._client = stdio_client(params)
-        read, write = await adapter._client.__aenter__()
-        # Register the logging handler so dispatch's pushed signals
-        # (notifications/message, logger="dispatch.signal") wake ROOT the moment
-        # a task completes, rather than waiting for the next poll (#26).
-        adapter.session = ClientSession(
-            read,
-            write,
-            logging_callback=_make_logging_callback(adapter, logger),
-        )
-        await adapter.session.__aenter__()
-        await adapter.session.initialize()
+        client = stdio_client(params)
+        read, write = await client.__aenter__()
+        adapter._client = client
+        try:
+            # Register the logging handler so dispatch's pushed signals
+            # (notifications/message, logger="dispatch.signal") wake ROOT the
+            # moment a task completes, rather than waiting for the next poll (#26).
+            session = ClientSession(
+                read,
+                write,
+                logging_callback=_make_logging_callback(adapter, logger),
+            )
+            await session.__aenter__()
+            adapter.session = session
+            await session.initialize()
+        except BaseException:
+            # Quitting while JARVIS starts cancels this mid-handshake. The
+            # transport must be closed here, in the task that opened it: left
+            # open, its stdout reader waits on `dispatch serve` forever and
+            # asyncio.run never returns, so the terminal hangs after the TUI
+            # exits.
+            await disconnect(adapter, logger)
+            raise
         adapter._connected = True
         logger.info("Dispatch: Connected successfully")
     except FileNotFoundError:
@@ -122,16 +133,23 @@ async def connect(adapter: Any, logger: Logger) -> None:
 
 
 async def disconnect(adapter: Any, logger: Logger) -> None:
-    """Disconnect DispatchAdapter session/client safely."""
-    try:
-        if adapter.session:
-            await adapter.session.__aexit__(None, None, None)
-        if adapter._client:
-            await adapter._client.__aexit__(None, None, None)
-        adapter._connected = False
+    """Disconnect DispatchAdapter session/client safely; a second call is a no-op.
+
+    The transport is closed even when closing the session fails: it is what
+    stops `dispatch serve` and releases the stdout reader.
+    """
+    session, client = adapter.session, adapter._client
+    adapter.session = adapter._client = None
+    adapter._connected = False
+    for name, ctx in (("session", session), ("transport", client)):
+        if ctx is None:
+            continue
+        try:
+            await ctx.__aexit__(None, None, None)
+        except Exception as e:
+            logger.error(f"Dispatch: Disconnect error ({name}): {e}")
+    if client is not None:
         logger.info("Dispatch: Disconnected")
-    except Exception as e:
-        logger.error(f"Dispatch: Disconnect error: {e}")
 
 
 def require_connection(adapter: Any, logger: Logger, op_name: str) -> bool:
