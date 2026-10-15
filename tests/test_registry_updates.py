@@ -206,12 +206,8 @@ class TestServerDocsMarker:
                 raise rows
             return rows
 
-        async def fake_manifest(server_id):
-            return {}
-
         app.dispatch.list_server_tools = fake_tools
         app.dispatch.check_updates = fake_check
-        app.dispatch.get_server_manifest = fake_manifest
         return app
 
     def _run_docs(self, app, monkeypatch):
