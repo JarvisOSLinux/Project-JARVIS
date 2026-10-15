@@ -8,6 +8,7 @@ from typing import Any, Set
 
 from ..core.logger import get_logger
 from ..dispatch.event_merger import Event, EventType
+from .daemon_thread import run_in_daemon_thread
 from .root_handlers import (
     on_confirmation_response,
     on_dispatch_signal,
@@ -55,9 +56,5 @@ def track_event_task(
 
 
 async def await_user_input() -> str:
-    """Read user input from stdin without blocking the event loop."""
-    return await asyncio.get_event_loop().run_in_executor(
-        None,
-        input,
-        "",
-    )
+    """Read user input from stdin without blocking the event loop or exit."""
+    return await run_in_daemon_thread(input, "")

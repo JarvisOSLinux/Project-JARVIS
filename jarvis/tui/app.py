@@ -346,6 +346,32 @@ class JarvisTUI(App):
         if len(self.screen_stack) <= 1:
             self._open_config("settings")
 
+    async def action_quit(self) -> None:
+        """Quit, asking first when quitting would stop work that is running."""
+        from ..runtime.lifecycle import force_stop, pending_work
+        from .quit_modal import QuitConfirmModal
+
+        if isinstance(self.screen, QuitConfirmModal):
+            # Asked already: a second Ctrl+Q that reaches the app confirms.
+            self.screen.dismiss(True)
+            return
+
+        jarvis = self.jarvis
+        pending = await pending_work(jarvis) if jarvis is not None else []
+        if not pending:
+            self.exit()
+            return
+
+        async def quit_anyway() -> None:
+            await force_stop(jarvis, logger)
+            self.exit()
+
+        def decided(confirmed: Optional[bool]) -> None:
+            if confirmed:
+                self.call_later(quit_anyway)
+
+        self.push_screen(QuitConfirmModal(pending), decided)
+
     def _open_config(self, tab: str = "settings") -> None:
         from .local_input import _apply_in_memory
 

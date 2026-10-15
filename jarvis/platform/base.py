@@ -201,12 +201,17 @@ class BasePlatform(ABC):
         self,
         loop: asyncio.AbstractEventLoop,
         stop_callback: Callable[[], None],
+        interrupt_callback: Optional[Callable[[], None]] = None,
     ) -> None:
-        """Register graceful-stop handlers for SIGTERM/SIGINT."""
+        """Register SIGTERM -> stop_callback, SIGINT -> interrupt_callback (else stop)."""
         import signal
 
-        for sig in (signal.SIGTERM, signal.SIGINT):
+        handlers = (
+            (signal.SIGTERM, stop_callback),
+            (signal.SIGINT, interrupt_callback or stop_callback),
+        )
+        for sig, callback in handlers:
             try:
-                loop.add_signal_handler(sig, stop_callback)
+                loop.add_signal_handler(sig, callback)
             except (ValueError, OSError, NotImplementedError):
                 pass

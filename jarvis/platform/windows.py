@@ -247,12 +247,17 @@ class WindowsPlatform(BasePlatform):
         self,
         loop: asyncio.AbstractEventLoop,
         stop_callback: Callable[[], None],
+        interrupt_callback: Optional[Callable[[], None]] = None,
     ) -> None:
         import signal
 
-        for sig in (signal.SIGTERM, signal.SIGINT):
+        handlers = (
+            (signal.SIGTERM, stop_callback),
+            (signal.SIGINT, interrupt_callback or stop_callback),
+        )
+        for sig, callback in handlers:
             try:
-                signal.signal(sig, lambda s, f: stop_callback())
+                signal.signal(sig, lambda s, f, cb=callback: cb())
             except (ValueError, OSError):
                 pass
 
