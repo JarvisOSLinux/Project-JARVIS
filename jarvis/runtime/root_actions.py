@@ -7,6 +7,7 @@ from logging import Logger
 from typing import Any
 
 from ..config import Config
+from ..core.setup_queue import missing_required
 from ..core.skill_store import delete_skill, save_skill
 from .goal_updates import apply_goal_updates
 from .llm_bridge import ask_llm
@@ -213,8 +214,6 @@ async def _handle_install_server(
     depth: int,
     max_chain_depth: int,
 ) -> None:
-    from ..core.params_store import ParamsStore
-
     server_id = parsed["server_id"]
     emit_activity(app, f"Installing {server_id}…", kind="dispatch")
 
@@ -232,76 +231,172 @@ async def _handle_install_server(
         await app._act_on_root_response(response, depth + 1)
         return
 
-    # Step 2: check for configurable properties
+    # Step 2: a required setting nobody has filled in becomes a pending setup
+    # the user completes whenever and wherever suits them (#254). Waiting here
+    # on a form held the whole goal, crashed the TUI once, and gave up with no
+    # display. With nothing required missing, setup runs now on the defaults:
+    # optional settings are no reason to stop.
     manifest = await app.dispatch.get_server_manifest(server_id)
-    props = manifest.get("configurableProperties", [])
+    missing = missing_required(
+        manifest.get("configurableProperties") or [], manifest.get("config") or {}
+    )
+    if missing:
+        await _queue_setup(app, logger, server_id, manifest, missing, depth)
+        return
+    await finish_install(app, logger, server_id, manifest, depth)
 
-    if props:
-        store = ParamsStore(server_id)
-        emit_activity(app, "Waiting for configuration…", kind="dispatch")
-        # The same collector configure_server uses. Outside the TUI this step
-        # used to be skipped, installing the server unconfigured so the model
-        # had to ask for its key later -- in the chat (#242).
-        status, values, missing = await _collect_config_securely(
-            app, logger, server_id, manifest, props, store.get()
-        )
 
-        if status == "cancelled":
-            logger.info(
-                f"JARVIS: install_server '{server_id}' cancelled by user"
-                + (f"; missing: {missing}" if missing else "")
+async def finish_install(
+    app: Any,
+    logger: Logger,
+    server_id: str,
+    manifest: dict,
+    depth: int,
+    *,
+    run_setup: bool = True,
+    preface: str = "",
+) -> None:
+    """Run the server's setup script, then hand the model its docs (INSTALL_RESULT)."""
+    if run_setup:
+        # The script receives MCP_CONFIG_* env vars from manifest.config.
+        emit_activity(app, f"Running setup for {server_id}…", kind="dispatch")
+        setup_result = await app.dispatch.run_server_setup(server_id)
+        if "error" in setup_result:
+            logger.warning(
+                f"JARVIS: setup '{server_id}' failed: {setup_result['error']}"
             )
             context = build_root_context(app, logger)
-            cancelled_msg = f"INSTALL_CANCELLED: {server_id}"
-            if missing:
-                cancelled_msg += f" — user did not provide: {', '.join(missing)}"
-            context += f"\n{cancelled_msg}"
+            context += preface
+            context += f"\nINSTALL_ERROR: setup failed — {setup_result['error']}"
             response = await ask_llm(
-                app, logger, context, tag="root-install-cancelled", mode="root"
+                app, logger, context, tag="root-setup-error", mode="root"
             )
             await app._act_on_root_response(response, depth + 1)
             return
-
-        if status == "collected" and values:
-            await app.dispatch.set_server_config(server_id, values)
-            store.set_many(_non_sensitive(values, props))
-
-    # Step 6: run setup script (receives MCP_CONFIG_* env vars from manifest.config)
-    emit_activity(app, f"Running setup for {server_id}…", kind="dispatch")
-    setup_result = await app.dispatch.run_server_setup(server_id)
-    if "error" in setup_result:
-        logger.warning(f"JARVIS: setup '{server_id}' failed: {setup_result['error']}")
-        context = build_root_context(app, logger)
-        context += f"\nINSTALL_ERROR: setup failed — {setup_result['error']}"
-        response = await ask_llm(
-            app, logger, context, tag="root-setup-error", mode="root"
-        )
-        await app._act_on_root_response(response, depth + 1)
-        return
 
     logger.info(f"JARVIS: install_server '{server_id}' complete")
     await app.dispatch.auto_index_server(
         server_id=server_id, embeddings=get_embeddings(app)
     )
 
-    # Step 7: fetch docs so LLM can dispatch immediately
+    # Fetch docs so the LLM can dispatch immediately.
     tools_result = await app.dispatch.list_server_tools(server_id)
     tools = tools_result.get("tools", []) if isinstance(tools_result, dict) else []
     tools_error = tools_result.get("error") if isinstance(tools_result, dict) else None
 
-    install_configurable_props = manifest.get("configurableProperties") or None
     context = build_root_context(app, logger)
+    context += preface
     context += f"\nINSTALL_RESULT: {server_id} installed successfully."
     context += "\n" + format_server_docs(
         server_id,
         tools,
         error=tools_error,
-        configurable_props=install_configurable_props,
+        configurable_props=manifest.get("configurableProperties") or None,
     )
     response = await ask_llm(
         app, logger, context, tag="root-install-result", mode="root"
     )
     await app._act_on_root_response(response, depth + 1)
+
+
+async def _queue_setup(
+    app: Any,
+    logger: Logger,
+    server_id: str,
+    manifest: dict,
+    missing: list,
+    depth: int,
+) -> None:
+    """Record a pending setup, offer the form where there is one, tell the model."""
+    active = app.goals.get_active_goals()
+    pending = app.setups.add(
+        server_id, manifest, missing, active[-1] if active else None
+    )
+    logger.info(
+        f"JARVIS: {server_id} installed; setup {pending.setup_id} waits for {missing}"
+    )
+    emit_activity(
+        app, f"{server_id} needs setup: {', '.join(missing)}", kind="dispatch"
+    )
+
+    form_open = False
+    offer = getattr(app, "setup_ready_callback", None)
+    if offer is not None:
+        try:
+            await offer(pending)
+            form_open = True
+        except Exception as e:
+            logger.warning(
+                f"JARVIS: could not open the setup form for {server_id}: {e}"
+            )
+
+    where = (
+        "A setup form has opened in the TUI; it can also be filled in from any "
+        "terminal with"
+        if form_open
+        else "The user fills it in outside the chat: in the TUI, or from any terminal with"
+    )
+    context = build_root_context(app, logger)
+    context += (
+        f"\nSETUP_PENDING: {server_id} is installed but cannot run until the user sets "
+        f"{', '.join(missing)}. {where} `jarvis setups fill {pending.setup_id}`. Tell the "
+        "user that, briefly. Never ask for these values in chat. You will be told when "
+        "the setup is done, and can then carry on with what the user asked."
+    )
+    response = await ask_llm(
+        app, logger, context, tag="root-install-setup-pending", mode="root"
+    )
+    await app._act_on_root_response(response, depth + 1)
+
+
+async def on_setup_result(app: Any, logger: Logger, data: dict) -> None:
+    """A pending setup was filled in or cancelled (#254): resume, or say so."""
+    ref = str(data.get("id") or "")
+    pending = app.setups.pop(ref)
+    if pending is None:
+        logger.warning(f"JARVIS: Ignoring a result for unknown setup {ref!r}")
+        return
+    server_id = pending.server_id
+    origin = (
+        f"\nThe user originally asked: {pending.goal_description}"
+        if pending.goal_description
+        else ""
+    )
+
+    if data.get("type") == "cancel_setup":
+        logger.info(f"JARVIS: setup {pending.setup_id} for {server_id} cancelled")
+        context = build_root_context(app, logger)
+        context += (
+            f"\nSETUP_CANCELLED: the user cancelled the setup of {server_id}. It stays "
+            "installed but cannot run until it is set up; installing it again asks again."
+            + origin
+        )
+        response = await ask_llm(
+            app, logger, context, tag="root-setup-cancelled", mode="root"
+        )
+        await app._act_on_root_response(response)
+        return
+
+    manifest = await app.dispatch.get_server_manifest(server_id)
+    missing = missing_required(
+        manifest.get("configurableProperties") or [], manifest.get("config") or {}
+    )
+    if missing:
+        # The form saved, but something required is still unset (a write
+        # failed, or the manifest changed): it stays pending rather than half-run.
+        await _queue_setup(app, logger, server_id, manifest, missing, 0)
+        return
+
+    logger.info(f"JARVIS: setup {pending.setup_id} for {server_id} filled in")
+    await finish_install(
+        app,
+        logger,
+        server_id,
+        manifest,
+        0,
+        preface=f"\nSETUP_COMPLETED: the user filled in the setup of {server_id}."
+        + origin,
+    )
 
 
 async def _handle_update_server(

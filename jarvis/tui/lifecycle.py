@@ -38,6 +38,7 @@ async def start_jarvis(app: Any, logger: Any) -> None:
     jarvis.output_manager.add_output_callback(app._output_cb)
     jarvis.output_manager.add_activity_callback(app._activity_cb)
     jarvis.config_modal_callback = app._open_config_modal
+    jarvis.setup_ready_callback = app._offer_setup
 
     if hasattr(jarvis, "confirmation"):
         jarvis.confirmation.set_tui_callback(app._tui_confirm)

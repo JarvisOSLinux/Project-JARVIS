@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 
 from .core import ComponentFactory
 from .core.logger import JarvisLogger, get_logger
+from .core.setup_queue import SetupQueue
 from .dispatch.event_merger import Event
 from .runtime import events as runtime_events
 from .runtime import io as runtime_io
@@ -106,6 +107,8 @@ class Jarvis:
         self.task_parser = self.components["task_parser"]
         self.output_manager = self.components["output_manager"]
         self.confirmation = self.components["confirmation_manager"]
+        # Memory-only when a caller assembles components without one (tests).
+        self.setups = self.components.get("setup_queue") or SetupQueue()
         self.voice_manager = self.components.get("voice_manager")
         self._output_clients: List[asyncio.StreamWriter] = []
         # writer -> client-supplied label (Project-JARVIS#146's "hello" message),
@@ -118,6 +121,9 @@ class Jarvis:
         # Set by the TUI layer to open the server config modal before setup runs.
         # Signature: async (server_id, server_name, server_desc, props, saved) -> ConfigModalResult
         self.config_modal_callback: Any = None
+        # Set by the TUI layer to offer the form for a new pending setup (#254)
+        # without blocking the engine. Signature: async (PendingSetup) -> None
+        self.setup_ready_callback: Any = None
 
         self.sessions = SessionManager(self.contextor)
 

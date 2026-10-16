@@ -265,6 +265,7 @@ make check                  # Format + lint + typecheck + tests
 | `jarvis/tui/config_modal.py` | Tabbed config/provider settings modal (F2 / /settings) |
 | `jarvis/tui/provider_modal.py` | Provider add/edit modal |
 | `jarvis/core/confirmation_manager.py` | Multi-channel confirmation gate; pending list persisted to `$JARVIS_DATA_DIR/confirmations.json` when built with a store path (#224) |
+| `jarvis/core/setup_queue.py` | Pending server setups (#254): `setups.json` (daemon-owned, survives restarts) + the offline completion queue; stores what a server needs, never values |
 | `jarvis/core/constraint_store.py` | Standing path-prefix deny constraints (#214), enforced in `dispatch_flow` ahead of the confirmation mode |
 | `jarvis/core/socket_security.py` | Socket hardening |
 | `jarvis/core/sudo_manager.py` | `jarvis sudo` — sudoers drop-in management (#158) |
@@ -292,6 +293,8 @@ make check                  # Format + lint + typecheck + tests
 ---
 
 ## Changelog — corrected claims
+
+*2026-10-15:* installing a server no longer blocks on a config form (#254, phase 1). A required setting that is unset becomes a *pending setup* in `core/setup_queue.py`, stored in `$JARVIS_DATA_DIR/setups.json` like the confirmation queue; the model is told `SETUP_PENDING` and never asks for the values in chat. A server with only optional settings installs straight away on its defaults. `jarvis setups` lists, `jarvis setups fill <id|server>` prompts in the terminal (secrets hidden, masked in the review) and writes each value with `dmcp config set --stdin`, then sends `setup_completed` (id only) over the socket; `root_actions.on_setup_result` runs the setup script and resumes with `SETUP_COMPLETED` + `INSTALL_RESULT` and the goal's original request. With the daemon off, the CLI runs `dmcp setup` itself and queues the completion in `setup_completions.json`, applied at startup. In the TUI the existing form opens for a new pending setup without blocking the engine; closing it leaves the setup pending. `set_server_config` now sends values over stdin too: as an argument a secret was readable from the process list and was logged by `run_dmcp` on failure (needs dmcp's `config set --stdin`, dmcp#76). `install` no longer uses `_collect_config_securely`; `configure_server` still does (phase 3). Verified live: install CalDAV through `jarvis chat`, fill it from a second terminal, the daemon runs setup and the model resumes; the password is in dmcp's config only.
 
 *2026-10-14:* the `sign_in` action is gone (#229, design v3). The 2026-09-29 design had dmcp hold the accounts and JARVIS run `dmcp login`; v3 moves sign-in into each server instead. A server that works in the user's account ships a `login` tool, through a per-server wrapper in mcp-registry when the upstream has none. The model calls `login` like any other tool. Its manifest marks it `blocking`, so dispatch arms a reminder by itself, and the sign-in link the wrapper prints to stderr reaches the model in REMIND. The wrapper keeps the tokens; no tool result carries them. This reverts #244: `dispatch/sign_in.py`, the SIGN_IN_NEEDED hint (`_failure_hints` is `_config_hint_for_signals` again), the install filter on account-filled keys, and `tests/test_sign_in.py`. The secret scrubbing and the secure config form from #242 stay.
 

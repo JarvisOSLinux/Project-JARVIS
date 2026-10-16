@@ -9,6 +9,7 @@ from typing import Any, Set
 from ..core.logger import get_logger
 from ..dispatch.event_merger import Event, EventType
 from .daemon_thread import run_in_daemon_thread
+from .root_actions import on_setup_result
 from .root_handlers import (
     on_confirmation_response,
     on_dispatch_signal,
@@ -29,6 +30,8 @@ async def handle_event(app: Any, event: Event) -> None:
         await on_dispatch_signals(app, logger, event.data)
     elif event.type == EventType.CONFIRMATION_RESPONSE:
         await on_confirmation_response(app, logger, event.data)
+    elif event.type == EventType.SETUP_RESULT:
+        await on_setup_result(app, logger, event.data)
 
 
 def track_event_task(
