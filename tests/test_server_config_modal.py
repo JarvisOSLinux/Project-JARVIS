@@ -100,3 +100,24 @@ def test_typing_saves_plain_values_but_never_secrets(params_file):
     saved = params_file.read_text()
     assert "abc" in saved
     assert "s3cret" not in saved
+
+
+@pytest.mark.unit
+def test_opening_the_form_saves_nothing(params_file):
+    async def steps(app, pilot):
+        await pilot.pause()
+
+    _drive(steps)
+    assert not params_file.exists() or "PRESET" not in params_file.read_text()
+
+
+@pytest.mark.unit
+def test_an_edit_back_to_the_default_is_still_saved(params_file):
+    async def steps(app, pilot):
+        app.screen.query_one("#input-PRESET").focus()
+        await pilot.press("end", "x")
+        await pilot.press("backspace")
+        await pilot.pause()
+
+    _drive(steps)
+    assert '"PRESET" = "mail,calendar"' in params_file.read_text()
