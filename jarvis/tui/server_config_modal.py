@@ -65,6 +65,9 @@ class _FieldRow(Vertical):
 
         default = prop.get("default") or ""
         self._initial = saved_value if saved_value is not None else default
+        # Textual reports an Input's starting value as a change. Saving it made
+        # merely opening the form write every default to the params file.
+        self._edited = False
 
     def compose(self) -> ComposeResult:
         label = self._prop.get("label") or self._key
@@ -98,6 +101,9 @@ class _FieldRow(Vertical):
         if event.input.id != f"input-{self._key}":
             return
         val = event.value
+        if not self._edited and val == self._initial:
+            return
+        self._edited = True
         inp = event.input
         inp.remove_class("required-empty", "required-filled", "saved")
         if self._required:
