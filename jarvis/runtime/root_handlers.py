@@ -6,7 +6,7 @@ import asyncio
 import json
 import re
 from logging import Logger
-from typing import Any
+from typing import Any, Callable
 
 from ..core.secret_scrubber import redact_secrets, redaction_notice
 from ..core.voice_state import VoiceState
@@ -187,6 +187,44 @@ async def _config_hint_for_signals(
     return hint
 
 
+# dispatch repeats a REMIND for as long as a task runs, and each one becomes its
+# own ROOT turn queued behind app.llm_lock. When reminders arrive faster than
+# the model answers, they pile up, and by the time one gets its turn the task
+# may have finished, or a newer reminder may carry the same news. Answering
+# those told a user to finish a sign-in that had already succeeded. So
+# freshness is judged when the turn comes, not when the signal arrives.
+
+
+def _signal_ledger(app: Any) -> tuple[set, dict]:
+    """(PIDs whose task has ended, PID -> token of its newest REMIND)."""
+    ledger = getattr(app, "_signal_ledger", None)
+    if ledger is None:
+        ledger = app._signal_ledger = (set(), {})
+    return ledger
+
+
+def _note_signal(
+    app: Any, signal: dict[str, Any], exit_data: Any = None
+) -> Callable[[], bool]:
+    """Record a signal; return a check that says whether it has since gone stale.
+
+    Only a plain REMIND can go stale. A REMIND that arrives merged with its
+    EXIT (exit_data) is the outcome, and is treated as one.
+    """
+    finished, newest = _signal_ledger(app)
+    pid = signal.get("pid")
+    kind = str(signal.get("type") or "").upper()
+    if kind in ("EXIT", "KILL") or exit_data is not None:
+        finished.add(pid)
+        newest.pop(pid, None)
+        return lambda: False
+    if kind != "REMIND" or pid is None:
+        return lambda: False
+    token = object()
+    newest[pid] = token
+    return lambda: pid in finished or newest.get(pid) is not token
+
+
 async def on_dispatch_signal(app: Any, logger: Logger, signal: dict[str, Any]) -> None:
     # Extract EventMerger enrichment keys before passing the signal downstream.
     remind_completed = signal.pop("_remind_completed", False)
@@ -208,6 +246,7 @@ async def on_dispatch_signal(app: Any, logger: Logger, signal: dict[str, Any]) -
         return
 
     app.goals.update_from_signal(signal)
+    is_stale = _note_signal(app, signal, exit_data)
 
     # Build a context scoped to the goal that owns this PID.
     # If no goal owns the PID (e.g. a timer from defer), fall back to
@@ -251,7 +290,15 @@ async def on_dispatch_signal(app: Any, logger: Logger, signal: dict[str, Any]) -
         app, logger, hint_signals, owning_goal, signal_text
     )
 
-    response = await ask_llm(app, logger, context, tag="root", mode="root")
+    response = await ask_llm(
+        app, logger, context, tag="root", mode="root", skip_if=is_stale
+    )
+    if response is None:
+        logger.info(
+            f"JARVIS: Dropped a stale REMIND for pid={sig_pid}: the task has "
+            "finished or a newer reminder replaced it"
+        )
+        return
     await app._act_on_root_response(response)
 
 
@@ -280,6 +327,7 @@ async def on_dispatch_signals(
 
     for sig in signals:
         app.goals.update_from_signal(sig)
+        _note_signal(app, sig)
 
     # A fire_wake=false batch is one session, so all PIDs share a goal; scope the
     # context to it. Fall back to full root context if none owns the PIDs.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from logging import Logger
 from typing import Any, Callable, Dict, List, Optional
@@ -73,6 +74,25 @@ def _make_logging_callback(adapter: Any, logger: Logger):
     return _on_log_message
 
 
+# The SDK's default environment is HOME, LOGNAME, PATH, SHELL and USER only.
+# Servers dispatch runs through dmcp also need the desktop session: a sign-in
+# wrapper opens its link in the browser (DISPLAY / WAYLAND_DISPLAY) and keeps
+# tokens in the keyring over the session bus. Without these, no browser opened
+# and secret-tool failed ("Cannot autolaunch D-Bus without X11 $DISPLAY"), so
+# tokens fell back to a file.
+_DESKTOP_SESSION_VARS = (
+    "DISPLAY",
+    "WAYLAND_DISPLAY",
+    "XAUTHORITY",
+    "XDG_RUNTIME_DIR",
+    "DBUS_SESSION_BUS_ADDRESS",
+)
+
+
+def _desktop_session_env() -> Dict[str, str]:
+    return {k: os.environ[k] for k in _DESKTOP_SESSION_VARS if os.environ.get(k)}
+
+
 async def connect(adapter: Any, logger: Logger) -> None:
     """Connect DispatchAdapter to dispatch serve over stdio MCP."""
     try:
@@ -87,20 +107,35 @@ async def connect(adapter: Any, logger: Logger) -> None:
             # replacing it: a bare env= drops PATH, so the spawned process
             # resolves binaries against os.defpath only and can't find
             # ~/.local/bin or Homebrew installs (#170).
-            env={**get_default_environment(), "RUST_LOG": "dispatch=warn"},
+            env={
+                **get_default_environment(),
+                **_desktop_session_env(),
+                "RUST_LOG": "dispatch=warn",
+            },
         )
-        adapter._client = stdio_client(params)
-        read, write = await adapter._client.__aenter__()
-        # Register the logging handler so dispatch's pushed signals
-        # (notifications/message, logger="dispatch.signal") wake ROOT the moment
-        # a task completes, rather than waiting for the next poll (#26).
-        adapter.session = ClientSession(
-            read,
-            write,
-            logging_callback=_make_logging_callback(adapter, logger),
-        )
-        await adapter.session.__aenter__()
-        await adapter.session.initialize()
+        client = stdio_client(params)
+        read, write = await client.__aenter__()
+        adapter._client = client
+        try:
+            # Register the logging handler so dispatch's pushed signals
+            # (notifications/message, logger="dispatch.signal") wake ROOT the
+            # moment a task completes, rather than waiting for the next poll (#26).
+            session = ClientSession(
+                read,
+                write,
+                logging_callback=_make_logging_callback(adapter, logger),
+            )
+            await session.__aenter__()
+            adapter.session = session
+            await session.initialize()
+        except BaseException:
+            # Quitting while JARVIS starts cancels this mid-handshake. The
+            # transport must be closed here, in the task that opened it: left
+            # open, its stdout reader waits on `dispatch serve` forever and
+            # asyncio.run never returns, so the terminal hangs after the TUI
+            # exits.
+            await disconnect(adapter, logger)
+            raise
         adapter._connected = True
         logger.info("Dispatch: Connected successfully")
     except FileNotFoundError:
@@ -122,16 +157,23 @@ async def connect(adapter: Any, logger: Logger) -> None:
 
 
 async def disconnect(adapter: Any, logger: Logger) -> None:
-    """Disconnect DispatchAdapter session/client safely."""
-    try:
-        if adapter.session:
-            await adapter.session.__aexit__(None, None, None)
-        if adapter._client:
-            await adapter._client.__aexit__(None, None, None)
-        adapter._connected = False
+    """Disconnect DispatchAdapter session/client safely; a second call is a no-op.
+
+    The transport is closed even when closing the session fails: it is what
+    stops `dispatch serve` and releases the stdout reader.
+    """
+    session, client = adapter.session, adapter._client
+    adapter.session = adapter._client = None
+    adapter._connected = False
+    for name, ctx in (("session", session), ("transport", client)):
+        if ctx is None:
+            continue
+        try:
+            await ctx.__aexit__(None, None, None)
+        except Exception as e:
+            logger.error(f"Dispatch: Disconnect error ({name}): {e}")
+    if client is not None:
         logger.info("Dispatch: Disconnected")
-    except Exception as e:
-        logger.error(f"Dispatch: Disconnect error: {e}")
 
 
 def require_connection(adapter: Any, logger: Logger, op_name: str) -> bool:

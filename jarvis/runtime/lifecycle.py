@@ -23,10 +23,12 @@ from .voice_activation_thread import run_voice_activation
 
 
 def install_signal_handlers(
-    loop: asyncio.AbstractEventLoop, stop_callback: Callable[[], None]
+    loop: asyncio.AbstractEventLoop,
+    stop_callback: Callable[[], None],
+    interrupt_callback: Optional[Callable[[], None]] = None,
 ) -> None:
-    """Register graceful-stop signal handlers for SIGTERM/SIGINT."""
-    platform.install_signal_handlers(loop, stop_callback)
+    """Register SIGTERM (graceful stop) and SIGINT (interrupt_callback, else stop)."""
+    platform.install_signal_handlers(loop, stop_callback, interrupt_callback)
 
 
 async def connect_dispatch_nonfatal(dispatch: Any, logger: Logger) -> None:
@@ -333,6 +335,101 @@ def stop_openai_server_if_running(server: Optional[Any]) -> None:
     """Stop the opt-in OpenAI-compat server if it was started."""
     if server is not None and server.is_running:
         server.stop()
+
+
+# A second Ctrl+C within this window confirms quitting with work still running.
+QUIT_CONFIRM_WINDOW_SECONDS = 10.0
+
+
+async def pending_work(app: Any) -> list[str]:
+    """What quitting now would cut short, one line per item, for the user to confirm.
+
+    Running tool calls and timers come from dispatch; requests still waiting
+    on the model are the in-flight goal turns. Empty means quitting loses
+    nothing and needs no confirmation.
+    """
+    lines: list[str] = []
+    goal_of: dict[Any, str] = {}
+    for goal in app.goals.get_active_goals():
+        for pid in goal.task_pids:
+            goal_of[pid] = goal.description
+    if app.dispatch.is_connected:
+        for task in await app.dispatch.get_task_status(tail=0):
+            if task.get("state") != "running":
+                continue
+            if task.get("type") == "timer":
+                line = (
+                    f"timer \"{task.get('label')}\" (fires in {task.get('fires_in')} s)"
+                )
+            else:
+                line = f"{task.get('server')} · {task.get('tool')}"
+            goal = goal_of.get(task.get("pid"))
+            if goal:
+                line += f": {goal[:80]}"
+            lines.append(line)
+    waiting = sum(1 for t in getattr(app, "_event_tasks", ()) if not t.done())
+    if waiting:
+        lines.append(f"{waiting} request(s) still waiting on the model")
+    return lines
+
+
+async def force_stop(app: Any, logger: Logger) -> None:
+    """Quit without waiting: kill running tasks, cancel in-flight turns, stop."""
+    if app.dispatch.is_connected:
+        running = [
+            t.get("pid")
+            for t in await app.dispatch.get_task_status(tail=0)
+            if t.get("state") == "running" and t.get("pid") is not None
+        ]
+        if running:
+            logger.info(f"JARVIS: Quitting now; killing running tasks {running}")
+            await app.dispatch.kill_tasks(running)
+    current = asyncio.current_task()
+    for task in list(getattr(app, "_event_tasks", ())):
+        if task is not current and not task.done():
+            task.cancel()
+    request_stop(app)
+
+
+def make_interrupt_handler(app: Any, logger: Logger) -> Callable[[], None]:
+    """Ctrl+C: quit at once when nothing is running, else list it and ask again.
+
+    Like a desktop asking before it shuts down with apps open: the first
+    Ctrl+C lists what is still running and changes nothing; a second one
+    within QUIT_CONFIRM_WINDOW_SECONDS stops it all and quits. SIGTERM keeps
+    the graceful path, since nobody is there to confirm.
+    """
+    loop = asyncio.get_running_loop()
+    state: dict[str, Any] = {"armed_at": None, "tasks": set()}
+
+    async def handle() -> None:
+        now = loop.time()
+        armed_at = state["armed_at"]
+        if armed_at is not None and now - armed_at <= QUIT_CONFIRM_WINDOW_SECONDS:
+            logger.warning("JARVIS: Quitting now and stopping what was running.")
+            await force_stop(app, logger)
+            return
+        state["armed_at"] = now
+        lines = await pending_work(app)
+        if not lines:
+            request_stop(app)
+            return
+        listing = "\n".join(f"  - {line}" for line in lines)
+        logger.warning(
+            f"JARVIS: Still running:\n{listing}\n"
+            f"Press Ctrl+C again within {QUIT_CONFIRM_WINDOW_SECONDS:.0f} s to "
+            "quit now and stop them."
+        )
+
+    def start() -> None:
+        task = loop.create_task(handle())
+        state["tasks"].add(task)
+        task.add_done_callback(state["tasks"].discard)
+
+    def on_interrupt() -> None:
+        loop.call_soon_threadsafe(start)
+
+    return on_interrupt
 
 
 def request_stop(app: Any) -> None:

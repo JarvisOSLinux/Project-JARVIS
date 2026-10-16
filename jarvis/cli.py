@@ -698,6 +698,24 @@ def _has_llm_configured() -> bool:
     return bool(list_providers())
 
 
+def _run_until_stopped(jarvis) -> None:
+    """Run JARVIS to the end of its shutdown, then leave without waiting on stdin.
+
+    A thread blocked reading the next line at the prompt (the chat input, or
+    a terminal confirmation) holds stdin's lock, and normal interpreter exit
+    waits for that lock forever: Ctrl+C reached "Shutdown complete" and the
+    terminal still hung until Enter was pressed. Everything JARVIS owns is
+    closed once run() returns, so flush what is buffered and exit.
+    """
+    import logging
+
+    asyncio.run(jarvis.run())
+    logging.shutdown()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)
+
+
 def main() -> None:
     """Main CLI entry point."""
     from .main import Jarvis
@@ -719,7 +737,7 @@ def main() -> None:
 
         try:
             jarvis = Jarvis()
-            asyncio.run(jarvis.run())
+            _run_until_stopped(jarvis)
         except KeyboardInterrupt:
             print("\nGoodbye.")
         except Exception as e:
@@ -744,7 +762,7 @@ def main() -> None:
         print("Type your messages. Press Ctrl+C to exit.\n")
         try:
             jarvis = Jarvis(text_mode=True)
-            asyncio.run(jarvis.run())
+            _run_until_stopped(jarvis)
         except KeyboardInterrupt:
             print("\nGoodbye.")
         except Exception as e:
