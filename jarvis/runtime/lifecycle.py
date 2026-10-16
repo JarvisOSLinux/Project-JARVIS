@@ -211,6 +211,29 @@ def apply_queued_confirmation_decisions(app: Any, logger: Logger) -> int:
     return applied
 
 
+def apply_queued_setup_completions(app: Any, logger: Logger) -> int:
+    """Drop setups that `jarvis setups` completed or cancelled while the daemon was off.
+
+    The CLI already wrote the values and ran the setup script itself, so all
+    that is left is the queue entry. The goal that asked for the server was
+    archived at that shutdown, so there is nothing to resume.
+    """
+    from ..core.confirmation_manager import clear_decision_queue, load_decision_queue
+    from ..core.setup_queue import completion_queue_path
+
+    path = completion_queue_path()
+    done = 0
+    for entry in load_decision_queue(path, quarantine=True):
+        setup = app.setups.pop(str(entry.get("id") or ""))
+        if setup is not None:
+            done += 1
+            logger.info(
+                f"JARVIS: setup of {setup.server_id} was {entry.get('type')} offline"
+            )
+    clear_decision_queue(path)
+    return done
+
+
 async def start_runtime_services(app: Any, logger: Logger) -> dict[str, Any]:
     """Start event sources and optional socket/voice runtime services."""
     user_source = resolve_user_source(app)
@@ -257,6 +280,7 @@ async def start_runtime_services(app: Any, logger: Logger) -> dict[str, Any]:
     # injector is wired, so a decision queued with the daemon down resolves on
     # the first turns of this run — whether or not any socket is enabled.
     apply_queued_confirmation_decisions(app, logger)
+    apply_queued_setup_completions(app, logger)
 
     output_socket_task: Optional[asyncio.Task] = None
     if Config.JARVIS_OUTPUT_SOCKET:

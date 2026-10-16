@@ -333,35 +333,38 @@ class TestConfigureServer:
 @pytest.mark.unit
 class TestInstallServer:
     @pytest.mark.asyncio
-    async def test_outside_the_tui_install_now_collects_config_in_the_form(
+    async def test_install_queues_the_setup_instead_of_blocking_on_a_form(
         self, tmp_path, params_file, monkeypatch
     ):
-        # Before: no TUI meant no form at all, so the server was installed
-        # unconfigured and the model asked for its key later -- in the chat.
+        # #242 made install collect config through a secure form rather than
+        # skip it; #254 keeps that promise without holding the goal on the
+        # form: the setup is queued and filled outside the chat.
+        from jarvis.core.setup_queue import SetupQueue
+
         monkeypatch.setenv("DISPLAY", ":0")
         app = _server_app(tmp_path)
+        app.goals = SimpleNamespace(get_active_goals=lambda: [])
+        app.setups = SetupQueue()
         app.dispatch.install_server = AsyncMock(return_value={})
         app.dispatch.run_server_setup = AsyncMock(return_value={})
-        app.dispatch.auto_index_server = AsyncMock()
-        app.dispatch.list_server_tools = AsyncMock(return_value={"tools": []})
         form = AsyncMock(return_value={"API_KEY": "k", "BASE_URL": "https://x"})
+        ask = AsyncMock(return_value="{}")
         with (
             patch("jarvis.ui.config_prompt.prompt_configurable_properties", form),
             patch.object(root_actions, "build_root_context", return_value=""),
             patch.object(root_actions, "emit_activity"),
-            patch.object(root_actions, "get_embeddings", return_value=None),
-            patch.object(root_actions, "ask_llm", new=AsyncMock(return_value="{}")),
+            patch.object(root_actions, "ask_llm", new=ask),
         ):
             await root_actions._handle_install_server(
                 app, Mock(), {"server_id": "demo"}, 0, 5
             )
 
-        form.assert_awaited_once()
-        app.dispatch.set_server_config.assert_awaited_once_with(
-            "demo", {"API_KEY": "k", "BASE_URL": "https://x"}
-        )
-        saved = params_file.read_text()
-        assert "https://x" in saved and '"k"' not in saved
+        form.assert_not_awaited()
+        app.dispatch.run_server_setup.assert_not_awaited()
+        (pending,) = app.setups.list()
+        assert pending["missing"] == ["API_KEY", "BASE_URL"]
+        told = ask.await_args.args[2]
+        assert "SETUP_PENDING" in told and "Never ask for these values in chat" in told
 
 
 # --- what the model is coached to send --------------------------------------------------

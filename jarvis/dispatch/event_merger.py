@@ -54,6 +54,9 @@ class EventType(Enum):
     # as a single ROOT turn (#189). data is a list of signal dicts.
     DISPATCH_SIGNAL_BATCH = "dispatch_signal_batch"
     CONFIRMATION_RESPONSE = "confirmation_response"
+    # A pending server setup was filled in or cancelled (#254). data is the
+    # socket message: {"type": "setup_completed" | "cancel_setup", "id": ...}.
+    SETUP_RESULT = "setup_result"
     SHUTDOWN = "shutdown"
 
 
@@ -80,6 +83,10 @@ class Event:
     @staticmethod
     def confirmation_response(data: Dict[str, Any]) -> "Event":
         return Event(type=EventType.CONFIRMATION_RESPONSE, data=data)
+
+    @staticmethod
+    def setup_result(data: Dict[str, Any]) -> "Event":
+        return Event(type=EventType.SETUP_RESULT, data=data)
 
     @staticmethod
     def shutdown() -> "Event":
@@ -160,6 +167,20 @@ class EventMerger:
                 logger.warning(
                     "EventMerger: Queue full, dropping confirmation response"
                 )
+
+        self._loop.call_soon_threadsafe(_put)
+
+    def inject_setup_result(self, data: Dict[str, Any]) -> None:
+        """Thread-safe."""
+        if self._loop is None:
+            logger.warning("EventMerger: inject_setup_result called before start")
+            return
+
+        def _put() -> None:
+            try:
+                self._queue.put_nowait(Event.setup_result(data))
+            except asyncio.QueueFull:
+                logger.warning("EventMerger: Queue full, dropping setup result")
 
         self._loop.call_soon_threadsafe(_put)
 

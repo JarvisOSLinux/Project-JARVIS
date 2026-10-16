@@ -128,6 +128,243 @@ def _format_age(created_at: float) -> str:
 
 
 OFFLINE_NOTICE = "daemon offline — decisions queue and apply at next start"
+SETUPS_OFFLINE_NOTICE = (
+    "daemon offline — read from disk; what you do applies at its next start"
+)
+
+
+def _ipc_request(request: dict) -> "dict | None":
+    """Send one request to the running daemon; None when it cannot be reached."""
+    from .platform import current as platform
+
+    path = _find_ipc_endpoint(quiet=True)
+    if not path:
+        return None
+    try:
+        sock = platform.ipc_connect(path)
+        try:
+            sock.sendall((json.dumps(request) + "\n").encode("utf-8"))
+            sock.settimeout(5.0)
+            line = sock.makefile().readline()
+        finally:
+            sock.close()
+    except (socket.error, OSError):
+        return None
+    try:
+        return json.loads(line) if line else None
+    except json.JSONDecodeError:
+        return None
+
+
+def _cmd_setups() -> None:
+    """List, fill in or cancel pending server setups (#254)."""
+    args = sys.argv[2:]
+    if not args or args == ["list"]:
+        setups, live = _load_setups()
+        _print_setups(setups, live)
+    elif len(args) == 2 and args[0] == "fill":
+        _setups_fill(args[1])
+    elif len(args) == 2 and args[0] == "cancel":
+        _setups_cancel(args[1])
+    else:
+        _show_setups_usage()
+        sys.exit(1)
+
+
+def _load_setups() -> "tuple[list, bool]":
+    """(pending setups, whether the daemon answered). Falls back to the store."""
+    response = _ipc_request({"type": "list_setups"})
+    if response and response.get("type") == "setup_list":
+        return response.get("setups", []), True
+    from .core.setup_queue import read_store, store_path
+
+    path = store_path()
+    if not path.exists():
+        return [], False
+    try:
+        return [s.to_dict() for s in read_store(path)], False
+    except Exception as e:
+        print(f"Error: could not read {path}: {e}")
+        sys.exit(1)
+
+
+def _print_setups(setups: list, live: bool) -> None:
+    if not setups:
+        print("No server is waiting for setup.")
+    else:
+        print("Servers waiting for setup:")
+        for setup in setups:
+            print(
+                f"  {setup['setup_id']}  {setup['server_name']} ({setup['server_id']})"
+            )
+            print(f"      needs: {', '.join(setup.get('missing') or [])}")
+            if setup.get("goal_description"):
+                print(f"      for: {setup['goal_description']}")
+        print("\nFill one in with: jarvis setups fill <id>")
+    if not live:
+        print(f"({SETUPS_OFFLINE_NOTICE})")
+
+
+def _find_setup(setups: list, ref: str) -> "dict | None":
+    for setup in setups:
+        if ref in (setup.get("setup_id"), setup.get("server_id")):
+            return setup
+    return None
+
+
+def _prompt_setup_values(setup: dict, ask=input, ask_secret=None) -> "dict | None":
+    """Ask for each setting in the terminal; None if the user declines to save.
+
+    Secrets are read without echo. Enter keeps a default or leaves an optional
+    setting unset; a setting the server cannot run without is asked again.
+    """
+    import getpass
+
+    ask_secret = ask_secret or getpass.getpass
+    missing = set(setup.get("missing") or [])
+    fields = setup.get("fields") or []
+    print(f"\nSet up {setup['server_name']} ({setup['server_id']})")
+    if setup.get("summary"):
+        print(f"  {setup['summary']}")
+    print("  Enter keeps a default, or leaves an optional setting unset.\n")
+
+    values: dict = {}
+    for field in fields:
+        key = field["key"]
+        sensitive = bool(field.get("sensitive"))
+        default = "" if sensitive else str(field.get("default") or "")
+        if field.get("description"):
+            print(f"  {field['description']}")
+        if key in missing:
+            note = " (required)"
+        elif field.get("required"):
+            note = " (already set; Enter keeps it)"
+        else:
+            note = ""
+        prompt = (
+            f"{field.get('label') or key}{note}{f' [{default}]' if default else ''}: "
+        )
+        while True:
+            value = (ask_secret if sensitive else ask)(prompt).strip()
+            if value or key not in missing:
+                break
+            print("  The server cannot run without this one.")
+        if value:
+            values[key] = value
+        print()
+
+    print("Saving:")
+    for field in fields:
+        if field["key"] in values:
+            shown = "•" * 8 if field.get("sensitive") else values[field["key"]]
+            print(f"  {field.get('label') or field['key']}: {shown}")
+    if not values:
+        print("  (nothing)")
+    answer = ask("Save these settings? [Y/n] ").strip().lower()
+    return None if answer in ("n", "no") else values
+
+
+def _dmcp_config_set(server_id: str, key: str, value: str) -> "str | None":
+    """Write one setting through dmcp, the value on stdin; an error message or None."""
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            [Config.DMCP_BINARY, "config", server_id, "set", key, "--stdin"],
+            input=value,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return str(e)
+    if result.returncode != 0:
+        return (result.stderr or "").strip() or f"dmcp exited {result.returncode}"
+    return None
+
+
+def _setups_fill(ref: str) -> None:
+    import subprocess
+
+    from .core.confirmation_manager import queue_decision
+    from .core.params_store import ParamsStore
+    from .core.setup_queue import completion_queue_path
+
+    setups, live = _load_setups()
+    setup = _find_setup(setups, ref)
+    if setup is None:
+        print(
+            f"Error: No pending setup '{ref}'. Run 'jarvis setups' to see what is waiting."
+        )
+        sys.exit(1)
+    try:
+        values = _prompt_setup_values(setup)
+    except (KeyboardInterrupt, EOFError):
+        print("\nNot saved; the setup is still pending.")
+        sys.exit(130)
+    if values is None:
+        print("Not saved; the setup is still pending.")
+        return
+
+    server_id = setup["server_id"]
+    for key, value in values.items():
+        error = _dmcp_config_set(server_id, key, value)
+        if error:
+            print(f"Error: could not save {key}: {error}")
+            sys.exit(1)
+    secret = {f["key"] for f in setup.get("fields") or [] if f.get("sensitive")}
+    plain = {k: v for k, v in values.items() if k not in secret}
+    if plain:
+        ParamsStore(server_id).set_many(plain)
+
+    if live:
+        response = _ipc_request({"type": "setup_completed", "id": setup["setup_id"]})
+        if response and response.get("type") == "ack":
+            print(response.get("message", "Saved."))
+            return
+        # The daemon went away while the form was open: finish here instead.
+
+    print(f"Running the setup of {server_id}...")
+    if subprocess.run([Config.DMCP_BINARY, "setup", server_id]).returncode != 0:
+        print(f"Error: the setup of {server_id} failed; it is still pending.")
+        sys.exit(1)
+    queue_decision(
+        {"type": "setup_completed", "id": setup["setup_id"]}, completion_queue_path()
+    )
+    print(
+        f"{server_id} is set up. JARVIS clears it from the queue when it next starts."
+    )
+
+
+def _setups_cancel(ref: str) -> None:
+    from .core.confirmation_manager import queue_decision
+    from .core.setup_queue import completion_queue_path
+
+    setups, live = _load_setups()
+    setup = _find_setup(setups, ref)
+    if setup is None:
+        print(
+            f"Error: No pending setup '{ref}'. Run 'jarvis setups' to see what is waiting."
+        )
+        sys.exit(1)
+    if live:
+        response = _ipc_request({"type": "cancel_setup", "id": setup["setup_id"]})
+        if response and response.get("type") == "ack":
+            print(response.get("message", "Cancelled."))
+            return
+    queue_decision(
+        {"type": "cancel_setup", "id": setup["setup_id"]}, completion_queue_path()
+    )
+    print(
+        f"Cancelled the setup of {setup['server_id']}; applies when JARVIS next starts."
+    )
+
+
+def _show_setups_usage() -> None:
+    print("Usage:")
+    print("  jarvis setups                    # List servers waiting for setup")
+    print("  jarvis setups fill <id|server>   # Fill in a server's settings")
+    print("  jarvis setups cancel <id|server> # Drop a pending setup")
 
 
 def _cmd_confirm() -> None:
@@ -678,6 +915,11 @@ def show_usage() -> None:
     print("  jarvis confirm approve-all            # Approve all pending")
     print("  (daemon off: decisions queue on disk and apply at its next start)")
     print()
+    print("Pending Server Setups:")
+    print("  jarvis setups                         # List servers waiting for setup")
+    print("  jarvis setups fill <id|server>        # Fill in a server's settings")
+    print("  jarvis setups cancel <id|server>      # Drop a pending setup")
+    print()
     print("Provider Pool:")
     print("  jarvis providers                                    # List providers")
     print("  jarvis providers add --type ollama --model <model>  # Add Ollama")
@@ -840,6 +1082,9 @@ def main() -> None:
 
     elif command == "confirm":
         _cmd_confirm()
+
+    elif command == "setups":
+        _cmd_setups()
 
     elif command == "model":
         _legacy_redirect("jarvis model")

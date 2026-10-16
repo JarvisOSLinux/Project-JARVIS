@@ -317,9 +317,9 @@ class DispatchAdapter:
     # MCP server discovery via dmcp (on-demand, keyword-based)
     # ------------------------------------------------------------------
 
-    async def _run_dmcp(self, *args: str) -> Optional[str]:
+    async def _run_dmcp(self, *args: str, stdin: Optional[str] = None) -> Optional[str]:
         """Run a dmcp command and return stdout, or None on failure."""
-        return await registry_run_dmcp(logger, *args)
+        return await registry_run_dmcp(logger, *args, stdin=stdin)
 
     async def search_servers(self, keywords: List[str]) -> Dict[str, Any]:
         return await registry_search_servers(logger, keywords, self.update_cache)
@@ -372,12 +372,15 @@ class DispatchAdapter:
 
         Each key is stored in the server's installed manifest config section and
         will be injected as an environment variable when the server is next run.
+        The value goes over stdin, never the command line (needs dmcp's --stdin).
         """
         for raw_key, value in config.items():
             if not value:
                 continue
             key = self._sanitize_config_key(raw_key)
-            result = await self._run_dmcp("config", server_id, "set", key, value)
+            result = await self._run_dmcp(
+                "config", server_id, "set", key, "--stdin", stdin=str(value)
+            )
             if result is None:
                 raise RuntimeError(
                     f"dmcp config set failed for '{key}' on '{server_id}' — check dmcp logs"

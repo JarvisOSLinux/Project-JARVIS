@@ -15,16 +15,27 @@ from typing import Any, Dict, List, Optional
 from ..config import Config
 
 
-async def run_dmcp(logger: Logger, *args: str) -> Optional[str]:
-    """Run a dmcp command and return stdout, or None on failure."""
+async def run_dmcp(
+    logger: Logger, *args: str, stdin: Optional[str] = None
+) -> Optional[str]:
+    """Run a dmcp command and return stdout, or None on failure.
+
+    `stdin` is written to the command's standard input. Use it for anything
+    secret (`config set KEY --stdin`): an argument is readable by any local
+    user from the process list, and a failure below logs the arguments.
+    """
     try:
         proc = await asyncio.create_subprocess_exec(
             Config.DMCP_BINARY,
             *args,
+            stdin=asyncio.subprocess.PIPE if stdin is not None else None,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(stdin.encode() if stdin is not None else None),
+            timeout=30,
+        )
     except FileNotFoundError:
         logger.warning("Dispatch: dmcp binary not found")
         return None

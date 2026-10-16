@@ -67,7 +67,9 @@ async def handle_socket_connection(
             if text.startswith("{"):
                 try:
                     msg = json.loads(text)
-                    handled = await _handle_confirmation_query(app, msg, writer)
+                    handled = await _handle_confirmation_query(
+                        app, msg, writer
+                    ) or await _handle_setup_query(app, msg, writer)
                     if handled:
                         continue
                     if msg.get("type") == "confirmation_response":
@@ -130,6 +132,37 @@ async def _handle_confirmation_query(
     if ack is None:
         return False
     await _gui_write(writer, {"type": "ack", "message": ack})
+    return True
+
+
+async def _handle_setup_query(
+    app: Any, msg: dict, writer: asyncio.StreamWriter
+) -> bool:
+    """`jarvis setups` over either socket (#254): list, complete, cancel.
+
+    Completing carries only the setup's id. The values were already written to
+    dmcp by whoever filled the form, so no setting ever crosses the socket.
+    Returns True if `msg` was a setup message and has been answered.
+    """
+    msg_type = msg.get("type")
+    if msg_type == "list_setups":
+        await _gui_write(writer, {"type": "setup_list", "setups": app.setups.list()})
+        return True
+    if msg_type not in ("setup_completed", "cancel_setup"):
+        return False
+    setup = app.setups.find(str(msg.get("id") or ""))
+    if setup is None:
+        await _gui_write(
+            writer,
+            {"type": "error", "message": f"No pending setup {msg.get('id')!r}"},
+        )
+        return True
+    app.events.inject_setup_result({"type": msg_type, "id": setup.setup_id})
+    done = "is finishing" if msg_type == "setup_completed" else "dropped"
+    await _gui_write(
+        writer,
+        {"type": "ack", "message": f"JARVIS {done} the setup of {setup.server_id}."},
+    )
     return True
 
 
@@ -368,7 +401,9 @@ async def _process_gui_message(
     """Route an incoming GUI protocol message."""
     msg_type = msg.get("type")
 
-    if await _handle_confirmation_query(app, msg, writer):
+    if await _handle_confirmation_query(app, msg, writer) or await _handle_setup_query(
+        app, msg, writer
+    ):
         return
 
     if msg_type == "message":

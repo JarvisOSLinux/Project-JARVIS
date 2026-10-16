@@ -173,6 +173,7 @@ class JarvisTUI(App):
     def __init__(self) -> None:
         super().__init__()
         self.jarvis = None  # type: ignore[assignment]
+        self._setup_forms: set = set()
         self._jarvis_task: Optional[asyncio.Task] = None
         self._output_cb = None
         self._activity_cb = None
@@ -279,6 +280,59 @@ class JarvisTUI(App):
 
         await self.push_screen(
             ServerConfigModal(server_id, server_name, server_desc, props, saved, future)
+        )
+
+    async def _offer_setup(self, setup: Any) -> None:
+        """Open the form for a new pending setup (#254) without blocking the engine.
+
+        Saving writes the values through dmcp and resumes the goal, the same
+        path `jarvis setups fill` takes; closing the form leaves it pending.
+        """
+        from ..core.params_store import ParamsStore
+        from .server_config_modal import ServerConfigModal
+
+        future: asyncio.Future = asyncio.get_running_loop().create_future()
+        await self.push_screen(
+            ServerConfigModal(
+                setup.server_id,
+                setup.server_name,
+                setup.summary,
+                setup.fields,
+                ParamsStore(setup.server_id).get(),
+                future,
+            )
+        )
+        task = asyncio.create_task(self._finish_setup_form(setup, future))
+        self._setup_forms.add(task)
+        task.add_done_callback(self._setup_forms.discard)
+
+    async def _finish_setup_form(self, setup: Any, future: "asyncio.Future") -> None:
+        from ..core.params_store import ParamsStore
+
+        result = await future
+        later = (
+            f"Setup of {self._escape(setup.server_id)} is still pending: "
+            f"jarvis setups fill {setup.setup_id}"
+        )
+        if not result.confirmed or self.jarvis is None:
+            self._append_log(f"[dim]{later}[/dim]")
+            return
+        values = {k: v for k, v in (result.values or {}).items() if v}
+        try:
+            await self.jarvis.dispatch.set_server_config(setup.server_id, values)
+        except Exception as e:
+            logger.warning(f"TUI: saving the setup of {setup.server_id} failed: {e}")
+            self._append_log(
+                f"[red]Could not save the settings: {self._escape(str(e))}[/red]"
+            )
+            self._append_log(f"[dim]{later}[/dim]")
+            return
+        secret = {f["key"] for f in setup.fields if f.get("sensitive")}
+        plain = {k: v for k, v in values.items() if k not in secret}
+        if plain:
+            ParamsStore(setup.server_id).set_many(plain)
+        self.jarvis.events.inject_setup_result(
+            {"type": "setup_completed", "id": setup.setup_id}
         )
 
     def _append_log(self, markup: str) -> None:

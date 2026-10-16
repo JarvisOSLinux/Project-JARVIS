@@ -18,6 +18,8 @@ from .command_parser import TaskParser
 from .confirmation_manager import STORE_FILENAME, ConfirmationManager
 from .logger import get_logger
 from .output_manager import OutputManager
+from .setup_queue import SetupQueue
+from .setup_queue import store_path as setup_store_path
 from .system_info import SystemInfo
 
 logger = get_logger(__name__)
@@ -191,6 +193,11 @@ class ComponentFactory:
         logger.info("Initiating Confirmation manager...")
         store = os.path.join(Config.JARVIS_DATA_DIR, STORE_FILENAME)
         return ConfirmationManager(store_path=store)
+
+    @staticmethod
+    def create_setup_queue() -> SetupQueue:
+        """The daemon's pending server setups, kept across restarts (#254)."""
+        return SetupQueue(store_path=str(setup_store_path()))
 
     @staticmethod
     def create_tts_optional() -> Optional[any]:
@@ -444,6 +451,7 @@ class ComponentFactory:
         components["goal_manager"] = ComponentFactory.create_goal_manager()
         components["event_merger"] = ComponentFactory.create_event_merger()
         components["task_parser"] = ComponentFactory.create_task_parser()
+        components["setup_queue"] = ComponentFactory.create_setup_queue()
         components["confirmation_manager"] = (
             ComponentFactory.create_confirmation_manager()
         )
