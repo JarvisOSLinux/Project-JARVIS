@@ -30,6 +30,35 @@ logger = get_logger(__name__)
 ROOT_HISTORY_WINDOW = 3
 
 
+def describe_provider_error(error: Exception) -> str:
+    """A short, plain reason a provider call failed, for the user to read."""
+    text = str(error)
+    lowered = text.lower()
+    host = re.search(r"lookup ([\w.-]+)", text)
+    retry = re.search(r"retry in (\d+)s", text)
+    if "no such host" in lowered or host:
+        reason = (
+            f"could not look up {host.group(1)}: a DNS or network problem"
+            if host
+            else "a DNS or network problem"
+        )
+    elif any(k in lowered for k in ("connection refused", "failed to connect")):
+        reason = "nothing answered at the model's address; is Ollama running?"
+    elif "timed out" in lowered or "timeout" in lowered:
+        reason = "the model did not answer in time"
+    elif any(k in lowered for k in ("401", "403", "unauthorized", "forbidden")):
+        reason = "the provider rejected the API key"
+    elif "429" in lowered or "rate limit" in lowered:
+        reason = "the provider is rate-limiting requests"
+    else:
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+        detail = lines[-1] if lines else type(error).__name__
+        reason = detail[:160]
+    if retry and int(retry.group(1)) > 0:
+        reason += f"; retrying it in {retry.group(1)} s"
+    return reason
+
+
 class LLM:
     """Main LLM interface with hierarchical mode support and tiered context."""
 
@@ -223,7 +252,7 @@ class LLM:
             else:
                 logger.error(f"LLM [{self._mode}] provider error: {e}")
             self.chat_history.pop()
-            return self._fallback_response()
+            return self._unreachable_response(e)
 
         logger.debug(
             f"LLM [{self._mode}] attempt={attempt} responded "
@@ -308,12 +337,24 @@ class LLM:
         history = self._histories.get("root", [])
         return [msg for msg in history if msg["role"] != "system"]
 
-    def _fallback_response(self) -> dict:
+    def _fallback_response(self, msg: str = "") -> dict:
         """Return a safe fallback when all retries are exhausted."""
-        msg = "I had trouble formatting my response. Could you try again?"
+        msg = msg or "I had trouble formatting my response. Could you try again?"
         if self._mode != "root":
             return {"action": "done", "summary": msg}
         return {"action": "respond", "output": msg}
+
+    def _unreachable_response(self, error: Exception) -> dict:
+        """Say the model could not be reached, and why, instead of blaming formatting.
+
+        A DNS blip on the way to a cloud model used to reach the user as "I had
+        trouble formatting my response", which pointed at the wrong thing.
+        """
+        return self._fallback_response(
+            "I can't reach my language model right now, so I couldn't answer that "
+            f"({describe_provider_error(error)}). Try again in a moment; "
+            "`jarvis providers` shows the provider setup."
+        )
 
     @staticmethod
     def _extract_json(text: str) -> tuple[dict | None, str]:

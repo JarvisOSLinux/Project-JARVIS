@@ -462,3 +462,46 @@ class TestTuiForm:
         host, _, _ = self._finish(False, {})
         host.jarvis.events.inject_setup_result.assert_not_called()
         assert "still pending" in host._append_log.call_args.args[0]
+
+
+# --- picking a setup by number or name -------------------------------------------------
+
+
+def _setup(setup_id, server_id, name, created_at):
+    return {
+        "setup_id": setup_id,
+        "server_id": server_id,
+        "server_name": name,
+        "created_at": created_at,
+        "missing": ["K"],
+    }
+
+
+TWO = [
+    _setup("f824602e", "com.example.mcp.caldav", "CalDAV Calendar", 2.0),
+    _setup("ab12cd34", "com.example.mcp.email", "Email", 1.0),
+]
+
+
+@pytest.mark.unit
+class TestResolve:
+    def test_numbers_follow_the_oldest_first_list(self, capsys):
+        cli._print_setups(TWO, True)
+        out = capsys.readouterr().out
+        assert out.index("1. Email") < out.index("2. CalDAV Calendar")
+        assert cli._resolve_setup(TWO, "1")["setup_id"] == "ab12cd34"
+        assert cli._resolve_setup(TWO, "2")["setup_id"] == "f824602e"
+
+    def test_id_prefix_and_part_of_the_name(self):
+        assert cli._resolve_setup(TWO, "f8")["setup_id"] == "f824602e"
+        assert cli._resolve_setup(TWO, "caldav")["setup_id"] == "f824602e"
+        assert cli._resolve_setup(TWO, "EMAIL")["setup_id"] == "ab12cd34"
+
+    def test_the_only_setup_needs_no_argument(self):
+        assert cli._resolve_setup(TWO[:1], None)["setup_id"] == "f824602e"
+
+    @pytest.mark.parametrize("ref", [None, "3", "0", "com.example", "nope"])
+    def test_ambiguous_missing_or_out_of_range_exits(self, ref, capsys):
+        with pytest.raises(SystemExit):
+            cli._resolve_setup(TWO, ref)
+        assert capsys.readouterr().out
