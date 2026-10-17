@@ -162,10 +162,10 @@ def _cmd_setups() -> None:
     if not args or args == ["list"]:
         setups, live = _load_setups()
         _print_setups(setups, live)
-    elif len(args) == 2 and args[0] == "fill":
-        _setups_fill(args[1])
-    elif len(args) == 2 and args[0] == "cancel":
-        _setups_cancel(args[1])
+    elif args[0] == "fill" and len(args) <= 2:
+        _setups_fill(args[1] if len(args) == 2 else None)
+    elif args[0] == "cancel" and len(args) <= 2:
+        _setups_cancel(args[1] if len(args) == 2 else None)
     else:
         _show_setups_usage()
         sys.exit(1)
@@ -189,27 +189,76 @@ def _load_setups() -> "tuple[list, bool]":
 
 
 def _print_setups(setups: list, live: bool) -> None:
-    if not setups:
+    ordered = _ordered_setups(setups)
+    if not ordered:
         print("No server is waiting for setup.")
     else:
         print("Servers waiting for setup:")
-        for setup in setups:
+        for number, setup in enumerate(ordered, 1):
             print(
-                f"  {setup['setup_id']}  {setup['server_name']} ({setup['server_id']})"
+                f"  {number}. {setup['server_name']} ({setup['server_id']})"
+                f"  [{setup['setup_id']}]"
             )
-            print(f"      needs: {', '.join(setup.get('missing') or [])}")
+            print(f"       needs: {', '.join(setup.get('missing') or [])}")
             if setup.get("goal_description"):
-                print(f"      for: {setup['goal_description']}")
-        print("\nFill one in with: jarvis setups fill <id>")
+                print(f"       for: {setup['goal_description']}")
+        hint = (
+            "jarvis setups fill" if len(ordered) == 1 else "jarvis setups fill <number>"
+        )
+        print(f"\nFill in with: {hint}")
     if not live:
         print(f"({SETUPS_OFFLINE_NOTICE})")
 
 
-def _find_setup(setups: list, ref: str) -> "dict | None":
-    for setup in setups:
+def _ordered_setups(setups: list) -> list:
+    """Oldest first, so a setup added later never renumbers one already shown."""
+    return sorted(setups, key=lambda s: s.get("created_at") or 0)
+
+
+def _resolve_setup(setups: list, ref: "str | None") -> dict:
+    """The setup `ref` names, or exit with why not.
+
+    `ref` may be the number `jarvis setups` shows, the id, the server id, a
+    unique start of the id, or part of the server's id or name. With exactly
+    one setup pending it may be left out.
+    """
+    ordered = _ordered_setups(setups)
+    if not ordered:
+        print("No server is waiting for setup.")
+        sys.exit(1)
+    if ref is None:
+        if len(ordered) == 1:
+            return ordered[0]
+        print("More than one server is waiting for setup; say which:")
+        _print_setups(ordered, True)
+        sys.exit(1)
+    if ref.isdigit():
+        number = int(ref)
+        if 1 <= number <= len(ordered):
+            return ordered[number - 1]
+        print(f"Error: there is no setup number {number}. Run 'jarvis setups'.")
+        sys.exit(1)
+    for setup in ordered:
         if ref in (setup.get("setup_id"), setup.get("server_id")):
             return setup
-    return None
+    low = ref.lower()
+    matches = [
+        s
+        for s in ordered
+        if str(s.get("setup_id", "")).startswith(low)
+        or low in str(s.get("server_id", "")).lower()
+        or low in str(s.get("server_name", "")).lower()
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    if matches:
+        names = ", ".join(s["server_id"] for s in matches)
+        print(f"Error: '{ref}' matches more than one setup: {names}.")
+    else:
+        print(
+            f"Error: No pending setup '{ref}'. Run 'jarvis setups' to see what is waiting."
+        )
+    sys.exit(1)
 
 
 def _prompt_setup_values(setup: dict, ask=input, ask_secret=None) -> "dict | None":
@@ -283,7 +332,7 @@ def _dmcp_config_set(server_id: str, key: str, value: str) -> "str | None":
     return None
 
 
-def _setups_fill(ref: str) -> None:
+def _setups_fill(ref: "str | None") -> None:
     import subprocess
 
     from .core.confirmation_manager import queue_decision
@@ -291,12 +340,7 @@ def _setups_fill(ref: str) -> None:
     from .core.setup_queue import completion_queue_path
 
     setups, live = _load_setups()
-    setup = _find_setup(setups, ref)
-    if setup is None:
-        print(
-            f"Error: No pending setup '{ref}'. Run 'jarvis setups' to see what is waiting."
-        )
-        sys.exit(1)
+    setup = _resolve_setup(setups, ref)
     try:
         values = _prompt_setup_values(setup)
     except (KeyboardInterrupt, EOFError):
@@ -336,17 +380,12 @@ def _setups_fill(ref: str) -> None:
     )
 
 
-def _setups_cancel(ref: str) -> None:
+def _setups_cancel(ref: "str | None") -> None:
     from .core.confirmation_manager import queue_decision
     from .core.setup_queue import completion_queue_path
 
     setups, live = _load_setups()
-    setup = _find_setup(setups, ref)
-    if setup is None:
-        print(
-            f"Error: No pending setup '{ref}'. Run 'jarvis setups' to see what is waiting."
-        )
-        sys.exit(1)
+    setup = _resolve_setup(setups, ref)
     if live:
         response = _ipc_request({"type": "cancel_setup", "id": setup["setup_id"]})
         if response and response.get("type") == "ack":
@@ -362,9 +401,11 @@ def _setups_cancel(ref: str) -> None:
 
 def _show_setups_usage() -> None:
     print("Usage:")
-    print("  jarvis setups                    # List servers waiting for setup")
-    print("  jarvis setups fill <id|server>   # Fill in a server's settings")
-    print("  jarvis setups cancel <id|server> # Drop a pending setup")
+    print("  jarvis setups                  # List servers waiting for setup, numbered")
+    print("  jarvis setups fill [<which>]   # Fill in a server's settings")
+    print("  jarvis setups cancel [<which>] # Drop a pending setup")
+    print("  <which>: the number from the list, the id, or part of the server's name;")
+    print("  optional when only one server is waiting.")
 
 
 def _cmd_confirm() -> None:
@@ -917,8 +958,8 @@ def show_usage() -> None:
     print()
     print("Pending Server Setups:")
     print("  jarvis setups                         # List servers waiting for setup")
-    print("  jarvis setups fill <id|server>        # Fill in a server's settings")
-    print("  jarvis setups cancel <id|server>      # Drop a pending setup")
+    print("  jarvis setups fill [<n|name>]         # Fill in a server's settings")
+    print("  jarvis setups cancel [<n|name>]       # Drop a pending setup")
     print()
     print("Provider Pool:")
     print("  jarvis providers                                    # List providers")
