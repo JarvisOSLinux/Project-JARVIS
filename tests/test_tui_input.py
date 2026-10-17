@@ -162,6 +162,7 @@ class TestSuggestionFilter:
         assert [name for name, _ in filter_commands("/pro", CATALOG)] == ["/providers"]
         assert [name for name, _ in filter_commands("/se", CATALOG)] == [
             "/settings",
+            "/setups",
             "/sessions",
         ]
 

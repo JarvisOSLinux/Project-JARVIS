@@ -261,49 +261,53 @@ def _resolve_setup(setups: list, ref: "str | None") -> dict:
     sys.exit(1)
 
 
-def _prompt_setup_values(setup: dict, ask=input, ask_secret=None) -> "dict | None":
+def _prompt_setup_values(spec, ask=input, ask_secret=None) -> "dict | None":
     """Ask for each setting in the terminal; None if the user declines to save.
 
-    Secrets are read without echo. Enter keeps a default or leaves an optional
-    setting unset; a setting the server cannot run without is asked again.
+    The plain-prompt version of the setup form, with the same rules: secrets
+    are read without echo, Enter keeps what a field already holds, and a
+    setting the server cannot run without is asked again.
     """
     import getpass
 
     ask_secret = ask_secret or getpass.getpass
-    missing = set(setup.get("missing") or [])
-    fields = setup.get("fields") or []
-    print(f"\nSet up {setup['server_name']} ({setup['server_id']})")
-    if setup.get("summary"):
-        print(f"  {setup['summary']}")
-    print("  Enter keeps a default, or leaves an optional setting unset.\n")
+    print(f"\nSet up {spec.server_name} ({spec.server_id})")
+    if spec.summary:
+        print(f"  {spec.summary}")
+    print("  Enter keeps what is shown, or leaves an optional setting unset.\n")
 
     values: dict = {}
-    for field in fields:
+    for field in spec.fields:
         key = field["key"]
         sensitive = bool(field.get("sensitive"))
-        default = "" if sensitive else str(field.get("default") or "")
+        needed = key in spec.missing
+        initial = (
+            "" if sensitive else spec.current.get(key, str(field.get("default") or ""))
+        )
         if field.get("description"):
             print(f"  {field['description']}")
-        if key in missing:
+        if needed:
             note = " (required)"
-        elif field.get("required"):
+        elif field.get("required") or key in spec.secrets_set:
             note = " (already set; Enter keeps it)"
         else:
             note = ""
         prompt = (
-            f"{field.get('label') or key}{note}{f' [{default}]' if default else ''}: "
+            f"{field.get('label') or key}{note}{f' [{initial}]' if initial else ''}: "
         )
         while True:
             value = (ask_secret if sensitive else ask)(prompt).strip()
-            if value or key not in missing:
+            if needed:
+                value = value or initial
+            if value or not needed:
                 break
             print("  The server cannot run without this one.")
-        if value:
+        if value and (needed or value != initial):
             values[key] = value
         print()
 
     print("Saving:")
-    for field in fields:
+    for field in spec.fields:
         if field["key"] in values:
             shown = "•" * 8 if field.get("sensitive") else values[field["key"]]
             print(f"  {field.get('label') or field['key']}: {shown}")
@@ -311,6 +315,34 @@ def _prompt_setup_values(setup: dict, ask=input, ask_secret=None) -> "dict | Non
         print("  (nothing)")
     answer = ask("Save these settings? [Y/n] ").strip().lower()
     return None if answer in ("n", "no") else values
+
+
+def _setup_form_values(spec) -> "dict | None":
+    """The values to save: the setup form on a terminal, plain prompts otherwise.
+
+    The form is Textual, the optional `tui` extra, drawn under the prompt
+    (full-screen on Windows). Without Textual, or with input or output
+    redirected, each setting is asked for in turn instead.
+    """
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        try:
+            from .tui.setup_form import run_inline
+        except ImportError:
+            pass
+        else:
+            return run_inline(spec)
+    return _prompt_setup_values(spec)
+
+
+def _installed_config(server_id: str) -> dict:
+    """The server's settings in dmcp, read from its installed manifest."""
+    import asyncio
+
+    from .dispatch.dmcp_registry import get_server_manifest
+
+    manifest = asyncio.run(get_server_manifest(logger, server_id))
+    config = manifest.get("config") if isinstance(manifest, dict) else None
+    return config if isinstance(config, dict) else {}
 
 
 def _dmcp_config_set(server_id: str, key: str, value: str) -> "str | None":
@@ -337,12 +369,14 @@ def _setups_fill(ref: "str | None") -> None:
 
     from .core.confirmation_manager import queue_decision
     from .core.params_store import ParamsStore
-    from .core.setup_queue import completion_queue_path
+    from .core.setup_queue import completion_queue_path, form_spec
 
     setups, live = _load_setups()
     setup = _resolve_setup(setups, ref)
+    server_id = setup["server_id"]
+    spec = form_spec(setup, _installed_config(server_id), ParamsStore(server_id).get())
     try:
-        values = _prompt_setup_values(setup)
+        values = _setup_form_values(spec)
     except (KeyboardInterrupt, EOFError):
         print("\nNot saved; the setup is still pending.")
         sys.exit(130)
@@ -350,7 +384,6 @@ def _setups_fill(ref: "str | None") -> None:
         print("Not saved; the setup is still pending.")
         return
 
-    server_id = setup["server_id"]
     for key, value in values.items():
         error = _dmcp_config_set(server_id, key, value)
         if error:

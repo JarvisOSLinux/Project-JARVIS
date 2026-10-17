@@ -39,6 +39,11 @@ def update_status(app: Any) -> None:
             else:
                 parts.append(f"ctx: {prompt_toks}tk")
 
+    setups = getattr(app.jarvis, "setups", None)
+    waiting = len(setups.list()) if setups is not None else 0
+    if waiting:
+        parts.append(f"setups waiting: {waiting} (F3)")
+
     parts.append(
         "Ctrl+N new · Ctrl+D delete · Ctrl+Q quit · Ctrl+L log · Ctrl+I input · F1 help · "
         "Ctrl+Shift+C clear · Ctrl+Shift+E export"

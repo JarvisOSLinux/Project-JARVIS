@@ -158,7 +158,8 @@ Built on [Textual](https://textual.textualize.io/). All platform-agnostic.
 | `status_bar.py` | Bottom bar: model, token usage (`ctx: X/Y`), mode indicator |
 | `config_modal.py` | Tabbed settings modal (F2 / `/settings` / `/providers`) — config + providers tabs |
 | `provider_modal.py` | Provider add/edit form pushed from config_modal |
-| `server_config_modal.py` | MCP server configuration form |
+| `setup_form.py` | Setup form shared with `jarvis setups fill` (modal here, inline in the CLI) |
+| `setups_view.py` | Servers waiting for setup (F3 / `/setups`) |
 | `confirm_modal.py` | Tool confirmation dialog (`[Y/n]`) |
 | `help_screen.py` | `/help` overlay |
 | `session_sidebar.py` | Session list sidebar |

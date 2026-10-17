@@ -61,6 +61,10 @@ def handle_local_input(app: Any, text: str, bindings: Any) -> bool:
         app._open_config("settings")
         return True
 
+    if low == "/setups":
+        app._open_setups()
+        return True
+
     return False
 
 

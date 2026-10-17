@@ -262,6 +262,8 @@ make check                  # Format + lint + typecheck + tests
 | `jarvis/tui/app.py` | Textual app shell |
 | `jarvis/tui/lifecycle.py` | App startup/shutdown, callback registration |
 | `jarvis/tui/confirm_modal.py` | Tool confirmation modal |
+| `jarvis/tui/setup_form.py` | The setup form (#254), shared by `jarvis setups fill` (inline) and the TUI (modal) |
+| `jarvis/tui/setups_view.py` | TUI list of pending setups (F3 / `/setups`) |
 | `jarvis/tui/config_modal.py` | Tabbed config/provider settings modal (F2 / /settings) |
 | `jarvis/tui/provider_modal.py` | Provider add/edit modal |
 | `jarvis/core/confirmation_manager.py` | Multi-channel confirmation gate; pending list persisted to `$JARVIS_DATA_DIR/confirmations.json` when built with a store path (#224) |
@@ -293,6 +295,8 @@ make check                  # Format + lint + typecheck + tests
 ---
 
 ## Changelog — corrected claims
+
+*2026-10-17:* one setup form for the CLI and the TUI (#254, phase 2). `jarvis/tui/setup_form.py` holds `SetupForm`, a Textual widget with every setting of one server on screen: Tab, Shift+Tab and the arrow keys move between fields; current values and defaults are filled in; secrets are masked (Ctrl+R shows one); a review step lists what will be saved, secrets as dots, before anything is returned. `jarvis setups fill` runs it as an inline app under the prompt (Textual itself falls back to full-screen on Windows) and keeps the plain prompts when Textual is missing or input or output is not a terminal. The TUI shows the same widget in `SetupFormScreen`, which replaces `ServerConfigModal`, and lists pending setups in `setups_view.py` (F3 or `/setups`; Enter fills one in, C cancels it), with a count in the status bar fed by `SetupQueue.on_change`. `setup_queue.form_spec` builds what the form shows, for both front ends and the plain prompts: dmcp's current config wins over the values mirrored in ParamsStore, and a secret is never prefilled, only marked as set. The form returns each changed field and each required field that was unset, never an untouched default (the server applies its own; writing one would pin it). It writes nothing itself, and the old modal's habit of saving keystrokes to the params file is gone with it. Verified in a real pseudo-terminal against a sandbox and a stand-in dmcp: the form draws inline, the password never reaches the screen, values reach dmcp over stdin, and the params file gets only the non-secret ones.
 
 *2026-10-17:* `configure_server` sets only the settings a server declares. It passed any key the model named to `dmcp config set`, and dmcp passes every stored setting to the server as an environment variable of that name, so a prompt injection could set `NODE_OPTIONS` (code execution in any Node server) with no confirmation prompt; two installed servers on the reference machine already carried settings the model had made up. An undeclared key is now dropped, and the model is told it is not a setting and which ones are. Keys are normalized the way the adapter writes them (`--api-key` → `API_KEY`) before anything is classified: checked under the raw name, a secret given as a flag was treated as an unknown plain key and stored from the model's value, bypassing the #242 rule. With no readable manifest nothing is set (`CONFIGURE_ERROR`). dmcp enforces the same rule on its side (dmcp#77).
 
