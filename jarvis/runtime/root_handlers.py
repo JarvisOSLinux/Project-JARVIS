@@ -17,6 +17,7 @@ from .root_context import (
     build_root_context,
     compact_payload_for_llm,
     configure_call_hint,
+    format_server_docs,
     required_config_keys,
 )
 from .session_commands import handle_slash_command
@@ -225,6 +226,47 @@ def _note_signal(
     return lambda: pid in finished or newest.get(pid) is not token
 
 
+# dispatch marks a finished MCP task "[hash=h] 200 <h>…" or "… 500 …". Only an
+# explicit success counts: a sign-in that failed, or an EXIT in any other
+# shape, shows the model nothing new.
+_EXIT_OK = re.compile(r"(?:^|\]\s*)200\b")
+
+
+async def _tools_after_login(app: Any, logger: Logger, signal: dict[str, Any]) -> str:
+    """Fresh docs for a server whose `login` tool just succeeded, else "".
+
+    A server signed in by a wrapper can only list its own login/status/logout
+    before the sign-in: a hosted server (Notion) refuses to list its tools
+    without a token. The model learned that short list at install time and,
+    after a successful sign-in, told the user the server "only provides
+    authentication tools". The manifest names the sign-in tool (`login`), so a
+    successful EXIT of it is the moment to show the model the real list.
+    """
+    if str(signal.get("type") or "").upper() != "EXIT":
+        return ""
+    server_tool = (getattr(app, "_pid_tools", None) or {}).pop(signal.get("pid"), None)
+    if not server_tool or not _EXIT_OK.search(str(signal.get("data") or "")):
+        return ""
+    server, tool = server_tool
+    manifest = await app.dispatch.get_server_manifest(server)
+    login = manifest.get("login") if isinstance(manifest, dict) else None
+    if not isinstance(login, dict) or login.get("tool") != tool:
+        return ""
+    listed = await app.dispatch.list_server_tools(server)
+    tools = listed.get("tools", []) if isinstance(listed, dict) else []
+    logger.info(f"JARVIS: {server} signed in; refreshed its tools ({len(tools)})")
+    return (
+        f"\nTOOLS_AFTER_SIGN_IN: {server} is signed in now, so it offers more than "
+        "the sign-in tools it listed before. Its current tools:\n"
+        + format_server_docs(
+            server,
+            tools,
+            error=listed.get("error") if isinstance(listed, dict) else None,
+            configurable_props=manifest.get("configurableProperties") or None,
+        )
+    )
+
+
 async def on_dispatch_signal(app: Any, logger: Logger, signal: dict[str, Any]) -> None:
     # Extract EventMerger enrichment keys before passing the signal downstream.
     remind_completed = signal.pop("_remind_completed", False)
@@ -288,6 +330,9 @@ async def on_dispatch_signal(app: Any, logger: Logger, signal: dict[str, Any]) -
             hint_signals = [exit_data]
     context += await _config_hint_for_signals(
         app, logger, hint_signals, owning_goal, signal_text
+    )
+    context += await _tools_after_login(
+        app, logger, exit_data if isinstance(exit_data, dict) else signal
     )
 
     response = await ask_llm(
@@ -412,10 +457,16 @@ async def on_confirmation_response(
         result = await app.dispatch.send_tasks(
             pending.approved_tasks, session_id=pending.session_id
         )
+        # A sign-in tool is gated (elevated), so its PID is recorded here, not
+        # only on the direct path: its EXIT is when the model is shown the
+        # server's full tool list (_tools_after_login).
+        from .dispatch_flow import _extract_pids_from_result, note_dispatched_tools
+
+        note_dispatched_tools(
+            app, _extract_pids_from_result(result), pending.approved_tasks
+        )
 
         if pending.session_id:
-            from .dispatch_flow import _extract_pids_from_result
-
             pids = _extract_pids_from_result(result)
             if pids:
                 if app.goals.get_goal(pending.session_id) is None:
