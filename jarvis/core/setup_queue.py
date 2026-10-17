@@ -27,7 +27,7 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from ..config import Config
 from .confirmation_manager import _atomic_write_json
@@ -65,6 +65,59 @@ def setting_fields(props: Iterable[Any]) -> List[Dict[str, Any]]:
         if isinstance(prop, dict) and isinstance(prop.get("key"), str):
             out.append({k: prop[k] for k in _FIELD_KEYS if k in prop})
     return out
+
+
+@dataclass
+class FormSpec:
+    """What a setup form shows for one server. Never holds a secret's value."""
+
+    server_id: str
+    server_name: str
+    summary: str = ""
+    fields: List[Dict[str, Any]] = field(default_factory=list)
+    # Required settings with no value yet; the form cannot be saved without them.
+    missing: List[str] = field(default_factory=list)
+    # Values already set, secrets left out. They prefill their fields.
+    current: Dict[str, str] = field(default_factory=dict)
+    # Secret settings that already have a value. Left as they are unless retyped.
+    secrets_set: List[str] = field(default_factory=list)
+
+
+def form_spec(
+    setup: Dict[str, Any],
+    config: Optional[Dict[str, Any]] = None,
+    remembered: Optional[Dict[str, Any]] = None,
+) -> FormSpec:
+    """The form for a pending setup, prefilled from what is already set.
+
+    `config` is the server's settings in dmcp (the installed manifest), which
+    wins over `remembered`, the non-secret values JARVIS mirrors to ParamsStore
+    and which outlive a reinstall.
+    """
+    fields_ = list(setup.get("fields") or [])
+    config = config if isinstance(config, dict) else {}
+    remembered = remembered if isinstance(remembered, dict) else {}
+    current: Dict[str, str] = {}
+    secrets_set: List[str] = []
+    for f in fields_:
+        key = f["key"]
+        value = str(config.get(key) or "").strip()
+        if f.get("sensitive"):
+            if value:
+                secrets_set.append(key)
+            continue
+        value = value or str(remembered.get(key) or "").strip()
+        if value:
+            current[key] = value
+    return FormSpec(
+        server_id=str(setup.get("server_id") or ""),
+        server_name=str(setup.get("server_name") or setup.get("server_id") or ""),
+        summary=str(setup.get("summary") or ""),
+        fields=fields_,
+        missing=list(setup.get("missing") or []),
+        current=current,
+        secrets_set=secrets_set,
+    )
 
 
 def missing_required(props: Iterable[Any], config: Dict[str, Any]) -> List[str]:
@@ -132,6 +185,8 @@ class SetupQueue:
     def __init__(self, store_path: Optional[str] = None) -> None:
         self._store_path = Path(store_path).expanduser() if store_path else None
         self._pending: Dict[str, PendingSetup] = {}
+        # Called after every change; the TUI keeps its pending count with it.
+        self.on_change: Optional[Callable[[], None]] = None
         self._restore()
 
     def _restore(self) -> None:
@@ -149,6 +204,11 @@ class SetupQueue:
             logger.info(f"Restored {len(self._pending)} pending setup(s)")
 
     def _persist(self) -> None:
+        if self.on_change is not None:
+            try:
+                self.on_change()
+            except Exception as e:
+                logger.warning(f"A pending-setups listener failed: {e}")
         if self._store_path is None:
             return
         try:

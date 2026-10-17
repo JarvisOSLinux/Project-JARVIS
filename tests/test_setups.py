@@ -335,7 +335,7 @@ class TestPrompts:
     def test_required_is_asked_again_secret_is_hidden_and_masked(self, capsys):
         prompts = []
         values = cli._prompt_setup_values(
-            SETUP,
+            setup_queue.form_spec(SETUP),
             ask=_answers("", "", "y", prompts=prompts),  # REGION, MODE kept; save
             ask_secret=_answers("", "s3cret", prompts=prompts),  # empty, then the key
         )
@@ -350,7 +350,9 @@ class TestPrompts:
     def test_declining_saves_nothing(self):
         assert (
             cli._prompt_setup_values(
-                SETUP, ask=_answers("eu", "", "n"), ask_secret=_answers("k")
+                setup_queue.form_spec(SETUP),
+                ask=_answers("eu", "", "n"),
+                ask_secret=_answers("k"),
             )
             is None
         )
@@ -367,9 +369,10 @@ class TestFill:
         monkeypatch.setattr(cli, "_load_setups", lambda: ([SETUP], live))
         monkeypatch.setattr(
             cli,
-            "_prompt_setup_values",
-            lambda setup: {"API_KEY": "s3cret", "REGION": "eu"},
+            "_setup_form_values",
+            lambda spec: {"API_KEY": "s3cret", "REGION": "eu"},
         )
+        monkeypatch.setattr(cli, "_installed_config", lambda server_id: {})
         ipc = Mock(return_value=ipc_answer)
         monkeypatch.setattr(cli, "_ipc_request", ipc)
 
@@ -422,9 +425,8 @@ class TestTuiForm:
     def _textual(self):
         pytest.importorskip("textual")
 
-    def _finish(self, confirmed, values):
+    def _finish(self, values):
         from jarvis.tui import app as tui_app
-        from jarvis.tui.server_config_modal import ConfigModalResult
 
         pending = SetupQueue().add("demo", MANIFEST, ["API_KEY"])
         host = SimpleNamespace(
@@ -436,20 +438,12 @@ class TestTuiForm:
             _escape=lambda s: s,
         )
         params = Mock()
-
-        async def run():
-            future = asyncio.get_running_loop().create_future()
-            future.set_result(ConfigModalResult(confirmed=confirmed, values=values))
-            await tui_app.JarvisTUI._finish_setup_form(host, pending, future)
-
         with patch("jarvis.core.params_store.ParamsStore", lambda sid: params):
-            asyncio.run(run())
+            asyncio.run(tui_app.JarvisTUI._finish_setup_form(host, pending, values))
         return host, pending, params
 
     def test_saving_writes_values_and_resumes(self):
-        host, pending, params = self._finish(
-            True, {"API_KEY": "k", "REGION": "eu", "MODE": ""}
-        )
+        host, pending, params = self._finish({"API_KEY": "k", "REGION": "eu"})
         host.jarvis.dispatch.set_server_config.assert_awaited_once_with(
             "demo", {"API_KEY": "k", "REGION": "eu"}
         )
@@ -459,7 +453,7 @@ class TestTuiForm:
         )
 
     def test_closing_the_form_leaves_it_pending(self):
-        host, _, _ = self._finish(False, {})
+        host, _, _ = self._finish(None)
         host.jarvis.events.inject_setup_result.assert_not_called()
         assert "still pending" in host._append_log.call_args.args[0]
 

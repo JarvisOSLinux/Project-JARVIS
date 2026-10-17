@@ -431,27 +431,6 @@ def test_the_configure_hint_leaves_secrets_empty():
     assert "Never ask for a secret in chat" in hint
 
 
-# --- the TUI form ------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-def test_the_tui_form_does_not_save_secret_keystrokes(params_file):
-    # The TUI is an optional extra and CI's test job does not install it --
-    # the same skip tests/test_tui_input.py uses.
-    pytest.importorskip("textual")
-    from jarvis.tui.server_config_modal import ServerConfigModal
-
-    modal = object.__new__(ServerConfigModal)
-    modal._server_id = "demo"
-    modal._props = MANIFEST["configurableProperties"]
-    modal._values = {}
-    modal.query_one = lambda *a, **k: Mock()
-    modal.on__field_changed(SimpleNamespace(key="API_KEY", value="s3cret-typed"))
-    modal.on__field_changed(SimpleNamespace(key="BASE_URL", value="https://x"))
-    saved = params_file.read_text()
-    assert "s3cret-typed" not in saved and "https://x" in saved
-
-
 # --- the params store ---------------------------------------------------------------------
 
 

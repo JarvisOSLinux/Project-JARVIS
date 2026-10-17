@@ -164,6 +164,7 @@ class JarvisTUI(App):
         Binding("ctrl+i", "focus_input", "Input", show=True),
         Binding("f1", "help", "Help", show=True, priority=True),
         Binding("f2", "settings", "Settings", show=True, priority=True),
+        Binding("f3", "setups", "Setups", show=True, priority=True),
         Binding("ctrl+shift+c", "clear_transcript", "Clear log", show=False),
         Binding("ctrl+shift+e", "export_transcript", "Export", show=False),
     ]
@@ -275,49 +276,73 @@ class JarvisTUI(App):
         saved: Dict[str, Any],
         future: "asyncio.Future",
     ) -> None:
-        """Push the server config modal and resolve *future* when the user submits."""
-        from .server_config_modal import ServerConfigModal
+        """Ask for the settings `configure_server` named, in the setup form."""
+        from types import SimpleNamespace
 
-        await self.push_screen(
-            ServerConfigModal(server_id, server_name, server_desc, props, saved, future)
+        from ..core.setup_queue import form_spec, missing_required, setting_fields
+        from .setup_form import SetupFormScreen
+
+        fields = setting_fields(props)
+        missing = missing_required(fields, saved)
+        spec = form_spec(
+            {
+                "server_id": server_id,
+                "server_name": server_name,
+                "summary": server_desc,
+                "fields": fields,
+                "missing": missing,
+            },
+            remembered=saved,
         )
 
+        def done(values: Optional[Dict[str, str]]) -> None:
+            if not future.done():
+                future.set_result(
+                    SimpleNamespace(
+                        confirmed=values is not None,
+                        values=values or {},
+                        missing_required=[] if values is not None else missing,
+                    )
+                )
+
+        self.push_screen(SetupFormScreen(spec), done)
+
     async def _offer_setup(self, setup: Any) -> None:
-        """Open the form for a new pending setup (#254) without blocking the engine.
+        """Open the form for a pending setup (#254) without blocking the engine.
 
         Saving writes the values through dmcp and resumes the goal, the same
         path `jarvis setups fill` takes; closing the form leaves it pending.
         """
         from ..core.params_store import ParamsStore
-        from .server_config_modal import ServerConfigModal
+        from ..core.setup_queue import form_spec
+        from .setup_form import SetupFormScreen
 
-        future: asyncio.Future = asyncio.get_running_loop().create_future()
-        await self.push_screen(
-            ServerConfigModal(
-                setup.server_id,
-                setup.server_name,
-                setup.summary,
-                setup.fields,
-                ParamsStore(setup.server_id).get(),
-                future,
-            )
+        manifest = await self.jarvis.dispatch.get_server_manifest(setup.server_id)
+        spec = form_spec(
+            setup.to_dict(),
+            (manifest or {}).get("config"),
+            ParamsStore(setup.server_id).get(),
         )
-        task = asyncio.create_task(self._finish_setup_form(setup, future))
-        self._setup_forms.add(task)
-        task.add_done_callback(self._setup_forms.discard)
 
-    async def _finish_setup_form(self, setup: Any, future: "asyncio.Future") -> None:
+        def done(values: Optional[Dict[str, str]]) -> None:
+            task = asyncio.create_task(self._finish_setup_form(setup, values))
+            self._setup_forms.add(task)
+            task.add_done_callback(self._setup_forms.discard)
+
+        self.push_screen(SetupFormScreen(spec), done)
+
+    async def _finish_setup_form(
+        self, setup: Any, values: Optional[Dict[str, str]]
+    ) -> None:
         from ..core.params_store import ParamsStore
 
-        result = await future
         later = (
             f"Setup of {self._escape(setup.server_id)} is still pending: "
-            f"jarvis setups fill {setup.setup_id}"
+            f"F3, or jarvis setups fill {setup.setup_id}"
         )
-        if not result.confirmed or self.jarvis is None:
+        if values is None or self.jarvis is None:
             self._append_log(f"[dim]{later}[/dim]")
             return
-        values = {k: v for k, v in (result.values or {}).items() if v}
         try:
             await self.jarvis.dispatch.set_server_config(setup.server_id, values)
         except Exception as e:
@@ -334,6 +359,32 @@ class JarvisTUI(App):
         self.jarvis.events.inject_setup_result(
             {"type": "setup_completed", "id": setup.setup_id}
         )
+
+    def _open_setups(self) -> None:
+        """The pending setups (F3, /setups): fill one in or cancel it."""
+        from .setups_view import SetupsScreen
+
+        jarvis = self.jarvis
+        setups = jarvis.setups.list() if jarvis is not None else []
+
+        def chosen(choice: Optional[tuple]) -> None:
+            if not choice or jarvis is None:
+                return
+            what, setup_id = choice
+            setup = jarvis.setups.find(setup_id)
+            if setup is None:
+                self._append_log("[dim]That setup is no longer pending.[/dim]")
+            elif what == "fill":
+                self.call_later(self._offer_setup, setup)
+            else:
+                jarvis.events.inject_setup_result(
+                    {"type": "cancel_setup", "id": setup.setup_id}
+                )
+                self._append_log(
+                    f"[dim]Cancelled the setup of {self._escape(setup.server_id)}.[/dim]"
+                )
+
+        self.push_screen(SetupsScreen(setups), chosen)
 
     def _append_log(self, markup: str) -> None:
         tui_output.append_log(self, markup)
@@ -399,6 +450,10 @@ class JarvisTUI(App):
     def action_settings(self) -> None:
         if len(self.screen_stack) <= 1:
             self._open_config("settings")
+
+    def action_setups(self) -> None:
+        if len(self.screen_stack) <= 1:
+            self._open_setups()
 
     async def action_quit(self) -> None:
         """Quit, asking first when quitting would stop work that is running."""

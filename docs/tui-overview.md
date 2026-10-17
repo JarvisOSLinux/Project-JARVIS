@@ -75,7 +75,9 @@ Full list in `jarvis/tui/slash_commands_doc.py`; handler in `jarvis/runtime/sess
 
 **`provider_modal.py`** — Provider add/edit form; pushed from config_modal Providers tab.
 
-**`server_config_modal.py`** — MCP server configuration; pushed when a server needs API keys / config.
+**`setup_form.py`** — The setup form (#254): every setting of one server on one screen, with a review step before saving. The TUI shows it in a modal when a server is waiting for setup; `jarvis setups fill` draws the same form under the prompt.
+
+**`setups_view.py`** — Servers waiting for setup (F3 or `/setups`): Enter opens the form, C cancels the setup. The status bar counts them.
 
 **`confirm_modal.py`** — Tool-level action confirmation dialog: shows the full command each tool will run (not just the tool name, #186); Allow/Deny via Y/N or buttons, Esc = Deny. Integrates with `ConfirmationManager` via the TUI callback.
 

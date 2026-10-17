@@ -1,5 +1,11 @@
 # Server Config Params — Design Spec
 
+> **Superseded in part by #254.** Installing no longer waits on a form: a
+> required setting that is unset becomes a pending setup, filled in with
+> `jarvis setups fill` or the TUI's Setups view (F3). `ServerConfigModal` is
+> gone; both front ends use the shared setup form in `jarvis/tui/setup_form.py`.
+> The sections below on the modal and the async bridge are history.
+
 ## Problem
 
 When JARVIS installs an MCP server that requires configuration (API keys,
