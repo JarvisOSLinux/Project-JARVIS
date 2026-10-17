@@ -944,6 +944,7 @@ async def dispatch_execute_tasks(
         return
 
     pids = _extract_pids_from_result(result)
+    note_dispatched_tools(app, pids, tasks)
     if pids and goal_id:
         app.goals.link_tasks(goal_id, pids)
         app.goals.link_dispatch_fingerprint(goal_id, fingerprint, pids)
@@ -951,6 +952,24 @@ async def dispatch_execute_tasks(
         # auth-error EXIT names only the server behind the failing task.
         app.goals.link_dispatch_servers(goal_id, pids, tasks)
     emit_activity(app, "Tasks dispatched; awaiting results…", kind="dispatch")
+
+
+def note_dispatched_tools(app: Any, pids: list, tasks: list) -> None:
+    """Remember which server and tool each dispatched PID runs.
+
+    Paired like GoalManager.link_dispatch_servers: this batch's INITs are the
+    newest, so the trailing len(tasks) PIDs belong to these tasks in order,
+    and an ambiguous pairing records nothing. Kept on the app rather than a
+    goal, since a sign-in can finish after its goal is closed.
+    """
+    if not pids or not tasks or len(pids) < len(tasks):
+        return
+    known = getattr(app, "_pid_tools", None)
+    if known is None:
+        known = app._pid_tools = {}
+    for pid, task in zip(pids[-len(tasks) :], tasks):
+        if isinstance(task, dict) and task.get("server") and task.get("tool"):
+            known[pid] = (task["server"], task["tool"])
 
 
 async def do_kill(app: Any, logger: Logger, pids: Any) -> None:
