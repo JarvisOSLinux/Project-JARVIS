@@ -25,6 +25,7 @@ from jarvis.core.secret_scrubber import (
     redact_secrets,
     redaction_notice,
 )
+from jarvis.dispatch.adapter import DispatchAdapter
 from jarvis.runtime import root_actions, root_handlers, sync_ask
 from jarvis.runtime.root_context import configure_call_hint
 
@@ -319,6 +320,59 @@ class TestConfigureServer:
         ):
             told = await _configure(app, {"API_KEY": ""})
         assert "cancelled" in told and "Do not ask for these values in chat" in told
+
+    @pytest.mark.asyncio
+    async def test_a_setting_the_server_does_not_declare_is_never_set(
+        self, tmp_path, params_file
+    ):
+        # Settings become environment variables of the same name; NODE_OPTIONS
+        # would run code in a Node server the next time it starts.
+        app = _server_app(tmp_path)
+        told = await _configure(
+            app,
+            {
+                "NODE_OPTIONS": "--import=data:text/javascript,0",
+                "BASE_URL": "https://x",
+            },
+        )
+        app.dispatch.set_server_config.assert_awaited_once_with(
+            "demo", {"BASE_URL": "https://x"}
+        )
+        assert "NODE_OPTIONS is not a setting of demo" in told
+        assert "its settings are API_KEY, BASE_URL" in told
+        assert "NODE_OPTIONS" not in params_file.read_text()
+
+    @pytest.mark.asyncio
+    async def test_a_secret_named_like_a_flag_is_still_a_secret(
+        self, tmp_path, params_file, monkeypatch
+    ):
+        # The adapter writes `--api-key` as API_KEY; checked under the raw name,
+        # the model's value went through as an unknown plain setting.
+        monkeypatch.delenv("DISPLAY", raising=False)
+        monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+        app = _server_app(tmp_path)
+        app.dispatch._sanitize_config_key = DispatchAdapter._sanitize_config_key
+        await _configure(app, {"--api-key": GITHUB})
+        app.dispatch.set_server_config.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_server_without_a_readable_manifest_gets_nothing(
+        self, tmp_path, params_file
+    ):
+        app = _server_app(tmp_path)
+        app.dispatch.get_server_manifest = AsyncMock(return_value={})
+        with (
+            patch.object(root_actions, "build_root_context", return_value=""),
+            patch.object(root_actions, "emit_activity"),
+            patch.object(
+                root_actions, "ask_llm", new=AsyncMock(return_value="{}")
+            ) as ask,
+        ):
+            await root_actions._handle_configure_server(
+                app, Mock(), {"server_id": "demo", "config": {"BASE_URL": "x"}}, 0, 5
+            )
+        app.dispatch.set_server_config.assert_not_awaited()
+        assert "CONFIGURE_ERROR" in ask.call_args.args[2]
 
     @pytest.mark.asyncio
     async def test_non_secret_placeholders_are_still_sent_back_to_the_user(
