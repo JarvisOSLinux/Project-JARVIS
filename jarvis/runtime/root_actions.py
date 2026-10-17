@@ -461,11 +461,33 @@ async def _handle_configure_server(
     max_chain_depth: int,
 ) -> None:
     server_id = parsed["server_id"]
-    config = parsed["config"]
     emit_activity(app, f"Configuring {server_id}…", kind="dispatch")
 
     manifest = await app.dispatch.get_server_manifest(server_id)
-    props = (manifest or {}).get("configurableProperties") or []
+    if not manifest:
+        await feed_root_summary(
+            app,
+            logger,
+            "CONFIGURE_ERROR",
+            f"{server_id} is not installed, or its manifest cannot be read; nothing was set",
+            depth,
+        )
+        return
+    props = manifest.get("configurableProperties") or []
+    declared = [
+        p["key"] for p in props if isinstance(p, dict) and isinstance(p.get("key"), str)
+    ]
+    # Named the way the adapter writes them, before anything is classified: a
+    # secret given as `--api-key` was checked as an unknown plain key and then
+    # stored as API_KEY.
+    config = {
+        app.dispatch._sanitize_config_key(k): v for k, v in parsed["config"].items()
+    }
+    # A setting reaches the server as an environment variable of that name, so
+    # an undeclared one (NODE_OPTIONS, LD_PRELOAD) would run code in it. dmcp
+    # refuses them too; this says why to the model.
+    undeclared = [k for k in config if k not in declared]
+    config = {k: v for k, v in config.items() if k in declared}
     secret = _sensitive_keys(props)
     plain = {k: v for k, v in config.items() if k not in secret}
     # A sensitive value is never taken from the model, real or placeholder:
@@ -504,6 +526,16 @@ async def _handle_configure_server(
 
     values = dict(plain)
     notes = []
+    if undeclared:
+        settings = (
+            f"its settings are {', '.join(declared)}"
+            if declared
+            else "it has no settings"
+        )
+        notes.append(
+            f"{', '.join(undeclared)} {'is' if len(undeclared) == 1 else 'are'} not a "
+            f"setting of {server_id} and was not set; {settings}"
+        )
     if wanted:
         from ..core.params_store import ParamsStore
 
@@ -539,11 +571,7 @@ async def _handle_configure_server(
             # Only non-secret values are remembered for pre-filling a form;
             # dmcp's config is the one place a secret lives.
             ParamsStore(server_id).set_many(
-                {
-                    app.dispatch._sanitize_config_key(k): v
-                    for k, v in _non_sensitive(values, props).items()
-                    if v
-                }
+                {k: v for k, v in _non_sensitive(values, props).items() if v}
             )
             logger.info(
                 f"JARVIS: configure_server '{server_id}' set {list(values.keys())}"
