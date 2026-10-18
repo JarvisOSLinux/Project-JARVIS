@@ -530,6 +530,72 @@ class TestFill:
         assert queued == [{"type": "cancel_setup", "id": "ab12cd34"}]
 
 
+@pytest.mark.unit
+class TestEdit:
+    """`jarvis setups edit <server>`: the form for an installed server (#254, phase 3)."""
+
+    def _edit(self, monkeypatch, tmp_path, ref, values, setups=()):
+        manifest = tmp_path / "manifest.json"
+        manifest.write_text(
+            json.dumps({**MANIFEST, "config": {"API_KEY": "old-key", "REGION": "eu"}})
+        )
+        servers = [
+            {"id": "com.example.demo", "name": "Demo", "manifest_path": str(manifest)},
+            {"id": "com.example.other", "name": "Other", "manifest_path": "/nope"},
+        ]
+        monkeypatch.setattr(cli, "_installed_servers", lambda: servers)
+        monkeypatch.setattr(cli, "_load_setups", lambda: (list(setups), True))
+        specs = []
+        monkeypatch.setattr(
+            cli, "_setup_form_values", lambda spec: specs.append(spec) or values
+        )
+        calls = []
+        monkeypatch.setattr(
+            "subprocess.run",
+            lambda args, **kw: calls.append((args, kw)) or _completed(),
+        )
+        params = Mock(get=Mock(return_value={}))
+        monkeypatch.setattr("jarvis.core.params_store.ParamsStore", lambda sid: params)
+        cli._setups_edit(ref)
+        return specs, calls, params
+
+    def test_opens_the_current_settings_and_saves_only_changes(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        specs, calls, params = self._edit(
+            monkeypatch, tmp_path, "demo", {"REGION": "us", "API_KEY": "new-key"}
+        )
+        (spec,) = specs
+        assert spec.kind == "edit" and spec.server_id == "com.example.demo"
+        assert spec.current == {"REGION": "eu"} and spec.secrets_set == ["API_KEY"]
+        assert spec.missing == [] and "old-key" not in repr(spec)
+        sets = [(a[4], kw["input"]) for a, kw in calls if a[1] == "config"]
+        assert sets == [("REGION", "us"), ("API_KEY", "new-key")]
+        assert all("new-key" not in a for a, _ in calls)
+        params.set_many.assert_called_once_with({"REGION": "us"})
+        out = capsys.readouterr().out
+        assert "Saved Region, API key for Demo" in out and "new-key" not in out
+
+    def test_nothing_changed_writes_nothing(self, monkeypatch, tmp_path, capsys):
+        _, calls, _ = self._edit(monkeypatch, tmp_path, "com.example.demo", {})
+        assert calls == []
+        assert "Nothing to save" in capsys.readouterr().out
+
+    def test_a_server_waiting_for_setup_opens_that_instead(self, monkeypatch, tmp_path):
+        filled = []
+        monkeypatch.setattr(cli, "_setups_fill", filled.append)
+        waiting = {"setup_id": "ab12cd34", "server_id": "com.example.demo"}
+        specs, _, _ = self._edit(monkeypatch, tmp_path, "demo", {}, setups=[waiting])
+        assert filled == ["ab12cd34"] and specs == []
+
+    def test_an_ambiguous_or_unknown_server_exits(self, monkeypatch, tmp_path, capsys):
+        for ref in ("com.example", "nothing-like-it"):
+            with pytest.raises(SystemExit):
+                self._edit(monkeypatch, tmp_path, ref, {})
+        out = capsys.readouterr().out
+        assert "matches more than one server" in out and "no installed server" in out
+
+
 # --- the TUI ---------------------------------------------------------------------------
 
 
