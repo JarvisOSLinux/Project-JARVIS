@@ -166,6 +166,8 @@ def _cmd_setups() -> None:
         _setups_fill(args[1] if len(args) == 2 else None)
     elif args[0] == "cancel" and len(args) <= 2:
         _setups_cancel(args[1] if len(args) == 2 else None)
+    elif args[0] == "edit" and len(args) == 2:
+        _setups_edit(args[1])
     else:
         _show_setups_usage()
         sys.exit(1)
@@ -450,11 +452,119 @@ def _setups_cancel(ref: "str | None") -> None:
     )
 
 
+def _installed_servers() -> list:
+    """Each installed server's id, name and manifest path, from `dmcp list --json`."""
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            [Config.DMCP_BINARY, "list", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        servers = json.loads(result.stdout)
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        return []
+    if not isinstance(servers, list):
+        return []
+    return [s for s in servers if isinstance(s, dict) and s.get("id")]
+
+
+def _resolve_server(servers: list, ref: str) -> dict:
+    """The installed server `ref` names (its id, or part of its id or name), or exit."""
+    for server in servers:
+        if server["id"] == ref:
+            return server
+    low = ref.lower()
+    matches = [
+        s
+        for s in servers
+        if low in s["id"].lower() or low in str(s.get("name") or "").lower()
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    if matches:
+        print(f"Error: '{ref}' matches more than one server:")
+        for s in matches:
+            print(f"  {s['id']}  ({s.get('name') or s['id']})")
+    else:
+        print(f"Error: no installed server matches '{ref}'. Run 'dmcp list'.")
+    sys.exit(1)
+
+
+def _setups_edit(ref: str) -> None:
+    """The setup form for an installed server's settings, filled in with what is set."""
+    from .core.params_store import ParamsStore
+    from .core.setup_queue import form_spec, missing_required, setting_fields
+
+    server = _resolve_server(_installed_servers(), ref)
+    server_id = server["id"]
+    setups, _ = _load_setups()
+    waiting = [s for s in setups if s.get("server_id") == server_id]
+    if waiting:
+        # Filling that in resumes the goal waiting on it; an edit would not.
+        print(f"{server_id} is waiting for setup; opening that instead.")
+        _setups_fill(waiting[0]["setup_id"])
+        return
+
+    try:
+        with open(server["manifest_path"], encoding="utf-8") as f:
+            manifest = json.load(f)
+    except (KeyError, OSError, ValueError) as e:
+        print(f"Error: cannot read the settings of {server_id}: {e}")
+        sys.exit(1)
+    props = manifest.get("configurableProperties") or []
+    name = manifest.get("name") or server_id
+    if not props:
+        print(f"{name} has no settings.")
+        return
+    config = manifest.get("config") if isinstance(manifest.get("config"), dict) else {}
+    spec = form_spec(
+        {
+            "server_id": server_id,
+            "server_name": name,
+            "fields": setting_fields(props),
+            "missing": missing_required(props, config),
+            "kind": "edit",
+        },
+        config,
+        ParamsStore(server_id).get(),
+    )
+    try:
+        values = _setup_form_values(spec)
+    except (KeyboardInterrupt, EOFError):
+        print("\nNot saved; nothing changed.")
+        sys.exit(130)
+    if values is None:
+        print("Not saved; nothing changed.")
+        return
+    if not values:
+        print("Nothing to save; the settings stay as they are.")
+        return
+
+    for key, value in values.items():
+        error = _dmcp_config_set(server_id, key, value)
+        if error:
+            print(f"Error: could not save {key}: {error}")
+            sys.exit(1)
+    secret = {f["key"] for f in spec.fields if f.get("sensitive")}
+    plain = {k: v for k, v in values.items() if k not in secret}
+    if plain:
+        ParamsStore(server_id).set_many(plain)
+    labels = {f["key"]: f.get("label") or f["key"] for f in spec.fields}
+    print(
+        f"Saved {', '.join(labels[k] for k in values)} for {name}. "
+        "They apply the next time it starts."
+    )
+
+
 def _show_setups_usage() -> None:
     print("Usage:")
     print("  jarvis setups                  # List servers waiting for setup, numbered")
     print("  jarvis setups fill [<which>]   # Fill in a server's settings")
     print("  jarvis setups cancel [<which>] # Drop a pending setup")
+    print("  jarvis setups edit <server>    # Change an installed server's settings")
     print("  <which>: the number from the list, the id, or part of the server's name;")
     print("  optional when only one server is waiting.")
 
@@ -1011,6 +1121,9 @@ def show_usage() -> None:
     print("  jarvis setups                         # List servers waiting for setup")
     print("  jarvis setups fill [<n|name>]         # Fill in a server's settings")
     print("  jarvis setups cancel [<n|name>]       # Drop a pending setup")
+    print(
+        "  jarvis setups edit <server>           # Change an installed server's settings"
+    )
     print()
     print("Provider Pool:")
     print("  jarvis providers                                    # List providers")
