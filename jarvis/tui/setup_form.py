@@ -21,9 +21,14 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.markup import escape
 from textual.message import Message
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label, Static
+from textual.widgets import Button, Input, Label, Select, SelectionList, Static, Switch
 
-from ..core.setup_queue import FormSpec
+from ..core.setup_queue import (
+    FormSpec,
+    as_setting_value,
+    boolean_spellings,
+    value_error,
+)
 
 MASK = "•" * 8
 KEYS_HINT = "Tab or ↑↓ move · Enter next · Ctrl+R shows a secret · Esc cancels"
@@ -31,7 +36,12 @@ REVIEW_HINT = "Enter or Ctrl+S saves · Esc goes back"
 
 
 class _Field(Vertical):
-    """One setting: its name, what it is for, and an input."""
+    """One setting: its name, what it is for, and a widget for its type.
+
+    A text box by default; a switch for a boolean, a select for a choice, a
+    checklist for a choice of several, and a whole-number box for an integer
+    (mcp-registry#115). A secret is always a masked text box.
+    """
 
     DEFAULT_CSS = """
     _Field {
@@ -40,6 +50,10 @@ class _Field(Vertical):
     }
     _Field .field-desc {
         color: $text-muted;
+    }
+    _Field SelectionList {
+        height: auto;
+        max-height: 12;
     }
     """
 
@@ -51,17 +65,46 @@ class _Field(Vertical):
         self.needed = self.key in spec.missing
         self.secret_set = self.key in spec.secrets_set
         self._prop = prop
+        self.kind = "string" if self.secret else str(prop.get("type") or "string")
+        self.choices = [str(c) for c in prop.get("choices") or []]
+        self.separator = str(prop.get("separator") or ",")
+        self.spelled = boolean_spellings(prop)
         # What the server runs with today: its current value, else its default.
         self.baseline = (
             ""
             if self.secret
             else spec.current.get(self.key, str(prop.get("default") or ""))
         )
+        if self.kind == "boolean":
+            # An unset switch is off; a value spelled another way ("True") is
+            # read as what it means, so an untouched switch writes nothing.
+            self.baseline = as_setting_value(
+                prop, self.baseline or self.spelled[1]
+            ) or (self.baseline)
         self.suggested = None if self.secret else spec.proposed.get(self.key)
         self.initial = self.suggested if self.suggested is not None else self.baseline
+        self.input: Optional[Input] = None
+        self.widget = self._make_widget()
+
+    def _make_widget(self) -> Any:
+        if self.kind == "boolean":
+            return Switch(value=self.initial == self.spelled[0])
+        if self.kind == "choice" and self._prop.get("multiple"):
+            chosen = set(self.initial.split(self.separator)) if self.initial else set()
+            return SelectionList(*((c, c, c in chosen) for c in self.choices))
+        if self.kind == "choice":
+            return Select(
+                [(c, c) for c in self.choices],
+                value=self.initial if self.initial in self.choices else Select.NULL,
+                prompt="choose one" if self.needed else "optional; leave empty",
+            )
         self.input = Input(
-            value=self.initial, password=self.secret, placeholder=self._placeholder()
+            value=self.initial,
+            password=self.secret,
+            placeholder=self._placeholder(),
+            type="integer" if self.kind == "integer" else "text",
         )
+        return self.input
 
     def _placeholder(self) -> str:
         if self.secret and self.secret_set:
@@ -80,6 +123,12 @@ class _Field(Vertical):
             notes.append("required, already set")
         if self.secret:
             notes.append("secret")
+        if self.kind == "choice" and self._prop.get("multiple"):
+            notes.append("any of these; Space ticks one")
+        if self.kind == "integer":
+            low, high = self._prop.get("min"), self._prop.get("max")
+            if isinstance(low, int) and isinstance(high, int):
+                notes.append(f"{low} to {high}")
         if self.suggested is not None:
             notes.append("[bold yellow]suggested by JARVIS[/bold yellow]")
         tail = f"  [dim]({', '.join(notes)})[/dim]" if notes else ""
@@ -88,11 +137,33 @@ class _Field(Vertical):
             yield Static(
                 str(self._prop["description"]), classes="field-desc", markup=False
             )
-        yield self.input
+        yield self.widget
 
     @property
     def value(self) -> str:
-        return self.input.value.strip()
+        """The setting as it would be stored: always a string."""
+        if self.kind == "boolean":
+            return self.spelled[0] if self.widget.value else self.spelled[1]
+        if isinstance(self.widget, SelectionList):
+            chosen = set(self.widget.selected)
+            return self.separator.join(c for c in self.choices if c in chosen)
+        if isinstance(self.widget, Select):
+            picked = self.widget.value
+            return picked if isinstance(picked, str) else ""
+        return self.widget.value.strip()
+
+    @property
+    def error(self) -> Optional[str]:
+        value = self.value
+        return value_error(self._prop, value) if value and not self.secret else None
+
+    def shown(self, value: str) -> str:
+        """How the review shows a value."""
+        if self.secret:
+            return MASK
+        if self.kind == "boolean":
+            return "on" if value == self.spelled[0] else "off"
+        return value
 
 
 class SetupForm(Vertical):
@@ -186,7 +257,7 @@ class SetupForm(Vertical):
             iter(self._fields), None
         )
         if first is not None:
-            first.input.focus()
+            first.widget.focus()
         else:
             self.query_one("#setup-next", Button).focus()
 
@@ -194,6 +265,9 @@ class SetupForm(Vertical):
 
     def still_needed(self) -> List[str]:
         return [f.label for f in self._fields if f.needed and not f.value]
+
+    def invalid(self) -> List[str]:
+        return [f"{f.label} {f.error}" for f in self._fields if f.error]
 
     def values(self) -> Dict[str, str]:
         """What to write: each field that differs from what the server runs with
@@ -217,7 +291,7 @@ class SetupForm(Vertical):
             lines = [f"Saving for {self.spec.server_name}:"]
             for f in self._fields:
                 if f.key in values:
-                    shown = MASK if f.secret else values[f.key]
+                    shown = f.shown(values[f.key])
                     mark = (
                         "  (suggested by JARVIS)"
                         if values[f.key] == f.suggested
@@ -238,9 +312,14 @@ class SetupForm(Vertical):
             status.update("")
             go.disabled = False
             return
-        needed = self.still_needed()
-        status.update(f"Still needed: {', '.join(needed)}" if needed else "")
-        go.disabled = bool(needed)
+        needed, invalid = self.still_needed(), self.invalid()
+        if needed:
+            status.update(f"Still needed: {', '.join(needed)}")
+        elif invalid:
+            status.update(f"Fix: {'; '.join(invalid)}")
+        else:
+            status.update("")
+        go.disabled = bool(needed or invalid)
 
     def _show_review(self, on: bool) -> None:
         self.reviewing = on
@@ -256,18 +335,29 @@ class SetupForm(Vertical):
         if on:
             self.query_one("#setup-next", Button).focus()
         elif self._fields:
-            self._fields[0].input.focus()
+            self._fields[0].widget.focus()
 
     def on_input_changed(self, event: Input.Changed) -> None:
         self._refresh()
 
+    def on_switch_changed(self, event: Switch.Changed) -> None:
+        self._refresh()
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        self._refresh()
+
+    def on_selection_list_selected_changed(
+        self, event: SelectionList.SelectedChanged
+    ) -> None:
+        self._refresh()
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
         event.stop()
-        inputs = [f.input for f in self._fields]
-        if event.input is inputs[-1]:
+        widgets = [f.widget for f in self._fields]
+        if event.input is widgets[-1]:
             self.action_advance()
         else:
-            inputs[inputs.index(event.input) + 1].focus()
+            widgets[widgets.index(event.input) + 1].focus()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         event.stop()
@@ -280,10 +370,10 @@ class SetupForm(Vertical):
         if self.reviewing:
             self.post_message(self.Finished(self.values()))
             return
-        needed = [f for f in self._fields if f.needed and not f.value]
-        if needed:
+        problems = [f for f in self._fields if (f.needed and not f.value) or f.error]
+        if problems:
             self.app.bell()
-            needed[0].input.focus()
+            problems[0].widget.focus()
             return
         self._show_review(True)
 
@@ -296,7 +386,7 @@ class SetupForm(Vertical):
     def action_reveal(self) -> None:
         focused = self.app.focused
         for f in self._fields:
-            if f.secret and f.input is focused:
+            if f.secret and f.input is not None and f.input is focused:
                 f.input.password = not f.input.password
 
 

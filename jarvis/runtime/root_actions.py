@@ -7,7 +7,12 @@ from logging import Logger
 from typing import Any
 
 from ..config import Config
-from ..core.setup_queue import missing_required, setting_fields
+from ..core.setup_queue import (
+    as_setting_value,
+    missing_required,
+    setting_fields,
+    value_error,
+)
 from ..core.skill_store import delete_skill, save_skill
 from .goal_updates import apply_goal_updates
 from .llm_bridge import ask_llm
@@ -551,14 +556,26 @@ async def _handle_configure_server(
     current = manifest.get("config") or {}
     # Only a plain value the model really has. A placeholder is no proposal:
     # the field is left for the user, who sees it empty rather than "<your url>".
-    proposed = {
-        k: str(v).strip()
-        for k, v in config.items()
-        if k in declared
-        and k not in secret
-        and str(v).strip()
-        and not _looks_like_placeholder(v)
-    }
+    proposed = {}
+    refused = []
+    for k, v in config.items():
+        if k not in declared or k in secret or not str(v).strip():
+            continue
+        if _looks_like_placeholder(v):
+            continue
+        prop = next(p for p in props if p["key"] == k)
+        # In the setting's own spelling ("yes" -> "1" for a 1/0 switch); a
+        # value its type refuses is no proposal: the user picks in the form.
+        value = as_setting_value(prop, v)
+        if value is None:
+            refused.append(f"{k} {value_error(prop, str(v).strip())}")
+        else:
+            proposed[k] = value
+    if refused:
+        note += (
+            f" Not filled in, because the setting does not accept it: "
+            f"{'; '.join(refused)}. The user picks those in the form."
+        )
     missing = missing_required(requested, current)
     unchanged = not missing and all(
         p["key"] not in secret
