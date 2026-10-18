@@ -222,18 +222,24 @@ MANIFEST = {
     "configurableProperties": [
         {"key": "API_KEY", "sensitive": True, "required": True},
         {"key": "BASE_URL", "required": True},
+        {"key": "MODE", "default": "safe"},
     ],
+    "config": {"BASE_URL": "https://old"},
 }
 
 
-def _server_app(tmp_path, *, modal=None):
+def _server_app(tmp_path, *, offer=None):
+    from jarvis.core.setup_queue import SetupQueue
+
     return SimpleNamespace(
         dispatch=SimpleNamespace(
             get_server_manifest=AsyncMock(return_value=MANIFEST),
             set_server_config=AsyncMock(),
             _sanitize_config_key=lambda k: k,
         ),
-        config_modal_callback=modal,
+        goals=SimpleNamespace(get_active_goals=lambda: []),
+        setups=SetupQueue(),
+        setup_ready_callback=offer,
         _act_on_root_response=AsyncMock(),
     )
 
@@ -259,70 +265,40 @@ async def _configure(app, config):
 
 @pytest.mark.unit
 class TestConfigureServer:
-    @pytest.mark.asyncio
-    async def test_a_secret_is_collected_in_the_form_not_taken_from_the_model(
-        self, tmp_path, params_file, monkeypatch
-    ):
-        monkeypatch.setenv("DISPLAY", ":0")
-        form = AsyncMock(return_value={"API_KEY": "from-the-form"})
-        app = _server_app(tmp_path)
-        with patch("jarvis.ui.config_prompt.prompt_configurable_properties", form):
-            # Even a real-looking value from the model is discarded: for the
-            # model to hold it, it came through the conversation.
-            told = await _configure(app, {"API_KEY": GITHUB, "BASE_URL": "https://x"})
-
-        app.dispatch.set_server_config.assert_awaited_once_with(
-            "demo", {"BASE_URL": "https://x", "API_KEY": "from-the-form"}
-        )
-        assert GITHUB not in repr(app.dispatch.set_server_config.mock_calls)
-        assert "from-the-form" not in told and "secure form" in told
-        assert "from-the-form" not in params_file.read_text()
-        assert "https://x" in params_file.read_text()
+    """The model names settings; the user reviews and saves them in the form (#254)."""
 
     @pytest.mark.asyncio
-    async def test_the_tui_modal_is_the_form_when_there_is_one(
+    async def test_nothing_is_written_the_settings_are_queued_for_review(
         self, tmp_path, params_file
     ):
-        async def modal(server_id, name, desc, props, saved, future):
-            future.set_result(
-                SimpleNamespace(
-                    confirmed=True, values={"API_KEY": "typed"}, missing_required=[]
-                )
-            )
-
-        app = _server_app(tmp_path, modal=AsyncMock(side_effect=modal))
-        await _configure(app, {"API_KEY": ""})
-        app.config_modal_callback.assert_awaited_once()
-        app.dispatch.set_server_config.assert_awaited_once_with(
-            "demo", {"API_KEY": "typed"}
-        )
-
-    @pytest.mark.asyncio
-    async def test_with_no_form_available_the_model_is_told_never_to_ask_in_chat(
-        self, tmp_path, params_file, monkeypatch
-    ):
-        monkeypatch.delenv("DISPLAY", raising=False)
-        monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
         app = _server_app(tmp_path)
-        told = await _configure(app, {"API_KEY": ""})
+        told = await _configure(app, {"API_KEY": GITHUB, "BASE_URL": "https://x"})
+
         app.dispatch.set_server_config.assert_not_awaited()
-        assert "jarvis tui" in told and "Never ask for a secret value in chat" in told
+        (pending,) = app.setups.list()
+        assert pending["kind"] == "configure"
+        assert [f["key"] for f in pending["fields"]] == ["API_KEY", "BASE_URL"]
+        # Even a real-looking secret from the model is discarded: for the model
+        # to hold it, it came through the conversation.
+        assert pending["proposed"] == {"BASE_URL": "https://x"}
+        assert GITHUB not in repr(app.setups.list())
+        assert pending["missing"] == ["API_KEY"]
+        assert (
+            "CONFIGURE_PENDING" in told and "Never ask for these values in chat" in told
+        )
+        assert f"jarvis setups fill {pending['setup_id']}" in told
 
     @pytest.mark.asyncio
-    async def test_a_cancelled_form_is_not_followed_by_a_request_in_chat(
-        self, tmp_path, params_file, monkeypatch
-    ):
-        monkeypatch.setenv("DISPLAY", ":0")
-        app = _server_app(tmp_path)
-        with patch(
-            "jarvis.ui.config_prompt.prompt_configurable_properties",
-            AsyncMock(return_value=None),
-        ):
-            told = await _configure(app, {"API_KEY": ""})
-        assert "cancelled" in told and "Do not ask for these values in chat" in told
+    async def test_the_tui_is_offered_the_form(self, tmp_path, params_file):
+        offer = AsyncMock()
+        app = _server_app(tmp_path, offer=offer)
+        told = await _configure(app, {"MODE": "fast"})
+        offer.assert_awaited_once()
+        assert offer.await_args.args[0].proposed == {"MODE": "fast"}
+        assert "A setup form has opened in the TUI" in told
 
     @pytest.mark.asyncio
-    async def test_a_setting_the_server_does_not_declare_is_never_set(
+    async def test_a_setting_the_server_does_not_declare_is_dropped(
         self, tmp_path, params_file
     ):
         # Settings become environment variables of the same name; NODE_OPTIONS
@@ -330,30 +306,49 @@ class TestConfigureServer:
         app = _server_app(tmp_path)
         told = await _configure(
             app,
-            {
-                "NODE_OPTIONS": "--import=data:text/javascript,0",
-                "BASE_URL": "https://x",
-            },
+            {"NODE_OPTIONS": "--import=data:text/javascript,0", "MODE": "fast"},
         )
-        app.dispatch.set_server_config.assert_awaited_once_with(
-            "demo", {"BASE_URL": "https://x"}
-        )
+        (pending,) = app.setups.list()
+        assert [f["key"] for f in pending["fields"]] == ["MODE"]
+        assert "NODE_OPTIONS" not in repr(pending)
         assert "NODE_OPTIONS is not a setting of demo" in told
-        assert "its settings are API_KEY, BASE_URL" in told
-        assert "NODE_OPTIONS" not in params_file.read_text()
+        assert "its settings are API_KEY, BASE_URL, MODE" in told
+
+    @pytest.mark.asyncio
+    async def test_only_undeclared_settings_queue_nothing(self, tmp_path, params_file):
+        app = _server_app(tmp_path)
+        told = await _configure(app, {"LD_PRELOAD": "/tmp/x.so"})
+        assert app.setups.list() == []
+        assert "CONFIGURE_RESULT: nothing was set on demo" in told
 
     @pytest.mark.asyncio
     async def test_a_secret_named_like_a_flag_is_still_a_secret(
-        self, tmp_path, params_file, monkeypatch
+        self, tmp_path, params_file
     ):
         # The adapter writes `--api-key` as API_KEY; checked under the raw name,
         # the model's value went through as an unknown plain setting.
-        monkeypatch.delenv("DISPLAY", raising=False)
-        monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
         app = _server_app(tmp_path)
         app.dispatch._sanitize_config_key = DispatchAdapter._sanitize_config_key
         await _configure(app, {"--api-key": GITHUB})
-        app.dispatch.set_server_config.assert_not_awaited()
+        (pending,) = app.setups.list()
+        assert [f["key"] for f in pending["fields"]] == ["API_KEY"]
+        assert pending["proposed"] == {} and GITHUB not in repr(pending)
+
+    @pytest.mark.asyncio
+    async def test_a_placeholder_is_left_for_the_user_not_proposed(
+        self, tmp_path, params_file
+    ):
+        app = _server_app(tmp_path)
+        await _configure(app, {"BASE_URL": "<your server url>"})
+        (pending,) = app.setups.list()
+        assert pending["proposed"] == {}
+
+    @pytest.mark.asyncio
+    async def test_values_already_set_need_no_form(self, tmp_path, params_file):
+        app = _server_app(tmp_path)
+        told = await _configure(app, {"BASE_URL": "https://old"})
+        assert app.setups.list() == []
+        assert "already has those values: BASE_URL = https://old" in told
 
     @pytest.mark.asyncio
     async def test_a_server_without_a_readable_manifest_gets_nothing(
@@ -361,27 +356,9 @@ class TestConfigureServer:
     ):
         app = _server_app(tmp_path)
         app.dispatch.get_server_manifest = AsyncMock(return_value={})
-        with (
-            patch.object(root_actions, "build_root_context", return_value=""),
-            patch.object(root_actions, "emit_activity"),
-            patch.object(
-                root_actions, "ask_llm", new=AsyncMock(return_value="{}")
-            ) as ask,
-        ):
-            await root_actions._handle_configure_server(
-                app, Mock(), {"server_id": "demo", "config": {"BASE_URL": "x"}}, 0, 5
-            )
-        app.dispatch.set_server_config.assert_not_awaited()
-        assert "CONFIGURE_ERROR" in ask.call_args.args[2]
-
-    @pytest.mark.asyncio
-    async def test_non_secret_placeholders_are_still_sent_back_to_the_user(
-        self, tmp_path, params_file
-    ):
-        app = _server_app(tmp_path)
-        told = await _configure(app, {"BASE_URL": "<your server url>"})
-        assert "CONFIGURE_BLOCKED" in told and "not secrets" in told
-        app.dispatch.set_server_config.assert_not_awaited()
+        told = await _configure(app, {"BASE_URL": "x"})
+        assert app.setups.list() == []
+        assert "CONFIGURE_ERROR" in told
 
 
 @pytest.mark.unit
@@ -393,18 +370,14 @@ class TestInstallServer:
         # #242 made install collect config through a secure form rather than
         # skip it; #254 keeps that promise without holding the goal on the
         # form: the setup is queued and filled outside the chat.
-        from jarvis.core.setup_queue import SetupQueue
-
-        monkeypatch.setenv("DISPLAY", ":0")
         app = _server_app(tmp_path)
-        app.goals = SimpleNamespace(get_active_goals=lambda: [])
-        app.setups = SetupQueue()
+        app.dispatch.get_server_manifest = AsyncMock(
+            return_value=dict(MANIFEST, config={})
+        )
         app.dispatch.install_server = AsyncMock(return_value={})
         app.dispatch.run_server_setup = AsyncMock(return_value={})
-        form = AsyncMock(return_value={"API_KEY": "k", "BASE_URL": "https://x"})
         ask = AsyncMock(return_value="{}")
         with (
-            patch("jarvis.ui.config_prompt.prompt_configurable_properties", form),
             patch.object(root_actions, "build_root_context", return_value=""),
             patch.object(root_actions, "emit_activity"),
             patch.object(root_actions, "ask_llm", new=ask),
@@ -413,7 +386,6 @@ class TestInstallServer:
                 app, Mock(), {"server_id": "demo"}, 0, 5
             )
 
-        form.assert_not_awaited()
         app.dispatch.run_server_setup.assert_not_awaited()
         (pending,) = app.setups.list()
         assert pending["missing"] == ["API_KEY", "BASE_URL"]

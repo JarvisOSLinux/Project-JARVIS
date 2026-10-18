@@ -55,12 +55,18 @@ class TestQueue:
         queue = SetupQueue()
         goal = SimpleNamespace(id="g1", description="check my mail")
         first = queue.add("demo", MANIFEST, ["API_KEY"], goal)
-        second = queue.add("demo", MANIFEST, ["API_KEY", "REGION"], goal)
-        assert [s["setup_id"] for s in queue.list()] == [second.setup_id]
-        assert queue.find("demo") is second and queue.find(second.setup_id) is second
-        assert queue.find(first.setup_id) is None
-        assert second.goal_description == "check my mail"
-        assert queue.pop("demo") is second and queue.list() == []
+        # A second request joins the first: the id the user was given still
+        # works, and the goal already waiting is the one that resumes.
+        second = queue.add(
+            "demo", MANIFEST, ["API_KEY", "REGION"], SimpleNamespace(id="g2")
+        )
+        assert second is first and [s["setup_id"] for s in queue.list()] == [
+            first.setup_id
+        ]
+        assert second.missing == ["API_KEY", "REGION"]
+        assert queue.find("demo") is first and queue.find(first.setup_id) is first
+        assert first.goal_id == "g1" and first.goal_description == "check my mail"
+        assert queue.pop("demo") is first and queue.list() == []
 
     def test_survives_a_restart_and_stores_no_values(self, data_dir):
         path = str(setup_queue.store_path())
@@ -239,6 +245,95 @@ class TestSetupResult:
         )
 
 
+@pytest.mark.unit
+class TestConfigureResult:
+    """configure_server's settings, saved or closed in the form (#254, phase 3)."""
+
+    def _pending(self, app, config_now):
+        pending = app.setups.add(
+            "demo",
+            MANIFEST,
+            [],
+            SimpleNamespace(id="g", description="use the eu region"),
+            kind="configure",
+            props=[MANIFEST["configurableProperties"][i] for i in (0, 1)],
+            proposed={"REGION": "eu", "API_KEY": "never-kept"},
+        )
+        app.dispatch.get_server_manifest = AsyncMock(
+            return_value={**MANIFEST, "config": config_now}
+        )
+        return pending
+
+    def test_a_secret_is_never_kept_as_a_proposal(self):
+        app = _app(MANIFEST)
+        assert self._pending(app, {}).proposed == {"REGION": "eu"}
+
+    def test_saving_resumes_with_plain_values_and_secrets_only_as_set(self):
+        app = _app(MANIFEST)
+        pending = self._pending(app, {"API_KEY": "s3cret", "REGION": "eu"})
+        told = _run(
+            root_actions.on_setup_result,
+            app,
+            Mock(),
+            {"type": "setup_completed", "id": pending.setup_id},
+        )
+        assert app.setups.list() == []
+        app.dispatch.run_server_setup.assert_not_awaited()
+        assert "CONFIGURE_RESULT: the user saved the settings of demo" in told
+        assert "API_KEY set (secret, not shown)" in told and "REGION = eu" in told
+        assert "s3cret" not in told
+        assert "originally asked: use the eu region" in told
+
+    def test_closing_the_form_changes_nothing_and_says_so(self):
+        app = _app(MANIFEST)
+        pending = self._pending(app, {})
+        told = _run(
+            root_actions.on_setup_result,
+            app,
+            Mock(),
+            {"type": "cancel_setup", "id": pending.setup_id},
+        )
+        assert "CONFIGURE_CANCELLED" in told and "nothing changed" in told
+
+    def test_a_required_setting_still_unset_stays_pending_as_configure(self):
+        app = _app(MANIFEST)
+        pending = app.setups.add(
+            "demo",
+            MANIFEST,
+            ["API_KEY"],
+            kind="configure",
+            props=[MANIFEST["configurableProperties"][0]],
+        )
+        app.dispatch.get_server_manifest = AsyncMock(
+            return_value={**MANIFEST, "config": {}}
+        )
+        told = _run(
+            root_actions.on_setup_result,
+            app,
+            Mock(),
+            {"type": "setup_completed", "id": pending.setup_id},
+        )
+        again = app.setups.find("demo")
+        assert again.kind == "configure" and again.missing == ["API_KEY"]
+        assert "CONFIGURE_PENDING" in told
+
+    def test_a_request_joins_a_pending_install_setup(self):
+        queue = SetupQueue()
+        install = queue.add("demo", MANIFEST, ["API_KEY"], SimpleNamespace(id="g1"))
+        joined = queue.add(
+            "demo",
+            MANIFEST,
+            [],
+            SimpleNamespace(id="g2"),
+            kind="configure",
+            props=[MANIFEST["configurableProperties"][1]],
+            proposed={"REGION": "eu"},
+        )
+        assert joined is install and joined.kind == "install"
+        assert joined.proposed == {"REGION": "eu"} and joined.goal_id == "g1"
+        assert [f["key"] for f in joined.fields] == ["API_KEY", "REGION", "MODE"]
+
+
 # --- the socket and the offline queue --------------------------------------------------
 
 
@@ -346,6 +441,25 @@ class TestPrompts:
         assert prompts[:2] == ["API key (required): ", "API key (required): "]
         assert "Region (already set; Enter keeps it): " in prompts
         assert "Mode [safe]: " in prompts
+
+    def test_a_suggested_value_is_shown_marked_and_enter_accepts_it(self):
+        prompts = []
+        spec = setup_queue.form_spec(
+            {
+                **SETUP,
+                "kind": "configure",
+                "missing": [],
+                "proposed": {"MODE": "fast"},
+            },
+            config={"API_KEY": "set", "REGION": "eu"},
+        )
+        values = cli._prompt_setup_values(
+            spec,
+            ask=_answers("", "", "y", prompts=prompts),  # REGION kept, MODE accepted
+            ask_secret=_answers("", prompts=prompts),  # the secret kept
+        )
+        assert values == {"MODE": "fast"}
+        assert "Mode (suggested by JARVIS; Enter accepts it) [fast]: " in prompts
 
     def test_declining_saves_nothing(self):
         assert (

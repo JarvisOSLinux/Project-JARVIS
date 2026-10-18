@@ -37,7 +37,6 @@ async def start_jarvis(app: Any, logger: Any) -> None:
     app._activity_cb = app._on_jarvis_activity
     jarvis.output_manager.add_output_callback(app._output_cb)
     jarvis.output_manager.add_activity_callback(app._activity_cb)
-    jarvis.config_modal_callback = app._open_config_modal
     jarvis.setup_ready_callback = app._offer_setup
     jarvis.setups.on_change = app._update_status
 

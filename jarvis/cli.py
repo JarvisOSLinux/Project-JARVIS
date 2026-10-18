@@ -199,7 +199,7 @@ def _print_setups(setups: list, live: bool) -> None:
                 f"  {number}. {setup['server_name']} ({setup['server_id']})"
                 f"  [{setup['setup_id']}]"
             )
-            print(f"       needs: {', '.join(setup.get('missing') or [])}")
+            print(f"       {_setup_needs(setup)}")
             if setup.get("goal_description"):
                 print(f"       for: {setup['goal_description']}")
         hint = (
@@ -208,6 +208,14 @@ def _print_setups(setups: list, live: bool) -> None:
         print(f"\nFill in with: {hint}")
     if not live:
         print(f"({SETUPS_OFFLINE_NOTICE})")
+
+
+def _setup_needs(setup: dict) -> str:
+    """What a pending setup is waiting for, in one line."""
+    if setup.get("kind") == "configure":
+        keys = [f["key"] for f in setup.get("fields") or []]
+        return f"change: {', '.join(keys)} (asked for by JARVIS)"
+    return f"needs: {', '.join(setup.get('missing') or [])}"
 
 
 def _ordered_setups(setups: list) -> list:
@@ -271,9 +279,15 @@ def _prompt_setup_values(spec, ask=input, ask_secret=None) -> "dict | None":
     import getpass
 
     ask_secret = ask_secret or getpass.getpass
-    print(f"\nSet up {spec.server_name} ({spec.server_id})")
-    if spec.summary:
-        print(f"  {spec.summary}")
+    if spec.kind == "configure":
+        print(f"\nChange settings for {spec.server_name} ({spec.server_id})")
+        print("  JARVIS asked to change these settings. Check each one before saving.")
+    elif spec.kind == "edit":
+        print(f"\nSettings for {spec.server_name} ({spec.server_id})")
+    else:
+        print(f"\nSet up {spec.server_name} ({spec.server_id})")
+        if spec.summary:
+            print(f"  {spec.summary}")
     print("  Enter keeps what is shown, or leaves an optional setting unset.\n")
 
     values: dict = {}
@@ -281,13 +295,17 @@ def _prompt_setup_values(spec, ask=input, ask_secret=None) -> "dict | None":
         key = field["key"]
         sensitive = bool(field.get("sensitive"))
         needed = key in spec.missing
-        initial = (
+        baseline = (
             "" if sensitive else spec.current.get(key, str(field.get("default") or ""))
         )
+        suggested = None if sensitive else spec.proposed.get(key)
+        initial = suggested if suggested is not None else baseline
         if field.get("description"):
             print(f"  {field['description']}")
         if needed:
             note = " (required)"
+        elif suggested is not None:
+            note = " (suggested by JARVIS; Enter accepts it)"
         elif field.get("required") or key in spec.secrets_set:
             note = " (already set; Enter keeps it)"
         else:
@@ -297,12 +315,12 @@ def _prompt_setup_values(spec, ask=input, ask_secret=None) -> "dict | None":
         )
         while True:
             value = (ask_secret if sensitive else ask)(prompt).strip()
-            if needed:
+            if needed or suggested is not None:
                 value = value or initial
             if value or not needed:
                 break
             print("  The server cannot run without this one.")
-        if value and (needed or value != initial):
+        if value and (needed or value != baseline):
             values[key] = value
         print()
 

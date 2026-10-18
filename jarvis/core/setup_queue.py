@@ -81,6 +81,12 @@ class FormSpec:
     current: Dict[str, str] = field(default_factory=dict)
     # Secret settings that already have a value. Left as they are unless retyped.
     secrets_set: List[str] = field(default_factory=list)
+    # Non-secret values the model proposed (configure_server). They prefill
+    # their fields, marked as the model's, and are saved unless changed back.
+    proposed: Dict[str, str] = field(default_factory=dict)
+    # "install": a server waiting for its settings; "configure": the model asked
+    # to change some; "edit": the user opened an installed server's settings.
+    kind: str = "install"
 
 
 def form_spec(
@@ -109,6 +115,12 @@ def form_spec(
         value = value or str(remembered.get(key) or "").strip()
         if value:
             current[key] = value
+    secret = {f["key"] for f in fields_ if f.get("sensitive")}
+    proposed = {
+        str(k): str(v)
+        for k, v in (setup.get("proposed") or {}).items()
+        if k not in secret and str(v).strip()
+    }
     return FormSpec(
         server_id=str(setup.get("server_id") or ""),
         server_name=str(setup.get("server_name") or setup.get("server_id") or ""),
@@ -117,6 +129,8 @@ def form_spec(
         missing=list(setup.get("missing") or []),
         current=current,
         secrets_set=secrets_set,
+        proposed=proposed,
+        kind=str(setup.get("kind") or "install"),
     )
 
 
@@ -146,6 +160,10 @@ class PendingSetup:
     goal_id: Optional[str] = None
     goal_description: Optional[str] = None
     created_at: float = field(default_factory=time.time)
+    # "install" (setup runs once filled) or "configure" (configure_server).
+    kind: str = "install"
+    # Non-secret values the model proposed; never a secret.
+    proposed: Dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -224,19 +242,47 @@ class SetupQueue:
         manifest: Dict[str, Any],
         missing: List[str],
         goal: Any = None,
+        *,
+        kind: str = "install",
+        props: Optional[List[Any]] = None,
+        proposed: Optional[Dict[str, str]] = None,
     ) -> PendingSetup:
-        """Record that `server_id` needs `missing`; replaces an older entry for it."""
-        for old in [s for s in self._pending.values() if s.server_id == server_id]:
-            del self._pending[old.setup_id]
+        """Record that `server_id` needs settings; one entry per server.
+
+        `props` limits the form to some of the server's settings (the ones
+        configure_server named); by default it shows all of them. A request for
+        a server that already has an entry joins it: the user fills in one
+        form, and the goal that is already waiting is the one that resumes.
+        """
+        all_fields = setting_fields(manifest.get("configurableProperties") or [])
+        wanted = setting_fields(props) if props is not None else all_fields
+        secret = {f["key"] for f in all_fields if f.get("sensitive")}
+        offered = {k: str(v) for k, v in (proposed or {}).items() if k not in secret}
+        old = self.find(server_id)
+        if old is not None:
+            keys = {f["key"] for f in old.fields} | {f["key"] for f in wanted}
+            old.fields = [f for f in all_fields if f["key"] in keys]
+            old.missing = [k for k in [*old.missing, *missing] if k in keys]
+            old.missing = list(dict.fromkeys(old.missing))
+            old.proposed = {**old.proposed, **offered}
+            if kind == "install":
+                old.kind = "install"
+            if old.goal_id is None and goal is not None:
+                old.goal_id = getattr(goal, "id", None)
+                old.goal_description = getattr(goal, "description", None)
+            self._persist()
+            return old
         setup = PendingSetup(
             setup_id=uuid.uuid4().hex[:8],
             server_id=server_id,
             server_name=str(manifest.get("name") or server_id),
             summary=str(manifest.get("summary") or manifest.get("description") or ""),
-            fields=setting_fields(manifest.get("configurableProperties") or []),
+            fields=wanted,
             missing=list(missing),
             goal_id=getattr(goal, "id", None),
             goal_description=getattr(goal, "description", None),
+            kind=kind,
+            proposed=offered,
         )
         self._pending[setup.setup_id] = setup
         self._persist()

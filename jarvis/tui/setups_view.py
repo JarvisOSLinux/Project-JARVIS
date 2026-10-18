@@ -25,9 +25,14 @@ def ordered(setups: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def describe(number: int, setup: Dict[str, Any]) -> str:
+    if setup.get("kind") == "configure":
+        keys = [f["key"] for f in setup.get("fields") or []]
+        needs = f"change: {', '.join(keys)} (asked for by JARVIS)"
+    else:
+        needs = f"needs: {', '.join(setup.get('missing') or [])}"
     lines = [
         f"{number}. {setup.get('server_name') or setup.get('server_id')}",
-        f"   needs: {', '.join(setup.get('missing') or [])}",
+        f"   {needs}",
     ]
     if setup.get("goal_description"):
         lines.append(f"   for: {setup['goal_description']}")
