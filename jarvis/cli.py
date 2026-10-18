@@ -280,6 +280,8 @@ def _prompt_setup_values(spec, ask=input, ask_secret=None) -> "dict | None":
     """
     import getpass
 
+    from .core.setup_queue import as_setting_value, boolean_spellings, value_error
+
     ask_secret = ask_secret or getpass.getpass
     if spec.kind == "configure":
         print(f"\nChange settings for {spec.server_name} ({spec.server_id})")
@@ -296,14 +298,22 @@ def _prompt_setup_values(spec, ask=input, ask_secret=None) -> "dict | None":
     for field in spec.fields:
         key = field["key"]
         sensitive = bool(field.get("sensitive"))
+        kind = "string" if sensitive else (field.get("type") or "string")
         needed = key in spec.missing
         baseline = (
             "" if sensitive else spec.current.get(key, str(field.get("default") or ""))
         )
+        if kind == "boolean":
+            # Unset reads as off, as on the form's switch: Enter writes nothing.
+            no = boolean_spellings(field)[1]
+            baseline = as_setting_value(field, baseline or no) or baseline
         suggested = None if sensitive else spec.proposed.get(key)
         initial = suggested if suggested is not None else baseline
         if field.get("description"):
             print(f"  {field['description']}")
+        hint = _type_hint(field, kind)
+        if hint:
+            print(f"  {hint}")
         if needed:
             note = " (required)"
         elif suggested is not None:
@@ -312,13 +322,18 @@ def _prompt_setup_values(spec, ask=input, ask_secret=None) -> "dict | None":
             note = " (already set; Enter keeps it)"
         else:
             note = ""
-        prompt = (
-            f"{field.get('label') or key}{note}{f' [{initial}]' if initial else ''}: "
-        )
+        shown = _shown_setting(field, kind, initial)
+        prompt = f"{field.get('label') or key}{note}{f' [{shown}]' if shown else ''}: "
         while True:
             value = (ask_secret if sensitive else ask)(prompt).strip()
-            if needed or suggested is not None:
+            if needed or suggested is not None or kind == "boolean":
                 value = value or initial
+            if value and kind == "boolean":
+                value = as_setting_value(field, value) or value
+            why = value_error(field, value) if value and not sensitive else None
+            if why:
+                print(f"  {field.get('label') or key} {why}.")
+                continue
             if value or not needed:
                 break
             print("  The server cannot run without this one.")
@@ -329,12 +344,46 @@ def _prompt_setup_values(spec, ask=input, ask_secret=None) -> "dict | None":
     print("Saving:")
     for field in spec.fields:
         if field["key"] in values:
-            shown = "•" * 8 if field.get("sensitive") else values[field["key"]]
+            kind = field.get("type") or "string"
+            shown = (
+                "•" * 8
+                if field.get("sensitive")
+                else _shown_setting(field, kind, values[field["key"]])
+            )
             print(f"  {field.get('label') or field['key']}: {shown}")
     if not values:
         print("  (nothing)")
     answer = ask("Save these settings? [Y/n] ").strip().lower()
     return None if answer in ("n", "no") else values
+
+
+def _type_hint(field: dict, kind: str) -> str:
+    """What the plain prompt accepts for a typed setting (mcp-registry#115)."""
+    if kind == "boolean":
+        return "Answer on or off."
+    if kind == "choice" and field.get("multiple"):
+        separator = field.get("separator") or ","
+        return f"Any of: {', '.join(field.get('choices') or [])} (separated by '{separator}')."
+    if kind == "choice":
+        return f"One of: {', '.join(field.get('choices') or [])}."
+    if (
+        kind == "integer"
+        and isinstance(field.get("min"), int)
+        and isinstance(field.get("max"), int)
+    ):
+        return f"A whole number from {field['min']} to {field['max']}."
+    if kind == "integer":
+        return "A whole number."
+    return ""
+
+
+def _shown_setting(field: dict, kind: str, value: str) -> str:
+    """A setting's value as a person reads it: a boolean as on or off."""
+    from .core.setup_queue import boolean_spellings
+
+    if kind == "boolean" and value:
+        return "on" if value == boolean_spellings(field)[0] else "off"
+    return value
 
 
 def _setup_form_values(spec) -> "dict | None":

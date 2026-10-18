@@ -406,3 +406,119 @@ class TestTui:
         jarvis.events.inject_setup_result.assert_called_once_with(
             {"type": "setup_completed", "id": setup.setup_id}
         )
+
+
+TYPED = [
+    {"key": "READ_ONLY", "label": "Read-only", "type": "boolean", "default": "false"},
+    {
+        "key": "TELEMETRY",
+        "label": "No telemetry",
+        "type": "boolean",
+        "values": {"true": "1", "false": "0"},
+    },
+    {
+        "key": "SECURITY",
+        "label": "Security",
+        "type": "choice",
+        "choices": ["ssl", "starttls", "plaintext"],
+        "default": "ssl",
+    },
+    {
+        "key": "PRESET",
+        "label": "Presets",
+        "type": "choice",
+        "multiple": True,
+        "choices": ["mail", "calendar", "files"],
+        "default": "mail",
+    },
+    {
+        "key": "PORT",
+        "label": "Port",
+        "type": "integer",
+        "min": 1,
+        "max": 65535,
+        "default": "993",
+    },
+]
+
+
+@pytest.mark.unit
+class TestTypedFields:
+    """mcp-registry#115: a switch, a select, a checklist and a whole-number box."""
+
+    def _spec(self, **kw):
+        base = dict(server_id="demo", server_name="Demo", fields=TYPED, missing=[])
+        base.update(kw)
+        return FormSpec(**base)
+
+    def test_each_type_gets_its_widget_and_untouched_writes_nothing(self):
+        async def steps(app, pilot, seen):
+            form = _form(app)
+            seen["widgets"] = [type(f.widget).__name__ for f in form._fields]
+            seen["values"] = [f.value for f in form._fields]
+            await pilot.press("ctrl+s", "ctrl+s")
+
+        values, seen = _run(self._spec(current={"TELEMETRY": "True"}), steps)
+        assert seen["widgets"] == [
+            "Switch",
+            "Switch",
+            "Select",
+            "SelectionList",
+            "Input",
+        ]
+        # "True" is read as on, so the switch shows it in the server's spelling.
+        assert seen["values"] == ["false", "1", "ssl", "mail", "993"]
+        assert values == {}
+
+    def test_changes_are_stored_in_each_setting_s_own_spelling(self):
+        async def steps(app, pilot, seen):
+            form = _form(app)
+            read_only, telemetry, security, preset, _ = (f.widget for f in form._fields)
+            read_only.focus()
+            await pilot.press("space")  # the switch, by keyboard
+            telemetry.value = True
+            security.value = "starttls"
+            preset.select("files")
+            await pilot.pause()
+            await pilot.press("ctrl+s")
+            seen["review"] = str(app.query_one("#setup-review").render())
+            await pilot.press("ctrl+s")
+
+        values, seen = _run(self._spec(), steps)
+        assert values == {
+            "READ_ONLY": "true",
+            "TELEMETRY": "1",
+            "SECURITY": "starttls",
+            "PRESET": "mail,files",
+        }
+        assert (
+            "Read-only: on" in seen["review"] and "No telemetry: on" in seen["review"]
+        )
+
+    def test_a_number_out_of_range_blocks_the_review_and_says_why(self):
+        async def steps(app, pilot, seen):
+            port = _form(app)._fields[-1].widget
+            port.focus()
+            await pilot.press("end", *["backspace"] * 3, *"70000")
+            seen["status"] = str(app.query_one("#setup-status").render())
+            seen["disabled"] = app.query_one("#setup-next", Button).disabled
+            await pilot.press("ctrl+s")
+            seen["reviewing"] = _form(app).reviewing
+            await pilot.press(*["backspace"] * 5, *"143", "ctrl+s", "ctrl+s")
+
+        values, seen = _run(self._spec(), steps)
+        assert seen["status"] == "Fix: Port must be at most 65535"
+        assert seen["disabled"] is True and seen["reviewing"] is False
+        assert values == {"PORT": "143"}
+
+    def test_a_secret_stays_a_masked_text_box_whatever_its_type(self):
+        spec = self._spec(
+            fields=[{"key": "TOKEN", "type": "boolean", "sensitive": True}]
+        )
+
+        async def steps(app, pilot, seen):
+            field = _form(app)._fields[0]
+            seen["masked"] = isinstance(field.widget, Input) and field.widget.password
+
+        _, seen = _run(spec, steps)
+        assert seen["masked"] is True

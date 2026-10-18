@@ -23,6 +23,7 @@ so a secret never touches this file, the socket, a log or the chat (#242).
 from __future__ import annotations
 
 import json
+import re
 import time
 import uuid
 from dataclasses import asdict, dataclass, field, fields
@@ -38,9 +39,78 @@ logger = get_logger(__name__)
 STORE_FILENAME = "setups.json"
 COMPLETION_QUEUE_FILENAME = "setup_completions.json"
 
-# The parts of a configurableProperties entry a form needs. Anything else in
-# the manifest stays there.
-_FIELD_KEYS = ("key", "label", "description", "required", "sensitive", "default")
+# The parts of a configurableProperties entry a form needs, its type included
+# (mcp-registry#115). Anything else in the manifest stays there.
+_FIELD_KEYS = (
+    "key",
+    "label",
+    "description",
+    "required",
+    "sensitive",
+    "default",
+    "type",
+    "values",
+    "choices",
+    "multiple",
+    "separator",
+    "min",
+    "max",
+)
+_INTEGER = re.compile(r"-?[0-9]+")
+_TRUE_WORDS = {"true", "yes", "on", "1", "enabled"}
+_FALSE_WORDS = {"false", "no", "off", "0", "disabled"}
+
+
+def boolean_spellings(field: Dict[str, Any]) -> tuple:
+    """(true, false) as the server spells them: `values`, else "true"/"false"."""
+    values = field.get("values") if isinstance(field.get("values"), dict) else {}
+    return str(values.get("true", "true")), str(values.get("false", "false"))
+
+
+def value_error(field: Dict[str, Any], value: str) -> Optional[str]:
+    """Why `value` is not valid for the setting, or None.
+
+    Mirrors the registry validator's property_value_error and dmcp's
+    config::value_error, which refuses the same values. An untyped setting,
+    or a type this JARVIS does not know, takes any string.
+    """
+    kind = field.get("type") or "string"
+    if kind == "boolean":
+        yes, no = boolean_spellings(field)
+        if value not in (yes, no):
+            return f"must be '{yes}' or '{no}'"
+    elif kind == "integer":
+        if not _INTEGER.fullmatch(value):
+            return "must be a whole number"
+        if isinstance(field.get("min"), int) and int(value) < field["min"]:
+            return f"must be at least {field['min']}"
+        if isinstance(field.get("max"), int) and int(value) > field["max"]:
+            return f"must be at most {field['max']}"
+    elif kind == "choice":
+        choices = [str(c) for c in field.get("choices") or []]
+        items = (
+            value.split(field.get("separator") or ",")
+            if field.get("multiple")
+            else [value]
+        )
+        if not value or any(item not in choices for item in items):
+            how = "each must be" if field.get("multiple") else "must be"
+            return f"{how} one of {', '.join(choices)}"
+    return None
+
+
+def as_setting_value(field: Dict[str, Any], value: Any) -> Optional[str]:
+    """A value the model proposed, in the setting's own spelling; None if invalid.
+
+    A boolean proposed as "yes", "on" or True becomes the server's spelling of
+    true; anything that still fails the type is no proposal.
+    """
+    text = str(value).strip()
+    if (field.get("type") or "string") == "boolean":
+        yes, no = boolean_spellings(field)
+        word = text.lower()
+        text = yes if word in _TRUE_WORDS else no if word in _FALSE_WORDS else text
+    return None if value_error(field, text) else text
 
 
 def store_path() -> Path:

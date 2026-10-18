@@ -344,6 +344,29 @@ class TestConfigureServer:
         assert pending["proposed"] == {}
 
     @pytest.mark.asyncio
+    async def test_a_proposal_is_kept_only_in_a_form_its_type_accepts(
+        self, tmp_path, params_file
+    ):
+        typed = {
+            "name": "Demo",
+            "configurableProperties": [
+                {
+                    "key": "TELEMETRY",
+                    "type": "boolean",
+                    "values": {"true": "1", "false": "0"},
+                },
+                {"key": "MODE", "type": "choice", "choices": ["a", "b"]},
+            ],
+        }
+        app = _server_app(tmp_path)
+        app.dispatch.get_server_manifest = AsyncMock(return_value=typed)
+        told = await _configure(app, {"TELEMETRY": "yes", "MODE": "maybe"})
+        (pending,) = app.setups.list()
+        assert pending["proposed"] == {"TELEMETRY": "1"}
+        assert "Not filled in, because the setting does not accept it" in told
+        assert "MODE must be one of a, b" in told
+
+    @pytest.mark.asyncio
     async def test_values_already_set_need_no_form(self, tmp_path, params_file):
         app = _server_app(tmp_path)
         told = await _configure(app, {"BASE_URL": "https://old"})

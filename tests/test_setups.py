@@ -461,6 +461,31 @@ class TestPrompts:
         assert values == {"MODE": "fast"}
         assert "Mode (suggested by JARVIS; Enter accepts it) [fast]: " in prompts
 
+    def test_typed_settings_are_checked_and_stored_in_their_spelling(self, capsys):
+        fields = [
+            {
+                "key": "TELEMETRY",
+                "label": "No telemetry",
+                "type": "boolean",
+                "values": {"true": "1", "false": "0"},
+            },
+            {"key": "MODE", "label": "Mode", "type": "choice", "choices": ["a", "b"]},
+            {"key": "PORT", "label": "Port", "type": "integer", "min": 1, "max": 9},
+            {"key": "FLAG", "label": "Flag", "type": "boolean", "default": "false"},
+        ]
+        spec = setup_queue.FormSpec("demo", "Demo", fields=fields)
+        values = cli._prompt_setup_values(
+            spec,
+            # yes -> 1; "c" refused then "b"; 10 refused then 3; Flag kept; save
+            ask=_answers("yes", "c", "b", "10", "3", "", "y"),
+            ask_secret=_answers(),
+        )
+        assert values == {"TELEMETRY": "1", "MODE": "b", "PORT": "3"}
+        out = capsys.readouterr().out
+        assert "Mode must be one of a, b." in out and "Port must be at most 9." in out
+        assert "Answer on or off." in out and "One of: a, b." in out
+        assert "No telemetry: on" in out
+
     def test_declining_saves_nothing(self):
         assert (
             cli._prompt_setup_values(
