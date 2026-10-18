@@ -182,6 +182,28 @@ class TestForm:
         assert "already set" in seen["placeholder"]
         assert values == {}
 
+    def test_a_suggested_value_is_saved_unless_changed_back(self):
+        spec = _spec(
+            kind="configure",
+            missing=[],
+            current={"URL": "https://old", "TIMEOUT": "60"},
+            proposed={"URL": "https://new", "TIMEOUT": "60"},
+        )
+
+        async def steps(app, pilot, seen):
+            seen["title"] = str(app.query_one("#setup-title").render())
+            seen["prefill"] = [i.value for i in _inputs(app)]
+            await pilot.press("ctrl+s")
+            seen["review"] = str(app.query_one("#setup-review").render())
+            await pilot.press("ctrl+s")
+
+        values, seen = _run(spec, steps)
+        assert seen["title"] == "Change settings for Demo"
+        assert seen["prefill"] == ["https://new", "", "60", ""]
+        # TIMEOUT was proposed as what it already is: nothing to write.
+        assert values == {"URL": "https://new"}
+        assert "Server URL: https://new  (suggested by JARVIS)" in seen["review"]
+
     def test_the_modal_dismisses_with_the_values(self):
         class Host(App):
             result = "unset"
@@ -356,19 +378,31 @@ class TestTui:
         queue.pop(setup.setup_id)
         assert calls == [1, 0]
 
-    def test_configure_server_secrets_are_asked_for_in_the_same_form(self):
-        # configure_server still waits on a future until phase 3 queues it.
-        result = {}
+    def test_a_configure_request_opens_with_the_suggestion_and_saves_it(self):
+        queue = SetupQueue()
+        setup = queue.add(
+            "demo",
+            MANIFEST,
+            [],
+            kind="configure",
+            props=[FIELDS[0], FIELDS[2]],
+            proposed={"URL": "https://new"},
+        )
+        jarvis = _jarvis(queue)
+        seen = {}
 
         async def drive(app, pilot):
-            future = asyncio.get_running_loop().create_future()
-            await app._open_config_modal("demo", "Demo", "", [FIELDS[1]], {}, future)
+            await app._offer_setup(setup)
             await pilot.pause()
-            await _type(pilot, "pw")
+            seen["title"] = str(app.screen.query_one("#setup-title").render())
             await pilot.press("ctrl+s", "ctrl+s")
-            await pilot.pause()
-            result["value"] = await future
 
-        _real_tui(_jarvis(SetupQueue()), drive)
-        assert result["value"].confirmed is True
-        assert result["value"].values == {"PASSWORD": "pw"}
+        params = _real_tui(jarvis, drive)
+        assert seen["title"] == "Change settings for Demo"
+        jarvis.dispatch.set_server_config.assert_awaited_once_with(
+            "demo", {"URL": "https://new"}
+        )
+        params.set_many.assert_called_once_with({"URL": "https://new"})
+        jarvis.events.inject_setup_result.assert_called_once_with(
+            {"type": "setup_completed", "id": setup.setup_id}
+        )

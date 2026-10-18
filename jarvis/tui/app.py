@@ -48,7 +48,7 @@ Architecture:
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from textual import on
 from textual.app import App, ComposeResult
@@ -266,46 +266,6 @@ class JarvisTUI(App):
     def _on_jarvis_activity(self, event: Dict[str, Any]) -> None:
         """Internal runtime narrative (LLM/dispatch status), not chat content."""
         tui_output.on_jarvis_activity(self, event)
-
-    async def _open_config_modal(
-        self,
-        server_id: str,
-        server_name: str,
-        server_desc: str,
-        props: List[Dict[str, Any]],
-        saved: Dict[str, Any],
-        future: "asyncio.Future",
-    ) -> None:
-        """Ask for the settings `configure_server` named, in the setup form."""
-        from types import SimpleNamespace
-
-        from ..core.setup_queue import form_spec, missing_required, setting_fields
-        from .setup_form import SetupFormScreen
-
-        fields = setting_fields(props)
-        missing = missing_required(fields, saved)
-        spec = form_spec(
-            {
-                "server_id": server_id,
-                "server_name": server_name,
-                "summary": server_desc,
-                "fields": fields,
-                "missing": missing,
-            },
-            remembered=saved,
-        )
-
-        def done(values: Optional[Dict[str, str]]) -> None:
-            if not future.done():
-                future.set_result(
-                    SimpleNamespace(
-                        confirmed=values is not None,
-                        values=values or {},
-                        missing_required=[] if values is not None else missing,
-                    )
-                )
-
-        self.push_screen(SetupFormScreen(spec), done)
 
     async def _offer_setup(self, setup: Any) -> None:
         """Open the form for a pending setup (#254) without blocking the engine.

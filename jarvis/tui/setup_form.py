@@ -51,11 +51,14 @@ class _Field(Vertical):
         self.needed = self.key in spec.missing
         self.secret_set = self.key in spec.secrets_set
         self._prop = prop
-        self.initial = (
+        # What the server runs with today: its current value, else its default.
+        self.baseline = (
             ""
             if self.secret
             else spec.current.get(self.key, str(prop.get("default") or ""))
         )
+        self.suggested = None if self.secret else spec.proposed.get(self.key)
+        self.initial = self.suggested if self.suggested is not None else self.baseline
         self.input = Input(
             value=self.initial, password=self.secret, placeholder=self._placeholder()
         )
@@ -77,6 +80,8 @@ class _Field(Vertical):
             notes.append("required, already set")
         if self.secret:
             notes.append("secret")
+        if self.suggested is not None:
+            notes.append("[bold yellow]suggested by JARVIS[/bold yellow]")
         tail = f"  [dim]({', '.join(notes)})[/dim]" if notes else ""
         yield Label(f"[bold]{escape(self.label)}[/bold]{tail}")
         if self._prop.get("description"):
@@ -150,8 +155,20 @@ class SetupForm(Vertical):
         self._fields = [_Field(p, spec) for p in spec.fields]
 
     def compose(self) -> ComposeResult:
-        yield Label(f"Set up {escape(self.spec.server_name)}", id="setup-title")
-        if self.spec.summary:
+        name = escape(self.spec.server_name)
+        title = {
+            "configure": f"Change settings for {name}",
+            "edit": f"Settings for {name}",
+        }.get(self.spec.kind, f"Set up {name}")
+        yield Label(title, id="setup-title")
+        if self.spec.kind == "configure":
+            yield Static(
+                "JARVIS asked to change these settings. Check each one before saving; "
+                "nothing changes until you save.",
+                id="setup-summary",
+                markup=False,
+            )
+        elif self.spec.summary:
             yield Static(self.spec.summary, id="setup-summary", markup=False)
         with VerticalScroll(id="setup-fields"):
             yield from self._fields
@@ -179,15 +196,17 @@ class SetupForm(Vertical):
         return [f.label for f in self._fields if f.needed and not f.value]
 
     def values(self) -> Dict[str, str]:
-        """What to write: each changed field, and each required one that was unset.
+        """What to write: each field that differs from what the server runs with
+        today, and each required one that was unset.
 
         An untouched default is left out, as it is at the plain prompt: the
-        server applies its own defaults, and writing one would pin it.
+        server applies its own defaults, and writing one would pin it. A value
+        JARVIS suggested counts as a change until it is changed back.
         """
         return {
             f.key: f.value
             for f in self._fields
-            if f.value and (f.needed or f.value != f.initial.strip())
+            if f.value and (f.needed or f.value != f.baseline.strip())
         }
 
     def _review_text(self) -> str:
@@ -199,7 +218,12 @@ class SetupForm(Vertical):
             for f in self._fields:
                 if f.key in values:
                     shown = MASK if f.secret else values[f.key]
-                    lines.append(f" · {f.label}: {shown}")
+                    mark = (
+                        "  (suggested by JARVIS)"
+                        if values[f.key] == f.suggested
+                        else ""
+                    )
+                    lines.append(f" · {f.label}: {shown}{mark}")
         unchanged = [f.label for f in self._fields if f.key not in values]
         if unchanged and values:
             lines.append(f"Unchanged: {', '.join(unchanged)}")

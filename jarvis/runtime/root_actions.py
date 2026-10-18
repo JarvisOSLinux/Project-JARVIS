@@ -7,7 +7,7 @@ from logging import Logger
 from typing import Any
 
 from ..config import Config
-from ..core.setup_queue import missing_required
+from ..core.setup_queue import missing_required, setting_fields
 from ..core.skill_store import delete_skill, save_skill
 from .goal_updates import apply_goal_updates
 from .llm_bridge import ask_llm
@@ -152,61 +152,6 @@ def _sensitive_keys(props: Any) -> set:
     }
 
 
-def _non_sensitive(values: dict, props: Any) -> dict:
-    secret = _sensitive_keys(props)
-    return {k: v for k, v in values.items() if k not in secret}
-
-
-async def _collect_config_securely(
-    app: Any,
-    logger: Logger,
-    server_id: str,
-    manifest: dict,
-    props: list,
-    saved: dict,
-) -> tuple:
-    """Collect config values in a form, never through the conversation (#242).
-
-    Returns (status, values, missing): "collected", "cancelled" or
-    "unavailable". The TUI supplies a modal. Anywhere else with a display --
-    the daemon, the desktop app -- gets the Tk dialog, which masks sensitive
-    fields; it existed already but was reachable only from the dead legacy
-    dispatch sub-chain, so outside the TUI nothing collected secrets safely and
-    the model asked for them in chat instead. With no display there is no
-    safe way to ask here, and "unavailable" says so rather than falling back.
-    """
-    import asyncio
-    import os
-
-    if getattr(app, "config_modal_callback", None):
-        future: asyncio.Future = asyncio.get_event_loop().create_future()
-        await app.config_modal_callback(
-            server_id,
-            manifest.get("name") or server_id,
-            manifest.get("description") or manifest.get("summary") or "",
-            props,
-            saved,
-            future,
-        )
-        result = await future
-        if not result.confirmed:
-            return "cancelled", {}, list(result.missing_required or [])
-        return "collected", dict(result.values or {}), []
-
-    if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
-        return "unavailable", {}, []
-    try:
-        from ..ui.config_prompt import prompt_configurable_properties
-
-        values = await prompt_configurable_properties(props)
-    except Exception as e:  # no tkinter, or Tk could not open the display
-        logger.warning(f"JARVIS: secure config form unavailable for {server_id}: {e}")
-        return "unavailable", {}, []
-    if values is None:
-        return "cancelled", {}, []
-    return "collected", {k: v for k, v in values.items() if v}, []
-
-
 async def _handle_install_server(
     app: Any,
     logger: Logger,
@@ -306,17 +251,36 @@ async def _queue_setup(
     manifest: dict,
     missing: list,
     depth: int,
+    *,
+    kind: str = "install",
+    props: Any = None,
+    proposed: Any = None,
+    note: str = "",
 ) -> None:
     """Record a pending setup, offer the form where there is one, tell the model."""
     active = app.goals.get_active_goals()
     pending = app.setups.add(
-        server_id, manifest, missing, active[-1] if active else None
+        server_id,
+        manifest,
+        missing,
+        active[-1] if active else None,
+        kind=kind,
+        props=props,
+        proposed=proposed,
     )
+    keys = [f["key"] for f in pending.fields]
     logger.info(
-        f"JARVIS: {server_id} installed; setup {pending.setup_id} waits for {missing}"
+        f"JARVIS: setup {pending.setup_id} ({pending.kind}) for {server_id} waits "
+        f"for the user: {keys}"
     )
     emit_activity(
-        app, f"{server_id} needs setup: {', '.join(missing)}", kind="dispatch"
+        app,
+        (
+            f"{server_id} needs setup: {', '.join(missing)}"
+            if pending.kind == "install"
+            else f"{server_id}: settings to review: {', '.join(keys)}"
+        ),
+        kind="dispatch",
     )
 
     form_open = False
@@ -337,12 +301,23 @@ async def _queue_setup(
         else "The user fills it in outside the chat: in the TUI, or from any terminal with"
     )
     context = build_root_context(app, logger)
-    context += (
-        f"\nSETUP_PENDING: {server_id} is installed but cannot run until the user sets "
-        f"{', '.join(missing)}. {where} `jarvis setups fill {pending.setup_id}`. Tell the "
-        "user that, briefly. Never ask for these values in chat. You will be told when "
-        "the setup is done, and can then carry on with what the user asked."
-    )
+    if pending.kind == "install":
+        context += (
+            f"\nSETUP_PENDING: {server_id} is installed but cannot run until the user "
+            f"sets {', '.join(pending.missing)}. {where} `jarvis setups fill "
+            f"{pending.setup_id}`. Tell the user that, briefly. Never ask for these "
+            "values in chat. You will be told when the setup is done, and can then "
+            "carry on with what the user asked."
+        )
+    else:
+        context += (
+            f"\nCONFIGURE_PENDING: the user reviews these settings of {server_id} in "
+            f"a form, with the values you proposed filled in: {', '.join(keys)}. "
+            f"Nothing changes until they save it. {where} `jarvis setups fill "
+            f"{pending.setup_id}`. Tell the user that, briefly. Never ask for these "
+            "values in chat. You will be told when they are saved."
+        )
+    context += note
     response = await ask_llm(
         app, logger, context, tag="root-install-setup-pending", mode="root"
     )
@@ -366,11 +341,18 @@ async def on_setup_result(app: Any, logger: Logger, data: dict) -> None:
     if data.get("type") == "cancel_setup":
         logger.info(f"JARVIS: setup {pending.setup_id} for {server_id} cancelled")
         context = build_root_context(app, logger)
-        context += (
-            f"\nSETUP_CANCELLED: the user cancelled the setup of {server_id}. It stays "
-            "installed but cannot run until it is set up; installing it again asks again."
-            + origin
-        )
+        if pending.kind == "configure":
+            context += (
+                f"\nCONFIGURE_CANCELLED: the user closed the settings of {server_id} "
+                "without saving; nothing changed. Do not ask for the values in chat."
+                + origin
+            )
+        else:
+            context += (
+                f"\nSETUP_CANCELLED: the user cancelled the setup of {server_id}. It "
+                "stays installed but cannot run until it is set up; installing it again "
+                "asks again." + origin
+            )
         response = await ask_llm(
             app, logger, context, tag="root-setup-cancelled", mode="root"
         )
@@ -378,13 +360,38 @@ async def on_setup_result(app: Any, logger: Logger, data: dict) -> None:
         return
 
     manifest = await app.dispatch.get_server_manifest(server_id)
-    missing = missing_required(
-        manifest.get("configurableProperties") or [], manifest.get("config") or {}
-    )
+    config = manifest.get("config") or {}
+    if pending.kind == "configure":
+        missing = missing_required(pending.fields, config)
+    else:
+        missing = missing_required(manifest.get("configurableProperties") or [], config)
     if missing:
         # The form saved, but something required is still unset (a write
         # failed, or the manifest changed): it stays pending rather than half-run.
-        await _queue_setup(app, logger, server_id, manifest, missing, 0)
+        await _queue_setup(
+            app,
+            logger,
+            server_id,
+            manifest,
+            missing,
+            0,
+            kind=pending.kind,
+            props=pending.fields,
+            proposed=pending.proposed,
+        )
+        return
+
+    if pending.kind == "configure":
+        logger.info(f"JARVIS: settings {pending.setup_id} for {server_id} saved")
+        await feed_root_summary(
+            app,
+            logger,
+            "CONFIGURE_RESULT",
+            f"the user saved the settings of {server_id}: "
+            f"{_describe_settings(pending.fields, config)}. Call get_server_docs for "
+            f"{server_id} to verify the server starts." + origin,
+            0,
+        )
         return
 
     logger.info(f"JARVIS: setup {pending.setup_id} for {server_id} filled in")
@@ -453,6 +460,27 @@ async def _handle_uninstall_server(
     await app._act_on_root_response(response, depth + 1)
 
 
+_PLACEHOLDERS = ("your_", "your-", "<your", "placeholder", "api_key_here", "insert_")
+
+
+def _looks_like_placeholder(value: Any) -> bool:
+    text = str(value).strip().lower()
+    return text.startswith("<") or any(p in text for p in _PLACEHOLDERS)
+
+
+def _describe_settings(fields: list, config: dict) -> str:
+    """The settings' state for the model: values of plain ones, secrets only as set."""
+    parts = []
+    for f in fields:
+        key = f["key"]
+        value = str(config.get(key) or "").strip()
+        if f.get("sensitive"):
+            parts.append(f"{key} {'set' if value else 'not set'} (secret, not shown)")
+        else:
+            parts.append(f"{key} = {value}" if value else f"{key} not set")
+    return "; ".join(parts)
+
+
 async def _handle_configure_server(
     app: Any,
     logger: Logger,
@@ -460,6 +488,14 @@ async def _handle_configure_server(
     depth: int,
     max_chain_depth: int,
 ) -> None:
+    """Queue the settings the model named, for the user to review in the setup form.
+
+    The model never writes a setting itself (#254; decided 2026-10-18): a
+    read-only switch or a server URL can do as much harm as a bad API key. A
+    secret is never taken from the model at all (#242). A non-secret value it
+    proposes prefills its field, marked as its suggestion, and the user saves
+    it, changes it, or closes the form.
+    """
     server_id = parsed["server_id"]
     emit_activity(app, f"Configuring {server_id}…", kind="dispatch")
 
@@ -473,10 +509,12 @@ async def _handle_configure_server(
             depth,
         )
         return
-    props = manifest.get("configurableProperties") or []
-    declared = [
-        p["key"] for p in props if isinstance(p, dict) and isinstance(p.get("key"), str)
+    props = [
+        p
+        for p in manifest.get("configurableProperties") or []
+        if isinstance(p, dict) and isinstance(p.get("key"), str)
     ]
+    declared = [p["key"] for p in props]
     # Named the way the adapter writes them, before anything is classified: a
     # secret given as `--api-key` was checked as an unknown plain key and then
     # stored as API_KEY.
@@ -487,113 +525,68 @@ async def _handle_configure_server(
     # an undeclared one (NODE_OPTIONS, LD_PRELOAD) would run code in it. dmcp
     # refuses them too; this says why to the model.
     undeclared = [k for k in config if k not in declared]
-    config = {k: v for k, v in config.items() if k in declared}
-    secret = _sensitive_keys(props)
-    plain = {k: v for k, v in config.items() if k not in secret}
-    # A sensitive value is never taken from the model, real or placeholder:
-    # for the model to hold it, it had to come through the conversation, and
-    # that is the leak (#242). Naming the key is enough to ask for it.
-    wanted = [p for p in props if p.get("key") in secret and p["key"] in config]
-
-    _PLACEHOLDERS = (
-        "your_",
-        "your-",
-        "<your",
-        "placeholder",
-        "api_key_here",
-        "insert_",
-    )
-    placeholder_keys = [
-        k
-        for k, v in plain.items()
-        if any(p in str(v).lower() for p in _PLACEHOLDERS) or str(v).startswith("<")
-    ]
-    if placeholder_keys:
-        logger.warning(
-            f"JARVIS: configure_server '{server_id}' rejected placeholder value(s): {placeholder_keys}"
-        )
-        context = build_root_context(app, logger)
-        context += (
-            f"\nCONFIGURE_BLOCKED: The value(s) for {placeholder_keys} look like placeholders. "
-            "These are not secrets, so use respond to ask the user for the actual value(s), "
-            "then call configure_server again."
-        )
-        response = await ask_llm(
-            app, logger, context, tag="root-configure-placeholder", mode="root"
-        )
-        await app._act_on_root_response(response, depth + 1)
-        return
-
-    values = dict(plain)
-    notes = []
+    note = ""
     if undeclared:
         settings = (
             f"its settings are {', '.join(declared)}"
             if declared
             else "it has no settings"
         )
-        notes.append(
-            f"{', '.join(undeclared)} {'is' if len(undeclared) == 1 else 'are'} not a "
-            f"setting of {server_id} and was not set; {settings}"
+        note = (
+            f" Note: {', '.join(undeclared)} {'is' if len(undeclared) == 1 else 'are'} "
+            f"not a setting of {server_id} and was dropped; {settings}."
         )
-    if wanted:
-        from ..core.params_store import ParamsStore
-
-        status, collected, missing = await _collect_config_securely(
-            app, logger, server_id, manifest or {}, wanted, ParamsStore(server_id).get()
+    requested = [p for p in props if p["key"] in config]
+    if not requested:
+        await feed_root_summary(
+            app,
+            logger,
+            "CONFIGURE_RESULT",
+            f"nothing was set on {server_id}.{note}",
+            depth,
         )
-        names = ", ".join(p["key"] for p in wanted)
-        if status == "collected":
-            values.update(collected)
-            notes.append(
-                f"{len(collected)} secret value(s) ({names}) were entered by the user in a "
-                "secure form; their values are not shown to you"
-            )
-        elif status == "cancelled":
-            notes.append(
-                f"the user cancelled the secure form for {names}"
-                + (f" (left empty: {', '.join(missing)})" if missing else "")
-                + ". Do not ask for these values in chat"
-            )
-        else:
-            notes.append(
-                f"{names} could not be collected: this session has no secure form. Tell the "
-                "user to open `jarvis tui`, or run JARVIS in their desktop session, to enter "
-                "them there. Never ask for a secret value in chat"
-            )
+        return
 
-    label = ""
-    if values:
-        try:
-            await app.dispatch.set_server_config(server_id, values)
-            from ..core.params_store import ParamsStore
-
-            # Only non-secret values are remembered for pre-filling a form;
-            # dmcp's config is the one place a secret lives.
-            ParamsStore(server_id).set_many(
-                {k: v for k, v in _non_sensitive(values, props).items() if v}
-            )
-            logger.info(
-                f"JARVIS: configure_server '{server_id}' set {list(values.keys())}"
-            )
-            label = (
-                f"CONFIGURE_RESULT: set {len(values)} value(s) on {server_id}. "
-                f"Now call get_server_docs for {server_id} to verify the server starts correctly."
-            )
-        except Exception as e:
-            logger.warning(f"JARVIS: configure_server '{server_id}' failed: {e}")
-            label = f"CONFIGURE_ERROR: {e}"
-    else:
-        label = f"CONFIGURE_RESULT: nothing was set on {server_id}."
-    if notes:
-        label += " Note: " + "; ".join(notes) + "."
-
-    context = build_root_context(app, logger)
-    context += f"\n{label}"
-    response = await ask_llm(
-        app, logger, context, tag="root-configure-server", mode="root"
+    secret = _sensitive_keys(props)
+    current = manifest.get("config") or {}
+    # Only a plain value the model really has. A placeholder is no proposal:
+    # the field is left for the user, who sees it empty rather than "<your url>".
+    proposed = {
+        k: str(v).strip()
+        for k, v in config.items()
+        if k in declared
+        and k not in secret
+        and str(v).strip()
+        and not _looks_like_placeholder(v)
+    }
+    missing = missing_required(requested, current)
+    unchanged = not missing and all(
+        p["key"] not in secret
+        and proposed.get(p["key"]) == str(current.get(p["key"]) or "").strip()
+        for p in requested
     )
-    await app._act_on_root_response(response, depth + 1)
+    if unchanged:
+        await feed_root_summary(
+            app,
+            logger,
+            "CONFIGURE_RESULT",
+            f"{server_id} already has those values: "
+            f"{_describe_settings(setting_fields(requested), current)}.{note}",
+            depth,
+        )
+        return
+    await _queue_setup(
+        app,
+        logger,
+        server_id,
+        manifest,
+        missing,
+        depth,
+        kind="configure",
+        props=requested,
+        proposed=proposed,
+        note=note,
+    )
 
 
 VISION_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif"}

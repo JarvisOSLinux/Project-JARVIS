@@ -426,12 +426,12 @@ uninstall_server — Remove an installed MCP server from the system.
   Use when the user asks to uninstall, remove, or delete an installed server.
   {{"action": "uninstall_server", "server_id": "<id>"}}
 
-configure_server — Set required config values on an installed server.
-  Use when SERVER_DOCS indicates "server requires configuration" (e.g. missing API key).
-  Secrets (API keys, tokens, passwords — marked in SERVER_DOCS): NEVER ask the user to type
-  them in chat. Pass the key with an empty value; JARVIS opens a secure form and you never
-  see what the user enters. Non-secret values (a URL, a username) may be asked for in chat.
-  Never invent or guess a value.
+configure_server — Change settings of an installed server: the ones SERVER_DOCS says it needs
+  (e.g. a missing API key), or ones the user asks to change. JARVIS shows the user a form with
+  the settings you name; nothing changes until they save it, and you are told when they have.
+  Give a non-secret setting (a URL, a username) the value the user told you, or leave it empty
+  for them to fill in. Secrets (API keys, tokens, passwords — marked in SERVER_DOCS): always
+  leave empty. The form asks for every value, so never ask for one in chat, and never invent one.
   {{"action": "configure_server", "server_id": "<id>", "config": {{"API_KEY": "", "BASE_URL": "<value>"}}}}
 
 dispatch — Execute tool calls. Only after seeing SERVER_DOCS.
@@ -664,10 +664,12 @@ install_server — Install a server shown in SEARCH_RESULTS as [available].
 update_server — Re-install a server the registry marks [update available].
   {{"action": "update_server", "server_id": "<id>", "goal_updates": []}}
 
-configure_server — Set required config values on an installed server.
-  Secrets (API keys, tokens, passwords — marked in SERVER_DOCS): NEVER ask the user to type
-  them in chat. Pass the key with an empty value; JARVIS opens a secure form and you never
-  see what the user enters.
+configure_server — Change settings of an installed server: the ones SERVER_DOCS says it needs
+  (e.g. a missing API key), or ones the user asks to change. JARVIS shows the user a form with
+  the settings you name; nothing changes until they save it, and you are told when they have.
+  Give a non-secret setting (a URL, a username) the value the user told you, or leave it empty
+  for them to fill in. Secrets (API keys, tokens, passwords — marked in SERVER_DOCS): always
+  leave empty. The form asks for every value, so never ask for one in chat, and never invent one.
   {{"action": "configure_server", "server_id": "<id>", "config": {{"API_KEY": "", "BASE_URL": "<value>"}}}}
 
 dispatch — Execute tool calls. Only after seeing SERVER_DOCS.

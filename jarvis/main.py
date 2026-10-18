@@ -118,9 +118,6 @@ class Jarvis:
 
         # Server docs scoped to the active dispatch chain — cleared on respond.
         self.mcp_dispatch_docs: dict = {}
-        # Set by the TUI layer to open the server config modal before setup runs.
-        # Signature: async (server_id, server_name, server_desc, props, saved) -> ConfigModalResult
-        self.config_modal_callback: Any = None
         # Set by the TUI layer to offer the form for a new pending setup (#254)
         # without blocking the engine. Signature: async (PendingSetup) -> None
         self.setup_ready_callback: Any = None
