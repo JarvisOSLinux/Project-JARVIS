@@ -11,6 +11,7 @@ from logging import Logger
 from typing import Any, Optional
 
 from ..config import Config
+from ..core.threat_level import ThreatLevel, classify
 from .llm_bridge import ask_llm
 from .output_hooks import emit_activity, persist_assistant_turn
 from .root_context import build_root_context, compact_payload_for_llm
@@ -352,9 +353,32 @@ async def dispatch_send(
     approved_tasks: list[dict[str, Any]] = []
     tools_needing_confirmation: list[dict[str, Any]] = []
 
+    # FORBIDDEN means the tool never runs (mcp-registry#88): refused here, ahead
+    # of should_confirm, because that is the layer allow_all skips. Every task is
+    # classified before any is sent, so the whole batch is refused, not part of it.
+    metas: list[dict[str, Any]] = []
     for task in tasks:
-        tool_name = f"{task.get('server', '?')}.{task.get('tool', '?')}"
         tool_meta = await get_tool_metadata(app, logger, task)
+        metas.append(tool_meta)
+        if (
+            classify(task.get("tool"), tool_meta, task.get("params"))
+            >= ThreatLevel.FORBIDDEN
+        ):
+            blocked = f"{task.get('server', '?')}.{task.get('tool', '?')}"
+            logger.warning(f"JARVIS: Dispatch blocked, FORBIDDEN tool: {blocked}")
+            emit_activity(app, f"Blocked, forbidden: {blocked}", kind="dispatch")
+            return {
+                "error": (
+                    f"Dispatch refused: {blocked} is classed FORBIDDEN and never "
+                    "runs, whatever the user confirms or the confirmation mode. "
+                    "Nothing in this batch was sent. Do not retry it or look for "
+                    "another route to the same effect. Tell the user what was "
+                    "blocked and why, then ask what they want to do instead."
+                )
+            }
+
+    for task, tool_meta in zip(tasks, metas):
+        tool_name = f"{task.get('server', '?')}.{task.get('tool', '?')}"
 
         if app.confirmation.should_confirm(
             tool_meta, tool_name=task.get("tool"), params=task.get("params")
