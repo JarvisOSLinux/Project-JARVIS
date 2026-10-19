@@ -226,6 +226,12 @@ LLM interprets as a user command and routes to a shell server.
   — URL install, unreadable manifest, legacy tier vocabulary — cannot
   self-declare its way past confirmation. All four inputs raise only; a
   registry outage can therefore add prompts but never remove one.
+- FORBIDDEN is a hard block, not a prompt (#250, mcp-registry#88).
+  `dispatch_flow.dispatch_send` classifies every task before sending any, and
+  refuses the whole batch if one is FORBIDDEN, in every `CONFIRMATION_MODE`.
+  It runs ahead of `should_confirm`, the layer `allow_all` skips, and has no
+  override. Only a manifest `threat_level: "forbidden"` produces it today.
+  Confirmations persisted before this shipped are not re-checked on approval.
 - `jarvis/core/threat_level.py` — scans dispatched tool *parameters* for
   dangerous payloads (sudo, `rm -rf`, pipe-to-shell, …) and raises the
   confirmation threat level accordingly. (There is no scanner on direct user
@@ -244,7 +250,8 @@ LLM interprets as a user command and routes to a shell server.
 **Not yet mitigated:**
 - Injection arriving through LLM-processed external content (web pages,
   documents) that bypasses the direct-input scanner.
-- `CONFIRMATION_MODE=allow_all` disables all execution gates.
+- `CONFIRMATION_MODE=allow_all` disables every execution gate except the
+  FORBIDDEN block and standing constraints.
 
 **Recommendation:** Never set `CONFIRMATION_MODE=allow_all` in environments
 where JARVIS has web-browsing or file-reading capabilities.
@@ -319,7 +326,7 @@ into future LLM contexts through RAG retrieval.
 
 | Setting | Safe default | Risk if changed |
 |---|---|---|
-| `CONFIRMATION_MODE` | `smart` | `allow_all` disables all tool confirmation |
+| `CONFIRMATION_MODE` | `smart` | `allow_all` disables tool confirmation for every tier except FORBIDDEN, which is always refused |
 | `CONFIRMATION_TIMEOUT` | `0` (never auto-deny; confirmations stay pending until answered, #185) | a positive value auto-denies unanswered confirmations after N seconds — safer for unattended/headless hosts, at the cost of killing unattended legitimate work |
 | `JARVIS_SUDO_ENABLED` | `false` | `true` grants shell access to privileged commands |
 | `providers.json` | (empty) | API providers store keys in this file |
@@ -337,6 +344,8 @@ vulnerabilities.
 ---
 
 ## Changelog — corrected claims
+
+*2026-10-18:* FORBIDDEN is now an unconditional block (#250). The earlier statements that `allow_all` bypasses every tier, FORBIDDEN included, no longer hold: `dispatch_send` refuses a FORBIDDEN call before the confirmation gate in every mode. `allow_all` still bypasses ELEVATED and DANGEROUS.
 
 *2026-08-25:* cross-platform IPC disclosure corrected (#174). The Exposed-Instances section described only the Linux Unix-socket shape and claimed the endpoints are "not TCP ports", while Windows has shipped a loopback-TCP transport (`127.0.0.1`, ephemeral port) since the platform backend landed — accurate in `PORTABILITY-SPEC.md`/`architecture.md` but not in this canonical file. Reworded to state the real guarantee (never network-reachable on any platform: Unix socket on Linux/macOS, loopback-only TCP on Windows, contrasted with OpenClaw's `0.0.0.0`) and the honest per-OS same-machine story (filesystem `0600` + kernel peer credentials vs a per-startup, best-effort-ACL'd token). The same-user "Planned" block also mixed shipped and unshipped work: accept-time peer authentication on the **input and GUI** sockets (`SO_PEERCRED`/`LOCAL_PEERCRED`, Windows token) shipped 2026-07-16 (`cf7c056`) yet was still listed as planned — a genuine docs-lag now corrected. Peer auth on the **output** socket was NOT a docs-lag: it was unenforced until `c27b8a3` (this cycle, #174) added it, so `ipc_verify_peer` now guards all three accept sites. The only remaining planned item is the Windows named-pipe + DACL backend. This doc edit is itself documentation-only, but — unlike a pure docs-lag correction — part of what it now documents (the output-socket guard) is code that landed alongside it, not pre-existing behavior.
 
