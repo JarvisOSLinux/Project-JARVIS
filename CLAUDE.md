@@ -72,10 +72,12 @@ Behaviour in `smart` mode, per `confirmation_manager.should_confirm`:
 | SAFE | Runs without prompting |
 | ELEVATED | Blocked pending user confirmation |
 | DANGEROUS | Blocked pending user confirmation |
-| FORBIDDEN | Blocked pending user confirmation |
+| FORBIDDEN | Refused before execution in every mode; never prompted (#250) |
 
-There is no separate audit log and no unconditional FORBIDDEN block:
-`allow_all` bypasses ALL tiers including FORBIDDEN (documented risk).
+There is no separate audit log. FORBIDDEN is refused in `dispatch_flow.dispatch_send`
+ahead of the confirmation gate, so `allow_all` cannot bypass it. Only a manifest
+`threat_level: "forbidden"` produces it today; the whole batch is refused and
+there is no override. `allow_all` still bypasses every other tier.
 
 ### Confirmation Modes
 
@@ -295,6 +297,8 @@ make check                  # Format + lint + typecheck + tests
 ---
 
 ## Changelog — corrected claims
+
+*2026-10-18:* FORBIDDEN is an unconditional block (#250, mcp-registry#88). `dispatch_send` classifies every task before sending any and refuses the batch if one is FORBIDDEN, in `smart`, `ask_all` and `allow_all` alike, with a structured error telling the model not to retry or route around it. Placed beside the constraint check because `should_confirm`, which `allow_all` skips, is the wrong layer. Host floor, payload scan, privileged-command scan and tier floor top out at DANGEROUS, so only a manifest declaration changes behavior. Confirmations persisted before this change are not re-checked on resume.
 
 *2026-10-18:* the setup form draws typed settings (mcp-registry#115). A setting declaring `type` gets a switch (`boolean`, stored in its own spelling from `values`, e.g. `1`/`0`), a select (`choice`), a checklist (`choice` with `multiple`, joined by `separator` in the order of `choices`), or a whole-number box (`integer`, with `min`/`max`); untyped settings and every secret stay text boxes. `setup_queue.value_error` mirrors the registry validator and dmcp's `config set` check: the form shows `Fix: Port must be at most 65535` and holds the review, and the plain prompts say on/off, list the choices and ask again. An unset switch reads as off and a value spelled another way (`True`) is read as what it means, so an untouched switch writes nothing. `configure_server` stores a model proposal in the setting's own spelling (`as_setting_value`: "yes" becomes `1` for a 1/0 switch) and leaves one its type refuses for the user, telling the model why. Verified in a pseudo-terminal: `jarvis setups edit microsoft` with Space on the read-only switch writes exactly `MS365_READ_ONLY=true`.
 
