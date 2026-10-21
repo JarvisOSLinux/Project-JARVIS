@@ -66,23 +66,30 @@ class CommandCompleter:
         self._index = 0
         self._emitted = None
 
-    def complete(self, text: str) -> str | None:
-        """Next completion for *text*, or None when there is nothing to do."""
-        if not is_command_prefix(text):
-            self.reset()
-            return None
+    def cycling(self, text: str) -> bool:
+        """True while *text* is exactly the completion this completer last produced."""
+        return bool(self._matches) and text == self._emitted
 
-        if self._matches and text == self._emitted:
+    def complete(self, text: str) -> str | None:
+        """Next completion for *text*, followed by a space; None when there is none.
+
+        The space is where the arguments go. Tab again walks the other matches
+        while the line is still exactly what Tab produced; sending strips it.
+        """
+        if self.cycling(text):
             self._index = (self._index + 1) % len(self._matches)
-        else:
+        elif is_command_prefix(text):
             matches = match_commands(text, self._commands)
             if not matches:
                 self.reset()
                 return None
             self._matches = matches
             self._index = 0
+        else:
+            self.reset()
+            return None
 
-        self._emitted = self._matches[self._index]
+        self._emitted = self._matches[self._index] + " "
         return self._emitted
 
 

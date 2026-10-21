@@ -14,6 +14,7 @@ from textual.widgets import (
     DataTable,
     Input,
     Label,
+    Rule,
     Select,
     Static,
     TabbedContent,
@@ -146,8 +147,7 @@ class ConfigModal(ModalScreen[ConfigModalResult]):
 
     #config-dialog {
         width: 68;
-        height: auto;
-        max-height: 90vh;
+        height: 90vh;
         border: round $primary;
         background: $surface;
         padding: 0;
@@ -159,27 +159,41 @@ class ConfigModal(ModalScreen[ConfigModalResult]):
         padding: 1 2 0 2;
     }
 
+    /* The footer is docked and the tabs take what is left, so the buttons
+       are never pushed past the dialog's edge by a long settings list. */
     #config-tabs {
-        height: auto;
-        max-height: 76vh;
+        height: 1fr;
+    }
+
+    #config-tabs ContentSwitcher, #config-tabs TabPane {
+        height: 1fr;
     }
 
     #settings-pane {
-        height: auto;
-        max-height: 68vh;
+        height: 1fr;
         padding: 0 2;
     }
 
     #providers-pane {
-        height: auto;
-        max-height: 68vh;
+        height: 1fr;
         padding: 0 2;
+    }
+
+    .settings-category-row {
+        height: 1;
+        margin-top: 1;
     }
 
     .settings-category {
         text-style: bold;
         color: $accent;
-        margin-top: 1;
+        width: auto;
+    }
+
+    .settings-category-row Rule {
+        width: 1fr;
+        margin: 0 0 0 1;
+        color: $accent;
     }
 
     .settings-field-label {
@@ -211,7 +225,8 @@ class ConfigModal(ModalScreen[ConfigModalResult]):
     }
 
     #config-footer {
-        height: 3;
+        dock: bottom;
+        height: auto;
         align: right middle;
         padding: 0 2;
         border-top: solid $primary 30%;
@@ -263,10 +278,12 @@ class ConfigModal(ModalScreen[ConfigModalResult]):
                         for s in _SETTINGS:
                             if s.category != current_category:
                                 current_category = s.category
-                                yield Label(
-                                    f"— {current_category} —",
-                                    classes="settings-category",
-                                )
+                                with Horizontal(classes="settings-category-row"):
+                                    yield Label(
+                                        f"— {current_category}",
+                                        classes="settings-category",
+                                    )
+                                    yield Rule()
 
                             yield Label(s.label, classes="settings-field-label")
                             if s.hint:

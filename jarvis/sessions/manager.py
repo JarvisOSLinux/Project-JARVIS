@@ -12,7 +12,7 @@ lives in the Rust contextor binary.  This class is stateless aside
 from the current-session pointer.
 """
 
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from ..core.logger import get_logger
 from .model import Session
@@ -32,6 +32,19 @@ class SessionManager:
         """
         self._contextor = contextor
         self._current: Optional[Session] = None
+        # Told when the user moves to another session (switch, new, deleting
+        # the current one), so a front end can show that session's messages.
+        # Not when a first message starts a session implicitly: that
+        # conversation simply goes on.
+        self.on_switch: Optional[Callable[[Optional[Session]], None]] = None
+
+    def _announce(self) -> None:
+        if self.on_switch is None:
+            return
+        try:
+            self.on_switch(self._current)
+        except Exception as e:
+            logger.warning(f"Sessions: a switch listener failed: {e}")
 
     # ------------------------------------------------------------------
     # Current-session pointer
@@ -75,9 +88,11 @@ class SessionManager:
             return None
         if self._current is not None:
             return self._current
-        return self.new_session()
+        return self.new_session(announce=False)
 
-    def new_session(self, title: Optional[str] = None) -> Optional[Session]:
+    def new_session(
+        self, title: Optional[str] = None, *, announce: bool = True
+    ) -> Optional[Session]:
         """Create a new session and make it current."""
         if not self.available:
             logger.debug("Sessions: new_session called but contextor unavailable")
@@ -93,6 +108,8 @@ class SessionManager:
             f"Sessions: Created new session {self._current.short_id()} "
             f"('{self._current.title}')"
         )
+        if announce:
+            self._announce()
         return self._current
 
     def switch(self, session_id: str) -> Optional[Session]:
@@ -109,6 +126,7 @@ class SessionManager:
         if "error" not in result and result.get("session"):
             self._current = Session.from_dict(result["session"])
             logger.info(f"Sessions: Switched to {self._current.short_id()}")
+            self._announce()
             return self._current
 
         # Try prefix match via list_sessions — useful for short ids typed
@@ -118,6 +136,7 @@ class SessionManager:
         if len(matches) == 1:
             self._current = matches[0]
             logger.info(f"Sessions: Switched to {self._current.short_id()}")
+            self._announce()
             return self._current
         if len(matches) > 1:
             logger.warning(
@@ -172,6 +191,7 @@ class SessionManager:
 
         if self._current and self._current.id == session_id:
             self._current = None
+            self._announce()
         return True
 
     # ------------------------------------------------------------------

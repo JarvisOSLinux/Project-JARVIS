@@ -18,12 +18,8 @@ async def new_session(app: Any) -> None:
     if not app.jarvis.sessions.available:
         app._append_log("[yellow]Memory is disabled — sessions unavailable.[/yellow]")
         return
-    session = app.jarvis.sessions.new_session()
-    if session:
-        app._pending_delete_session_id = None
-        app._append_log(f"[dim]— started new session {session.short_id()} —[/dim]")
-        await app._refresh_sidebar()
-    else:
+    # The session manager announces the switch; the chat follows from there.
+    if app.jarvis.sessions.new_session() is None:
         app._append_log("[red]Could not create a new session.[/red]")
 
 
