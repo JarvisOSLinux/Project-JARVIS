@@ -95,6 +95,13 @@ _SETTINGS: List[_SettingDef] = [
         hint="Must be a readable WAV file; bundled default used if unset",
     ),
     _SettingDef(
+        "VOICE_SPEAK_COMMENTS",
+        "Speak JARVIS's comments",
+        "Voice",
+        "bool",
+        hint="Say aloud what JARVIS is about to do; off still shows it in the chat",
+    ),
+    _SettingDef(
         "OUTPUT_MODE",
         "Output mode",
         "Output",

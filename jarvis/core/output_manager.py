@@ -113,7 +113,10 @@ class OutputManager:
                 logger.warning(f"Output callback error: {e}")
 
         if Config.OUTPUT_MODE == "voice":
-            self._output_voice(response["output"])
+            if response.get("comment") and not Config.VOICE_SPEAK_COMMENTS:
+                self._output_text(response["output"])
+            else:
+                self._output_voice(response["output"])
         elif Config.OUTPUT_MODE == "text":
             self._output_text(response["output"])
         else:
