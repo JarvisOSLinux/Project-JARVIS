@@ -297,7 +297,7 @@ def _apply_in_memory(key: str, value: str) -> None:
     """Apply a setting change to the live Config object with proper type coercion."""
     from ..config import Config
 
-    bool_keys = {"RESET_HISTORY_AFTER_RESPONSE"}
+    bool_keys = {"RESET_HISTORY_AFTER_RESPONSE", "VOICE_SPEAK_COMMENTS"}
     int_keys = {
         "RAG_TOP_K",
         "MAX_GOALS_IN_CONTEXT",

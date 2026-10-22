@@ -113,6 +113,14 @@ class Config:
         os.path.dirname(__file__), "assets", "wake_chime.wav"
     )
     WAKE_CHIME_PATH = os.getenv("WAKE_CHIME_PATH", DEFAULT_WAKE_CHIME_PATH)
+    # Speak the model's one-line notes on what it is about to do (#273). Off
+    # still shows them in the chat; only the voice stays quiet.
+    VOICE_SPEAK_COMMENTS = os.getenv("VOICE_SPEAK_COMMENTS", "true").lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
     # Minimum RMS amplitude (0-32767, int16 PCM) a raw audio chunk must have
     # to reach the STT/wake-word recognizer at all -- quiet ambient noise is
     # dropped before it ever becomes a Vosk hypothesis. Typical quiet-room
@@ -592,6 +600,13 @@ DISPATCH_RESULT shows only the signals for YOUR CURRENT BATCH. EXIT signals in i
 success or failure. No EXIT yet means tasks are still running — dispatch again to re-check or
 proceed only when you have a success EXIT.
 
+--- Saying what you are doing ---
+Any action except respond may carry "comment": one short sentence to the user saying what you
+are about to do, e.g. {{"action": "search_tools", "capability": "calendar", "comment": "Let me find
+a calendar tool for you."}}. JARVIS shows it, and speaks it in voice mode, before the action runs,
+so the user is not left waiting in silence. Say what you are doing, never what happened: the
+result is not known yet. Leave it out for a quick step that follows straight from the last one.
+
 --- Reporting results ---
 Report ONLY what the signals/results actually say. Never tell the user a task "finished",
 "succeeded", or "is still running" unless a signal says so, and do not send progress guesses
@@ -798,6 +813,13 @@ SKILL_WRITE_RESULT confirms a skill_write.
 Include goal_updates in respond: "completed" or "failed" with result.
 DISPATCH_RESULT shows only the signals for YOUR CURRENT BATCH. EXIT signals in it confirm
 success or failure. No EXIT yet means tasks are still running.
+
+--- Saying what you are doing ---
+Any action except respond may carry "comment": one short sentence to the user saying what you
+are about to do, e.g. {{"action": "search_tools", "capability": "calendar", "comment": "Let me find
+a calendar tool for you."}}. JARVIS shows it, and speaks it in voice mode, before the action runs,
+so the user is not left waiting in silence. Say what you are doing, never what happened: the
+result is not known yet. Leave it out for a quick step that follows straight from the last one.
 
 --- Reporting results ---
 Report ONLY what the signals/results actually say. Never tell the user a task "finished",

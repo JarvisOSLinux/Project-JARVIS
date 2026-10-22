@@ -818,6 +818,28 @@ async def _handle_skill_write(
     await feed_root_summary(app, logger, "SKILL_WRITE_RESULT", summary, depth)
 
 
+COMMENT_MAX_CHARS = 300
+
+
+def _say_comment(app: Any, response: Any, action: str) -> None:
+    """Pass on the model's note on what it is about to do, before it does it (#273).
+
+    It goes out like any reply (shown, saved, spoken in voice mode unless
+    VOICE_SPEAK_COMMENTS is off), so the user is not left waiting in silence.
+    A respond already speaks for itself.
+    """
+    if action == "respond" or not isinstance(response, dict):
+        return
+    comment = response.get("comment")
+    if not isinstance(comment, str) or not comment.strip():
+        return
+    text = " ".join(comment.split())
+    if len(text) > COMMENT_MAX_CHARS:
+        text = text[: COMMENT_MAX_CHARS - 1] + "…"
+    app.output_manager.handle_response({"output": text, "comment": True})
+    persist_assistant_turn(app, text)
+
+
 async def act_on_root_response(
     app: Any,
     logger: Logger,
@@ -860,6 +882,7 @@ async def act_on_root_response(
 
     action = parsed["action"]
     logger.info(f"JARVIS: Root action='{action}'")
+    _say_comment(app, response, action)
     if action == "respond":
         emit_activity(app, "Composing response…", kind="llm")
     elif action == "dispatch":
