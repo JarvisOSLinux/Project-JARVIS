@@ -12,6 +12,26 @@ def session_reply(app: Any, message: str) -> None:
     app.output_manager.handle_response({"output": message})
 
 
+def _unquote(text: str) -> str:
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in ('"', "'"):
+        return text[1:-1]
+    return text
+
+
+def _rename_target(app: Any, raw: str, whole: str) -> tuple:
+    """(session, title) for `/rename`: `<id> <title>` names a session, else the current.
+
+    The first word is taken as an id only when it starts exactly one session's
+    id and a title follows, the rule `/delete` uses for its prefix.
+    """
+    first, _, rest = raw.partition(" ")
+    if rest.strip():
+        matches = [s for s in app.sessions.list(limit=500) if s.id.startswith(first)]
+        if len(matches) == 1:
+            return matches[0], _unquote(rest.strip())
+    return app.sessions.current, whole
+
+
 def handle_slash_command(app: Any, text: str) -> bool:
     """Handle /new, /sessions, /switch, /rename, /delete.
 
@@ -72,13 +92,18 @@ def handle_slash_command(app: Any, text: str) -> bool:
 
     if cmd == "/rename":
         if not arg:
-            session_reply(app, "Usage: /rename <new title>")
+            session_reply(app, "Usage: /rename [<session id>] <new title>")
             return True
-        if not app.sessions.current:
-            session_reply(app, "No active session to rename.")
+        target, title = _rename_target(app, parts[1].strip(), arg)
+        if target is None:
+            session_reply(
+                app,
+                "You're not in a session. Name one by its id (/rename <id> <title>), "
+                "or switch to it first (/switch <id>).",
+            )
             return True
-        if app.sessions.rename(arg):
-            session_reply(app, f"Renamed to '{arg}'.")
+        if app.sessions.rename(title, session_id=target.id):
+            session_reply(app, f"Renamed {target.short_id()} to '{title}'.")
         else:
             session_reply(app, "Rename failed.")
         return True

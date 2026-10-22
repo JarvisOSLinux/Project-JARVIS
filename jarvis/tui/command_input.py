@@ -149,7 +149,7 @@ class CommandInput(Input):
         """Put *command* on the line and dismiss the suggestions."""
         if not command:
             return
-        self._write(command, sync_dropdown=False)
+        self._write(command + " ", sync_dropdown=False)
         self._close_dropdown()
 
     # ------------------------------------------------------------------
@@ -182,7 +182,7 @@ class CommandInput(Input):
         # Let Tab fall through to focus movement when there is no command to
         # complete, and Esc fall through when nothing is being suggested.
         if action == "complete":
-            return is_command_prefix(self.value)
+            return is_command_prefix(self.value) or self._completer.cycling(self.value)
         if action == "close_dropdown":
             return self.dropdown_open
         return True
@@ -236,7 +236,7 @@ class CommandInput(Input):
             # Only "select" when the highlight would actually change the line;
             # otherwise a fully typed (or just completed) command would need a
             # second Enter to send.
-            if command is not None and command != self.value:
+            if command is not None and command != self.value.rstrip():
                 self.accept_command(command)
                 return
             self._close_dropdown()

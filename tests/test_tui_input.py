@@ -90,32 +90,36 @@ class TestIsCommandPrefix:
 
 @pytest.mark.unit
 class TestTabCompletion:
-    """#130 — Tab completes, repeated Tab cycles, typing resets."""
+    """#130 — Tab completes, repeated Tab cycles, typing resets.
+
+    #269: a completion ends in a space, where the arguments go; Tab cycles
+    while the line is exactly what Tab produced, and sending strips it.
+    """
 
     def test_unique_prefix_completes_from_the_real_catalog(self):
         completer = CommandCompleter(COMMANDS)
-        assert completer.complete("/pro") == "/providers"
+        assert completer.complete("/pro") == "/providers "
 
         completer = CommandCompleter(COMMANDS)
-        assert completer.complete("/he") == "/help"
+        assert completer.complete("/he") == "/help "
 
     def test_unique_match_is_stable_on_repeated_tab(self):
         completer = CommandCompleter(SAMPLE)
-        assert completer.complete("/st") == "/status"
-        assert completer.complete("/status") == "/status"
+        assert completer.complete("/st") == "/status "
+        assert completer.complete("/status ") == "/status "
 
     def test_multiple_matches_cycle_and_wrap(self):
         completer = CommandCompleter(SAMPLE)
-        assert completer.complete("/e") == "/export"
-        assert completer.complete("/export") == "/exit"
-        assert completer.complete("/exit") == "/export"
+        assert completer.complete("/e") == "/export "
+        assert completer.complete("/export ") == "/exit "
+        assert completer.complete("/exit ") == "/export "
 
     def test_cycle_follows_catalog_order(self):
         completer = CommandCompleter(SAMPLE)
         seen = [completer.complete("/s")]
         for _ in range(3):
             seen.append(completer.complete(seen[-1]))
-        assert seen == ["/status", "/settings", "/status", "/settings"]
+        assert seen == ["/status ", "/settings ", "/status ", "/settings "]
 
     def test_no_match_is_a_noop(self):
         completer = CommandCompleter(SAMPLE)
@@ -130,20 +134,22 @@ class TestTabCompletion:
 
     def test_typing_resets_the_cycle(self):
         completer = CommandCompleter(SAMPLE)
-        assert completer.complete("/e") == "/export"
+        assert completer.complete("/e") == "/export "
         # The user keeps typing instead of pressing Tab again.
-        assert completer.complete("/ex") == "/export"
-        assert completer.complete("/export") == "/exit"
+        assert completer.complete("/ex") == "/export "
+        assert completer.complete("/export ") == "/exit "
 
     def test_explicit_reset_starts_over(self):
         completer = CommandCompleter(SAMPLE)
-        assert completer.complete("/e") == "/export"
+        assert completer.complete("/e") == "/export "
         completer.reset()
-        assert completer.complete("/export") == "/export"
+        # The command is settled (a space follows it): Tab has nothing to do.
+        assert completer.complete("/export ") is None
+        assert completer.complete("/export") == "/export "
 
     def test_completion_is_case_insensitive(self):
         completer = CommandCompleter(COMMANDS)
-        assert completer.complete("/PRO") == "/providers"
+        assert completer.complete("/PRO") == "/providers "
 
     def test_match_commands_returns_catalog_order(self):
         assert match_commands("/e", SAMPLE) == ["/export", "/exit"]

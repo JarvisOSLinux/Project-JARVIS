@@ -29,7 +29,10 @@ SESSION_SLASH_HELP: tuple[tuple[str, str], ...] = (
         "List sessions (current row marked with an asterisk in text output).",
     ),
     ("/switch <id>", "Switch session by short id prefix."),
-    ("/rename <title>", "Rename the **current** session."),
+    (
+        "/rename [<id>] <title>",
+        "Rename the session you're in, or the one whose id starts with <id>.",
+    ),
     ("/delete <id>", "Delete session by **unique** id prefix."),
     ("/context", "Show token usage of the last LLM call and active server docs."),
 )
@@ -89,9 +92,12 @@ def slash_command_catalog() -> tuple[tuple[str, str], ...]:
     catalog: dict[str, str] = {}
     for column, description in TUI_LOCAL_SLASH_HELP + SESSION_SLASH_HELP:
         for alternative in column.split(","):
-            name = alternative.strip().split(" ", 1)[0]
+            name, _, usage = alternative.strip().partition(" ")
             if name.startswith("/") and name not in catalog:
-                catalog[name] = _plain(description)
+                # The arguments lead the description: the list showed a bare
+                # `/rename` with no hint that it needs a title.
+                text = _plain(description)
+                catalog[name] = f"{usage}  {text}" if usage else text
     return tuple(catalog.items())
 
 

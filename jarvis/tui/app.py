@@ -80,6 +80,7 @@ from .local_input import export_transcript_to_disk, handle_local_input
 from .session_sidebar import on_session_selected as handle_session_selected
 from .session_sidebar import refresh_sidebar
 from .session_sidebar import schedule_sidebar_refresh as queue_sidebar_refresh
+from .session_sidebar import show_session
 
 logger = get_logger(__name__)
 
@@ -235,6 +236,10 @@ class JarvisTUI(App):
         if not text:
             return
 
+        # Echoed first, TUI-only commands included, so every line typed stays
+        # visible above whatever it produced.
+        self._append_log(f"[bold cyan]you[/bold cyan] > {tui_output.escape(text)}")
+
         if handle_local_input(self, text, JarvisTUI.BINDINGS):
             return
 
@@ -244,11 +249,12 @@ class JarvisTUI(App):
             )
             return
 
-        self._append_log(f"[bold cyan]you[/bold cyan] > {tui_output.escape(text)}")
-
+        # A session is named after the first thing said in it, never after a
+        # command: "/switch 110" became the title of the session it switched to.
+        if not text.startswith("/"):
+            self._pending_autoname_text = text
         # Inject via the same path voice and sockets use.  Slash
         # commands still work — main.py's handler catches them.
-        self._pending_autoname_text = text
         self.jarvis.events.inject_user_input(text)
 
     @on(OptionList.OptionSelected, "#command-dropdown")
@@ -370,6 +376,9 @@ class JarvisTUI(App):
 
     async def _refresh_sidebar(self) -> None:
         await refresh_sidebar(self, SessionItem, logger)
+
+    def _on_session_switch(self, session: Any) -> None:
+        show_session(self, session)
 
     @on(ListView.Selected, "#session-list")
     async def on_session_selected(self, event: ListView.Selected) -> None:

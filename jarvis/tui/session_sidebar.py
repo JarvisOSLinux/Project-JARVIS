@@ -65,8 +65,35 @@ async def refresh_sidebar(app: Any, session_item_cls: Any, logger: Any) -> None:
         app._update_status()
 
 
-async def _load_session_history(app: Any, session_id: str) -> None:
-    """Load stored conversation entries and render them into the RichLog."""
+def show_session(app: Any, session: Any) -> None:
+    """Show *session* in the chat: its header and stored messages, or no session.
+
+    The one place the chat changes to another session. `SessionManager`
+    announces every switch (`/switch`, `/new`, the sidebar, deleting the
+    session you are in, a socket client), so the chat can never show one
+    session while JARVIS is in another.
+    """
+    try:
+        from textual.widgets import RichLog
+
+        app.query_one("#chat-log", RichLog).clear()
+        app._export_lines.clear()
+    except Exception:
+        pass
+    app._pending_delete_session_id = None
+    if session is None:
+        app._append_log("[dim]— no session; your next message starts a new one —[/dim]")
+    else:
+        app._append_log(
+            f"[dim]— {session.short_id()} "
+            f"('{tui_output.escape(session.title or 'untitled')}') —[/dim]"
+        )
+        render_session_history(app, session.id)
+    app.schedule_sidebar_refresh()
+
+
+def render_session_history(app: Any, session_id: str) -> None:
+    """Write a session's stored conversation into the chat, oldest first."""
     if app.jarvis is None:
         return
     ctx = getattr(app.jarvis, "contextor", None)
@@ -77,17 +104,14 @@ async def _load_session_history(app: Any, session_id: str) -> None:
         entries = result.get("entries", [])
     except Exception:
         return
-
     if not entries:
         app._append_log("[dim](no messages in this session yet)[/dim]")
         return
-
     # Sort chronologically — contextor returns most-recent-first by default.
     try:
         entries.sort(key=lambda e: e.get("stored_at", ""))
     except Exception:
         pass
-
     for entry in entries:
         content = (entry.get("content") or "").strip()
         if not content:
@@ -110,27 +134,8 @@ async def on_session_selected(app: Any, event: Any) -> None:
         return
     if item.session_id == app.jarvis.sessions.current_id:
         return
-    app._pending_delete_session_id = None
-    session = app.jarvis.sessions.switch(item.session_id)
-    if session is None:
+    if app.jarvis.sessions.switch(item.session_id) is None:
         app._append_log(f"[red]Could not switch to {item.session_id[:8]}[/red]")
-        return
-
-    # Clear transcript and reload history for the selected session.
-    try:
-        from textual.widgets import RichLog
-
-        chat_log = app.query_one("#chat-log", RichLog)
-        chat_log.clear()
-        app._export_lines.clear()
-    except Exception:
-        pass
-
-    app._append_log(
-        f"[dim]— {session.short_id()} " f"('{session.title or 'untitled'}') —[/dim]"
-    )
-    await _load_session_history(app, session.id)
-    await app._refresh_sidebar()
 
 
 def get_delete_target_session(app: Any) -> Optional[Any]:
