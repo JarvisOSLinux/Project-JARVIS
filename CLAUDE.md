@@ -20,7 +20,7 @@ Project-JARVIS (Python)     — daemon, LLM orchestration, interfaces
   jarvis/runtime/           — event loop, action handlers
   jarvis/contextor/         — adapter + embeddings for the Rust contextor memory binary
   jarvis/platform/          — OS abstraction (Linux/macOS/Windows: data dirs, IPC hardening + accept-time peer auth, askpass/elevation, sidecar resolution)
-  jarvis/server/            — opt-in OpenAI-compatible HTTP endpoint (`openai_compat.py`, off by default)
+  jarvis/server/            — opt-in network surfaces, both off by default: OpenAI-compatible HTTP (`openai_compat.py`) and `jarvis web` phone gateway over Tailscale (`web_gateway.py` + `web/` page)
 
 deps/rust/dispatch          — Rust signal-driven MCP task orchestrator
 deps/rust/dmcp              — Rust MCP server manager (package manager for MCP)
@@ -272,6 +272,7 @@ make check                  # Format + lint + typecheck + tests
 | `jarvis/core/setup_queue.py` | Pending server setups (#254): `setups.json` (daemon-owned, survives restarts) + the offline completion queue; stores what a server needs, never values |
 | `jarvis/core/constraint_store.py` | Standing path-prefix deny constraints (#214), enforced in `dispatch_flow` ahead of the confirmation mode |
 | `jarvis/core/socket_security.py` | Socket hardening |
+| `jarvis/server/web_gateway.py` | `jarvis web` (#266): loopback WebSocket gateway, Tailscale identity + role allowlist, audit log, relay to `jarvis.sock`; page in `jarvis/server/web/` is jarvis-app's UI over `transport.js`; see `docs/web-gateway.md` |
 | `jarvis/core/sudo_manager.py` | `jarvis sudo` — sudoers drop-in management (#158) |
 | `jarvis/dispatch/boundary.py` | Output-provenance boundary verification (#165) |
 | `jarvis/core/command_parser.py` | LLM response parser + action registry |
@@ -297,6 +298,8 @@ make check                  # Format + lint + typecheck + tests
 ---
 
 ## Changelog — corrected claims
+
+*2026-10-22:* `jarvis web`, phone access over Tailscale (#266, host side). A separate opt-in process (`JARVIS_WEB_ENABLED`) bound to `127.0.0.1`, reached through `tailscale serve`, never Funnel. Identity is the `Tailscale-User-Login` header checked against `web_allowlist.json` (guest/trusted/owner) on every message; `Host` must end in `.ts.net` and `Origin` must equal `Host`. Each role has a narrow send list (no settings, providers, setups, shutdown, `approve_all_confirmations`), the daemon's provider/settings/setup broadcasts are never forwarded, a session is refused or ended while the host is in `allow_all`, and state-changing requests go to `web_audit.jsonl`. The page is jarvis-app's chat, sessions drawer and permission panel behind a `transport.js` connection switch, with a phone layout and an always-visible stop button; the stop button only ends the stream display (`stop_stream`), real stop and activity events are #267 phase 2. Tested against a fake daemon socket (`tests/test_web_gateway.py`); not yet run against a real tailnet, so V1-V6 in `docs/web-gateway.md` are open, and the claim that `tailscale serve` strips a forged identity header is unverified.
 
 *2026-10-22:* JARVIS says what it is about to do (#273). Asked to do something, it went silent until it had an answer. Any ROOT action except `respond` may carry an optional `comment`, one short sentence of intent; `root_actions._say_comment` sends it through `output_manager.handle_response` like a reply (shown in every front end, saved to the session, spoken in voice mode) before the action runs, clipped to 300 characters on one line. `VOICE_SPEAK_COMMENTS` (Settings → Voice, on by default) silences only the speaking; the chat still shows it. Both ROOT prompts ask for it and forbid stating a result before a signal does. Probed on the reference model (`nemotron-3-ultra:cloud`) before shipping: the first step of a request carried a comment in 3 of 3 runs ("Let me find a calendar tool to check your schedule for this week."), later steps only sometimes, greetings never, and every reply stayed valid JSON.
 

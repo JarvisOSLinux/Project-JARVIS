@@ -94,6 +94,11 @@ tui = [
     "textual>=0.60.0",
 ]
 
+# Phone access over Tailscale (`jarvis web`, opt-in; docs/web-gateway.md).
+web = [
+    "websockets>=13.0",
+]
+
 # Development dependencies
 dev = [
     "pytest>=7.0.0",
@@ -119,6 +124,7 @@ docs = [
 # Everything - convenience group
 all = [
     "project-jarvis[tui]",
+    "project-jarvis[web]",
     "project-jarvis[voice-aec]",
     "project-jarvis[dev]",
     "project-jarvis[docs]",
@@ -138,7 +144,7 @@ where = ["."]
 include = ["jarvis*"]
 
 [tool.setuptools.package-data]
-jarvis = ["*.json", "*.yaml", "*.yml", "assets/*.wav"]
+jarvis = ["*.json", "*.yaml", "*.yml", "assets/*.wav", "server/web/*"]
 
 [tool.black]
 line-length = 88

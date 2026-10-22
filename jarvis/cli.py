@@ -1134,6 +1134,106 @@ def _cmd_unconstrain() -> None:
         sys.exit(1)
 
 
+def _cmd_web() -> None:
+    """Phone access over Tailscale (docs/web-gateway.md): serve, allow, revoke, list."""
+    from .server.web_gateway import (
+        ROLES,
+        Allowlist,
+        build_gateway,
+        serve_forever,
+    )
+
+    args = sys.argv[2:]
+    allowlist = Allowlist(Config.WEB_ALLOWLIST_FILE)
+    sub = args[0] if args else "start"
+
+    if sub == "allow":
+        if len(args) < 2:
+            print(f"Usage: jarvis web allow <tailscale-login> [{'|'.join(ROLES)}]")
+            sys.exit(1)
+        role = args[2] if len(args) > 2 else "trusted"
+        try:
+            allowlist.set(args[1], role)
+        except ValueError as e:
+            print(f"Error: {e}")
+            sys.exit(1)
+        print(f"{args[1].lower()} may use JARVIS from a phone as {role}.")
+        return
+
+    if sub == "revoke":
+        if len(args) < 2:
+            print("Usage: jarvis web revoke <tailscale-login>")
+            sys.exit(1)
+        if not allowlist.remove(args[1]):
+            print(f"{args[1]} is not on the allowlist.")
+            sys.exit(1)
+        print(f"Removed {args[1].lower()}. Open sessions end at their next request.")
+        return
+
+    if sub == "list":
+        entries = allowlist.load()
+        if not entries:
+            print(
+                "Nobody is allowed. Add one: jarvis web allow <tailscale-login> owner"
+            )
+        for login, role in sorted(entries.items()):
+            print(f"  {login:<40} {role}")
+        return
+
+    dev_login = None
+    if sub != "start":
+        print(f"Error: Unknown web command '{sub}'")
+        show_usage()
+        sys.exit(1)
+    if "--insecure-dev-login" in args:
+        rest = args[args.index("--insecure-dev-login") + 1 :]
+        if not rest:
+            print("Usage: jarvis web start --insecure-dev-login <login>")
+            sys.exit(1)
+        dev_login = rest[0]
+
+    if not Config.WEB_ENABLED:
+        print("Remote access is off. Turn it on with:")
+        print("  JARVIS_WEB_ENABLED=true jarvis web")
+        print("  (or add JARVIS_WEB_ENABLED=true to jarvis.conf)")
+        sys.exit(1)
+    try:
+        import websockets  # noqa: F401
+    except ImportError:
+        import subprocess
+
+        print("Installing the web extra (websockets)...")
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "websockets>=13"], check=True
+        )
+    if not dev_login and not allowlist.load():
+        print("Nobody is on the allowlist, so every request would be refused.")
+        print("  jarvis web allow <your-tailscale-login> owner")
+        sys.exit(1)
+
+    port = Config.WEB_PORT
+    print(f"jarvis web listening on 127.0.0.1:{port} (loopback only)")
+    if dev_login:
+        print(
+            f"WARNING: --insecure-dev-login: every request is treated as {dev_login}."
+        )
+    else:
+        print(
+            f"  Publish it inside your tailnet:  tailscale serve --bg --https=443 {port}"
+        )
+        print("  Never use `tailscale funnel`; the gateway refuses Funnel requests.")
+    try:
+        asyncio.run(serve_forever(build_gateway(dev_login), port))
+    except KeyboardInterrupt:
+        print("\nStopped.")
+    except OSError as e:
+        print(f"Error: could not listen on 127.0.0.1:{port}: {e}")
+        sys.exit(1)
+    except RuntimeError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+
 def show_usage() -> None:
     """Display usage information."""
     print("JARVIS AI Assistant - CLI Interface")
@@ -1173,6 +1273,12 @@ def show_usage() -> None:
     print(
         "  jarvis setups edit <server>           # Change an installed server's settings"
     )
+    print()
+    print("Phone Access (opt-in, over Tailscale):")
+    print("  jarvis web allow <login> [guest|trusted|owner]   # Let an account in")
+    print("  jarvis web revoke <login>                        # Remove an account")
+    print("  jarvis web list                                  # Show who is allowed")
+    print("  JARVIS_WEB_ENABLED=true jarvis web               # Start the gateway")
     print()
     print("Provider Pool:")
     print("  jarvis providers                                    # List providers")
@@ -1339,6 +1445,9 @@ def main() -> None:
 
     elif command == "setups":
         _cmd_setups()
+
+    elif command == "web":
+        _cmd_web()
 
     elif command == "model":
         _legacy_redirect("jarvis model")

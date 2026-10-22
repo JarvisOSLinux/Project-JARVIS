@@ -93,15 +93,14 @@ The table below maps their critical CVEs to JARVIS design decisions.
 transmitting the user’s authentication token.  Attacker captured the
 token, reconnected to the legitimate gateway, and achieved full RCE.
 
-**JARVIS:** Has no WebSocket gateway and no URL-parameter-driven
-auto-connect-and-exfiltrate mechanism of any kind — the specific pattern
-this CVE exploited does not exist here, regardless of the optional TCP
-listener described under "Exposed Instances" below (that listener requires
-a bearer token per request and is never auto-triggered by a URL parameter
-or untrusted input).
+**JARVIS:** No URL-parameter-driven auto-connect-and-exfiltrate mechanism
+of any kind. The opt-in `jarvis web` gateway (below) is a WebSocket
+endpoint, but it holds no token a page could leak (identity comes from
+Tailscale), the page never opens a socket to any host but its own, and the
+gateway rejects an `Origin` that is not its own `Host`.
 
-- Status: ✅ Eliminated by design (no WebSocket gateway, no URL-driven
-  auto-connect)
+- Status: ✅ Closed by design (no URL-driven auto-connect, no token to
+  exfiltrate, same-origin only)
 
 ### CVE-2026-28472 “ClawJacked” — WebSocket Auth Bypass
 
@@ -109,10 +108,18 @@ or untrusted input).
 could be bypassed by manipulating headers, allowing unauthenticated
 remote devices to impersonate trusted paired devices.
 
-**JARVIS:** No WebSocket gateway, no device pairing.  Eliminated by
-the same design decision.
+**JARVIS:** No device pairing and no identity of our own to forge. The
+opt-in `jarvis web` gateway trusts only the `Tailscale-User-Login` header
+that `tailscale serve` sets (and strips from client input), checks it
+against an allowlist with a role per account on every message, and refuses
+Funnel requests. Residual risk: any local process can send that header to
+the loopback port itself (see the module docstring of
+`jarvis/server/web_gateway.py`); do not enable it on a shared host. Whether
+`tailscale serve` really strips a forged header is checked by V2 in
+`docs/web-gateway.md`, and has not yet been run.
 
-- Status: ✅ Eliminated by design (no network gateway)
+- Status: ⚠️ Closed by design when `jarvis web` is off or on a single-user
+  host; V2 outstanding before relying on it
 
 ### Exposed Instances (~40K discoverable on Shodan)
 
