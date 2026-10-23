@@ -517,6 +517,6 @@ class TestTui:
 
         busy, waiting, idle, lines = _tui(drive)
         assert busy == ("⋯ Searching for: calendar…", False)
-        assert waiting == "⋯ 1 task still running"
+        assert waiting == "⋯ 1 task still running (F4 shows them)"
         assert idle is True
         assert not any("Searching" in line for line in lines)

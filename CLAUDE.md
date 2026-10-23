@@ -267,6 +267,7 @@ make check                  # Format + lint + typecheck + tests
 | `jarvis/tui/confirm_modal.py` | Tool confirmation modal |
 | `jarvis/tui/setup_form.py` | The setup form (#254), shared by `jarvis setups fill` (inline) and the TUI (modal) |
 | `jarvis/tui/setups_view.py` | TUI list of pending setups (F3 / `/setups`) |
+| `jarvis/tui/tasks_view.py` | What JARVIS is doing now (F4 / `/tasks`): requests, running tasks with output, timers (#267) |
 | `jarvis/tui/config_modal.py` | Tabbed config/provider settings modal (F2 / /settings) |
 | `jarvis/tui/provider_modal.py` | Provider add/edit modal |
 | `jarvis/core/confirmation_manager.py` | Multi-channel confirmation gate; pending list persisted to `$JARVIS_DATA_DIR/confirmations.json` when built with a store path (#224) |
@@ -294,6 +295,7 @@ make check                  # Format + lint + typecheck + tests
 | `jarvis/runtime/root_actions.py` | ROOT-mode LLM response action handlers |
 | `jarvis/runtime/action_events.py` | Start/update/end events for what JARVIS does (search, docs, install, tool runs, confirmations), for front ends (#271) |
 | `jarvis/runtime/root_context.py` | Context assembly for ROOT-mode prompts |
+| `jarvis/runtime/work.py` | `collect_work()`: requests, running tasks and timers, what waits on the user, as plain data (#267) |
 | `jarvis/runtime/health.py` | `/status` health check (#272): sections of checks as plain data, fast by default, `full` adds registry updates |
 | `jarvis/runtime/llm_bridge.py` | `ask_llm()` — the sole locked/mode-atomic LLM call site |
 | `jarvis/runtime/events.py` | Event routing + per-event task tracking (concurrent goals) |
@@ -301,6 +303,8 @@ make check                  # Format + lint + typecheck + tests
 ---
 
 ## Changelog — corrected claims
+
+*2026-10-23:* the TUI shows what JARVIS is doing now (#267, phase 1): F4 or `/tasks`. Nothing did: Ctrl+Q listed running work only when quitting. `jarvis/runtime/work.py` (`collect_work`) returns plain data, for socket clients next: the active requests and how long ago they came in, how many turns wait on the model, each running task from dispatch's status with the title, parameters and start time its action block recorded (a task JARVIS did not start still shows, without a duration), the request it belongs to and its latest output (dispatch's provenance-wrapped tail, unwrapped for display), timers with when they fire, and the confirmations and setups waiting. `jarvis/tui/tasks_view.py` refreshes it every second. It has no stop buttons: what stopping a request or a task does is #270, parked for Yakup and Toufic to specify; Ctrl+Q still stops everything when quitting. The activity line points to F4 while tasks run.
 
 *2026-10-23:* the TUI chat is messages and folding blocks (#271). It was one append-only `RichLog`, so a long output pushed the conversation out of sight, and what JARVIS ran showed only as passing "... Dispatch signal (pid 7)" lines. Every action now starts and ends as an event (`jarvis/runtime/action_events.py`, delivered by `OutputManager.emit_action`, never spoken): a search with what it found, reading a server's tools, an install, update, uninstall or configure with its outcome (`waiting` when a setup form is pending), each dispatched tool with its parameters (a shell command as typed), its live output from REMIND and its output and status from EXIT/KILL, and a confirmation with what was decided. Tool output is unwrapped from the provenance boundary for the reader; output that failed verification keeps its warning. Only an action that started can end, so a timer's EXIT or a confirmation restored after a restart draws nothing. `jarvis/tui/chat_view.py` draws them: a typed slash command is a block that holds its output (`session_reply` marks engine replies `command: True`), a block folds to one line once something newer arrives unless you folded or opened it yourself, and a long one scrolls inside 16 lines. Ctrl+L or `/commands` browses (Up/Down, Enter/Space, Esc back to typing; a click on a title folds too); `/commands collapse|expand` does them all. The activity narrative moved from the chat to one line above the input, which says how many tasks are still running once JARVIS has answered. Socket clients do not get the action events yet (#267 phase 2).
 

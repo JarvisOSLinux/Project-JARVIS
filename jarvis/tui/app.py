@@ -24,6 +24,7 @@ Keybindings:
     Ctrl+Shift+C — clear on-screen transcript (export buffer only; not memory)
     Ctrl+Shift+E — export transcript to ``JARVIS_DATA_DIR/transcripts/``
     F1      — help (keys from ``BINDINGS`` + documented slash commands)
+    F4      — what JARVIS is doing: requests, running tasks, timers
     Enter   — submit message, or accept the highlighted slash-command suggestion
     Tab     — complete the ``/command`` being typed; press again to cycle
     Up/Down — walk previously sent messages (the suggestion list when it is open)
@@ -217,6 +218,7 @@ class JarvisTUI(App):
         Binding("f1", "help", "Help", show=True, priority=True),
         Binding("f2", "settings", "Settings", show=True, priority=True),
         Binding("f3", "setups", "Setups", show=True, priority=True),
+        Binding("f4", "tasks", "Tasks", show=True, priority=True),
         Binding("ctrl+shift+c", "clear_transcript", "Clear log", show=False),
         Binding("ctrl+shift+e", "export_transcript", "Export", show=False),
     ]
@@ -490,6 +492,24 @@ class JarvisTUI(App):
     def action_setups(self) -> None:
         if len(self.screen_stack) <= 1:
             self._open_setups()
+
+    def action_tasks(self) -> None:
+        if len(self.screen_stack) <= 1:
+            self._open_tasks()
+
+    def _open_tasks(self) -> None:
+        """What JARVIS is doing now (F4, /tasks)."""
+        from ..runtime.work import collect_work
+        from .tasks_view import TasksScreen
+
+        jarvis = self.jarvis
+
+        async def collect() -> Dict[str, Any]:
+            if jarvis is None:
+                return {}
+            return await collect_work(jarvis)
+
+        self.push_screen(TasksScreen(collect))
 
     async def action_quit(self) -> None:
         """Quit, asking first when quitting would stop work that is running."""

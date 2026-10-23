@@ -74,6 +74,11 @@ TUI_LOCAL_SLASH_HELP: tuple[tuple[str, str], ...] = (
     ("/model [name]", "Show or switch the current LLM model."),
     ("/settings", "Open settings editor (runtime config)."),
     ("/setups", "List servers waiting for setup; fill one in or cancel it."),
+    (
+        "/tasks",
+        "What JARVIS is doing now: requests, running tasks with their latest "
+        "output, timers, and what waits on you.",
+    ),
 )
 
 # Keys that are not represented as App BINDINGS but belong in the cheat sheet.
