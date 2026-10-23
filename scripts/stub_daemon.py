@@ -2,7 +2,9 @@
 
 Speaks just enough of the socket protocol for `jarvis web`: settings, sessions,
 streamed replies and confirmations. Send "confirm" in the chat to get a pending
-permission request; any other text is echoed back in two chunks.
+permission request, and "run" to watch a turn with a comment, the activity
+line and action blocks (docs/gui-protocol.md); any other text is echoed back in
+two chunks. `get_status` and `list_work` answer with sample data.
 
     python scripts/stub_daemon.py <socket-path>
 """
@@ -34,6 +36,113 @@ async def reply(text: str) -> None:
     await broadcast({"type": "state", "state": "idle"})
 
 
+running: dict = {}
+
+
+async def action(phase: str, action_id: str, **fields) -> None:
+    await broadcast(
+        {"type": "action", "phase": phase, "id": action_id, "at": time.time(), **fields}
+    )
+
+
+async def run_turn() -> None:
+    """A turn like a real one: comment, activity, a search, a tool run, the answer."""
+    await broadcast({"type": "state", "state": "processing"})
+    await asyncio.sleep(0.6)
+    await broadcast(
+        {
+            "type": "response",
+            "content": "Let me find a tool that can run updates.",
+            "done": True,
+            "comment": True,
+        }
+    )
+    await broadcast({"type": "activity", "text": "Searching for: run system updates…"})
+    start = time.time()
+    await action("start", "search:1", kind="search", title="Search: run system updates")
+    await asyncio.sleep(0.8)
+    await action(
+        "end",
+        "search:1",
+        kind="search",
+        status="ok",
+        output="jarvis-shell-system-mcp (installed): System-level shell execution",
+        started_at=start,
+    )
+    await broadcast({"type": "activity", "text": "Tasks dispatched; awaiting results…"})
+    start = time.time()
+    running["tool:7"] = start
+    await action(
+        "start",
+        "tool:7",
+        kind="tool",
+        title="execute_command (jarvis-shell-system-mcp)",
+        detail="pacman -Syu --noconfirm",
+    )
+    lines = []
+    for i in range(1, 6):
+        await asyncio.sleep(1.0)
+        lines.append(f"( {i}/5) upgrading package-{i}")
+        await action("update", "tool:7", output="\n".join(lines))
+    running.pop("tool:7", None)
+    await action(
+        "end",
+        "tool:7",
+        kind="tool",
+        status="ok",
+        output="\n".join(lines + [":: Running post-transaction hooks..."]),
+        started_at=start,
+    )
+    await broadcast({"type": "activity", "text": "LLM (root) is thinking…"})
+    await asyncio.sleep(0.6)
+    await broadcast(
+        {"type": "response", "content": "Done: 5 packages were upgraded.", "done": True}
+    )
+    await broadcast({"type": "state", "state": "idle"})
+
+
+def sample_work() -> dict:
+    now = time.time()
+    tasks = [
+        {
+            "pid": 7,
+            "kind": "tool",
+            "title": "execute_command (jarvis-shell-system-mcp)",
+            "detail": "pacman -Syu --noconfirm",
+            "running_for": round(now - since, 1),
+            "output": "( 2/5) upgrading package-2",
+            "request": "update my system",
+        }
+        for since in running.values()
+    ]
+    return {
+        "requests": (
+            [{"id": "a1", "text": "update my system", "since": now - 30}]
+            if running
+            else []
+        ),
+        "tasks": tasks,
+        "thinking": 0,
+        "confirmations": len(pending),
+        "setups": 0,
+    }
+
+
+SAMPLE_STATUS = [
+    {
+        "title": "Language model",
+        "checks": [{"name": "stub", "state": "ok", "detail": "in use (no LLM)"}],
+    },
+    {
+        "title": "Engines",
+        "checks": [
+            {"name": "dispatch", "state": "off", "detail": "not in the stub"},
+            {"name": "Search", "state": "warn", "detail": "keyword only"},
+        ],
+    },
+]
+
+
 async def handle(msg: dict, writer: asyncio.StreamWriter) -> None:
     kind = msg.get("type")
     if kind == "get_settings":
@@ -52,6 +161,10 @@ async def handle(msg: dict, writer: asyncio.StreamWriter) -> None:
         await broadcast({"type": "confirmation_list", "confirmations": pending})
     elif kind == "list_clients":
         await broadcast({"type": "client_list", "clients": []})
+    elif kind == "get_status":
+        await broadcast({"type": "status", "full": False, "sections": SAMPLE_STATUS})
+    elif kind == "list_work":
+        await broadcast({"type": "work", "work": sample_work()})
     elif kind == "message":
         text = str(msg.get("content", ""))
         if text.strip().lower() == "confirm":
@@ -64,6 +177,8 @@ async def handle(msg: dict, writer: asyncio.StreamWriter) -> None:
                 }
             )
             await broadcast({"type": "confirmation_request", "id": pending[-1]["id"]})
+        elif text.strip().lower() == "run":
+            asyncio.create_task(run_turn())
         else:
             asyncio.create_task(reply(text))
 

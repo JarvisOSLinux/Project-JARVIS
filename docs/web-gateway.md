@@ -66,8 +66,10 @@ Every request that changes something is appended to
 | `JARVIS_WEB_HOST_SUFFIX` | `.ts.net` |
 
 `scripts/run-web.sh` starts the daemon and the gateway for you: `--stub` uses a
-fake daemon so no LLM is needed, `--tailscale` also publishes it on your tailnet
-and adds your own account as owner when the allowlist is empty.
+fake daemon so no LLM is needed (type `confirm` for a permission request, `run`
+for a turn with the activity line and action blocks), `--tailscale` also
+publishes it on your tailnet and adds your own account as owner when the
+allowlist is empty.
 
 `jarvis web start --insecure-dev-login <login>` treats every request as that
 account, for trying the page on `localhost` without Tailscale. It prints a

@@ -130,7 +130,8 @@ if [ "$MODE" = local ]; then
     URL="http://localhost:$PORT"
     echo "==> $URL  (every request is $LOGIN, owner)"
     if [ "$STUB" = 1 ]; then
-        echo "    type 'confirm' in the chat to get a permission request"
+        echo "    type 'confirm' in the chat to get a permission request,"
+        echo "    and 'run' to watch a turn with action blocks"
     fi
     if [ "$OPEN" = 1 ]; then
         (sleep 1.5 && { xdg-open "$URL" || open "$URL"; } >/dev/null 2>&1) &

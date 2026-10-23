@@ -20,6 +20,8 @@
             type: 'partial_approve_confirmation', id: a.id, approved_indices: a.approvedIndices,
         }),
         list_clients:               ()  => ({ type: 'list_clients' }),
+        get_status:                 (a) => ({ type: 'get_status', full: !!a.full }),
+        list_work:                  ()  => ({ type: 'list_work' }),
     };
 
     const EVENTS = {
@@ -35,6 +37,10 @@
         ack:                  'ipc-ack',
         gateway:              'ipc-gateway',
         DAEMON_SHUTDOWN:      'ipc-daemon-shutdown',
+        activity:             'ipc-activity',
+        action:               'ipc-action',
+        status:               'ipc-status',
+        work:                 'ipc-work',
     };
 
     const listeners = {};
@@ -60,7 +66,9 @@
 
     function route(msg) {
         if (msg.type === 'response') {
-            emit('ipc-chunk', { content: msg.content, done: msg.done });
+            emit('ipc-chunk', {
+                content: msg.content, done: msg.done, comment: !!msg.comment,
+            });
         } else if (msg.type === 'confirmation_list') {
             emit('ipc-confirmation-list', msg.confirmations);
         } else if (msg.type === 'session_list') {
