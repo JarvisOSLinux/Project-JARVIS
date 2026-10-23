@@ -10,6 +10,7 @@ from typing import Any, Callable
 
 from ..core.secret_scrubber import redact_secrets, redaction_notice
 from ..core.voice_state import VoiceState
+from . import action_events
 from .io import broadcast_to_gui_clients, enrich_pending_with_goals, set_gui_state
 from .llm_bridge import ask_llm
 from .output_hooks import emit_activity
@@ -289,6 +290,7 @@ async def on_dispatch_signal(app: Any, logger: Logger, signal: dict[str, Any]) -
 
     app.goals.update_from_signal(signal)
     is_stale = _note_signal(app, signal, exit_data)
+    action_events.on_signal(app, signal, exit_data)
 
     # Build a context scoped to the goal that owns this PID.
     # If no goal owns the PID (e.g. a timer from defer), fall back to
@@ -373,6 +375,7 @@ async def on_dispatch_signals(
     for sig in signals:
         app.goals.update_from_signal(sig)
         _note_signal(app, sig)
+        action_events.on_signal(app, sig)
 
     # A fire_wake=false batch is one session, so all PIDs share a goal; scope the
     # context to it. Fall back to full root context if none owns the PIDs.
@@ -412,6 +415,16 @@ async def on_confirmation_response(
     pending = app.confirmation.resolve(data)
     if pending is None:
         return
+    action_events.end(
+        app,
+        f"confirm:{pending.request_id}",
+        "approved" if pending.approved_tasks else "denied",
+        (
+            f"Denied: {', '.join(pending.denied_tools)}"
+            if pending.approved_tasks and pending.denied_tools
+            else ""
+        ),
+    )
 
     logger.info(
         f"JARVIS: Confirmation resolved: id={pending.request_id}, "

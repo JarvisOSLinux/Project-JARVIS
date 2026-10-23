@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from textual.widgets import Input, RichLog
+from textual.widgets import Input
 
+from .chat_view import ChatView
 from .help_screen import HelpScreen
 from .local_input import export_transcript_to_disk
 from .session_sidebar import get_delete_target_session
@@ -53,9 +54,9 @@ async def delete_selected_session(app: Any) -> None:
 
 
 def focus_chat(app: Any) -> None:
-    """Move focus to the transcript for keyboard scrolling (arrows / PgUp)."""
+    """Browse mode: the newest block takes focus; ↑/↓, Enter/Space, Esc (#271)."""
     try:
-        app.query_one("#chat-log", RichLog).focus()
+        app.query_one("#chat-log", ChatView).browse()
     except Exception:
         pass
 
@@ -74,10 +75,9 @@ def open_help(app: Any, bindings: Any) -> None:
 
 
 def clear_transcript(app: Any) -> None:
-    """Clear the RichLog and export buffer only (does not touch contextor)."""
+    """Clear the chat and export buffer only (does not touch contextor)."""
     try:
-        log = app.query_one("#chat-log", RichLog)
-        log.clear()
+        app.query_one("#chat-log", ChatView).clear()
     except Exception:
         return
     app._export_lines.clear()

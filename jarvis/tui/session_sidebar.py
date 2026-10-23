@@ -74,9 +74,9 @@ def show_session(app: Any, session: Any) -> None:
     session while JARVIS is in another.
     """
     try:
-        from textual.widgets import RichLog
+        from .chat_view import ChatView
 
-        app.query_one("#chat-log", RichLog).clear()
+        app.query_one("#chat-log", ChatView).clear()
         app._export_lines.clear()
     except Exception:
         pass

@@ -14,6 +14,7 @@ from ..core.setup_queue import (
     value_error,
 )
 from ..core.skill_store import delete_skill, save_skill
+from . import action_events
 from .goal_updates import apply_goal_updates
 from .llm_bridge import ask_llm
 from .output_hooks import emit_activity, get_embeddings, persist_assistant_turn
@@ -51,6 +52,7 @@ async def _handle_search_tools(
     top_k = parsed.get("top_k", 5)
     min_score = parsed.get("min_score", 0.25)
     emit_activity(app, f"Searching for: {capability[:60]}…", kind="dispatch")
+    action = action_events.start(app, "search", f"Search: {capability}")
 
     result = await app.dispatch.search_by_capability(
         capability=capability,
@@ -63,11 +65,30 @@ async def _handle_search_tools(
     logger.info(
         f"JARVIS: search_tools '{capability}' → {len(entries)} result(s) via {mode}"
     )
+    action_events.end(
+        app,
+        action,
+        "failed" if result.get("error") else "ok",
+        str(result.get("error") or "")
+        or "\n".join(_search_line(e) for e in entries)
+        or "No matching server.",
+    )
 
     context = build_root_context(app, logger)
     context += "\n" + format_search_results(capability, entries, mode)
     response = await ask_llm(app, logger, context, tag="root-search-tools", mode="root")
     await app._act_on_root_response(response, depth + 1)
+
+
+def _search_line(entry: Any) -> str:
+    """One search result for its block: the server, its score, what it does."""
+    if not isinstance(entry, dict):
+        return str(entry)
+    name = entry.get("server_id") or entry.get("id") or "?"
+    about = entry.get("server_description") or entry.get("description") or ""
+    first = str(about).strip().splitlines()
+    line = f"{name} (installed)" if entry.get("installed") else str(name)
+    return f"{line}: {first[0][:120]}" if first else line
 
 
 def _drift_row(rows: Any, server_id: str) -> dict | None:
@@ -108,11 +129,18 @@ async def _handle_get_server_docs(
 ) -> None:
     server_id = parsed["server_id"]
     emit_activity(app, f"Fetching docs for {server_id}…", kind="dispatch")
+    action = action_events.start(app, "docs", f"Read the tools of {server_id}")
 
     tools_result = await app.dispatch.list_server_tools(server_id)
     tools = tools_result.get("tools", []) if isinstance(tools_result, dict) else []
     tools_error = tools_result.get("error") if isinstance(tools_result, dict) else None
     logger.info(f"JARVIS: get_server_docs '{server_id}' → {len(tools)} tool(s)")
+    action_events.end(
+        app,
+        action,
+        "failed" if tools_error and not tools else "ok",
+        _tool_names(tools) if tools else str(tools_error or "No tools."),
+    )
 
     # When the server fails to start due to missing config, surface the exact
     # env-var key names from configurableProperties so the LLM doesn't guess.
@@ -149,6 +177,11 @@ async def _handle_get_server_docs(
     await app._act_on_root_response(response, depth + 1)
 
 
+def _tool_names(tools: list) -> str:
+    names = [t.get("name", "?") for t in tools if isinstance(t, dict)]
+    return f"{len(names)} tools: {', '.join(names)}"
+
+
 def _sensitive_keys(props: Any) -> set:
     return {
         p["key"]
@@ -166,6 +199,7 @@ async def _handle_install_server(
 ) -> None:
     server_id = parsed["server_id"]
     emit_activity(app, f"Installing {server_id}…", kind="dispatch")
+    action = action_events.start(app, "install", f"Install {server_id}")
 
     # Step 1: bare install (no setup script yet)
     install_result = await app.dispatch.install_server(server_id)
@@ -173,6 +207,7 @@ async def _handle_install_server(
         logger.warning(
             f"JARVIS: install_server '{server_id}' failed: {install_result['error']}"
         )
+        action_events.end(app, action, "failed", str(install_result["error"]))
         context = build_root_context(app, logger)
         context += f"\nINSTALL_ERROR: {install_result['error']}"
         response = await ask_llm(
@@ -191,9 +226,12 @@ async def _handle_install_server(
         manifest.get("configurableProperties") or [], manifest.get("config") or {}
     )
     if missing:
+        action_events.end(
+            app, action, "waiting", f"Installed; needs setup: {', '.join(missing)}"
+        )
         await _queue_setup(app, logger, server_id, manifest, missing, depth)
         return
-    await finish_install(app, logger, server_id, manifest, depth)
+    await finish_install(app, logger, server_id, manifest, depth, action=action)
 
 
 async def finish_install(
@@ -205,8 +243,14 @@ async def finish_install(
     *,
     run_setup: bool = True,
     preface: str = "",
+    action: str = "",
 ) -> None:
-    """Run the server's setup script, then hand the model its docs (INSTALL_RESULT)."""
+    """Run the server's setup script, then hand the model its docs (INSTALL_RESULT).
+
+    `action` is the install's block, still open; without one (a setup the user
+    finished later) the setup gets a block of its own.
+    """
+    action = action or action_events.start(app, "install", f"Set up {server_id}")
     if run_setup:
         # The script receives MCP_CONFIG_* env vars from manifest.config.
         emit_activity(app, f"Running setup for {server_id}…", kind="dispatch")
@@ -214,6 +258,9 @@ async def finish_install(
         if "error" in setup_result:
             logger.warning(
                 f"JARVIS: setup '{server_id}' failed: {setup_result['error']}"
+            )
+            action_events.end(
+                app, action, "failed", f"Setup failed: {setup_result['error']}"
             )
             context = build_root_context(app, logger)
             context += preface
@@ -233,6 +280,12 @@ async def finish_install(
     tools_result = await app.dispatch.list_server_tools(server_id)
     tools = tools_result.get("tools", []) if isinstance(tools_result, dict) else []
     tools_error = tools_result.get("error") if isinstance(tools_result, dict) else None
+    action_events.end(
+        app,
+        action,
+        "ok",
+        f"Installed. {_tool_names(tools)}" if tools else "Installed.",
+    )
 
     context = build_root_context(app, logger)
     context += preface
@@ -421,8 +474,15 @@ async def _handle_update_server(
     """Re-install a drifted server so the agent can heal it inside one goal (#39)."""
     server_id = parsed["server_id"]
     emit_activity(app, f"Updating {server_id}…", kind="dispatch")
+    action = action_events.start(app, "install", f"Update {server_id}")
 
     result = await app.dispatch.update_server(server_id)
+    action_events.end(
+        app,
+        action,
+        "failed" if "error" in result else "ok",
+        str(result.get("error") or "Updated."),
+    )
     if "error" in result:
         logger.warning(f"JARVIS: update_server '{server_id}' failed: {result['error']}")
         await feed_root_summary(app, logger, "UPDATE_ERROR", result["error"], depth)
@@ -447,8 +507,15 @@ async def _handle_uninstall_server(
 ) -> None:
     server_id = parsed["server_id"]
     emit_activity(app, f"Uninstalling {server_id}…", kind="dispatch")
+    action = action_events.start(app, "install", f"Uninstall {server_id}")
 
     result = await app.dispatch.uninstall_server(server_id)
+    action_events.end(
+        app,
+        action,
+        "failed" if "error" in result else "ok",
+        str(result.get("error") or "Removed."),
+    )
     context = build_root_context(app, logger)
     if "error" in result:
         logger.warning(
@@ -503,9 +570,11 @@ async def _handle_configure_server(
     """
     server_id = parsed["server_id"]
     emit_activity(app, f"Configuring {server_id}…", kind="dispatch")
+    action = action_events.start(app, "install", f"Configure {server_id}")
 
     manifest = await app.dispatch.get_server_manifest(server_id)
     if not manifest:
+        action_events.end(app, action, "failed", "Not installed.")
         await feed_root_summary(
             app,
             logger,
@@ -543,6 +612,7 @@ async def _handle_configure_server(
         )
     requested = [p for p in props if p["key"] in config]
     if not requested:
+        action_events.end(app, action, "ok", "Nothing to set." + note)
         await feed_root_summary(
             app,
             logger,
@@ -583,6 +653,7 @@ async def _handle_configure_server(
         for p in requested
     )
     if unchanged:
+        action_events.end(app, action, "ok", "Already set.")
         await feed_root_summary(
             app,
             logger,
@@ -592,6 +663,12 @@ async def _handle_configure_server(
             depth,
         )
         return
+    action_events.end(
+        app,
+        action,
+        "waiting",
+        f"For you to review: {', '.join(p['key'] for p in requested)}",
+    )
     await _queue_setup(
         app,
         logger,

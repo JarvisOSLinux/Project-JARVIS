@@ -36,6 +36,10 @@ def handle_local_input(app: Any, text: str, bindings: Any) -> bool:
         export_transcript_to_disk(app, name_arg)
         return True
 
+    if low == "/commands" or low.startswith("/commands "):
+        _handle_commands(app, low)
+        return True
+
     if low == "/clear":
         from .actions import clear_transcript
 
@@ -67,6 +71,22 @@ def handle_local_input(app: Any, text: str, bindings: Any) -> bool:
         return True
 
     return False
+
+
+def _handle_commands(app: Any, low: str) -> None:
+    """`/commands`: browse the chat's blocks, or fold or unfold them all (#271)."""
+    from .chat_view import ChatView
+
+    chat = app.query_one("#chat-log", ChatView)
+    arg = low.split(maxsplit=1)[1].strip() if " " in low else ""
+    if arg not in ("", "collapse", "expand"):
+        app._append_log("[yellow]Usage: /commands [collapse|expand][/yellow]")
+        return
+    chat.end_command()
+    if arg:
+        chat.set_all(arg == "collapse")
+    elif not chat.browse():
+        app._append_log("[dim]Nothing to browse yet.[/dim]")
 
 
 _MARKS = {
