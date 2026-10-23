@@ -284,7 +284,7 @@ make check                  # Format + lint + typecheck + tests
 | `jarvis/voice/chime.py` | Wake-word earcon: path validation + best-effort playback |
 | `jarvis/voice/audio.py` | Audio device detection + `passes_noise_gate` RMS filter |
 | `jarvis/voice/aec/webrtc_aec.py` | `WebRtcAEC` — acoustic echo cancellation (barge-in fix, #143) |
-| `jarvis/runtime/io.py` | Input/GUI/output sockets — confirmation queries, session CRUD, settings + provider CRUD, client labeling/`list_clients`/`shutdown_request` |
+| `jarvis/runtime/io.py` | Input/GUI/output sockets — confirmation queries, session CRUD, settings + provider CRUD, client labeling/`list_clients`/`shutdown_request`, status/work requests and activity/action pushes; the protocol is `docs/gui-protocol.md` |
 | `jarvis/runtime/lifecycle.py` | Signal handlers, startup service wiring, `shutdown_request`'s safe save-then-exit sequence |
 | `jarvis/dispatch/goal_manager.py` | `GoalManager` — goal tree + on-disk archive (`archive_all()` for shutdown) |
 | `jarvis/core/providers.py` | Provider pool CRUD (`providers.json`), shared by CLI, TUI, and the GUI socket |
@@ -303,6 +303,8 @@ make check                  # Format + lint + typecheck + tests
 ---
 
 ## Changelog — corrected claims
+
+*2026-10-23:* the TUI's new controls reach socket clients (#267, phase 2), and the protocol is written down in `docs/gui-protocol.md`. Activity and action events are pushed to every GUI client (`io.on_gui_activity`, `io.on_gui_action`, wired in `lifecycle` beside `_on_gui_output`); `get_status` answers with the `/status` sections as data (`full` adds the registry check), `list_work` with what F4 shows, `move_provider` reorders like `/providers move`. A `response` now says `comment: true` or `command: true`, and a comment no longer sets the state to `idle`: JARVIS is still working after it, and every client showed it as done. `jarvis web` relays `activity` to every role and `action`, `status` and `work` only to trusted and owner, since action blocks carry tool parameters and raw output; `relayable()` takes the role, and the relay follows the role the allowlist gives at the phone's latest message. Stopping is still #270.
 
 *2026-10-23:* the TUI shows what JARVIS is doing now (#267, phase 1): F4 or `/tasks`. Nothing did: Ctrl+Q listed running work only when quitting. `jarvis/runtime/work.py` (`collect_work`) returns plain data, for socket clients next: the active requests and how long ago they came in, how many turns wait on the model, each running task from dispatch's status with the title, parameters and start time its action block recorded (a task JARVIS did not start still shows, without a duration), the request it belongs to and its latest output (dispatch's provenance-wrapped tail, unwrapped for display), timers with when they fire, and the confirmations and setups waiting. `jarvis/tui/tasks_view.py` refreshes it every second. It has no stop buttons: what stopping a request or a task does is #270, parked for Yakup and Toufic to specify; Ctrl+Q still stops everything when quitting. The activity line points to F4 while tasks run.
 

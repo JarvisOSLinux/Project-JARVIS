@@ -17,6 +17,8 @@ from .io import (
     apply_confirmation_decision,
     broadcast_to_gui_clients,
     enrich_pending_with_goals,
+    on_gui_action,
+    on_gui_activity,
     set_gui_state,
 )
 from .voice_activation_thread import run_voice_activation
@@ -294,6 +296,10 @@ async def start_runtime_services(app: Any, logger: Logger) -> dict[str, Any]:
 
         harden_socket_path(Config.JARVIS_GUI_SOCKET)
         app.output_manager.add_output_callback(app._on_gui_output)
+        app.output_manager.add_activity_callback(
+            lambda event: on_gui_activity(app, event)
+        )
+        app.output_manager.add_action_callback(lambda event: on_gui_action(app, event))
         gui_socket_task = asyncio.create_task(app._run_gui_socket_listener())
         logger.info(f"JARVIS: GUI socket at {Config.JARVIS_GUI_SOCKET}")
 

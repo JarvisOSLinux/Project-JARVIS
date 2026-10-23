@@ -37,8 +37,8 @@ host chores, not code.
 
 | Role | May do |
 |---|---|
-| guest | chat, stop the reply, see sessions, confirmations and clients |
-| trusted | guest + approve or deny requests, create and switch sessions |
+| guest | chat, stop the reply, see what JARVIS is doing (the activity line), sessions, confirmations and clients |
+| trusted | guest + approve or deny requests, create and switch sessions, see action blocks (tool parameters and output), status and running work |
 | owner | trusted + rename and delete sessions |
 
 No role may change settings, providers, the wake chime or setups, shut JARVIS
@@ -86,8 +86,9 @@ Not yet run, since they need a tailnet:
 
 ## Protocol
 
-JSON text frames, one message each, the `jarvis.sock` protocol narrowed by the
-table above. The gateway adds `{"type": "gateway", "login": …, "role": …}` as
-the first frame and closes with 4003 (not allowed or revoked), 4008 (idle),
-4009 (host in `allow_all`) or 4010 (JARVIS not running). The activity, status
-and running-task messages of #267 phase 2 do not exist yet.
+JSON text frames, one message each: the `jarvis.sock` protocol
+(`docs/gui-protocol.md`), narrowed by the table above. The gateway adds
+`{"type": "gateway", "login": …, "role": …}` as the first frame and closes with
+4003 (not allowed or revoked), 4008 (idle), 4009 (host in `allow_all`) or 4010
+(JARVIS not running). A role taken away while a phone is connected stops what
+it relays at that phone's next message.

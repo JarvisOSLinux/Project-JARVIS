@@ -59,6 +59,23 @@ class TestPolicy:
         for role in wg.ROLES:
             assert not wg.sendable(role, {"type": kind})
 
+    def test_status_and_work_need_trust(self):
+        for kind in ("get_status", "list_work"):
+            assert not wg.sendable("guest", {"type": kind})
+            assert wg.sendable("trusted", {"type": kind})
+            assert wg.sendable("owner", {"type": kind})
+
+    def test_activity_for_everyone_actions_for_trusted(self):
+        # Action blocks carry tool parameters and raw output.
+        activity = {"type": "activity", "text": "Searching…", "kind": "dispatch"}
+        for role in wg.ROLES:
+            assert wg.relayable(activity, role)
+        for kind in ("action", "status", "work"):
+            assert not wg.relayable({"type": kind}, "guest")
+            assert wg.relayable({"type": kind}, "trusted")
+            assert wg.relayable({"type": kind}, "owner")
+        assert not wg.relayable({"type": "action"}, None)
+
     def test_malformed_messages_are_refused(self):
         assert not wg.sendable("owner", [])
         assert not wg.sendable("owner", {"type": ["message"]})
@@ -285,6 +302,41 @@ class TestRelay:
                 await daemon.push({"type": "state", "state": "processing"})
                 seen = await _recv_types(ws, "state")
                 assert all(m["type"] != "provider_list" for m in seen)
+        finally:
+            server.close()
+            await daemon.stop()
+
+    async def test_a_guest_sees_activity_but_not_actions(self, tmp_path):
+        daemon, server, url, gateway = await _boot(
+            tmp_path, {"g@example.com": "guest", "t@example.com": "trusted"}
+        )
+        try:
+            async with (
+                connect(url, additional_headers=_wire(url, "g@example.com")) as guest,
+                connect(url, additional_headers=_wire(url, "t@example.com")) as trusted,
+            ):
+                await guest.recv()
+                await trusted.recv()
+                await asyncio.sleep(0.2)
+                await daemon.push({"type": "action", "phase": "start", "id": "tool:1"})
+                await daemon.push({"type": "activity", "text": "Running…"})
+                guest_saw = await _recv_types(guest, "activity")
+                trusted_saw = await _recv_types(trusted, "activity")
+                assert [m["type"] for m in guest_saw if m["type"] != "state"] == [
+                    "activity"
+                ]
+                assert [m["type"] for m in trusted_saw if m["type"] != "state"] == [
+                    "action",
+                    "activity",
+                ]
+                # Demoted while connected: actions stop at the phone's next message.
+                gateway.allowlist.set("t@example.com", "guest")
+                await trusted.send(json.dumps({"type": "ping"}))
+                await asyncio.sleep(0.2)
+                await daemon.push({"type": "action", "phase": "end", "id": "tool:1"})
+                await daemon.push({"type": "activity", "text": "Done"})
+                later = await _recv_types(trusted, "activity")
+                assert all(m["type"] != "action" for m in later)
         finally:
             server.close()
             await daemon.stop()

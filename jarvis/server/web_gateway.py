@@ -71,6 +71,8 @@ _TRUSTED_SENDS = _GUEST_SENDS | {
     "partial_approve_confirmation",
     "create_session",
     "switch_session",
+    "get_status",
+    "list_work",
 }
 # Absent on purpose for every role: settings, providers, wake chime, setups,
 # shutdown_request, approve_all_confirmations, and the raw confirmation_response.
@@ -86,6 +88,7 @@ RELAYED = frozenset(
     {
         "state",
         "response",
+        "activity",
         "confirmation_request",
         "confirmation_list",
         "ack",
@@ -99,6 +102,15 @@ RELAYED = frozenset(
         "DAEMON_SHUTDOWN",
     }
 )
+# Action blocks carry tool parameters and raw output, status names paths and
+# providers, and work lists every running task (#267): for the roles trusted to
+# approve what JARVIS runs, not for a guest.
+_TRUSTED_RELAYED = RELAYED | {"action", "status", "work"}
+RELAYED_FOR = {
+    "guest": RELAYED,
+    "trusted": _TRUSTED_RELAYED,
+    "owner": _TRUSTED_RELAYED,
+}
 
 _AUDITED = frozenset(
     {
@@ -129,9 +141,11 @@ def sendable(role: str, msg: Any) -> bool:
     )
 
 
-def relayable(msg: Any) -> bool:
-    """True when a daemon message may be shown on a phone."""
-    return isinstance(msg, dict) and msg.get("type") in RELAYED
+def relayable(msg: Any, role: str = "guest") -> bool:
+    """True when a daemon message may be shown on a phone signed in as `role`."""
+    return isinstance(msg, dict) and msg.get("type") in RELAYED_FOR.get(
+        role, frozenset()
+    )
 
 
 def shutdown_notice(msg: dict) -> dict:
@@ -374,7 +388,7 @@ class Gateway:
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
         login: str,
-        role: str,
+        role: Optional[str],
         label: str,
     ) -> bool:
         """Label this client, and refuse to run while confirmations are off."""
@@ -408,13 +422,13 @@ class Gateway:
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
         login: str,
-        role: str,
+        role: Optional[str],
     ) -> None:
         last_active = time.monotonic()
         limiter = RateLimit()
 
         async def phone_to_daemon() -> None:
-            nonlocal last_active
+            nonlocal last_active, role
             async for raw in ws:
                 role = self.allowlist.role_for(login)
                 if role is None:
@@ -467,7 +481,7 @@ class Gateway:
                     return
                 if msg.get("type") == "DAEMON_SHUTDOWN":
                     msg = shutdown_notice(msg)
-                elif not relayable(msg):
+                elif not relayable(msg, role):
                     continue
                 await ws.send(json.dumps(msg, ensure_ascii=False))
 
