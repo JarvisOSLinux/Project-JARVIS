@@ -45,7 +45,11 @@ TUI_LOCAL_SLASH_HELP: tuple[tuple[str, str], ...] = (
     ),
     ("/clear", "Clear the chat view (on-screen only; session memory unchanged)."),
     ("/quit, /exit", "Exit the TUI."),
-    ("/status", "Show current provider, model, and session."),
+    (
+        "/status [full]",
+        "Check JARVIS's health: model providers, engines, voice, safety, work, "
+        "session. `full` also checks for server updates (goes online).",
+    ),
     ("/providers", "List configured providers with live pool status."),
     ("/providers add", "Open guided modal to add a provider."),
     (

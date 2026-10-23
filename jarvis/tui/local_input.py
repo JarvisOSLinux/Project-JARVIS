@@ -18,6 +18,7 @@ from ..core.providers import (
     remove_provider,
 )
 from .help_screen import HelpScreen
+from .output import escape
 from .provider_modal import ProviderModal
 from .slash_commands_doc import build_help_markdown
 
@@ -45,8 +46,8 @@ def handle_local_input(app: Any, text: str, bindings: Any) -> bool:
         app.exit()
         return True
 
-    if low == "/status":
-        _show_status(app)
+    if low in ("/status", "/status full"):
+        _show_status(app, full=low.endswith("full"))
         return True
 
     if low == "/providers" or low.startswith("/providers "):
@@ -68,30 +69,45 @@ def handle_local_input(app: Any, text: str, bindings: Any) -> bool:
     return False
 
 
-def _show_status(app: Any) -> None:
-    """Display current provider, model, and session info."""
-    model = "(unset)"
-    provider_name = "(none)"
+_MARKS = {
+    "ok": "[green]✓[/green]",
+    "warn": "[yellow]![/yellow]",
+    "fail": "[red]✗[/red]",
+    "off": "[dim]–[/dim]",
+}
 
-    pool = None
-    if app.jarvis is not None and hasattr(app.jarvis, "llm"):
-        pool = getattr(app.jarvis.llm, "provider", None)
 
-    if pool is not None and hasattr(pool, "active_provider_name"):
-        provider_name = pool.active_provider_name or provider_name
-        model = getattr(pool, "model", model)
+def status_markup(sections: Any) -> str:
+    """The health check (#272) as chat lines: one mark, name and reason per check."""
+    lines = ["[bold cyan]Status[/bold cyan]"]
+    for section in sections:
+        lines.append(f"[bold]{escape(section.title)}[/bold]")
+        for check in section.checks:
+            mark = _MARKS.get(check.state, "?")
+            detail = f": {escape(check.detail)}" if check.detail else ""
+            lines.append(f"  {mark} {escape(check.name)}{detail}")
+    return "\n".join(lines)
 
-    session_id = "(none)"
-    if app.jarvis is not None and app.jarvis.sessions.current:
-        session_id = app.jarvis.sessions.current.short_id()
 
-    lines = [
-        "[bold cyan]Status[/bold cyan]",
-        f"  provider: {provider_name}",
-        f"  model: {model}",
-        f"  session: {session_id}",
-    ]
-    app._append_log("\n".join(lines))
+def _show_status(app: Any, *, full: bool = False) -> None:
+    """Check JARVIS's health without blocking the TUI, then print the result."""
+    if app.jarvis is None:
+        app._append_log("[yellow]JARVIS is still starting up.[/yellow]")
+        return
+    from ..runtime.health import collect_status
+
+    if full:
+        app._append_log("[dim]Checking, including registry updates…[/dim]")
+
+    async def run() -> None:
+        try:
+            sections = await collect_status(app.jarvis, full=full)
+        except Exception as e:  # a broken check must not take the TUI down
+            app._append_log(f"[red]Status check failed: {escape(str(e))}[/red]")
+            return
+        app._append_log(status_markup(sections))
+
+    app.run_worker(run(), exclusive=False)
 
 
 def _show_providers(app: Any) -> None:
