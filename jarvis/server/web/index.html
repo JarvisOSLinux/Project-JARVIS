@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#0a0e1a">
+    <title>JARVIS</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header id="header">
+        <button class="icon-btn" id="sessions-btn" title="Sessions">&#9776;</button>
+        <div class="header-info">
+            <div class="header-title">JARVIS</div>
+            <div class="header-subtitle" id="who">Remote</div>
+        </div>
+        <button class="icon-btn" id="permissions-btn" title="Permission Requests">
+            &#128274;
+            <span id="permission-indicator"></span>
+            <span id="permission-count"></span>
+        </button>
+        <div id="status-indicator">
+            <div id="status-dot"></div>
+            <span id="status-label">Offline</span>
+        </div>
+    </header>
+
+    <div id="session-backdrop"></div>
+    <aside id="session-sidebar">
+        <div id="session-sidebar-header">
+            <span>Sessions</span>
+            <button class="icon-btn" id="new-session-btn" title="New chat">+</button>
+        </div>
+        <div id="session-list"></div>
+    </aside>
+
+    <div id="permission-backdrop"></div>
+    <aside id="permission-panel">
+        <div id="permission-panel-header">
+            <span id="permission-panel-title">Permission Requests</span>
+        </div>
+        <div id="permission-list"></div>
+    </aside>
+
+    <div id="chat-view">
+        <div id="empty-state">
+            <div class="empty-logo">
+                <div class="empty-logo-inner">J</div>
+            </div>
+            <div class="empty-title">Hello. I&rsquo;m JARVIS.</div>
+            <div class="empty-subtitle">How can I assist you today?</div>
+        </div>
+        <div id="messages"></div>
+    </div>
+
+    <div id="notice" class="hidden"></div>
+
+    <div id="divider"></div>
+
+    <div id="input-bar">
+        <div class="input-wrapper">
+            <input
+                type="text"
+                id="message-input"
+                placeholder="Connecting&hellip;"
+                autocomplete="off"
+                enterkeyhint="send"
+                disabled
+            >
+        </div>
+        <button class="icon-btn" id="stop-btn" title="Stop the reply">&#9632;</button>
+        <button class="icon-btn" id="send-btn" title="Send message" disabled>&#9654;</button>
+    </div>
+
+    <script src="markdown.js"></script>
+    <script src="transport.js"></script>
+    <script src="main.js"></script>
+</body>
+</html>

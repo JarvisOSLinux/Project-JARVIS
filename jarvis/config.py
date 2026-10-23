@@ -310,6 +310,24 @@ class Config:
         os.path.join(_DEFAULT_CONFIG_DIR, "openai_server_token"),
     )
 
+    # Remote phone access (`jarvis web`, opt-in, off by default). A separate
+    # process, bound to loopback only and reached through `tailscale serve`;
+    # identity comes from Tailscale, never from a token of our own. See
+    # jarvis/server/web_gateway.py and docs/web-gateway.md before changing
+    # any of these defaults.
+    WEB_ENABLED = os.getenv("JARVIS_WEB_ENABLED", "false").lower() == "true"
+    WEB_PORT = int(os.getenv("JARVIS_WEB_PORT", "8318"))
+    WEB_ALLOWLIST_FILE = os.getenv(
+        "JARVIS_WEB_ALLOWLIST_FILE",
+        os.path.join(_DEFAULT_CONFIG_DIR, "web_allowlist.json"),
+    )
+    WEB_AUDIT_FILE = os.getenv(
+        "JARVIS_WEB_AUDIT_FILE",
+        os.path.join(JARVIS_DATA_DIR, "web_audit.jsonl"),
+    )
+    WEB_IDLE_TIMEOUT = int(os.getenv("JARVIS_WEB_IDLE_TIMEOUT", "900"))
+    WEB_HOST_SUFFIX = os.getenv("JARVIS_WEB_HOST_SUFFIX", ".ts.net")
+
     # Threat Level Access (TLA) Confirmation
     # - "allow_all": never ask, run everything (power users / trusted environments)
     # - "smart":     only ask when tool has confirmation_required=true (default)
