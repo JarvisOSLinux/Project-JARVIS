@@ -1,5 +1,7 @@
 import logging
+import os
 import sys
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
 
@@ -45,6 +47,26 @@ _FILE_FORMATTER = logging.Formatter(
     "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
+
+
+LOG_FILE_MAX_BYTES = 5 * 1024 * 1024
+LOG_FILE_BACKUPS = 3
+
+
+class _PrivateRotatingFileHandler(RotatingFileHandler):
+    """Rotates at a size cap, and keeps each file readable by its owner only.
+
+    The log holds what the user said to JARVIS (secrets are scrubbed first,
+    #242), so a new or rotated file is made 0600 rather than left to the umask.
+    """
+
+    def _open(self):  # type: ignore[override]
+        stream = super()._open()
+        try:
+            os.chmod(self.baseFilename, 0o600)
+        except OSError:
+            pass
+        return stream
 
 
 class JarvisLogger:
@@ -99,10 +121,13 @@ class JarvisLogger:
 
     @classmethod
     def _attach_file_handler(cls, log_file: str) -> None:
-        cls._log_file = Path(log_file)
+        cls._log_file = Path(log_file).expanduser()
         cls._log_file.parent.mkdir(parents=True, exist_ok=True)
-        cls._file_handler = logging.FileHandler(
-            cls._log_file, mode="a", encoding="utf-8"
+        cls._file_handler = _PrivateRotatingFileHandler(
+            cls._log_file,
+            maxBytes=LOG_FILE_MAX_BYTES,
+            backupCount=LOG_FILE_BACKUPS,
+            encoding="utf-8",
         )
         cls._file_handler.setLevel(logging.DEBUG)
         cls._file_handler.setFormatter(_FILE_FORMATTER)

@@ -352,9 +352,12 @@ class Config:
     LOG_LEVEL = os.getenv(
         "LOG_LEVEL", "INFO"
     ).upper()  # DEBUG, INFO, WARNING, ERROR, CRITICAL
-    LOG_FILE = os.getenv(
-        "LOG_FILE", ""
-    )  # Optional: path to log file (empty = no file logging)
+    # On by default, under the data directory: without it there was nothing to
+    # read when something went wrong (jarvis.log had not changed in two months).
+    # LOG_FILE="" (or "off") turns file logging off. Rotated at 5 MB, owner-only.
+    LOG_FILE = os.getenv("LOG_FILE", os.path.join(JARVIS_DATA_DIR, "jarvis.log"))
+    if LOG_FILE.strip().lower() in ("", "off", "none", "false"):
+        LOG_FILE = ""
     LOG_COLORS = (
         os.getenv("LOG_COLORS", "true").lower() == "true"
     )  # Enable colored console output
