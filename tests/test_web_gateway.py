@@ -263,6 +263,7 @@ class TestRelay:
             assert {
                 "type": "hello",
                 "label": "web:toufic@example.com",
+                "subscribe": ["activity", "action"],
             } in daemon.received
             assert {"type": "message", "content": "hello"} in daemon.received
             audit = [json.loads(x) for x in open(tmp_path / "audit.jsonl")]

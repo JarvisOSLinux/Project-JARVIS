@@ -392,7 +392,10 @@ class Gateway:
         label: str,
     ) -> bool:
         """Label this client, and refuse to run while confirmations are off."""
-        await self._upstream_send(writer, {"type": "hello", "label": label})
+        await self._upstream_send(
+            writer,
+            {"type": "hello", "label": label, "subscribe": ["activity", "action"]},
+        )
         await self._upstream_send(writer, {"type": "get_settings"})
         try:
             while True:
