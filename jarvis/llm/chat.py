@@ -23,6 +23,7 @@ from typing import Any, Optional
 from ..config import Config
 from ..core.logger import get_logger
 from .base import BaseLLMProvider
+from .context_breakdown import breakdown
 from .context_manager import ContextManager
 
 logger = get_logger(__name__)
@@ -85,6 +86,7 @@ class LLM:
         self._prompts = prompts
         self._mode = "root"
         self._root_window = root_window
+        self.last_breakdown: Optional[dict] = None
 
         logger.info(f"Using LLM provider: {self.provider.model}")
 
@@ -223,6 +225,8 @@ class LLM:
                 hot_exchanges=hot_exchanges,
                 new_input=None,  # Already appended to chat_history above
             )
+            # What filled this prompt, part by part, for /context (#272).
+            self.last_breakdown = breakdown(messages)
         else:
             messages = self.chat_history
 
