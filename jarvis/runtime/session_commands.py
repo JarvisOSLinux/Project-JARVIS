@@ -8,8 +8,12 @@ from ..config import Config
 
 
 def session_reply(app: Any, message: str) -> None:
-    """Emit a local reply for slash-commands (no LLM roundtrip)."""
-    app.output_manager.handle_response({"output": message})
+    """Emit a local reply for slash-commands (no LLM roundtrip).
+
+    Marked as a command's reply so a front end can keep it with the command
+    that asked for it (#271).
+    """
+    app.output_manager.handle_response({"output": message, "command": True})
 
 
 def _unquote(text: str) -> str:

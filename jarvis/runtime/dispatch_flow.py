@@ -12,6 +12,7 @@ from typing import Any, Optional
 
 from ..config import Config
 from ..core.threat_level import ThreatLevel, classify
+from . import action_events
 from .llm_bridge import ask_llm
 from .output_hooks import emit_activity, persist_assistant_turn
 from .root_context import build_root_context, compact_payload_for_llm
@@ -420,6 +421,21 @@ async def dispatch_send(
     )
 
     tool_names = [t["tool_name"] for t in tools_needing_confirmation]
+    asked = [
+        (t["task"], action_events.tool_detail(t["params"]))
+        for t in tools_needing_confirmation
+    ]
+    action_events.start(
+        app,
+        "confirm",
+        "Confirm " + ", ".join(action_events.tool_title(task) for task, _ in asked),
+        (
+            asked[0][1]
+            if len(asked) == 1
+            else "\n".join(f"{action_events.tool_title(t)}: {d}" for t, d in asked)
+        ),
+        action_id=f"confirm:{request_id}",
+    )
     emit_activity(
         app,
         "Awaiting confirmation for: "
@@ -640,7 +656,7 @@ async def dispatch_execute_tasks(
 
 
 def note_dispatched_tools(app: Any, pids: list, tasks: list) -> None:
-    """Remember which server and tool each dispatched PID runs.
+    """Remember, and show, which server and tool each dispatched PID runs.
 
     Paired like GoalManager.link_dispatch_servers: this batch's INITs are the
     newest, so the trailing len(tasks) PIDs belong to these tasks in order,
@@ -649,6 +665,7 @@ def note_dispatched_tools(app: Any, pids: list, tasks: list) -> None:
     """
     if not pids or not tasks or len(pids) < len(tasks):
         return
+    action_events.tools_started(app, pids, tasks)
     known = getattr(app, "_pid_tools", None)
     if known is None:
         known = app._pid_tools = {}

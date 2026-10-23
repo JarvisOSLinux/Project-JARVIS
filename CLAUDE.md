@@ -262,6 +262,7 @@ make check                  # Format + lint + typecheck + tests
 | `jarvis/cli.py` | CLI entry point |
 | `jarvis/config.py` | Global configuration |
 | `jarvis/tui/app.py` | Textual app shell |
+| `jarvis/tui/chat_view.py` | The chat as lines and folding blocks (#271): commands with their output, JARVIS's actions; browse mode |
 | `jarvis/tui/lifecycle.py` | App startup/shutdown, callback registration |
 | `jarvis/tui/confirm_modal.py` | Tool confirmation modal |
 | `jarvis/tui/setup_form.py` | The setup form (#254), shared by `jarvis setups fill` (inline) and the TUI (modal) |
@@ -291,6 +292,7 @@ make check                  # Format + lint + typecheck + tests
 | `jarvis/dispatch/dmcp_registry.py` | dmcp CLI wrappers (install, tools, config) |
 | `jarvis/dispatch/event_merger.py` | Merges voice/CLI/socket/dispatch events |
 | `jarvis/runtime/root_actions.py` | ROOT-mode LLM response action handlers |
+| `jarvis/runtime/action_events.py` | Start/update/end events for what JARVIS does (search, docs, install, tool runs, confirmations), for front ends (#271) |
 | `jarvis/runtime/root_context.py` | Context assembly for ROOT-mode prompts |
 | `jarvis/runtime/health.py` | `/status` health check (#272): sections of checks as plain data, fast by default, `full` adds registry updates |
 | `jarvis/runtime/llm_bridge.py` | `ask_llm()` — the sole locked/mode-atomic LLM call site |
@@ -299,6 +301,8 @@ make check                  # Format + lint + typecheck + tests
 ---
 
 ## Changelog — corrected claims
+
+*2026-10-23:* the TUI chat is messages and folding blocks (#271). It was one append-only `RichLog`, so a long output pushed the conversation out of sight, and what JARVIS ran showed only as passing "... Dispatch signal (pid 7)" lines. Every action now starts and ends as an event (`jarvis/runtime/action_events.py`, delivered by `OutputManager.emit_action`, never spoken): a search with what it found, reading a server's tools, an install, update, uninstall or configure with its outcome (`waiting` when a setup form is pending), each dispatched tool with its parameters (a shell command as typed), its live output from REMIND and its output and status from EXIT/KILL, and a confirmation with what was decided. Tool output is unwrapped from the provenance boundary for the reader; output that failed verification keeps its warning. Only an action that started can end, so a timer's EXIT or a confirmation restored after a restart draws nothing. `jarvis/tui/chat_view.py` draws them: a typed slash command is a block that holds its output (`session_reply` marks engine replies `command: True`), a block folds to one line once something newer arrives unless you folded or opened it yourself, and a long one scrolls inside 16 lines. Ctrl+L or `/commands` browses (Up/Down, Enter/Space, Esc back to typing; a click on a title folds too); `/commands collapse|expand` does them all. The activity narrative moved from the chat to one line above the input, which says how many tasks are still running once JARVIS has answered. Socket clients do not get the action events yet (#267 phase 2).
 
 *2026-10-23:* input that arrives before the engine starts is kept. The TUI says "Ready." while the engine is still syncing its tool index (7 s on the reference machine), and `EventMerger` dropped anything injected before `start()` with only a log line, so a first message typed quickly was ignored. User input, confirmation decisions and setup results are now held (up to the queue size) and queued at `start()`, in order. Found by driving the real TUI and engine headless.
 

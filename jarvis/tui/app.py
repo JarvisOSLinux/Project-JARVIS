@@ -19,7 +19,7 @@ Keybindings:
     Ctrl+N  — new session
     Ctrl+Q  — quit
     Ctrl+,  — settings (read-only config viewer)
-    Ctrl+L  — focus chat log (scroll with arrows / PgUp)
+    Ctrl+L  — browse the chat's blocks: ↑/↓ move, Enter/Space fold, Esc back
     Ctrl+I  — focus message input
     Ctrl+Shift+C — clear on-screen transcript (export buffer only; not memory)
     Ctrl+Shift+E — export transcript to ``JARVIS_DATA_DIR/transcripts/``
@@ -63,7 +63,6 @@ from textual.widgets import (
     ListItem,
     ListView,
     OptionList,
-    RichLog,
     Static,
 )
 
@@ -73,6 +72,7 @@ from . import actions as tui_actions
 from . import lifecycle as tui_lifecycle
 from . import output as tui_output
 from . import status_bar as tui_status_bar
+from .chat_view import ChatView
 from .command_input import CommandDropdown, CommandInput
 from .config_modal import ConfigModal, ConfigModalResult
 from .confirm_modal import ConfirmModal
@@ -135,6 +135,57 @@ class JarvisTUI(App):
         padding: 0 1;
     }
 
+    #chat-log > .line {
+        margin: 0 0 0 0;
+    }
+
+    Block {
+        height: auto;
+    }
+
+    BlockTitle {
+        width: 1fr;
+        height: 1;
+        text-wrap: nowrap;
+        text-overflow: ellipsis;
+        color: $text-muted;
+    }
+
+    BlockTitle:hover {
+        background: $boost;
+    }
+
+    BlockTitle:focus {
+        background: $accent 30%;
+        color: $text;
+    }
+
+    Block.block-command > BlockTitle {
+        color: $text;
+    }
+
+    .block-body {
+        height: auto;
+        max-height: 16;
+        padding: 0 0 0 2;
+        border-left: vkey $primary 40%;
+        margin: 0 0 0 1;
+    }
+
+    Block.-collapsed > .block-body {
+        display: none;
+    }
+
+    #activity {
+        height: 1;
+        padding: 0 1;
+        color: $text-muted;
+    }
+
+    #activity.-idle {
+        display: none;
+    }
+
     #input {
         dock: bottom;
         margin: 1 0 0 0;
@@ -161,7 +212,7 @@ class JarvisTUI(App):
         Binding("ctrl+n", "new_session", "New", show=True),
         Binding("ctrl+q", "quit", "Quit", show=True),
         Binding("ctrl+d", "delete_selected_session", "Delete", show=True),
-        Binding("ctrl+l", "focus_chat", "Log", show=True),
+        Binding("ctrl+l", "focus_chat", "Browse", show=True),
         Binding("ctrl+i", "focus_input", "Input", show=True),
         Binding("f1", "help", "Help", show=True, priority=True),
         Binding("f2", "settings", "Settings", show=True, priority=True),
@@ -179,6 +230,9 @@ class JarvisTUI(App):
         self._jarvis_task: Optional[asyncio.Task] = None
         self._output_cb = None
         self._activity_cb = None
+        self._action_cb = None
+        # Action id -> kind, for the actions still running (the activity line).
+        self._running_actions: Dict[str, Any] = {}
         # Plain lines mirroring the RichLog (for Markdown export).
         self._export_lines: list[str] = []
         # Sidebar refresh can be requested from multiple timers/callbacks.
@@ -199,7 +253,8 @@ class JarvisTUI(App):
                 yield Label("Sessions  (Ctrl+N new)", id="sidebar-title")
                 yield ListView(id="session-list")
             with Vertical(id="chat-pane"):
-                yield RichLog(id="chat-log", markup=True, wrap=True, highlight=True)
+                yield ChatView(id="chat-log")
+                yield Static("", id="activity", classes="-idle")
                 yield CommandDropdown(id="command-dropdown")
                 yield CommandInput(
                     placeholder="Message, /help, /export, /sessions, /new…",
@@ -237,8 +292,16 @@ class JarvisTUI(App):
             return
 
         # Echoed first, TUI-only commands included, so every line typed stays
-        # visible above whatever it produced.
-        self._append_log(f"[bold cyan]you[/bold cyan] > {tui_output.escape(text)}")
+        # visible above whatever it produced. A command is the title of a block
+        # that holds its output (#271).
+        chat = self.query_one("#chat-log", ChatView)
+        echo = f"[bold cyan]you[/bold cyan] > {tui_output.escape(text)}"
+        chat.end_command()
+        if text.startswith("/"):
+            chat.begin_command(echo)
+            self._export_lines.append(tui_output.markup_to_plain(echo))
+        else:
+            self._append_log(echo)
 
         if handle_local_input(self, text, JarvisTUI.BINDINGS):
             return
@@ -272,6 +335,10 @@ class JarvisTUI(App):
     def _on_jarvis_activity(self, event: Dict[str, Any]) -> None:
         """Internal runtime narrative (LLM/dispatch status), not chat content."""
         tui_output.on_jarvis_activity(self, event)
+
+    def _on_jarvis_action(self, event: Dict[str, Any]) -> None:
+        """An action JARVIS took, as a block in the chat (#271)."""
+        tui_output.on_jarvis_action(self, event)
 
     async def _offer_setup(self, setup: Any) -> None:
         """Open the form for a pending setup (#254) without blocking the engine.
@@ -396,7 +463,7 @@ class JarvisTUI(App):
         await tui_actions.delete_selected_session(self)
 
     def action_focus_chat(self) -> None:
-        """Move focus to the transcript for keyboard scrolling (arrows / PgUp)."""
+        """Browse the chat's blocks (or scroll it, when it has none)."""
         tui_actions.focus_chat(self)
 
     def action_focus_input(self) -> None:

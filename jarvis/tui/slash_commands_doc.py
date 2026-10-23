@@ -47,6 +47,11 @@ TUI_LOCAL_SLASH_HELP: tuple[tuple[str, str], ...] = (
         "Save plain transcript (Markdown) under `transcripts/`; optional basename only.",
     ),
     ("/clear", "Clear the chat view (on-screen only; session memory unchanged)."),
+    (
+        "/commands [collapse|expand]",
+        "Browse the chat's blocks (↑/↓ move, Enter/Space fold, Esc back), "
+        "or fold or unfold them all.",
+    ),
     ("/quit, /exit", "Exit the TUI."),
     (
         "/status [full]",
@@ -79,6 +84,11 @@ EXTRA_KEYBOARD_HELP: tuple[tuple[str, str], ...] = (
     ("Ctrl+W", "Delete the word left of the cursor (Ctrl+Backspace where supported)."),
     ("Ctrl+Delete", "Delete the word right of the cursor."),
     ("Click / arrows", "Select a session in the sidebar."),
+    (
+        "In browse mode",
+        "Up/Down move between blocks, Enter or Space folds or unfolds one, "
+        "Esc goes back to typing. Clicking a block's title folds it too.",
+    ),
     ("Esc", "Close the suggestion list, or the help modal when it is focused."),
 )
 
