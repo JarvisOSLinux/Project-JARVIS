@@ -129,7 +129,9 @@ async def _handle_get_server_docs(
 ) -> None:
     server_id = parsed["server_id"]
     emit_activity(app, f"Fetching docs for {server_id}…", kind="dispatch")
-    action = action_events.start(app, "docs", f"Read the tools of {server_id}")
+    action = action_events.start(
+        app, "docs", f"Read the tools of {action_events.short_server(server_id)}"
+    )
 
     tools_result = await app.dispatch.list_server_tools(server_id)
     tools = tools_result.get("tools", []) if isinstance(tools_result, dict) else []
@@ -199,7 +201,9 @@ async def _handle_install_server(
 ) -> None:
     server_id = parsed["server_id"]
     emit_activity(app, f"Installing {server_id}…", kind="dispatch")
-    action = action_events.start(app, "install", f"Install {server_id}")
+    action = action_events.start(
+        app, "install", f"Install {action_events.short_server(server_id)}"
+    )
 
     # Step 1: bare install (no setup script yet)
     install_result = await app.dispatch.install_server(server_id)
@@ -250,7 +254,9 @@ async def finish_install(
     `action` is the install's block, still open; without one (a setup the user
     finished later) the setup gets a block of its own.
     """
-    action = action or action_events.start(app, "install", f"Set up {server_id}")
+    action = action or action_events.start(
+        app, "install", f"Set up {action_events.short_server(server_id)}"
+    )
     if run_setup:
         # The script receives MCP_CONFIG_* env vars from manifest.config.
         emit_activity(app, f"Running setup for {server_id}…", kind="dispatch")
@@ -474,7 +480,9 @@ async def _handle_update_server(
     """Re-install a drifted server so the agent can heal it inside one goal (#39)."""
     server_id = parsed["server_id"]
     emit_activity(app, f"Updating {server_id}…", kind="dispatch")
-    action = action_events.start(app, "install", f"Update {server_id}")
+    action = action_events.start(
+        app, "install", f"Update {action_events.short_server(server_id)}"
+    )
 
     result = await app.dispatch.update_server(server_id)
     action_events.end(
@@ -507,7 +515,9 @@ async def _handle_uninstall_server(
 ) -> None:
     server_id = parsed["server_id"]
     emit_activity(app, f"Uninstalling {server_id}…", kind="dispatch")
-    action = action_events.start(app, "install", f"Uninstall {server_id}")
+    action = action_events.start(
+        app, "install", f"Uninstall {action_events.short_server(server_id)}"
+    )
 
     result = await app.dispatch.uninstall_server(server_id)
     action_events.end(
@@ -570,7 +580,9 @@ async def _handle_configure_server(
     """
     server_id = parsed["server_id"]
     emit_activity(app, f"Configuring {server_id}…", kind="dispatch")
-    action = action_events.start(app, "install", f"Configure {server_id}")
+    action = action_events.start(
+        app, "install", f"Configure {action_events.short_server(server_id)}"
+    )
 
     manifest = await app.dispatch.get_server_manifest(server_id)
     if not manifest:

@@ -421,13 +421,18 @@ async def dispatch_send(
     )
 
     tool_names = [t["tool_name"] for t in tools_needing_confirmation]
+    asked = [
+        (t["task"], action_events.tool_detail(t["params"]))
+        for t in tools_needing_confirmation
+    ]
     action_events.start(
         app,
         "confirm",
-        "Confirm " + ", ".join(tool_names),
-        "\n".join(
-            f"{t['tool_name']}: {action_events.tool_detail(t['params'])}"
-            for t in tools_needing_confirmation
+        "Confirm " + ", ".join(action_events.tool_title(task) for task, _ in asked),
+        (
+            asked[0][1]
+            if len(asked) == 1
+            else "\n".join(f"{action_events.tool_title(t)}: {d}" for t, d in asked)
         ),
         action_id=f"confirm:{request_id}",
     )

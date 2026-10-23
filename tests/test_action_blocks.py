@@ -83,6 +83,9 @@ class TestEvents:
             {"server": "files", "tool": "read_file", "params": {"path": "/a"}},
         ]
         action_events.tools_started(app, [3, 7, 8], tasks)
+        assert action_events.short_server("com.github.x.jarvis-shell-mcp") == (
+            "jarvis-shell-mcp"
+        )
         assert [(e["id"], e["title"], e["detail"]) for e in events] == [
             ("tool:7", "execute_command (shell)", "ls"),
             ("tool:8", "read_file (files)", '{"path": "/a"}'),
@@ -148,6 +151,35 @@ class TestSignals:
             {"type": "EXIT", "pid": 4, "data": "200 done"},
         )
         assert (events[-1]["phase"], events[-1]["output"]) == ("end", "done")
+
+    def test_a_shell_result_reads_as_what_it_printed(self):
+        app, events = self._tool()
+        result = '{"success": true, "exit_code": 0, "stdout": "a\\nb\\n", "stderr": ""}'
+        action_events.on_signal(
+            app,
+            {
+                "type": "EXIT",
+                "pid": 4,
+                "nonce": N,
+                "data": f"[hash={N}] 200 <{N}>{result}</{N}>",
+            },
+        )
+        assert (events[-1]["status"], events[-1]["output"]) == ("ok", "a\nb")
+
+    def test_a_command_that_failed_is_a_failure(self):
+        app, events = self._tool()
+        result = (
+            '{"success": false, "exit_code": 1, "stdout": "", "stderr": "error: lock"}'
+        )
+        action_events.on_signal(
+            app, {"type": "EXIT", "pid": 4, "data": f"200 {result}"}
+        )
+        assert events[-1]["status"] == "failed"
+        assert events[-1]["output"] == "error: lock\n(exit code 1)"
+
+    def test_other_json_is_left_alone(self):
+        assert action_events.readable('{"items": []}') == ('{"items": []}', False)
+        assert action_events.readable("not json {") == ("not json {", False)
 
     def test_output_that_failed_verification_keeps_its_warning(self):
         app, events = self._tool()
@@ -275,8 +307,8 @@ class TestConfirmation:
         result = asyncio.run(dispatch_flow.dispatch_send(app, _LOG, [task]))
         (start,) = events
         assert start["id"] == f"confirm:{result['confirmation_id']}"
-        assert start["title"] == "Confirm shell.execute_command"
-        assert start["detail"] == "shell.execute_command: rm -r /tmp/x"
+        assert start["title"] == "Confirm execute_command (shell)"
+        assert start["detail"] == "rm -r /tmp/x"
 
         app.confirmation._pending[result["confirmation_id"]] = PendingConfirmation(
             request_id=result["confirmation_id"], tasks=[task], approved_tasks=[]

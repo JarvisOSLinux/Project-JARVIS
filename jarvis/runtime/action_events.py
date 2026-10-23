@@ -115,6 +115,44 @@ def running(app: Any) -> List[Dict[str, Any]]:
     return sorted(_open(app).values(), key=lambda r: r["at"])
 
 
+def short_server(server_id: Any) -> str:
+    """The readable end of a server id: com.github.x.jarvis-shell-mcp -> jarvis-shell-mcp."""
+    return str(server_id or "?").rsplit(".", 1)[-1]
+
+
+def tool_title(task: Any) -> str:
+    """`execute_command (jarvis-shell-mcp)` for a task dict."""
+    if not isinstance(task, dict):
+        return "?"
+    return f"{task.get('tool', '?')} ({short_server(task.get('server'))})"
+
+
+def readable(text: str) -> tuple:
+    """(text, failed) for a tool's output: a shell result as what it printed.
+
+    Shell servers answer with JSON ({"stdout", "stderr", "exit_code"}), so a
+    package upgrade read as one line of escaped newlines. A non-zero exit or
+    `success: false` is a failure even though the call itself succeeded.
+    """
+    stripped = text.strip()
+    if not stripped.startswith("{"):
+        return text, False
+    try:
+        data = json.loads(stripped)
+    except ValueError:
+        return text, False
+    if not isinstance(data, dict) or not {"stdout", "stderr"} & data.keys():
+        return text, False
+    code = data.get("exit_code")
+    parts = [
+        str(data.get("stdout") or "").rstrip("\n"),
+        str(data.get("stderr") or "").rstrip("\n"),
+        f"(exit code {code})" if code not in (None, 0) else "",
+    ]
+    failed = data.get("success") is False or code not in (None, 0)
+    return "\n".join(p for p in parts if p), failed
+
+
 def tool_detail(params: Any) -> str:
     """A tool's parameters as one readable line: a shell command as typed."""
     if not isinstance(params, dict) or not params:
@@ -144,7 +182,7 @@ def tools_started(app: Any, pids: list, tasks: list) -> None:
         start(
             app,
             "tool",
-            f"{task.get('tool', '?')} ({task.get('server', '?')})",
+            tool_title(task),
             tool_detail(task.get("params")),
             action_id=f"tool:{pid}",
         )
@@ -194,5 +232,8 @@ def on_signal(app: Any, signal: Dict[str, Any], exit_data: Any = None) -> None:
     if kind not in ("EXIT", "KILL", "TIMEOUT"):
         return
     code, text = signal_output(signal)
-    status = _STATUS_OF_SIGNAL.get(kind) or ("ok" if code == "200" else "failed")
+    text, failed = readable(text)
+    status = _STATUS_OF_SIGNAL.get(kind) or (
+        "ok" if code == "200" and not failed else "failed"
+    )
     end(app, action_id, status, text)
