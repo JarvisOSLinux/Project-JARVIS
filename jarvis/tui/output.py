@@ -99,7 +99,8 @@ def show_activity(app: Any, text: Optional[str]) -> None:
             a for a in getattr(app, "_running_actions", {}).values() if a == "tool"
         ]
         text = (
-            f"{len(running)} task{'s' if len(running) != 1 else ''} still running"
+            f"{len(running)} task{'s' if len(running) != 1 else ''} still running "
+            "(F4 shows them)"
             if running
             else ""
         )

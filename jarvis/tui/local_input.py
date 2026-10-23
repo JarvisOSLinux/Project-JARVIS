@@ -70,6 +70,10 @@ def handle_local_input(app: Any, text: str, bindings: Any) -> bool:
         app._open_setups()
         return True
 
+    if low == "/tasks":
+        app._open_tasks()
+        return True
+
     return False
 
 
