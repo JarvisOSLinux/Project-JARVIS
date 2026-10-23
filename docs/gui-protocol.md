@@ -16,7 +16,10 @@ test pins each message added by #267.
 - **Framing:** one JSON object per line, UTF-8, both ways. Every message has a
   `type`. A line that is not JSON is ignored.
 - **On connect** the daemon sends the current `state`. Send `hello` with a
-  label so `list_clients` can name you.
+  label so `list_clients` can name you, and with `subscribe` for the pushed
+  events you can show: `{"type": "hello", "label": "jarvis-app", "subscribe":
+  ["activity", "action"]}`. Without it you get neither, so a client written
+  before them never sees an unknown type.
 - **Keepalive:** after 60 s without a line from you the daemon sends `ping`;
   you may send `ping` and get `pong`.
 
@@ -32,7 +35,7 @@ client keeps its view in step by listening, not by polling.
 |---|---|---|
 | `message` | `content` | Says something to JARVIS, as if typed. Slash commands (`/new`, `/switch 110`, `/context`) work too; their replies carry `command: true`. The state becomes `processing`. |
 | `stop_stream` | | Ends the reply being shown (`response` with `done: true`) and sets the state to `idle`. It does not stop the work behind it: that is #270, still being specified. |
-| `hello` | `label` | Names this client in `list_clients`. |
+| `hello` | `label`, `subscribe` (optional list: `activity`, `action`) | Names this client in `list_clients`, and asks for the pushed events it can show. |
 | `list_clients` | | → `client_list` |
 | `ping` | | → `pong` |
 
@@ -43,7 +46,7 @@ client keeps its view in step by listening, not by polling.
 | `get_status` | `full` (bool, optional) | `status`: the `/status` health check. `full` also asks the registry for server updates, the one check that goes online. |
 | `list_work` | | `work`: what the TUI's F4 view shows. |
 
-Activity and action events are pushed without asking (see below).
+Activity and action events are pushed to the clients that subscribed to them in `hello` (see below).
 
 ### Confirmations
 
@@ -128,8 +131,9 @@ this machine: `jarvis web` never relays it.
 
 ### Activity (#267)
 
-What JARVIS is doing at this moment, for one line of a client's screen. It
-replaces the previous one; it is not part of the conversation.
+Only to clients that subscribed to `activity`. What JARVIS is doing at this
+moment, for one line of a client's screen. It replaces the previous one; it is
+not part of the conversation.
 
 ```json
 {"type": "activity", "text": "Searching for: execute shell commands…", "kind": "dispatch"}
@@ -139,8 +143,9 @@ replaces the previous one; it is not part of the conversation.
 
 ### Actions (#271)
 
-What JARVIS did, as blocks: the TUI folds them in the chat. Each action has
-a `start`, may have `update`s and has one `end`, all with the same `id`.
+Only to clients that subscribed to `action`. What JARVIS did, as blocks: the
+TUI folds them in the chat. Each action has a `start`, may have `update`s and
+has one `end`, all with the same `id`.
 
 ```json
 {"type": "action", "phase": "start", "id": "tool:7", "kind": "tool",
@@ -242,7 +247,8 @@ The `/status` health check, as data.
 ## Through `jarvis web`
 
 The gateway relays this protocol over a WebSocket, narrowed by role
-(`docs/web-gateway.md`):
+(`docs/web-gateway.md`). It subscribes to `activity` and `action` for the
+phone:
 
 - **Every role** sees `state`, `response`, `activity`, confirmations, sessions,
   `client_list`, `ack`, `error`, and a `DAEMON_SHUTDOWN` cut down to its state.

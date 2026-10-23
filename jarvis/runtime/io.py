@@ -6,7 +6,7 @@ import asyncio
 import json
 import os
 from logging import Logger
-from typing import Any
+from typing import Any, Optional
 
 from ..config import Config
 from ..core.providers import (
@@ -332,6 +332,18 @@ async def run_gui_socket_listener(app: Any, logger: Logger) -> None:
 
 DEFAULT_CLIENT_LABEL = "unlabeled"
 
+# Pushed events a client receives only when its `hello` asks for them. A
+# client that predates them would choke on an unknown type: jarvis-app shows
+# every unknown message as an alert.
+SUBSCRIBABLE = frozenset({"activity", "action"})
+
+
+def _subscriptions(app: Any) -> dict:
+    subs = getattr(app, "_gui_subscriptions", None)
+    if subs is None:
+        subs = app._gui_subscriptions = {}
+    return subs
+
 
 async def handle_gui_connection(
     app: Any,
@@ -385,6 +397,7 @@ async def handle_gui_connection(
         pass
     finally:
         app._gui_clients.pop(writer, None)
+        _subscriptions(app).pop(writer, None)
         try:
             writer.close()
             await writer.wait_closed()
@@ -422,6 +435,9 @@ async def _process_gui_message(
         if label:
             app._gui_clients[writer] = label
             logger.info(f"JARVIS: GUI client identified as '{label}'")
+        wanted = msg.get("subscribe")
+        if isinstance(wanted, list):
+            _subscriptions(app)[writer] = SUBSCRIBABLE & {str(w) for w in wanted}
 
     elif msg_type == "list_clients":
         await _gui_write(
@@ -809,10 +825,16 @@ def on_gui_output(app: Any, response: dict[str, Any]) -> None:
 
 
 def _broadcast_soon(app: Any, message: dict) -> None:
-    if not getattr(app, "_gui_clients", None):
+    """Send a subscribable event to the clients that asked for its type."""
+    subs = _subscriptions(app)
+    kind = message.get("type")
+    writers = [w for w in getattr(app, "_gui_clients", {}) if kind in subs.get(w, ())]
+    if not writers:
         return
     try:
-        asyncio.get_running_loop().create_task(broadcast_to_gui_clients(app, message))
+        asyncio.get_running_loop().create_task(
+            broadcast_to_gui_clients(app, message, writers)
+        )
     except RuntimeError:
         pass
 
@@ -855,13 +877,15 @@ async def _gui_output_and_idle(app: Any, response: dict[str, Any]) -> None:
         await set_gui_state(app, VoiceState.IDLE)
 
 
-async def broadcast_to_gui_clients(app: Any, message: dict) -> None:
-    """Send a JSON message to all connected GUI clients."""
+async def broadcast_to_gui_clients(
+    app: Any, message: dict, writers: Optional[list] = None
+) -> None:
+    """Send a JSON message to all connected GUI clients, or to `writers`."""
     if not app._gui_clients:
         return
     data = (json.dumps(message, ensure_ascii=False) + "\n").encode("utf-8")
     dead: set[asyncio.StreamWriter] = set()
-    for writer in list(app._gui_clients):
+    for writer in list(app._gui_clients if writers is None else writers):
         try:
             writer.write(data)
             await writer.drain()
