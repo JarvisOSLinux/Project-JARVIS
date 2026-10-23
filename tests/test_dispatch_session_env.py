@@ -37,7 +37,7 @@ def test_connect_hands_the_session_to_dispatch(monkeypatch):
     monkeypatch.setenv("DISPLAY", ":0")
     captured = {}
 
-    def fake_stdio_client(params):
+    def fake_stdio_client(params, **kw):
         captured["env"] = params.env
         raise RuntimeError("stop before spawning")
 

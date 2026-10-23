@@ -73,6 +73,10 @@ class TestEvents:
     def test_a_shell_command_reads_as_typed(self):
         detail = action_events.tool_detail
         assert detail({"command": "pacman", "args": ["-Syu"]}) == "pacman -Syu"
+        assert detail({"script": "pacman -Syu", "timeout": 300}) == (
+            "pacman -Syu  (timeout 300s)"
+        )
+        assert detail({"command": "ls", "cwd": "/tmp"}) == "ls  (in /tmp)"
         assert detail({"path": "/tmp/ü"}) == '{"path": "/tmp/ü"}'
         assert detail({}) == "" and detail(None) == ""
 
@@ -176,6 +180,21 @@ class TestSignals:
         )
         assert events[-1]["status"] == "failed"
         assert events[-1]["output"] == "error: lock\n(exit code 1)"
+
+    def test_a_failed_call_reads_as_what_it_printed(self):
+        # pacman asked "continue? [Y/n]" with nobody to answer (2026-10-23).
+        result = (
+            'Error: dmcp invocation failed: {\n  "success": false,\n  "exit_code": 1,'
+            '\n  "stdout": ":: Synchronizing package databases...\\n core downloading...\\n",'
+            '\n  "stderr": ":: Do you want to continue? [Y/n] "\n}'
+        )
+        text, failed = action_events.readable(result)
+        assert failed
+        assert text == (
+            "Error: dmcp invocation failed:\n"
+            ":: Synchronizing package databases...\n core downloading...\n"
+            ":: Do you want to continue? [Y/n]\n(exit code 1)"
+        )
 
     def test_other_json_is_left_alone(self):
         assert action_events.readable('{"items": []}') == ('{"items": []}', False)

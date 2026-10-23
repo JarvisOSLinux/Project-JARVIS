@@ -22,6 +22,7 @@ Sessions (chat conversations):
 
 import json
 import subprocess
+import sys
 import threading
 from typing import Any, Dict, Optional
 
@@ -50,12 +51,19 @@ class ContextorAdapter:
     def connect(self) -> bool:
         """Spawn the contextor binary and verify connectivity."""
         try:
+            from ..core.logger import JarvisLogger
+
+            # A pipe nobody reads blocks contextor once it fills, and the
+            # terminal belongs to the TUI.
+            stderr = JarvisLogger.child_stderr("contextor")
             self._process = subprocess.Popen(
                 [self._binary],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stderr=stderr,
             )
+            if stderr is not sys.__stderr__:
+                stderr.close()
             status = self._send({"cmd": "status"})
             self._connected = status.get("ok", False)
             if self._connected:
