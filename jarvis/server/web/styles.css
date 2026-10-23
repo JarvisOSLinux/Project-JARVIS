@@ -807,6 +807,186 @@ body.working #stop-btn {
     box-shadow: 0 0 10px rgba(255, 68, 85, 0.35);
 }
 
+/* ── What JARVIS is doing: activity line, action blocks, work panel (#267, #271) ── */
+#activity {
+    flex-shrink: 0;
+    padding: 6px 16px;
+    font-size: 12px;
+    font-style: italic;
+    color: var(--text-secondary);
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.jarvis-message.comment .jarvis-bubble {
+    background: none;
+    border: 1px dashed var(--border);
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
+details.action-block {
+    margin: 2px 0 6px 40px;
+    max-width: calc(100% - 40px);
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+details.action-block > summary {
+    cursor: pointer;
+    list-style: none;
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    padding: 4px 8px;
+    border-radius: 8px;
+    min-height: 28px;
+}
+details.action-block > summary::-webkit-details-marker { display: none; }
+details.action-block > summary::before { content: '▸'; color: var(--primary-dim); }
+details.action-block[open] > summary::before { content: '▾'; }
+details.action-block > summary:hover { background: var(--card); }
+
+.action-title { color: var(--text-primary); overflow-wrap: anywhere; }
+.action-time { margin-left: auto; white-space: nowrap; }
+.action-mark { white-space: nowrap; }
+.action-mark.running { color: #ffaa00; }
+.action-mark.ok, .action-mark.approved { color: var(--listening); }
+.action-mark.failed, .action-mark.denied { color: #ff4455; }
+.action-mark.stopped { color: #ffaa00; }
+.action-mark.waiting { color: var(--primary); }
+
+.action-detail {
+    margin: 2px 8px 2px 24px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    overflow-wrap: anywhere;
+}
+
+.action-output {
+    margin: 4px 8px 2px 24px;
+    padding: 8px;
+    max-height: 16em;
+    overflow: auto;
+    background: var(--card);
+    border-left: 2px solid var(--border);
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-primary);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+#work-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+    z-index: 20;
+}
+#work-backdrop.visible { opacity: 1; pointer-events: auto; }
+
+#work-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 360px;
+    max-width: 92%;
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    transform: translateX(100%);
+    transition: transform 0.22s ease;
+    z-index: 21;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+}
+#work-panel.visible { transform: translateX(0); }
+
+#work-panel-header {
+    min-height: 64px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-primary);
+    font-size: 13px;
+    letter-spacing: 0.5px;
+}
+
+#status-btn {
+    border: 1px solid var(--primary-dim);
+    border-radius: 8px;
+    background: rgba(0, 200, 255, 0.10);
+    color: var(--primary);
+    font-size: 12px;
+    padding: 8px 12px;
+    min-height: 36px;
+    cursor: pointer;
+}
+
+#work-panel-header #status-btn { margin-left: auto; margin-right: 8px; }
+
+.panel-close {
+    width: 36px;
+    height: 36px;
+    border: none;
+    background: none;
+    color: var(--text-secondary);
+    font-size: 16px;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.panel-close:hover { color: var(--primary); }
+
+#work-list, #status-list { padding: 4px 16px; }
+#status-list:not(:empty) { border-top: 1px solid var(--border); }
+
+.work-section { padding: 10px 0; }
+.work-section-title {
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--primary-dim);
+    margin-bottom: 6px;
+}
+.work-item { padding: 6px 0; border-bottom: 1px solid var(--border); }
+.work-item:last-child { border-bottom: none; }
+.work-item-title { color: var(--text-primary); font-size: 13px; overflow-wrap: anywhere; }
+.work-item-meta, .work-empty { color: var(--text-secondary); font-size: 11px; margin-top: 2px; }
+.work-item .action-detail, .work-item .action-output { margin-left: 0; margin-right: 0; }
+
+.status-check { display: flex; gap: 8px; font-size: 12px; padding: 3px 0; align-items: baseline; }
+.status-mark { width: 12px; flex-shrink: 0; text-align: center; }
+.status-mark.ok { color: var(--listening); }
+.status-mark.warn { color: #ffaa00; }
+.status-mark.fail { color: #ff4455; }
+.status-mark.off { color: var(--text-secondary); }
+.status-name { color: var(--text-primary); white-space: nowrap; }
+.status-detail { color: var(--text-secondary); overflow-wrap: anywhere; }
+
+#work-btn {
+    width: 36px;
+    height: 36px;
+    border-color: transparent;
+    background: none;
+    color: var(--text-secondary);
+    font-size: 16px;
+}
+#work-btn:hover { color: var(--primary); }
+
+/* Action blocks, status and work are for the roles trusted to approve. */
+body:not(.can-approve) #work-btn { display: none; }
+
 /* A guest watches and chats; only owner and trusted answer a request. */
 body:not(.can-approve) .permission-action { display: none; }
 body:not(.can-approve) .permission-task input { display: none; }
@@ -818,6 +998,8 @@ body:not(.can-approve) #new-session-btn { display: none; }
     .header-title { font-size: 17px; letter-spacing: 3px; }
     #session-sidebar { width: 86%; }
     #permission-panel { width: 100%; max-width: 100%; }
+    #work-panel { width: 100%; max-width: 100%; }
+    details.action-block { margin-left: 0; max-width: 100%; }
     #input-bar { padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); height: auto; }
     .input-wrapper input { font-size: 16px; } /* 16px stops iOS zooming on focus */
     .icon-btn { min-width: 44px; min-height: 44px; }
