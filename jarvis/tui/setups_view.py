@@ -1,7 +1,8 @@
 """The TUI's list of pending server setups (#254): F3 or /setups.
 
 The same list `jarvis setups` prints, oldest first so the numbers match.
-Picking one opens the setup form; C cancels it.
+Picking one opens the setup form; C twice cancels it, since cancelling tells
+the request that was waiting on it to give up.
 """
 
 from __future__ import annotations
@@ -76,6 +77,7 @@ class SetupsScreen(ModalScreen[Choice]):
     def __init__(self, setups: List[Dict[str, Any]]) -> None:
         super().__init__()
         self._setups = ordered(setups)
+        self._cancel_armed: Optional[str] = None
 
     def compose(self) -> ComposeResult:
         with Vertical(id="setups-dialog"):
@@ -94,6 +96,7 @@ class SetupsScreen(ModalScreen[Choice]):
             yield Static(
                 "Enter fills in the settings · C cancels the setup · Esc closes",
                 classes="setups-hint",
+                id="setups-hint",
             )
 
     def on_mount(self) -> None:
@@ -110,8 +113,17 @@ class SetupsScreen(ModalScreen[Choice]):
             return
         option_list = self.query_one(OptionList)
         index = option_list.highlighted
-        if index is not None:
-            self.dismiss(("cancel", self._setups[index]["setup_id"]))
+        if index is None:
+            return
+        setup = self._setups[index]
+        if self._cancel_armed != setup["setup_id"]:
+            self._cancel_armed = setup["setup_id"]
+            name = setup.get("server_name") or setup.get("server_id")
+            self.query_one("#setups-hint", Static).update(
+                f"Press C again to cancel the setup of {name} · Esc closes"
+            )
+            return
+        self.dismiss(("cancel", setup["setup_id"]))
 
     def action_close(self) -> None:
         self.dismiss(None)

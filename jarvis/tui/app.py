@@ -20,7 +20,7 @@ Keybindings:
     Ctrl+Q  — quit
     Ctrl+,  — settings (read-only config viewer)
     Ctrl+L  — browse the chat's blocks: ↑/↓ move, Enter/Space fold, Esc back
-    Ctrl+I  — focus message input
+    Esc     — back to the message input (Ctrl+I too, where the terminal tells it from Tab)
     Ctrl+Shift+C — clear on-screen transcript (export buffer only; not memory)
     Ctrl+Shift+E — export transcript to ``JARVIS_DATA_DIR/transcripts/``
     F1      — help (keys from ``BINDINGS`` + documented slash commands)
@@ -214,7 +214,9 @@ class JarvisTUI(App):
         Binding("ctrl+q", "quit", "Quit", show=True),
         Binding("ctrl+d", "delete_selected_session", "Delete", show=True),
         Binding("ctrl+l", "focus_chat", "Browse", show=True),
-        Binding("ctrl+i", "focus_input", "Input", show=True),
+        # Most terminals send Ctrl+I as Tab, so Esc is the key that works.
+        Binding("ctrl+i", "focus_input", "Input", show=False),
+        Binding("escape", "focus_input", "Back to typing", show=False),
         Binding("f1", "help", "Help", show=True, priority=True),
         Binding("f2", "settings", "Settings", show=True, priority=True),
         Binding("f3", "setups", "Setups", show=True, priority=True),
@@ -472,9 +474,19 @@ class JarvisTUI(App):
         """Move focus back to the message line."""
         tui_actions.focus_input(self)
 
+    def _close_if_showing(self, kind: type) -> bool:
+        """F1-F4 open their window and close it again: they have priority,
+        so the window's own binding for the same key never sees it."""
+        if isinstance(self.screen, kind):
+            self.screen.dismiss(None)
+            return True
+        return False
+
     def action_help(self) -> None:
-        """Open the help modal (Esc / F1 closes while help is focused)."""
-        if len(self.screen_stack) <= 1:
+        """Open the help modal; F1 or Esc closes it."""
+        from .help_screen import HelpScreen
+
+        if not self._close_if_showing(HelpScreen) and len(self.screen_stack) <= 1:
             tui_actions.open_help(self, JarvisTUI.BINDINGS)
 
     def action_clear_transcript(self) -> None:
@@ -486,15 +498,21 @@ class JarvisTUI(App):
         tui_actions.export_transcript(self)
 
     def action_settings(self) -> None:
-        if len(self.screen_stack) <= 1:
+        if isinstance(self.screen, ConfigModal):
+            self.screen.action_cancel()
+        elif len(self.screen_stack) <= 1:
             self._open_config("settings")
 
     def action_setups(self) -> None:
-        if len(self.screen_stack) <= 1:
+        from .setups_view import SetupsScreen
+
+        if not self._close_if_showing(SetupsScreen) and len(self.screen_stack) <= 1:
             self._open_setups()
 
     def action_tasks(self) -> None:
-        if len(self.screen_stack) <= 1:
+        from .tasks_view import TasksScreen
+
+        if not self._close_if_showing(TasksScreen) and len(self.screen_stack) <= 1:
             self._open_tasks()
 
     def _open_tasks(self) -> None:

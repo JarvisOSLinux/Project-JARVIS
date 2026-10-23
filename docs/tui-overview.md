@@ -28,16 +28,17 @@ JARVIS's TUI is built with **[Textual](https://textual.textualize.io/)** (Python
 | Key | Action |
 |-----|--------|
 | `Enter` | Send message |
-| `F1` / `/help` | Open keybinding + slash command help overlay |
-| `F2` / `/settings` / `/providers` | Open tabbed config modal (Settings + Providers tabs) |
-| `Ctrl+L` | Focus chat log (scroll with arrows / PgUp/PgDn) |
-| `Ctrl+I` | Focus message input |
+| `F1` / `/help` | Open keybinding + slash command help overlay (F1 again closes it) |
+| `F2` / `/settings` / `/providers` | Open tabbed config modal (Settings + Providers tabs); Esc with unsaved settings asks first |
+| `F3` / `/setups` | Servers waiting for setup: Enter fills one in, C twice cancels it |
+| `F4` / `/tasks` | What JARVIS is doing: requests, running tasks with output, timers |
+| `Ctrl+L` / `/commands` | Browse the chat's blocks: Up/Down move, Enter/Space fold, Esc back to typing |
 | `Ctrl+Shift+C` | Clear on-screen transcript (does not clear contextor memory) |
 | `Ctrl+Shift+E` / `/export` | Export transcript to `JARVIS_DATA_DIR/transcripts/` as Markdown |
 | `Ctrl+N` | New session |
 | `Ctrl+D` | Delete selected session (press twice to confirm) |
 | `Ctrl+Q` | Quit |
-| `Esc` | Close modal / return focus to input |
+| `Esc` | Close modal / return focus to input (from the sidebar or the chat too) |
 
 ---
 
@@ -55,6 +56,9 @@ TUI-only:
 | `/status` | Show daemon status |
 | `/export` | Export transcript |
 | `/clear` | Clear on-screen transcript |
+| `/commands [collapse\|expand]` | Browse the chat's blocks, or fold or unfold them all |
+| `/setups` | Servers waiting for setup |
+| `/tasks` | What JARVIS is doing now |
 | `/quit` | Quit |
 
 Session commands (work in all modes — CLI/voice/socket/TUI, handled by
