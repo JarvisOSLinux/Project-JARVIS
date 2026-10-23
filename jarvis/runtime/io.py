@@ -13,6 +13,7 @@ from ..core.providers import (
     add_provider,
     edit_provider,
     list_providers,
+    move_provider,
     remove_provider,
 )
 from ..core.voice_state import VoiceState
@@ -485,6 +486,17 @@ async def _process_gui_message(
     elif msg_type == "remove_provider":
         await _reply_or_broadcast_providers(app, writer, _handle_remove_provider(msg))
 
+    elif msg_type == "move_provider":
+        await _reply_or_broadcast_providers(app, writer, _handle_move_provider(msg))
+
+    elif msg_type == "get_status":
+        await _gui_write(writer, await _status_reply(app, bool(msg.get("full"))))
+
+    elif msg_type == "list_work":
+        from .work import collect_work
+
+        await _gui_write(writer, {"type": "work", "work": await collect_work(app)})
+
     elif msg_type == "list_sessions":
         await _gui_write(writer, _handle_list_sessions(app, msg))
 
@@ -624,6 +636,30 @@ def _handle_remove_provider(msg: dict) -> dict:
     except ValueError as e:
         return _provider_error(str(e))
     return {"type": "provider_list", "providers": list_providers()}
+
+
+def _handle_move_provider(msg: dict) -> dict:
+    name = str(msg.get("name") or "").strip()
+    try:
+        position = int(msg.get("position"))
+    except (TypeError, ValueError):
+        return _provider_error("move_provider needs a name and a position (1 = first)")
+    try:
+        move_provider(name, position)
+    except ValueError as e:
+        return _provider_error(str(e))
+    return {"type": "provider_list", "providers": list_providers()}
+
+
+async def _status_reply(app: Any, full: bool) -> dict:
+    """The /status health check (#272) as data: sections of named checks."""
+    from .health import as_dicts, collect_status
+
+    try:
+        sections = await collect_status(app, full=full)
+    except Exception as e:  # a broken check must not cost the client its reply
+        return {"type": "error", "message": f"Status check failed: {e}"}
+    return {"type": "status", "full": full, "sections": as_dicts(sections)}
 
 
 async def _reply_or_broadcast_providers(
@@ -772,6 +808,28 @@ def on_gui_output(app: Any, response: dict[str, Any]) -> None:
         pass
 
 
+def _broadcast_soon(app: Any, message: dict) -> None:
+    if not getattr(app, "_gui_clients", None):
+        return
+    try:
+        asyncio.get_running_loop().create_task(broadcast_to_gui_clients(app, message))
+    except RuntimeError:
+        pass
+
+
+def on_gui_activity(app: Any, event: dict[str, Any]) -> None:
+    """What JARVIS is doing now, for a client's activity line (#267)."""
+    _broadcast_soon(
+        app,
+        {"type": "activity", "text": event.get("text", ""), "kind": event.get("kind")},
+    )
+
+
+def on_gui_action(app: Any, event: dict[str, Any]) -> None:
+    """An action's start, update or end (runtime/action_events.py), as is."""
+    _broadcast_soon(app, event)
+
+
 async def _gui_output_and_idle(app: Any, response: dict[str, Any]) -> None:
     """Translate daemon output into GUI protocol and reset state to idle.
 
@@ -782,9 +840,16 @@ async def _gui_output_and_idle(app: Any, response: dict[str, Any]) -> None:
     """
     text = response.get("output", "")
     if text:
-        await broadcast_to_gui_clients(
-            app, {"type": "response", "content": text, "done": True}
-        )
+        message = {"type": "response", "content": text, "done": True}
+        # A comment says what JARVIS is about to do (#273) and a command's reply
+        # belongs to the command (#271); clients may show them differently.
+        for flag in ("comment", "command"):
+            if response.get(flag):
+                message[flag] = True
+        await broadcast_to_gui_clients(app, message)
+    # After a comment JARVIS carries on working, so it is not idle.
+    if response.get("comment"):
+        return
     about_to_speak = Config.OUTPUT_MODE == "voice" and app.output_manager.has_tts()
     if not about_to_speak:
         await set_gui_state(app, VoiceState.IDLE)
