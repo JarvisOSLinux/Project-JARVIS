@@ -322,7 +322,7 @@ class TestTui:
             {"type": "setup_completed", "id": setup.setup_id}
         )
 
-    def test_c_cancels_the_highlighted_setup(self):
+    def test_c_twice_cancels_the_highlighted_setup(self):
         queue = SetupQueue()
         setup = queue.add("demo", MANIFEST, ["URL"])
         jarvis = _jarvis(queue)
@@ -330,6 +330,9 @@ class TestTui:
         async def drive(app, pilot):
             app._open_setups()
             await pilot.pause()
+            await pilot.press("c")
+            await pilot.pause()
+            jarvis.events.inject_setup_result.assert_not_called()
             await pilot.press("c")
 
         _real_tui(jarvis, drive)

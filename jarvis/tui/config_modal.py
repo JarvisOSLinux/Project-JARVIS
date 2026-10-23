@@ -271,6 +271,7 @@ class ConfigModal(ModalScreen[ConfigModalResult]):
         self._initial_tab = initial_tab
         self._settings_changes: Dict[str, str] = {}
         self._providers_changed = False
+        self._discard_armed = False
 
     def compose(self) -> ComposeResult:
         from ..config import Config
@@ -381,9 +382,6 @@ class ConfigModal(ModalScreen[ConfigModalResult]):
     # -- Settings save ------------------------------------------------------
 
     def _save_settings(self) -> None:
-        from ..config import Config
-
-        changes: Dict[str, str] = {}
         for s in _SETTINGS:
             widget_id = f"setting-{s.key}"
 
@@ -411,15 +409,7 @@ class ConfigModal(ModalScreen[ConfigModalResult]):
                     err.add_class("visible")
                     return
 
-            old_raw = getattr(Config, s.key, "")
-            if s.kind == "bool":
-                old_val = "true" if old_raw else "false"
-            else:
-                old_val = str(old_raw)
-
-            if new_val != old_val:
-                changes[s.key] = new_val
-
+        changes = self._edited()
         if not changes:
             err = self.query_one("#settings-error", Static)
             err.update("No changes to save.")
@@ -510,7 +500,37 @@ class ConfigModal(ModalScreen[ConfigModalResult]):
 
     # -- Dismiss ------------------------------------------------------------
 
+    def _edited(self) -> Dict[str, str]:
+        """Settings whose field differs from the value JARVIS runs with."""
+        from ..config import Config
+
+        edited: Dict[str, str] = {}
+        for s in _SETTINGS:
+            widget_id = f"#setting-{s.key}"
+            if s.kind in ("select", "bool"):
+                new_val = str(self.query_one(widget_id, Select).value)
+            else:
+                new_val = self.query_one(widget_id, Input).value.strip()
+            old_raw = getattr(Config, s.key, "")
+            old_val = (
+                ("true" if old_raw else "false") if s.kind == "bool" else str(old_raw)
+            )
+            if new_val != old_val:
+                edited[s.key] = new_val
+        return edited
+
     def action_cancel(self) -> None:
+        """Close; with unsaved edits, the first Esc says so and the second discards."""
+        edited = self._edited()
+        if edited and not self._discard_armed:
+            self._discard_armed = True
+            labels = [s.label for s in _SETTINGS if s.key in edited]
+            err = self.query_one("#settings-error", Static)
+            err.update(
+                f"Not saved: {', '.join(labels)}. Ctrl+S saves; Esc again discards."
+            )
+            err.add_class("visible")
+            return
         self.dismiss(
             ConfigModalResult(
                 settings_changes={},
