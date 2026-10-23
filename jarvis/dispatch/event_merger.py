@@ -345,11 +345,21 @@ class EventMerger:
                             and self._signal_key(sig) not in self._seen
                         ):
                             pid = sig.get("pid")
-                            verify_and_mark(exits_by_pid[pid])
+                            exit_sig = exits_by_pid[pid]
+                            if self._signal_key(exit_sig) in self._seen:
+                                # The outcome was delivered already: a reminder
+                                # for a task that has finished adds nothing.
+                                self._seen.add(self._signal_key(sig))
+                                continue
+                            verify_and_mark(exit_sig)
+                            # The EXIT rides inside this event. Left unseen, the
+                            # same snapshot delivered it a second time, and ROOT
+                            # reported one result twice.
+                            self._seen.add(self._signal_key(exit_sig))
                             sig = {
                                 **sig,
                                 "_remind_completed": True,
-                                "_exit": exits_by_pid[pid],
+                                "_exit": exit_sig,
                             }
                             logger.info(
                                 f"EventMerger: REMIND+EXIT merged for pid={pid}"
