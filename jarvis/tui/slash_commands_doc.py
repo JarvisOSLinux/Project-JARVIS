@@ -34,7 +34,10 @@ SESSION_SLASH_HELP: tuple[tuple[str, str], ...] = (
         "Rename the session you're in, or the one whose id starts with <id>.",
     ),
     ("/delete <id>", "Delete session by **unique** id prefix."),
-    ("/context", "Show token usage of the last LLM call and active server docs."),
+    (
+        "/context",
+        "Show what filled the last prompt, part by part, and how much room is left.",
+    ),
 )
 
 TUI_LOCAL_SLASH_HELP: tuple[tuple[str, str], ...] = (
@@ -45,7 +48,11 @@ TUI_LOCAL_SLASH_HELP: tuple[tuple[str, str], ...] = (
     ),
     ("/clear", "Clear the chat view (on-screen only; session memory unchanged)."),
     ("/quit, /exit", "Exit the TUI."),
-    ("/status", "Show current provider, model, and session."),
+    (
+        "/status [full]",
+        "Check JARVIS's health: model providers, engines, voice, safety, work, "
+        "session. `full` also checks for server updates (goes online).",
+    ),
     ("/providers", "List configured providers with live pool status."),
     ("/providers add", "Open guided modal to add a provider."),
     (
