@@ -45,7 +45,7 @@ def _adapter():
 @contextlib.contextmanager
 def _patch_mcp(client, session):
     with (
-        patch("mcp.client.stdio.stdio_client", lambda params: client),
+        patch("mcp.client.stdio.stdio_client", lambda params, **kw: client),
         patch("mcp.ClientSession", lambda *a, **kw: session),
     ):
         yield

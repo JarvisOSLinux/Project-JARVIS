@@ -135,18 +135,21 @@ def readable(text: str) -> tuple:
     `success: false` is a failure even though the call itself succeeded.
     """
     stripped = text.strip()
-    if not stripped.startswith("{"):
+    # A failed call arrives as "Error: dmcp invocation failed: {…}".
+    start = stripped.find("{")
+    if start == -1:
         return text, False
     try:
-        data = json.loads(stripped)
+        data, _ = json.JSONDecoder().raw_decode(stripped[start:])
     except ValueError:
         return text, False
     if not isinstance(data, dict) or not {"stdout", "stderr"} & data.keys():
         return text, False
     code = data.get("exit_code")
     parts = [
-        str(data.get("stdout") or "").rstrip("\n"),
-        str(data.get("stderr") or "").rstrip("\n"),
+        stripped[:start].strip(),
+        str(data.get("stdout") or "").rstrip(),
+        str(data.get("stderr") or "").rstrip(),
         f"(exit code {code})" if code not in (None, 0) else "",
     ]
     failed = data.get("success") is False or code not in (None, 0)
@@ -154,14 +157,28 @@ def readable(text: str) -> tuple:
 
 
 def tool_detail(params: Any) -> str:
-    """A tool's parameters as one readable line: a shell command as typed."""
+    """A tool's parameters as one readable line: a shell command or script as typed."""
     if not isinstance(params, dict) or not params:
         return ""
+    options = []
+    if params.get("cwd"):
+        options.append(f"in {params['cwd']}")
+    if params.get("timeout"):
+        options.append(f"timeout {params['timeout']}s")
+    suffix = f"  ({', '.join(options)})" if options else ""
     command = params.get("command")
-    if isinstance(command, str) and set(params) <= {"command", "args"}:
+    if isinstance(command, str) and set(params) <= {
+        "command",
+        "args",
+        "cwd",
+        "timeout",
+    }:
         args = params.get("args") or []
         if isinstance(args, list):
-            return " ".join([command, *(str(a) for a in args)])
+            return " ".join([command, *(str(a) for a in args)]) + suffix
+    script = params.get("script")
+    if isinstance(script, str) and set(params) <= {"script", "cwd", "timeout"}:
+        return script.strip() + suffix
     try:
         return json.dumps(params, ensure_ascii=False)
     except (TypeError, ValueError):

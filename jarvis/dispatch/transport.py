@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 import time
 from logging import Logger
 from typing import Any, Callable, Dict, List, Optional
@@ -113,7 +114,11 @@ async def connect(adapter: Any, logger: Logger) -> None:
                 "RUST_LOG": "dispatch=warn",
             },
         )
-        client = stdio_client(params)
+        from ..core.logger import JarvisLogger
+
+        # Its stderr must not reach the terminal: the TUI draws there.
+        adapter._errlog = JarvisLogger.child_stderr("dispatch")
+        client = stdio_client(params, errlog=adapter._errlog)
         read, write = await client.__aenter__()
         adapter._client = client
         try:
@@ -172,6 +177,10 @@ async def disconnect(adapter: Any, logger: Logger) -> None:
             await ctx.__aexit__(None, None, None)
         except Exception as e:
             logger.error(f"Dispatch: Disconnect error ({name}): {e}")
+    errlog = getattr(adapter, "_errlog", None)
+    adapter._errlog = None
+    if errlog is not None and errlog is not sys.__stderr__:
+        errlog.close()
     if client is not None:
         logger.info("Dispatch: Disconnected")
 

@@ -77,6 +77,8 @@ class JarvisLogger:
     _file_handler: Optional[logging.FileHandler] = None
     _console_enabled: bool = True
     _enable_colors: bool = True
+    # Set when the TUI owns the terminal: nothing may write to it directly.
+    _screen_owned: bool = False
 
     @classmethod
     def setup(
@@ -217,7 +219,35 @@ class JarvisLogger:
                     _ensure_no_last_resort(logger)
 
     @classmethod
+    def child_stderr(cls, name: str):
+        """Where a helper process (dispatch, contextor) writes its stderr.
+
+        dispatch's stderr was the terminal's, so in the TUI its warnings ("WARN
+        MCP task failed …") were drawn over the screen until Textual repainted,
+        and contextor's was a pipe nobody read, which blocks it once full. With
+        file logging on it is `<name>.log` beside the JARVIS log, owner-only and
+        rotated once at the same size; without, the terminal, except in the TUI.
+        """
+        if cls._log_file is not None:
+            path = cls._log_file.with_name(f"{name}.log")
+            try:
+                if path.exists() and path.stat().st_size > LOG_FILE_MAX_BYTES:
+                    os.replace(path, path.with_name(f"{name}.log.1"))
+                return open(
+                    path,
+                    "a",
+                    encoding="utf-8",
+                    opener=lambda p, flags: os.open(p, flags, 0o600),
+                )
+            except OSError:
+                pass
+        if cls._screen_owned:
+            return open(os.devnull, "w")
+        return sys.__stderr__
+
+    @classmethod
     def apply_tui_root_mitigation(cls) -> None:
+        cls._screen_owned = True
         root = logging.getLogger()
         for handler in list(root.handlers):
             if _is_console_stream_handler(handler):
