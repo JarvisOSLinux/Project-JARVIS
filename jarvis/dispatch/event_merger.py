@@ -34,6 +34,7 @@ mark_signals_seen() so the background poller does not re-enqueue them.
 """
 
 import asyncio
+import threading
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Awaitable, Callable, Dict, List, Optional
@@ -121,10 +122,35 @@ class EventMerger:
         self._poll_interval = poll_interval
         self._seen: set = set()
         self._signals_initialized = False
+        # What arrives before start() is held, not dropped: the TUI says
+        # "Ready" while the engine is still syncing its tool index, and a
+        # message typed in those seconds simply vanished.
+        self._early: List[Event] = []
+        self._early_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Thread-safe injection helpers
     # ------------------------------------------------------------------
+
+    def _inject(self, event: "Event", what: str) -> None:
+        """Queue an event from any thread; before start, hold it until start."""
+        with self._early_lock:
+            loop = self._loop
+            if loop is None:
+                if self._queue.maxsize and len(self._early) >= self._queue.maxsize:
+                    logger.warning(f"EventMerger: Not started, dropping {what}")
+                    return
+                self._early.append(event)
+                logger.info(f"EventMerger: {what} held until the engine starts")
+                return
+
+        def _put() -> None:
+            try:
+                self._queue.put_nowait(event)
+            except asyncio.QueueFull:
+                logger.warning(f"EventMerger: Queue full, dropping {what}")
+
+        loop.call_soon_threadsafe(_put)
 
     def inject_user_input(self, text: str) -> None:
         """
@@ -134,55 +160,19 @@ class EventMerger:
         if not text or not str(text).strip():
             return
         t = str(text).strip()
-        if self._loop is None:
-            logger.warning(
-                "EventMerger: inject_user_input called before start, dropping input"
-            )
-            return
-
-        def _put() -> None:
-            try:
-                self._queue.put_nowait(Event.user_input(t))
-                logger.debug(f"EventMerger: Injected user input ({len(t)} chars)")
-            except asyncio.QueueFull:
-                logger.warning("EventMerger: User input queue full, dropping")
-
-        self._loop.call_soon_threadsafe(_put)
+        self._inject(Event.user_input(t), "user input")
+        logger.debug(f"EventMerger: Injected user input ({len(t)} chars)")
 
     def inject_confirmation_response(self, data: Dict[str, Any]) -> None:
         """Thread-safe."""
-        if self._loop is None:
-            logger.warning(
-                "EventMerger: inject_confirmation_response called before start"
-            )
-            return
-
-        def _put() -> None:
-            try:
-                self._queue.put_nowait(Event.confirmation_response(data))
-                logger.debug(
-                    f"EventMerger: Injected confirmation response id={data.get('id')}"
-                )
-            except asyncio.QueueFull:
-                logger.warning(
-                    "EventMerger: Queue full, dropping confirmation response"
-                )
-
-        self._loop.call_soon_threadsafe(_put)
+        self._inject(
+            Event.confirmation_response(data),
+            f"confirmation response id={data.get('id')}",
+        )
 
     def inject_setup_result(self, data: Dict[str, Any]) -> None:
         """Thread-safe."""
-        if self._loop is None:
-            logger.warning("EventMerger: inject_setup_result called before start")
-            return
-
-        def _put() -> None:
-            try:
-                self._queue.put_nowait(Event.setup_result(data))
-            except asyncio.QueueFull:
-                logger.warning("EventMerger: Queue full, dropping setup result")
-
-        self._loop.call_soon_threadsafe(_put)
+        self._inject(Event.setup_result(data), "setup result")
 
     def call_soon_threadsafe(self, callback: Callable[[], None]) -> None:
         """Schedule a plain callback on the event loop from any thread.
@@ -245,7 +235,13 @@ class EventMerger:
                 inject_user_input() and socket listeners feed user input.
         """
         self._running = True
-        self._loop = asyncio.get_running_loop()
+        with self._early_lock:
+            self._loop = asyncio.get_running_loop()
+            held, self._early = self._early, []
+        for event in held:
+            self._queue.put_nowait(event)
+        if held:
+            logger.info(f"EventMerger: Queued {len(held)} event(s) that came early")
         tasks = [asyncio.create_task(self._listen_signals(signal_window_source))]
         if user_source is not None:
             tasks.append(asyncio.create_task(self._listen_user_source(user_source)))
