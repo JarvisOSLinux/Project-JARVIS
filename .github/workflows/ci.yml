@@ -65,7 +65,7 @@ jobs:
           cache: "pip"
 
       - name: Install project with dev dependencies
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev,web]"
 
       - name: Run pytest
         run: pytest -m "not integration and not manual and not slow" -k "not voice_activation"

@@ -55,8 +55,8 @@ ensure_env() {
         fi
     fi
     if ! "$VENV/bin/python" -c "import pytest, black, isort, flake8, mypy, websockets" 2>/dev/null; then
-        echo "==> installing project with dev extras"
-        "$VENV/bin/python" -m pip install -q -e ".[dev]"
+        echo "==> installing project with dev and web extras"
+        "$VENV/bin/python" -m pip install -q -e ".[dev,web]"
     fi
 }
 
