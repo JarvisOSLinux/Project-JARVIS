@@ -63,9 +63,7 @@ async def handle(msg: dict, writer: asyncio.StreamWriter) -> None:
                     "tool_lines": ["delete_file path=/tmp/demo"],
                 }
             )
-            await broadcast(
-                {"type": "confirmation_request", "id": pending[-1]["id"]}
-            )
+            await broadcast({"type": "confirmation_request", "id": pending[-1]["id"]})
         else:
             asyncio.create_task(reply(text))
 
