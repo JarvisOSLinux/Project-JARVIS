@@ -41,7 +41,7 @@ from .runtime.lifecycle import (
     shutdown,
     start_runtime_services,
     stdin_is_tty,
-    stop_openai_server_if_running,
+    stop_http_server_if_running,
 )
 from .runtime.llm_bridge import ask_llm as runtime_ask_llm
 from .runtime.llm_bridge import ask_llm_sync as runtime_ask_llm_sync
@@ -174,7 +174,8 @@ class Jarvis:
             cancel_task_if_running(runtime_tasks.get("gui_socket"))
             cancel_task_if_running(runtime_tasks.get("update_sweep"))
             join_voice_thread_if_running(runtime_tasks.get("voice_thread"))
-            stop_openai_server_if_running(runtime_tasks.get("openai_server"))
+            stop_http_server_if_running(runtime_tasks.get("openai_server"))
+            stop_http_server_if_running(runtime_tasks.get("ollama_server"))
             if self._event_tasks:
                 logger.info(
                     f"JARVIS: Waiting for {len(self._event_tasks)} in-flight goal(s) to finish..."
