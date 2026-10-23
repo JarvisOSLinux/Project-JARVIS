@@ -3,7 +3,9 @@
 Socket clients got replies and confirmations but not what JARVIS was doing:
 the activity line and the action blocks were in-process only, and there was
 no way to ask for the health check or the running work. Now:
-- activity and action events are pushed to every GUI client;
+- activity and action events are pushed to the GUI clients whose `hello`
+  subscribed to them (a client from before them would choke on an unknown
+  type: jarvis-app alerts on every one);
 - `get_status` answers with the /status sections, `list_work` with what F4
   shows, `move_provider` reorders providers like `/providers move`;
 - a reply says whether it is a comment (JARVIS is still working, so the state
@@ -12,6 +14,7 @@ no way to ask for the health check or the running work. Now:
 
 import asyncio
 import json
+import logging
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -49,7 +52,7 @@ def _app():
 
 
 def _ask(app, writer, msg):
-    asyncio.run(io._process_gui_message(app, None, msg, writer))
+    asyncio.run(io._process_gui_message(app, logging.getLogger("test"), msg, writer))
     return writer.sent[-1]
 
 
@@ -126,8 +129,19 @@ class TestRequests:
 
 @pytest.mark.unit
 class TestPushed:
-    def test_activity_and_actions_reach_every_client(self):
+    def test_activity_and_actions_reach_the_clients_that_asked(self):
         app, writer = _app()
+        old = Writer()  # a client from before these events, e.g. jarvis-app today
+        app._gui_clients[old] = "jarvis-app"
+        hello = {
+            "type": "hello",
+            "label": "web",
+            "subscribe": ["activity", "action", "x"],
+        }
+        asyncio.run(
+            io._process_gui_message(app, logging.getLogger("test"), hello, writer)
+        )
+        assert app._gui_subscriptions[writer] == {"activity", "action"}
         app.output_manager.add_activity_callback(lambda e: io.on_gui_activity(app, e))
         app.output_manager.add_action_callback(lambda e: io.on_gui_action(app, e))
 
@@ -146,6 +160,8 @@ class TestPushed:
             "kind": "dispatch",
         }
         assert writer.sent[2]["output"] == "found 2"
+        # jarvis-app showed every unknown message type as an alert.
+        assert old.sent == []
 
     def test_nothing_is_built_without_clients(self):
         app, _ = _app()
