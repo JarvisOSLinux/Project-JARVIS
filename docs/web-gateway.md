@@ -33,6 +33,21 @@ Each step ends with a check.
 Sleep, keyring and service wiring (runbook sections C and E of #266) are still
 host chores, not code.
 
+## Headscale (self-hosted control server)
+
+This machine is only a client of your Headscale server; nothing about the
+gateway changes. `scripts/run-web.sh --tailscale --login-server https://hs.example.com`
+does the client side: installs tailscale, joins (an auth key from `$TS_AUTHKEY`
+is passed by file, not on the command line; without one it prompts), and sets
+`JARVIS_WEB_HOST_SUFFIX` to the node's MagicDNS suffix instead of `.ts.net`.
+
+Headscale does not issue HTTPS certificates, as far as we know, so the script
+falls back to `tailscale serve --http=80`. The tunnel is still WireGuard, but
+browsers treat the page as insecure, so the phone's microphone and speech
+recognition do not work. Headscale logins are plain user names, not emails:
+give `jarvis web allow` exactly what `tailscale whois <ip>` shows, or pass
+`--allow name:role` to the script.
+
 ## Roles
 
 | Role | May do |
