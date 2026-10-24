@@ -341,12 +341,24 @@ def _parse_dispatch(response: Dict[str, Any]) -> Dict[str, Any]:
             logger.warning(f"TaskParser: Task {i} missing server or tool, skipping")
             continue
 
+        params = task.get("params", {})
+        remind_after = task.get("remind_after")
+        # Models put dispatch's per-task option inside the tool's arguments,
+        # where dispatch never looks: no reminder came, so a job waiting on
+        # pacman's "[Y/n]" sat out its whole timeout unseen.
+        if (
+            remind_after is None
+            and isinstance(params, dict)
+            and "remind_after" in params
+        ):
+            params = dict(params)
+            remind_after = params.pop("remind_after")
         validated_tasks.append(
             {
                 "server": server,
                 "tool": tool,
-                "params": task.get("params", {}),
-                "remind_after": task.get("remind_after"),
+                "params": params,
+                "remind_after": remind_after,
             }
         )
 
