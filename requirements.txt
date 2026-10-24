@@ -24,7 +24,6 @@
 # - If you need Python 3.14, you can use nightly builds: pip install --pre onnxruntime
 
 # Core dependencies (always installed)
-ollama>=0.5.3
 python-dotenv>=1.1.1
 mcp[cli]>=1.13.1
 httpx>=0.28.1

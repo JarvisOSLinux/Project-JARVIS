@@ -21,22 +21,6 @@ from tests.integration_utils import (
 class TestLLMProviderIntegration:
     """Test LLM provider initialization and basic functionality."""
 
-    def test_ollama_provider_initialization(self):
-        from jarvis.llm.providers.ollama import OllamaProvider
-
-        provider = OllamaProvider("test-model")
-        assert provider is not None
-        assert provider.model == "test-model"
-        assert hasattr(provider, "chat")
-        assert hasattr(provider, "is_available")
-
-    def test_ollama_provider_with_custom_url(self):
-        from jarvis.llm.providers.ollama import OllamaProvider
-
-        custom_url = "http://localhost:8080"
-        provider = OllamaProvider("test-model", base_url=custom_url)
-        assert provider.base_url == custom_url
-
     def test_api_provider_initialization(self):
         from jarvis.llm.providers.api import APIProvider
 
@@ -46,10 +30,10 @@ class TestLLMProviderIntegration:
         assert provider is not None
         assert provider.model == "test-model"
 
-    def test_llm_provider_factory_ollama(self):
+    def test_llm_provider_factory_llamacpp(self):
         from jarvis.llm.providers import create_provider
 
-        provider = create_provider(provider="ollama", model="test-model")
+        provider = create_provider(provider="llamacpp", model="test-model")
         assert provider is not None
         assert hasattr(provider, "chat")
 
@@ -257,26 +241,26 @@ class TestLLMContextManagement:
 class TestLLMProviderSwitching:
     """Test switching between different LLM providers."""
 
-    def test_provider_switching_ollama_to_api(self):
+    def test_provider_switching_llamacpp_to_api(self):
         from jarvis.llm.providers import create_provider
 
-        ollama = create_provider(provider="ollama", model="llama2")
+        local = create_provider(provider="llamacpp", model="llama2")
         api = create_provider(
             provider="api",
             model="gpt-3.5-turbo",
             api_url="http://localhost:8080",
             api_key="test-key",
         )
-        assert ollama is not None
+        assert local is not None
         assert api is not None
-        assert api != ollama
+        assert api != local
 
     def test_provider_availability_check(self):
         from jarvis.llm.providers.api import APIProvider
-        from jarvis.llm.providers.ollama import OllamaProvider
+        from jarvis.llm.providers.llamacpp import LlamaCppProvider
 
-        ollama = OllamaProvider("test-model")
-        assert isinstance(ollama.is_available(), bool)
+        local = LlamaCppProvider("test-model")
+        assert isinstance(local.is_available(), bool)
 
         api = APIProvider("test-model", api_url="http://localhost:8080", api_key="fake")
         assert isinstance(api.is_available(), bool)
@@ -296,7 +280,7 @@ class TestLLMErrorHandling:
         from jarvis.llm.providers import create_provider
 
         with pytest.raises(ValueError):
-            create_provider(provider="ollama", model="")
+            create_provider(provider="llamacpp", model="")
 
     def test_llm_timeout_handling(self):
         """A provider timeout degrades to the fallback response, not a raise.

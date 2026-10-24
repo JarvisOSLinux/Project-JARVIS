@@ -94,14 +94,14 @@ class TestEngines:
         self, monkeypatch
     ):
         monkeypatch.setattr(Config, "ALLOW_EMBEDDING_SEARCH", True)
-        monkeypatch.setattr(health, "_ollama_has_model", lambda e: False)
+        monkeypatch.setattr(health, "_embeddings_reachable", lambda e: False)
         app = SimpleNamespace(_embeddings=SimpleNamespace(model="nomic-embed-text"))
         check = asyncio.run(health._search_check(app))
         assert (check.state, check.detail) == (
             "warn",
             "keyword only: the embedding model nomic-embed-text is not reachable",
         )
-        monkeypatch.setattr(health, "_ollama_has_model", lambda e: True)
+        monkeypatch.setattr(health, "_embeddings_reachable", lambda e: True)
         check = asyncio.run(health._search_check(app))
         assert (check.state, check.detail) == ("ok", "semantic (nomic-embed-text)")
 
