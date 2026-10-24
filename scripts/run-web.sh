@@ -4,13 +4,24 @@
 #   scripts/run-web.sh               local: JARVIS daemon + gateway on localhost
 #   scripts/run-web.sh --stub        local, no LLM: a stub daemon answers instead
 #   scripts/run-web.sh --tailscale   real: gateway published on your tailnet
+#   scripts/run-web.sh --tailscale --login-server https://hs.example.com
+#                                    same, with this machine joined to a
+#                                    self-hosted Headscale server
 #
 # Local modes treat every request as one throwaway owner account and use a
 # temporary allowlist, so your real one is untouched. Never use them on a
 # shared machine. --tailscale uses your real allowlist (jarvis web allow ...)
 # and adds your own Tailscale account as owner when the list is empty.
 #
-# Options: --port N (default 8318), --no-open (do not open a browser).
+# --tailscale does the client side on this machine: installs tailscale, joins
+# the tailnet (--login-server, or $JARVIS_LOGIN_SERVER, for Headscale; an auth
+# key from $TS_AUTHKEY, else interactive), takes the MagicDNS suffix from the
+# node's own name, and serves over HTTPS when the control server issues
+# certificates, over plain HTTP (still WireGuard-encrypted) when it does not.
+#
+# Options: --port N (default 8318), --no-open (do not open a browser),
+# --allow LOGIN[:ROLE] (also allow this account; repeatable; role defaults
+# to trusted).
 # Ctrl+C stops everything this script started.
 set -euo pipefail
 
@@ -21,18 +32,28 @@ cd "$ROOT"
 MODE=local
 STUB=0
 OPEN=1
+LOGIN_SERVER="${JARVIS_LOGIN_SERVER:-}"
+ALLOW=()
 PORT="${JARVIS_WEB_PORT:-8318}"
 while [ $# -gt 0 ]; do
     case "$1" in
         --stub) STUB=1 ;;
         --tailscale) MODE=tailscale ;;
         --no-open) OPEN=0 ;;
+        --login-server)
+            LOGIN_SERVER="${2:?--login-server needs a URL}"
+            shift
+            ;;
+        --allow)
+            ALLOW+=("${2:?--allow needs LOGIN[:ROLE]}")
+            shift
+            ;;
         --port)
             PORT="${2:?--port needs a number}"
             shift
             ;;
         -h | --help)
-            sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+            sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -52,13 +73,13 @@ ensure_env
 
 WORK="$(mktemp -d)"
 PIDS=()
-SERVED=0
+SERVE_FLAG=""
 cleanup() {
     trap - EXIT INT TERM
     echo
     echo "==> stopping"
-    if [ "$SERVED" = 1 ]; then
-        tailscale serve --https=443 off >/dev/null 2>&1 || true
+    if [ -n "$SERVE_FLAG" ]; then
+        tailscale serve "$SERVE_FLAG" off >/dev/null 2>&1 || true
     fi
     for pid in "${PIDS[@]:-}"; do
         [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
@@ -147,29 +168,94 @@ fi
 if ! command -v tailscale >/dev/null; then
     echo "==> installing tailscale"
     pm_install tailscale
-    sudo systemctl enable --now tailscaled
 fi
-if ! tailscale status >/dev/null 2>&1; then
-    echo "==> signing in to Tailscale"
-    sudo tailscale up
+sudo systemctl enable --now tailscaled
+
+# One read of the node's state: prints "<state>|<dns name>|<ip>|<login>|<certs>".
+node_info() {
+    tailscale status --json 2>/dev/null | "$BIN/python" -c '
+import json, sys
+try:
+    s = json.load(sys.stdin)
+except ValueError:
+    sys.exit(0)
+me = s.get("Self") or {}
+user = (s.get("User") or {}).get(str(me.get("UserID")), {})
+ips = me.get("TailscaleIPs") or [""]
+print("|".join([
+    s.get("BackendState", ""),
+    (me.get("DNSName") or "").rstrip("."),
+    ips[0],
+    user.get("LoginName", ""),
+    "yes" if s.get("CertDomains") else "no",
+]))'
+}
+
+IFS='|' read -r STATE NAME IP ME CERTS <<<"$(node_info)"
+if [ "$STATE" != Running ]; then
+    UP=(sudo tailscale up)
+    if [ -n "$LOGIN_SERVER" ]; then
+        UP+=(--login-server "$LOGIN_SERVER")
+    fi
+    if [ -n "${TS_AUTHKEY:-}" ]; then
+        (umask 077 && printf '%s' "$TS_AUTHKEY" >"$WORK/authkey")
+        UP+=("--auth-key=file:$WORK/authkey")
+    fi
+    echo "==> joining the tailnet${LOGIN_SERVER:+ at $LOGIN_SERVER}"
+    "${UP[@]}"
+    IFS='|' read -r STATE NAME IP ME CERTS <<<"$(node_info)"
+elif [ -n "$LOGIN_SERVER" ]; then
+    CURRENT="$(tailscale debug prefs 2>/dev/null | "$BIN/python" -c '
+import json, sys
+try:
+    print(json.load(sys.stdin).get("ControlURL", ""))
+except ValueError:
+    pass')"
+    if [ -n "$CURRENT" ] && [ "${CURRENT%/}" != "${LOGIN_SERVER%/}" ]; then
+        echo "this node is already on $CURRENT, not $LOGIN_SERVER." >&2
+        echo "run 'sudo tailscale logout' first if that is what you want." >&2
+        exit 1
+    fi
+fi
+if [ "$STATE" != Running ]; then
+    echo "tailscale is not running (state: ${STATE:-unknown})" >&2
+    exit 1
 fi
 
-if [ -z "$("$BIN/jarvis" web list | grep -E ' (guest|trusted|owner)$' || true)" ]; then
-    ME="$(tailscale status --json | "$BIN/python" -c '
-import json, sys
-s = json.load(sys.stdin)
-print(s["User"][str(s["Self"]["UserID"])]["LoginName"])')"
+# Without MagicDNS the node has no name, so the gateway accepts its IP instead.
+HOST="${NAME:-$IP}"
+if [ -n "$NAME" ]; then
+    export JARVIS_WEB_HOST_SUFFIX=".${NAME#*.}"
+else
+    export JARVIS_WEB_HOST_SUFFIX="$IP"
+fi
+
+if [ -z "$("$BIN/jarvis" web list | grep -E '^  [^ ]+ +(guest|trusted|owner)$' || true)" ]; then
     echo "==> allowlist is empty, adding $ME as owner"
     "$BIN/jarvis" web allow "$ME" owner
 fi
+for entry in "${ALLOW[@]:-}"; do
+    [ -n "$entry" ] || continue
+    "$BIN/jarvis" web allow "${entry%%:*}" "$([ "$entry" = "${entry#*:}" ] && echo trusted || echo "${entry#*:}")"
+done
 
-NAME="$(tailscale status --json | "$BIN/python" -c '
-import json, sys
-print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')"
-tailscale serve --bg --https=443 "$PORT"
-SERVED=1
-echo "==> https://$NAME   (open it on a phone with the Tailscale app on)"
-echo "    allowed accounts:"
+if [ "$CERTS" = yes ]; then
+    SERVE_FLAG="--https=443"
+    SCHEME=https
+else
+    SERVE_FLAG="--http=80"
+    SCHEME=http
+fi
+tailscale serve --bg "$SERVE_FLAG" "$PORT"
+
+echo "==> $SCHEME://$HOST   (open it on a phone that is on the same tailnet)"
+if [ "$SCHEME" = http ]; then
+    echo "    no certificate from the control server: traffic is encrypted by the"
+    echo "    tunnel, but browsers treat the page as insecure, so the phone's"
+    echo "    microphone and speech recognition stay off"
+fi
+echo "    this machine appears as: $ME"
+echo "    allowed accounts (use the login exactly as 'tailscale whois <ip>' shows it):"
 "$BIN/jarvis" web list
 "$BIN/jarvis" web start &
 PIDS+=("$!")
