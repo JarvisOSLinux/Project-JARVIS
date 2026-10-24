@@ -392,9 +392,15 @@ async def list_server_tools(logger: Logger, server_id: str) -> Dict[str, Any]:
 
     # Docstring fallback: if any tools lack descriptions, parse Python source.
     if any(not t.get("description") for t in tools if isinstance(t, dict)):
-        base = _dmcp_base_dir()
-        manifest_path = base / "installed" / server_id / "manifest.json"
-        if manifest_path.exists():
+        manifest_path = next(
+            (
+                d / server_id / "manifest.json"
+                for d in _install_dirs()
+                if (d / server_id / "manifest.json").exists()
+            ),
+            None,
+        )
+        if manifest_path is not None:
             try:
                 manifest = json.loads(manifest_path.read_text())
                 src = _find_python_source(manifest)
@@ -418,7 +424,44 @@ async def list_server_tools(logger: Logger, server_id: str) -> Dict[str, Any]:
     return {"server": server_id, "tools": tools}
 
 
-def _dmcp_base_dir() -> Path:
+def _dmcp_paths() -> Dict[str, Any]:
+    """`dmcp paths --json`, or {} when dmcp is missing or too old to say."""
+    try:
+        result = subprocess.run(
+            ["dmcp", "paths", "--json"],
+            capture_output=True,
+            timeout=3,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            data = json.loads(result.stdout)
+            if isinstance(data, dict):
+                return data
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        pass
+    return {}
+
+
+def _install_dirs() -> List[Path]:
+    """Where dmcp installs servers: the user's scope, then the system's.
+
+    A system-scope server (the root shell server) lives under
+    /usr/share/mcp/installed, and JARVIS read only the user's directory, so
+    every system server had no manifest here: no threat levels, no sign-in or
+    settings, and "no readable manifest" on each dispatch.
+    """
+    paths = _dmcp_paths()
+    dirs = [_dmcp_base_dir(paths) / "installed"]
+    system = paths.get("system_install_dir") or (
+        "/usr/share/mcp/installed" if sys.platform.startswith("linux") else ""
+    )
+    if system:
+        dirs.append(Path(system))
+    return dirs
+
+
+def _dmcp_base_dir(paths: Optional[Dict[str, Any]] = None) -> Path:
     """dmcp's own per-OS data directory (the parent of ``installed/``).
 
     Ask dmcp directly first (``dmcp paths --json`` exposes ``data_dir``,
@@ -434,20 +477,9 @@ def _dmcp_base_dir() -> Path:
     ``LOCALAPPDATA/mcp`` on Windows, ``~/Library/Application Support/mcp``
     on macOS, and ``$XDG_DATA_HOME`` (or ``~/.local/share``) ``/mcp`` on Linux.
     """
-    try:
-        result = subprocess.run(
-            ["dmcp", "paths", "--json"],
-            capture_output=True,
-            timeout=3,
-            text=True,
-            check=False,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            data = json.loads(result.stdout)
-            if data.get("data_dir"):
-                return Path(data["data_dir"])
-    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
-        pass
+    data = _dmcp_paths() if paths is None else paths
+    if data.get("data_dir"):
+        return Path(data["data_dir"])
 
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Application Support" / "mcp"
@@ -461,13 +493,13 @@ def _dmcp_base_dir() -> Path:
 async def get_server_manifest(logger: Logger, server_id: str) -> Dict[str, Any]:
     """Return the manifest dict for a server, reading locally with no network call.
 
-    Checks the installed manifest first; falls back to the registry clone.
+    Checks the installed manifest first, in the user's scope and then the
+    system's; falls back to the registry clone.
     Returns an empty dict if neither exists.
     """
-    base = _dmcp_base_dir()
-    candidates = [
-        base / "installed" / server_id / "manifest.json",
-        base / "registry" / server_id / "manifest.json",
+    installed = _install_dirs()
+    candidates = [d / server_id / "manifest.json" for d in installed] + [
+        installed[0].parent / "registry" / server_id / "manifest.json"
     ]
     for path in candidates:
         if path.exists():
