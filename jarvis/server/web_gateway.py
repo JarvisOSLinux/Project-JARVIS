@@ -391,12 +391,18 @@ class Gateway:
         role: Optional[str],
         label: str,
     ) -> bool:
-        """Label this client, and refuse to run while confirmations are off."""
+        """Label this client, and refuse to run while confirmations are off.
+
+        What the daemon sends before its settings reply is kept and relayed
+        once the session opens: it greets every client with its current
+        state, and the page, never told, said "Offline" until the next change.
+        """
         await self._upstream_send(
             writer,
             {"type": "hello", "label": label, "subscribe": ["activity", "action"]},
         )
         await self._upstream_send(writer, {"type": "get_settings"})
+        early = []
         try:
             while True:
                 line = await asyncio.wait_for(reader.readline(), timeout=5.0)
@@ -405,6 +411,7 @@ class Gateway:
                     return False
                 msg = json.loads(line)
                 if msg.get("type") != "settings":
+                    early.append(msg)
                     continue
                 if msg.get("confirmation_mode") == "allow_all":
                     await ws.close(
@@ -417,6 +424,9 @@ class Gateway:
             await ws.close(CLOSE_UPSTREAM, "JARVIS did not answer")
             return False
         await ws.send(json.dumps({"type": "gateway", "login": login, "role": role}))
+        for msg in early:
+            if relayable(msg, role):
+                await ws.send(json.dumps(msg, ensure_ascii=False))
         return True
 
     async def _relay(
