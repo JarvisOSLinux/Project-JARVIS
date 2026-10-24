@@ -12,6 +12,7 @@ from typing import Any, Dict, Optional
 
 from ..config import Config
 from ..core.voice_state import VoiceState
+from ..llm import runner as llm_runner
 from ..platform import current as platform
 from .io import (
     apply_confirmation_decision,
@@ -519,4 +520,5 @@ async def shutdown(app: Any, logger: Logger) -> None:
     await app.dispatch.disconnect()
     if app.contextor:
         app.contextor.disconnect()
+    llm_runner.stop_all()
     logger.info("JARVIS: Shutdown complete")

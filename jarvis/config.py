@@ -57,32 +57,21 @@ class Config:
         os.path.join(MODELS_DIR, "whisper"),
     )
 
-    # Ollama-specific
-    LLM_AUTO_PULL = os.getenv("LLM_AUTO_PULL", "false").lower() == "true"
-    OLLAMA_AUTO_START = os.getenv("OLLAMA_AUTO_START", "true").lower() == "true"
+    # Built-in model runner: JARVIS supervises llama-server (llama.cpp).
+    LLAMA_SERVER_BIN = os.getenv("LLAMA_SERVER_BIN", "llama-server")
+    LLM_HOST = os.getenv("JARVIS_LLM_HOST", "127.0.0.1")
+    LLM_PORT = int(os.getenv("JARVIS_LLM_PORT", "11445"))
+    EMBED_PORT = int(os.getenv("JARVIS_EMBED_PORT", "11446"))
+    # Layers offloaded to the GPU (-ngl); llama.cpp clamps to the model's count
+    # and ignores it on CPU-only builds.
+    LLM_GPU_LAYERS = int(os.getenv("LLM_GPU_LAYERS", "999"))
+    LLM_AUTO_START = os.getenv("LLM_AUTO_START", "true").lower() == "true"
+    # Seconds to wait for a model to load; a first start also downloads it.
+    LLM_START_TIMEOUT = float(os.getenv("LLM_START_TIMEOUT", "900"))
 
     # Sampling temperature for LLM responses (0.0 = deterministic, 1.0+ = creative)
     # Default 0.7 gives a balance of consistency and variety.
     LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
-
-    # Ollama extended thinking mode. "true" keeps reasoning in the separate
-    # `thinking` field (prevents leaking into `content`). "false" disables
-    # thinking entirely. Unset = let the model decide. Ignored by models that
-    # don't support the option.
-    _llm_think_raw = os.getenv("LLM_THINK", "").lower()
-    LLM_THINK = (
-        True
-        if _llm_think_raw == "true"
-        else False if _llm_think_raw == "false" else None
-    )
-
-    # Ollama strict JSON mode (format="json"). Default off because reasoning
-    # models (qwen3, gpt-oss, deepseek-r1, ...) emit thinking tokens that
-    # conflict with grammar-constrained decoding and return empty content.
-    # JARVIS's _extract_json strips thinking tags, code fences, and trailing
-    # noise — it does not need server-side JSON enforcement. Set true only
-    # when using a non-reasoning model that benefits from strict mode.
-    LLM_STRICT_JSON = os.getenv("LLM_STRICT_JSON", "false").lower() == "true"
 
     from .platform import current as _platform
 
@@ -234,11 +223,11 @@ class Config:
     MAX_ENTRIES_PER_THEME = int(os.getenv("MAX_ENTRIES_PER_THEME", "500"))
 
     # --- Context Retrieval (RAG) ---
-    # Embedding model for semantic search (runs on Ollama)
-    EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")
-    # Ollama URL for embeddings — defaults to local instance, NOT LLM_URL
-    # (the LLM may live on a remote server; embeddings always need local Ollama)
-    EMBED_URL = os.getenv("EMBED_URL", "http://localhost:11434")
+    # Embedding model for semantic search: a GGUF path or Hugging Face
+    # user/repo[:quant], served by its own llama-server on EMBED_PORT.
+    EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-ai/nomic-embed-text-v1.5-GGUF:Q8_0")
+    # Set to use an already-running embedding server instead of starting one.
+    EMBED_URL = os.getenv("EMBED_URL", "")
     # Enable semantic search via contextor binary (requires embed model)
     RAG_ENABLED = os.getenv("RAG_ENABLED", "true").lower() == "true"
     # Number of memories to retrieve per RAG query
@@ -362,9 +351,6 @@ class Config:
         os.getenv("LOG_COLORS", "true").lower() == "true"
     )  # Enable colored console output
     LLM_IO_LOG = os.getenv("LLM_IO_LOG", "")  # Optional: path to log LLM I/O as JSONL
-
-    # os.environ["OLLAMA_NO_GPU"] = "1"
-    # os.environ["OLLAMA_NUM_THREADS"] = str(multiprocessing.cpu_count())
 
     # ------------------------------------------------------------------
     # Hierarchical prompt system: ROOT → DISPATCH

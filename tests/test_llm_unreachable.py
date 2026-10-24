@@ -27,7 +27,7 @@ DNS = RuntimeError(
             DNS,
             "could not look up ollama.com: a DNS or network problem; retrying it in 25 s",
         ),
-        (ConnectionError("Connection refused"), "is Ollama running?"),
+        (ConnectionError("Connection refused"), "is the model server running?"),
         (RuntimeError("Read timed out"), "did not answer in time"),
         (RuntimeError("HTTP 401 Unauthorized"), "rejected the API key"),
         (RuntimeError("HTTP 429 Too Many Requests"), "rate-limiting"),

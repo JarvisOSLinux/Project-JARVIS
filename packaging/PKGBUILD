@@ -19,7 +19,7 @@ depends=(
     python-pathspec
     dmcp
     dispatch-mcp
-    ollama
+    llama.cpp
 )
 makedepends=(
     python-build
@@ -29,7 +29,6 @@ makedepends=(
     python-setuptools-scm
 )
 optdepends=(
-    'python-ollama: Ollama Python client (required at runtime — install from AUR)'
     'python-mcp: MCP protocol library (required at runtime — install from AUR)'
     'python-vosk: offline speech recognition'
     'python-sounddevice: microphone/speaker audio I/O'

@@ -38,7 +38,7 @@ Usage
     client.stop()
 
 Key/provider reporting is called directly:
-    client.report_provider(KernelClient.PROVIDER_OLLAMA, "llama3:8b")
+    client.report_provider(KernelClient.PROVIDER_LOCAL, "llama3:8b")
     key = client.get_api_key("claude-api-key")   # may return None
 """
 
@@ -86,7 +86,7 @@ STATE_ERROR = 3
 
 # jarvis_provider
 PROVIDER_NONE = 0
-PROVIDER_OLLAMA = 1
+PROVIDER_LOCAL = 1  # slot 1 is JARVIS_PROVIDER_OLLAMA in the kernel uapi header
 PROVIDER_CLAUDE = 2
 PROVIDER_OPENAI = 3
 PROVIDER_OPENAI_COMPAT = 4
@@ -209,7 +209,7 @@ class KernelClient:
 
     # Re-export constants for callers
     PROVIDER_NONE = PROVIDER_NONE
-    PROVIDER_OLLAMA = PROVIDER_OLLAMA
+    PROVIDER_LOCAL = PROVIDER_LOCAL
     PROVIDER_CLAUDE = PROVIDER_CLAUDE
     PROVIDER_OPENAI = PROVIDER_OPENAI
     PROVIDER_OPENAI_COMPAT = PROVIDER_OPENAI_COMPAT
@@ -519,7 +519,7 @@ def provider_from_config(provider_name: str) -> int:
     Convert a provider type name to a JARVIS_PROVIDER_* int.
     """
     mapping = {
-        "ollama": PROVIDER_OLLAMA,
+        "llamacpp": PROVIDER_LOCAL,
         "claude": PROVIDER_CLAUDE,
         "openai": PROVIDER_OPENAI,
         "api": PROVIDER_OPENAI_COMPAT,

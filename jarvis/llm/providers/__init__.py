@@ -8,14 +8,14 @@ from ..base import BaseLLMProvider
 
 
 def create_provider(
-    provider: str = "ollama",
+    provider: str = "llamacpp",
     model: str = "",
     **kwargs,
 ) -> BaseLLMProvider:
     """Create an LLM provider instance.
 
     Args:
-        provider: Provider name (``"ollama"``, ``"api"``, or ``"lmstudio"``).
+        provider: Provider name (``"llamacpp"``, ``"api"``, or ``"lmstudio"``).
         model: Model name / identifier.
         **kwargs: Provider-specific options (base_url, api_key, etc.).
 
@@ -28,10 +28,10 @@ def create_provider(
     if not model:
         raise ValueError("model must be specified")
 
-    if provider == "ollama":
-        from .ollama import OllamaProvider
+    if provider == "llamacpp":
+        from .llamacpp import LlamaCppProvider
 
-        return OllamaProvider(model=model, **kwargs)
+        return LlamaCppProvider(model=model, **kwargs)
 
     if provider in ("api", "lmstudio"):
         from .api import APIProvider
@@ -39,7 +39,7 @@ def create_provider(
         return APIProvider(model=model, **kwargs)
 
     raise ValueError(
-        f"Unknown LLM provider: '{provider}'. Available: ollama, api, lmstudio"
+        f"Unknown LLM provider: '{provider}'. Available: llamacpp, api, lmstudio"
     )
 
 

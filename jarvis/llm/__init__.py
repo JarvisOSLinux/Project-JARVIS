@@ -2,7 +2,7 @@
 LLM package for JARVIS.
 
 Provides the abstract provider interface, concrete provider
-implementations (Ollama, OpenAI-compatible API), a provider
+implementations (llama.cpp runner, OpenAI-compatible API), a provider
 factory, and the LLM chat class.
 """
 

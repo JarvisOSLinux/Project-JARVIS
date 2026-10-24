@@ -162,10 +162,12 @@ class TestLLM:
         from jarvis.llm.providers import create_provider
 
         try:
-            provider = create_provider(provider="ollama", model="test-model")
+            provider = create_provider(provider="llamacpp", model="test-model")
             assert provider is not None
         except Exception:
-            pytest.skip("LLM provider factory failed (expected if Ollama not running)")
+            pytest.skip(
+                "LLM provider factory failed (expected if no model server is reachable)"
+            )
 
     def test_system_info_extraction(self):
         from jarvis.core.system_info import SystemInfo

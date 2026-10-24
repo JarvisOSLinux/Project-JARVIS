@@ -56,9 +56,9 @@ def add_provider(
 ) -> Tuple[str, int]:
     """Add a provider. Returns (name, position) or raises ValueError."""
     ptype = ptype.lower()
-    if ptype not in ("ollama", "api", "lmstudio"):
+    if ptype not in ("llamacpp", "api", "lmstudio"):
         raise ValueError(
-            f"Unknown provider type '{ptype}'. Use 'ollama', 'api', or 'lmstudio'."
+            f"Unknown provider type '{ptype}'. Use 'llamacpp', 'api', or 'lmstudio'."
         )
 
     if ptype == "lmstudio" and not url:

@@ -764,7 +764,7 @@ async def _handle_analyze_image(
             logger,
             "VISION_ERROR",
             "no vision-capable provider configured — add one with "
-            "'jarvis providers add --type ollama --model llama3.2-vision --vision'",
+            "'jarvis providers add --type llamacpp --model ggml-org/gemma-3-4b-it-GGUF --vision'",
             depth,
         )
         return

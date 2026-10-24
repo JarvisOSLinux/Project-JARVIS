@@ -39,28 +39,20 @@ class ComponentFactory:
             entries = []
             for spec in data.get("providers", []):
                 name = spec.get("name", f"provider-{len(entries)}")
-                ptype = spec.get("type", "ollama")
+                ptype = spec.get("type", "llamacpp")
                 model = spec.get("model", "")
                 if not model:
                     logger.warning(f"Provider '{name}' has no model, skipping")
                     continue
 
                 kwargs = {}
-                if ptype == "ollama":
-                    kwargs["base_url"] = spec.get("url", "http://localhost:11434")
-                    if spec.get("api_key"):
-                        kwargs["api_key"] = spec["api_key"]
-                    kwargs["auto_pull"] = spec.get("auto_pull", False)
+                if ptype == "llamacpp":
+                    if spec.get("url"):
+                        kwargs["base_url"] = spec["url"]
                     kwargs["temperature"] = spec.get(
                         "temperature",
                         getattr(Config, "LLM_TEMPERATURE", 0.7),
                     )
-                    kwargs["strict_json"] = spec.get("strict_json", False)
-                    llm_think = getattr(Config, "LLM_THINK", None)
-                    if spec.get("think") is not None:
-                        kwargs["think"] = spec["think"]
-                    elif llm_think is not None:
-                        kwargs["think"] = llm_think
                 elif ptype in ("api", "lmstudio"):
                     default_url = (
                         "http://localhost:1234/v1" if ptype == "lmstudio" else ""
@@ -408,9 +400,9 @@ class ComponentFactory:
         embeddings = None
         if Config.RAG_ENABLED or Config.ALLOW_EMBEDDING_SEARCH:
             try:
-                from ..contextor.embeddings import OllamaEmbeddings
+                from ..contextor.embeddings import LlamaEmbeddings
 
-                embeddings = OllamaEmbeddings(model=Config.EMBED_MODEL)
+                embeddings = LlamaEmbeddings(model=Config.EMBED_MODEL)
                 if not embeddings.ensure_model():
                     logger.warning(
                         f"Embedding model '{Config.EMBED_MODEL}' not available. "

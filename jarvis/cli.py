@@ -879,7 +879,7 @@ def _legacy_redirect(old_cmd: str) -> None:
     """Print a migration hint for removed legacy commands."""
     print(f"'{old_cmd}' has been removed. Use the provider pool instead:")
     print("  jarvis providers                                    # List providers")
-    print("  jarvis providers add --type ollama --model <model>  # Add provider")
+    print("  jarvis providers add --type llamacpp --model <model>  # Add provider")
     print("  jarvis providers edit <name> --model <model>        # Update a field")
     sys.exit(1)
 
@@ -953,7 +953,9 @@ def _cmd_providers() -> None:
             print("No providers configured.")
             print()
             print("Add one with:")
-            print("  jarvis providers add --type ollama --model qwen3:4b")
+            print(
+                "  jarvis providers add --type llamacpp --model Qwen/Qwen3-4B-GGUF:Q4_K_M"
+            )
             print(
                 "  jarvis providers add --type api --model gpt-4 "
                 "--url https://api.example.com --key sk-xxx"
@@ -992,7 +994,7 @@ def _cmd_providers() -> None:
         model = flags.get("model", "")
         if not ptype or not model:
             print(
-                "Usage: jarvis providers add --type <ollama|api|lmstudio> --model <model>"
+                "Usage: jarvis providers add --type <llamacpp|api|lmstudio> --model <model>"
             )
             print(
                 "  Optional: --name <label> --url <url> --key <api_key> "
@@ -1079,7 +1081,7 @@ def _cmd_providers() -> None:
 def _show_providers_usage() -> None:
     print("Usage:")
     print("  jarvis providers                                  # List all")
-    print("  jarvis providers add --type ollama --model <model> # Add provider")
+    print("  jarvis providers add --type llamacpp --model <model> # Add provider")
     print("  jarvis providers remove <name>                    # Remove by name")
     print("  jarvis providers move <name> <position>           # Reorder priority")
     print("  jarvis providers edit <name> --model <model>      # Update a field")
@@ -1282,7 +1284,7 @@ def show_usage() -> None:
     print()
     print("Provider Pool:")
     print("  jarvis providers                                    # List providers")
-    print("  jarvis providers add --type ollama --model <model>  # Add Ollama")
+    print("  jarvis providers add --type llamacpp --model <model>  # Add local model")
     print("  jarvis providers add --type api --model <m> --url <u> --key <k>")
     print(
         "  jarvis providers add --type lmstudio --model <m>    # Add LM Studio (no key needed)"
@@ -1328,7 +1330,9 @@ def main() -> None:
             sys.argv.pop(1)
         if not _has_llm_configured():
             print("Error: No LLM configured.")
-            print("  Quick start: jarvis providers add --type ollama --model qwen3:4b")
+            print(
+                "  Quick start: jarvis providers add --type llamacpp --model Qwen/Qwen3-4B-GGUF:Q4_K_M"
+            )
             print("  Or set a model: jarvis model qwen3:4b")
             sys.exit(1)
         print("Starting JARVIS (dual input: voice + socket)...")
@@ -1358,7 +1362,9 @@ def main() -> None:
     if command == "chat":
         if not _has_llm_configured():
             print("Error: No LLM configured.")
-            print("  Quick start: jarvis providers add --type ollama --model qwen3:4b")
+            print(
+                "  Quick start: jarvis providers add --type llamacpp --model Qwen/Qwen3-4B-GGUF:Q4_K_M"
+            )
             sys.exit(1)
         print("Starting JARVIS interactive chat...")
         print("Type your messages. Press Ctrl+C to exit.\n")
@@ -1467,25 +1473,6 @@ def main() -> None:
 
     elif command == "providers":
         _cmd_providers()
-
-    elif command == "auto-pull":
-        if len(sys.argv) == 2:
-            auto_pull = getattr(Config, "LLM_AUTO_PULL", False)
-            print(f"Auto-pull missing models: {'enabled' if auto_pull else 'disabled'}")
-        elif len(sys.argv) == 3:
-            value = sys.argv[2].lower()
-            if value in ["on", "true", "1", "yes", "enable"]:
-                _update_env_setting("LLM_AUTO_PULL", "true")
-                print("Auto-pull enabled")
-            elif value in ["off", "false", "0", "no", "disable"]:
-                _update_env_setting("LLM_AUTO_PULL", "false")
-                print("Auto-pull disabled")
-            else:
-                print(f"Error: Invalid value '{value}'. Use 'on' or 'off'")
-                sys.exit(1)
-        else:
-            print("Usage: jarvis auto-pull [on|off]")
-            sys.exit(1)
 
     elif command == "constraints":
         _cmd_constraints()
