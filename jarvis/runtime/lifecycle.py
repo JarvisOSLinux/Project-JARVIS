@@ -331,6 +331,14 @@ async def start_runtime_services(app: Any, logger: Logger) -> dict[str, Any]:
         openai_server = OpenAICompatServer(app.llm.provider)
         openai_server.start()
 
+    # Opt-in, off by default -- see jarvis/server/ollama_compat.py.
+    ollama_server = None
+    if Config.OLLAMA_SERVER_ENABLED:
+        from ..server.ollama_compat import OllamaCompatServer
+
+        ollama_server = OllamaCompatServer(app.llm.provider)
+        ollama_server.start()
+
     return {
         "input_socket": input_socket_task,
         "output_socket": output_socket_task,
@@ -338,6 +346,7 @@ async def start_runtime_services(app: Any, logger: Logger) -> dict[str, Any]:
         "update_sweep": update_sweep_task,
         "voice_thread": voice_thread,
         "openai_server": openai_server,
+        "ollama_server": ollama_server,
     }
 
 
@@ -361,8 +370,8 @@ def join_voice_thread_if_running(
         thread.join(timeout=timeout)
 
 
-def stop_openai_server_if_running(server: Optional[Any]) -> None:
-    """Stop the opt-in OpenAI-compat server if it was started."""
+def stop_http_server_if_running(server: Optional[Any]) -> None:
+    """Stop an opt-in HTTP compat server (OpenAI or Ollama) if it was started."""
     if server is not None and server.is_running:
         server.stop()
 
