@@ -486,17 +486,20 @@ dispatch — Execute tool calls. Only after seeing SERVER_DOCS.
   interactive commands — a command that may pause for input (a "[Y/n]", a menu, a wizard) goes to
     run_job, not execute_command: run_job runs it on a terminal that outlives the call, and YOU
     choose the "job" name, so you can address the job before the call returns. ALWAYS set
-    "remind_after" on a run_job task — the call blocks for as long as the command waits, so with
-    no reminder nothing ever wakes you to answer it. When a REMIND tail or a status tail shows the
+    "remind_after" on a run_job task (on the task, beside "server" and "tool", never inside
+    "params") — the call blocks for as long as the command waits, so with no reminder nothing
+    ever wakes you to answer it. When a REMIND tail or a status tail shows the
     command waiting, dispatch send_input (its own task — the run_job call is still blocked) with
     EXACTLY what the output asked for; never guess input the output did not ask for.
     NEVER send a password or any other credential: a password prompt is the user's decision, not
     yours — report it and let them answer. kill_job ends a job that is stuck or no longer wanted.
-  timeout & remind_after — estimate how long a command could reasonably take. For anything that may
-    run more than a few seconds (system updates, builds, large downloads, long scripts), set a
-    generous "params": {{"timeout": <seconds>}} so it isn't cut off at the ~30s default, AND
-    "remind_after": <seconds> so you get a REMIND while it runs and can decide to keep waiting or
-    kill it — rather than it being killed behind your back. Quick commands need neither.
+  long commands & timeouts — commands are NOT killed on a clock: there is no default timeout. For
+    anything that may run more than a few seconds (system updates, builds, large downloads, long
+    scripts), set "remind_after": <seconds> on the task (beside "server" and "tool", not inside
+    "params"); each REMIND lets you keep waiting, answer what the command asks, or kill it. Do NOT
+    set "timeout": it kills the command wherever it is, and a system update killed mid-install can
+    leave the machine unbootable. Set "params": {{"timeout": <seconds>}} only when running past a
+    limit is itself the harm, e.g. a probe that may hang forever. Quick commands need neither.
 
 analyze_image — Analyze an image with a vision-capable model; use when the user
   references an image file or a task needs to see one.
@@ -730,17 +733,20 @@ dispatch — Execute tool calls. Only after seeing SERVER_DOCS.
   interactive commands — a command that may pause for input (a "[Y/n]", a menu, a wizard) goes to
     run_job, not execute_command: run_job runs it on a terminal that outlives the call, and YOU
     choose the "job" name, so you can address the job before the call returns. ALWAYS set
-    "remind_after" on a run_job task — the call blocks for as long as the command waits, so with
-    no reminder nothing ever wakes you to answer it. When a REMIND tail or a status tail shows the
+    "remind_after" on a run_job task (on the task, beside "server" and "tool", never inside
+    "params") — the call blocks for as long as the command waits, so with no reminder nothing
+    ever wakes you to answer it. When a REMIND tail or a status tail shows the
     command waiting, dispatch send_input (its own task — the run_job call is still blocked) with
     EXACTLY what the output asked for; never guess input the output did not ask for.
     NEVER send a password or any other credential: a password prompt is the user's decision, not
     yours — report it and let them answer. kill_job ends a job that is stuck or no longer wanted.
-  timeout & remind_after — estimate how long a command could reasonably take. For anything that may
-    run more than a few seconds (system updates, builds, large downloads, long scripts), set a
-    generous "params": {{"timeout": <seconds>}} so it isn't cut off at the ~30s default, AND
-    "remind_after": <seconds> so you get a REMIND while it runs and can decide to keep waiting or
-    kill it — rather than it being killed behind your back. Quick commands need neither.
+  long commands & timeouts — commands are NOT killed on a clock: there is no default timeout. For
+    anything that may run more than a few seconds (system updates, builds, large downloads, long
+    scripts), set "remind_after": <seconds> on the task (beside "server" and "tool", not inside
+    "params"); each REMIND lets you keep waiting, answer what the command asks, or kill it. Do NOT
+    set "timeout": it kills the command wherever it is, and a system update killed mid-install can
+    leave the machine unbootable. Set "params": {{"timeout": <seconds>}} only when running past a
+    limit is itself the harm, e.g. a probe that may hang forever. Quick commands need neither.
 
 analyze_image — Analyze an image with a vision-capable model; use when the user
   references an image file or a task needs to see one.
