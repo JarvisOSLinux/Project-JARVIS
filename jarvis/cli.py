@@ -994,7 +994,7 @@ def _cmd_providers() -> None:
         model = flags.get("model", "")
         if not ptype or not model:
             print(
-                "Usage: jarvis providers add --type <llamacpp|api|lmstudio> --model <model>"
+                "Usage: jarvis providers add --type <llamacpp|api|lmstudio|ollama-cloud> --model <model>"
             )
             print(
                 "  Optional: --name <label> --url <url> --key <api_key> "
@@ -1289,6 +1289,8 @@ def show_usage() -> None:
     print(
         "  jarvis providers add --type lmstudio --model <m>    # Add LM Studio (no key needed)"
     )
+    print("  jarvis providers add --type ollama-cloud --model <m> --key <k>")
+    print("      # Ollama cloud; --key may be omitted if OLLAMA_API_KEY is set")
     print("  jarvis providers remove <name>                      # Remove provider")
     print("  jarvis providers move <name> <position>             # Reorder priority")
     print("  jarvis providers edit <name> --model <model>        # Update a field")

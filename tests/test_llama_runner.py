@@ -161,3 +161,49 @@ class TestProvider:
         provider.chat([{"role": "user", "content": "x"}])
         sent = client.__enter__.return_value.post.call_args.kwargs["json"]
         assert sent["temperature"] == 0.2
+
+
+class TestOllamaCloud:
+    def test_factory_builds_api_provider_with_cloud_defaults(self):
+        provider = create_provider(
+            provider="ollama-cloud",
+            model="gemma4:31b",
+            api_url=Config.OLLAMA_CLOUD_URL,
+            api_key="k",
+        )
+        assert provider.api_url == "https://ollama.com"
+        assert provider.headers["Authorization"] == "Bearer k"
+
+    def test_add_provider_defaults_url_and_needs_no_key_in_file(
+        self, tmp_path, monkeypatch
+    ):
+        from jarvis.core import providers as providers_mod
+
+        monkeypatch.setattr(Config, "PROVIDERS_FILE", str(tmp_path / "providers.json"))
+        name, _ = providers_mod.add_provider("ollama-cloud", "gemma4:31b")
+        entry = providers_mod.list_providers()[0]
+        assert entry["name"] == name
+        assert entry["url"] == "https://ollama.com"
+        assert "api_key" not in entry
+
+    def test_pool_reads_key_from_environment(self, tmp_path, monkeypatch):
+        import json
+
+        from jarvis.core.component_factory import ComponentFactory
+
+        path = tmp_path / "providers.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "providers": [
+                        {"name": "c", "type": "ollama-cloud", "model": "gemma4:31b"}
+                    ]
+                }
+            )
+        )
+        monkeypatch.setattr(Config, "PROVIDERS_FILE", str(path))
+        monkeypatch.setenv("OLLAMA_API_KEY", "envkey")
+        pool = ComponentFactory._build_provider_pool()
+        provider = pool.entries[0].provider
+        assert provider.api_url == "https://ollama.com"
+        assert provider.headers["Authorization"] == "Bearer envkey"

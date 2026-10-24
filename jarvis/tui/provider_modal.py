@@ -136,7 +136,11 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
                 yield Label("Type", classes="field-label")
                 with Horizontal(id="type-row"):
                     yield Select(
-                        [("Local (llama.cpp)", "llamacpp"), ("API (cloud)", "api")],
+                        [
+                            ("Local (llama.cpp)", "llamacpp"),
+                            ("Ollama Cloud", "ollama-cloud"),
+                            ("API (cloud)", "api"),
+                        ],
                         value=self._ptype,
                         id="input-type",
                         allow_blank=False,

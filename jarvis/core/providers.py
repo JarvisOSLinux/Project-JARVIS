@@ -56,13 +56,16 @@ def add_provider(
 ) -> Tuple[str, int]:
     """Add a provider. Returns (name, position) or raises ValueError."""
     ptype = ptype.lower()
-    if ptype not in ("llamacpp", "api", "lmstudio"):
+    if ptype not in ("llamacpp", "api", "lmstudio", "ollama-cloud"):
         raise ValueError(
-            f"Unknown provider type '{ptype}'. Use 'llamacpp', 'api', or 'lmstudio'."
+            f"Unknown provider type '{ptype}'. Use 'llamacpp', 'api', 'lmstudio', or 'ollama-cloud'."
         )
 
     if ptype == "lmstudio" and not url:
         url = "http://localhost:1234/v1"
+
+    if ptype == "ollama-cloud" and not url:
+        url = Config.OLLAMA_CLOUD_URL
 
     if ptype in ("api", "lmstudio") and not url:
         raise ValueError("API/LM Studio providers require a url.")

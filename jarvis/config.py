@@ -61,6 +61,9 @@ class Config:
     LLAMA_SERVER_BIN = os.getenv("LLAMA_SERVER_BIN", "llama-server")
     LLM_HOST = os.getenv("JARVIS_LLM_HOST", "127.0.0.1")
     LLM_PORT = int(os.getenv("JARVIS_LLM_PORT", "11445"))
+    # Ollama cloud, reached through its OpenAI-style /v1 endpoint with a Bearer
+    # key from ollama.com/settings/keys.
+    OLLAMA_CLOUD_URL = "https://ollama.com"
     EMBED_PORT = int(os.getenv("JARVIS_EMBED_PORT", "11446"))
     # Layers offloaded to the GPU (-ngl); llama.cpp clamps to the model's count
     # and ignores it on CPU-only builds.

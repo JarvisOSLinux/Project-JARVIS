@@ -53,12 +53,15 @@ class ComponentFactory:
                         "temperature",
                         getattr(Config, "LLM_TEMPERATURE", 0.7),
                     )
-                elif ptype in ("api", "lmstudio"):
-                    default_url = (
-                        "http://localhost:1234/v1" if ptype == "lmstudio" else ""
-                    )
+                elif ptype in ("api", "lmstudio", "ollama-cloud"):
+                    default_url = {
+                        "lmstudio": "http://localhost:1234/v1",
+                        "ollama-cloud": Config.OLLAMA_CLOUD_URL,
+                    }.get(ptype, "")
                     kwargs["api_url"] = spec.get("url") or default_url
                     kwargs["api_key"] = spec.get("api_key", "")
+                    if ptype == "ollama-cloud" and not kwargs["api_key"]:
+                        kwargs["api_key"] = os.environ.get("OLLAMA_API_KEY", "")
                     if spec.get("headers"):
                         kwargs["headers"] = spec["headers"]
 
