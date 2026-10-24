@@ -1087,6 +1087,51 @@ def _show_providers_usage() -> None:
     print("  jarvis providers edit <name> --model <model>      # Update a field")
 
 
+def _cmd_model() -> None:
+    """Manage the local GGUF models JARVIS runs itself."""
+    from .llm import models
+
+    usage = (
+        "Usage: jarvis model pull <user/repo[:quant]>\n"
+        "       jarvis model list\n"
+        "       jarvis model rm <user/repo[:quant]>"
+    )
+    subcmd = sys.argv[2] if len(sys.argv) > 2 else ""
+
+    if subcmd == "list":
+        pulled = models.list_models()
+        if not pulled:
+            print("No models pulled.")
+            print("Pull one with: jarvis model pull Qwen/Qwen3-4B-GGUF:Q4_K_M")
+            return
+        for name, size in pulled:
+            print(f"  {name}  ({size / 1e9:.2f} GB)")
+        print(f"\n  Store: {models.store_dir()}")
+        return
+
+    if subcmd in ("pull", "rm") and len(sys.argv) == 4:
+        spec = sys.argv[3]
+        try:
+            if subcmd == "rm":
+                print(f"Removed {models.remove(spec)} file(s) for {spec}")
+                return
+
+            def show(label: str, done: int, total: int) -> None:
+                pct = f"{done * 100 // total}%" if total else f"{done >> 20} MB"
+                print(f"\r{label}: {pct}", end="", flush=True)
+
+            path = models.pull(spec, show)
+            print(f"\nReady: {path}")
+            print(f"Use it: jarvis providers add --type llamacpp --model {spec}")
+        except models.ModelError as exc:
+            print(f"Error: {exc}")
+            sys.exit(1)
+        return
+
+    print(usage)
+    sys.exit(1)
+
+
 def _cmd_constraints() -> None:
     """List active standing constraints."""
     from .core.constraint_store import load_constraints
@@ -1282,6 +1327,15 @@ def show_usage() -> None:
     print("  jarvis web list                                  # Show who is allowed")
     print("  JARVIS_WEB_ENABLED=true jarvis web               # Start the gateway")
     print()
+    print("Local Models:")
+    print(
+        "  jarvis model pull <user/repo[:quant]>               # Download a GGUF model"
+    )
+    print("  jarvis model list                                   # Show pulled models")
+    print(
+        "  jarvis model rm <user/repo[:quant]>                 # Delete a pulled model"
+    )
+    print()
     print("Provider Pool:")
     print("  jarvis providers                                    # List providers")
     print("  jarvis providers add --type llamacpp --model <model>  # Add local model")
@@ -1294,9 +1348,6 @@ def show_usage() -> None:
     print("  jarvis providers remove <name>                      # Remove provider")
     print("  jarvis providers move <name> <position>             # Reorder priority")
     print("  jarvis providers edit <name> --model <model>        # Update a field")
-    print(
-        "  jarvis auto-pull on/off                             # Auto-pull missing models"
-    )
 
 
 def _has_llm_configured() -> bool:
@@ -1458,7 +1509,7 @@ def main() -> None:
         _cmd_web()
 
     elif command == "model":
-        _legacy_redirect("jarvis model")
+        _cmd_model()
 
     elif command == "ask":
         if len(sys.argv) < 3:

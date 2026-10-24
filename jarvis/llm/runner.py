@@ -3,21 +3,22 @@
 One process per model: llama-server loads a single model, and the chat model
 and the embedding model need different flags (``--embedding``). A spec that
 names an existing file is passed as ``-m``; anything else is a Hugging Face
-reference (``user/repo[:quant]``) that llama-server downloads into
+reference (``user/repo[:quant]``) that ``models.ensure`` downloads into
 ``MODELS_DIR/llm`` on first start.
 """
 
 import atexit
-import os
 import shutil
 import subprocess
 import threading
 import time
 import urllib.request
+from pathlib import Path
 from typing import Dict, List, Optional
 
 from ..config import Config
 from ..core.logger import JarvisLogger, get_logger
+from . import models
 
 logger = get_logger(__name__)
 
@@ -54,7 +55,7 @@ class LlamaServer:
         except Exception:
             return False
 
-    def _command(self, binary: str) -> List[str]:
+    def _command(self, binary: str, model_path: Path) -> List[str]:
         cmd = [
             binary,
             "--host",
@@ -66,10 +67,7 @@ class LlamaServer:
             "-ngl",
             str(Config.LLM_GPU_LAYERS),
         ]
-        if os.path.isfile(self.model):
-            cmd += ["-m", self.model]
-        else:
-            cmd += ["-hf", self.model]
+        cmd += ["-m", str(model_path)]
         if self.embedding:
             cmd.append("--embedding")
         else:
@@ -96,20 +94,20 @@ class LlamaServer:
         binary = find_binary()
         if binary is None:
             raise RunnerError(
-                f"'{Config.LLAMA_SERVER_BIN}' not found on PATH; install llama.cpp "
-                "(Arch: pacman -S llama.cpp) or set LLAMA_SERVER_BIN"
+                f"'{Config.LLAMA_SERVER_BIN}' not found on PATH; install llama-cpp "
+                "(Arch: pacman -S llama-cpp) or set LLAMA_SERVER_BIN"
             )
-        cache = os.path.join(Config.MODELS_DIR, "llm")
-        os.makedirs(cache, exist_ok=True)
-        env = dict(os.environ, LLAMA_CACHE=cache)
+        try:
+            model_path = models.ensure(self.model)
+        except models.ModelError as exc:
+            raise RunnerError(str(exc)) from exc
         self._stderr = JarvisLogger.child_stderr("llama-server")
-        cmd = self._command(binary)
+        cmd = self._command(binary, model_path)
         logger.info(f"Starting llama-server for '{self.model}' on port {self.port}")
         logger.debug(f"llama-server command: {cmd}")
         try:
             self._proc = subprocess.Popen(
                 cmd,
-                env=env,
                 stdout=self._stderr,
                 stderr=self._stderr,
                 stdin=subprocess.DEVNULL,

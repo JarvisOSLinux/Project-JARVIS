@@ -19,28 +19,26 @@ def _clean_registry():
 
 
 class TestCommand:
-    def test_hugging_face_spec_uses_hf_flag(self):
-        server = runner.LlamaServer("Qwen/Qwen3-4B-GGUF:Q4_K_M", 11445)
-        cmd = server._command("llama-server")
-        assert cmd[cmd.index("-hf") + 1] == "Qwen/Qwen3-4B-GGUF:Q4_K_M"
-        assert "-m" not in cmd
+    def test_model_path_passed_with_m_flag(self, tmp_path):
+        gguf = tmp_path / "model.gguf"
+        cmd = runner.LlamaServer("org/repo:Q4_K_M", 11445)._command(
+            "llama-server", gguf
+        )
+        assert cmd[cmd.index("-m") + 1] == str(gguf)
+        assert cmd[cmd.index("--alias") + 1] == "org/repo:Q4_K_M"
+        assert "-hf" not in cmd
         assert "--jinja" in cmd
         assert "--embedding" not in cmd
 
-    def test_existing_file_uses_m_flag(self, tmp_path):
-        gguf = tmp_path / "model.gguf"
-        gguf.write_bytes(b"GGUF")
-        cmd = runner.LlamaServer(str(gguf), 11445)._command("llama-server")
-        assert cmd[cmd.index("-m") + 1] == str(gguf)
-        assert "-hf" not in cmd
-
-    def test_embedding_server_gets_embedding_flag(self):
-        cmd = runner.LlamaServer("m", 11446, embedding=True)._command("llama-server")
+    def test_embedding_server_gets_embedding_flag(self, tmp_path):
+        cmd = runner.LlamaServer("m", 11446, embedding=True)._command(
+            "llama-server", tmp_path / "m.gguf"
+        )
         assert "--embedding" in cmd
         assert "--jinja" not in cmd
 
-    def test_binds_loopback_on_requested_port(self):
-        cmd = runner.LlamaServer("m", 11445)._command("llama-server")
+    def test_binds_loopback_on_requested_port(self, tmp_path):
+        cmd = runner.LlamaServer("m", 11445)._command("llama-server", tmp_path / "m")
         assert cmd[cmd.index("--host") + 1] == Config.LLM_HOST == "127.0.0.1"
         assert cmd[cmd.index("--port") + 1] == "11445"
 
@@ -63,7 +61,21 @@ class TestEnsureRunning:
         server = runner.LlamaServer("m", 11445)
         monkeypatch.setattr(server, "is_up", lambda: False)
         monkeypatch.setattr(runner, "find_binary", lambda: None)
-        with pytest.raises(runner.RunnerError, match="pacman -S llama.cpp"):
+        with pytest.raises(runner.RunnerError, match="pacman -S llama-cpp"):
+            server.ensure_running()
+
+    def test_model_download_failure_surfaces_as_runner_error(self, monkeypatch):
+        from jarvis.llm import models
+
+        server = runner.LlamaServer("org/repo", 11445)
+        monkeypatch.setattr(server, "is_up", lambda: False)
+        monkeypatch.setattr(runner, "find_binary", lambda: "/usr/bin/llama-server")
+
+        def boom(spec):
+            raise models.ModelError("'org/repo' not found on Hugging Face")
+
+        monkeypatch.setattr(models, "ensure", boom)
+        with pytest.raises(runner.RunnerError, match="not found on Hugging Face"):
             server.ensure_running()
 
     def test_already_up_spawns_nothing(self, monkeypatch):

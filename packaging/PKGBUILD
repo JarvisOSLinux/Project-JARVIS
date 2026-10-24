@@ -19,7 +19,7 @@ depends=(
     python-pathspec
     dmcp
     dispatch-mcp
-    llama.cpp
+    llama-cpp
 )
 makedepends=(
     python-build
