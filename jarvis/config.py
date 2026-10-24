@@ -324,6 +324,15 @@ class Config:
     OLLAMA_SERVER_ALLOW_NONLOCAL = (
         os.getenv("JARVIS_OLLAMA_SERVER_ALLOW_NONLOCAL", "false").lower() == "true"
     )
+    # The model name that runs a request through the full harness (ROOT,
+    # DISPATCH, tools, confirmation gate) instead of straight to the LLM. It
+    # always requires the bearer token, even on loopback.
+    OLLAMA_SERVER_HARNESS_MODEL = os.getenv(
+        "JARVIS_OLLAMA_SERVER_HARNESS_MODEL", "jarvis"
+    )
+    OLLAMA_SERVER_HARNESS_TIMEOUT = float(
+        os.getenv("JARVIS_OLLAMA_SERVER_HARNESS_TIMEOUT", "300")
+    )
 
     # Remote phone access (`jarvis web`, opt-in, off by default). A separate
     # process, bound to loopback only and reached through `tailscale serve`;

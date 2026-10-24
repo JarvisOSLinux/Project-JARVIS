@@ -330,7 +330,7 @@ async def start_runtime_services(app: Any, logger: Logger) -> dict[str, Any]:
     if Config.OLLAMA_SERVER_ENABLED:
         from ..server.ollama_compat import OllamaCompatServer
 
-        ollama_server = OllamaCompatServer(app.llm.provider)
+        ollama_server = OllamaCompatServer(app.llm.provider, app)
         ollama_server.start()
 
     return {

@@ -6,6 +6,7 @@ request round trips for the endpoints Ollama clients probe and use.
 
 import http.client
 import json
+import threading
 
 import pytest
 
@@ -45,11 +46,12 @@ def running_server(stub_provider, tmp_path, monkeypatch):
     server.stop()
 
 
-def _request(server, method, path, body=None):
+def _request(server, method, path, body=None, token=None):
     host, port = server._httpd.server_address[:2]
     conn = http.client.HTTPConnection(host, port, timeout=5)
     payload = json.dumps(body).encode() if body is not None else None
-    conn.request(method, path, body=payload)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    conn.request(method, path, body=payload, headers=headers)
     response = conn.getresponse()
     data = response.read()
     conn.close()
@@ -162,3 +164,153 @@ class TestEndpoints:
         conn.request("POST", "/api/chat", body=b"{not json")
         assert conn.getresponse().status == 400
         conn.close()
+
+
+class _FakeOutputManager:
+    def __init__(self):
+        self.callbacks = []
+
+    def add_output_callback(self, cb):
+        self.callbacks.append(cb)
+
+    def remove_output_callback(self, cb):
+        self.callbacks.remove(cb)
+
+    def emit(self, response):
+        for cb in list(self.callbacks):
+            cb(response)
+
+
+class _FakeEvents:
+    """Stands in for the event loop: answers each injected input in a thread."""
+
+    _running = True
+
+    def __init__(self, output, replies):
+        self.output = output
+        self.replies = replies
+        self.injected = []
+
+    def inject_user_input(self, text):
+        self.injected.append(text)
+        replies = list(self.replies)
+        threading.Thread(target=lambda: [self.output.emit(r) for r in replies]).start()
+
+
+class _FakeApp:
+    _running = True
+
+    def __init__(self, replies):
+        self.output_manager = _FakeOutputManager()
+        self.events = _FakeEvents(self.output_manager, replies)
+
+
+@pytest.fixture
+def harness_server(stub_provider, tmp_path, monkeypatch):
+    monkeypatch.setattr(Config, "OPENAI_SERVER_TOKEN_FILE", str(tmp_path / "token"))
+    monkeypatch.setattr(Config, "OLLAMA_SERVER_ENABLED", True)
+    monkeypatch.setattr(Config, "OLLAMA_SERVER_HOST", "127.0.0.1")
+    monkeypatch.setattr(Config, "OLLAMA_SERVER_PORT", 0)
+    monkeypatch.setattr(Config, "OLLAMA_SERVER_ALLOW_NONLOCAL", False)
+    monkeypatch.setattr(Config, "OLLAMA_SERVER_HARNESS_MODEL", "jarvis")
+    monkeypatch.setattr(Config, "OLLAMA_SERVER_HARNESS_TIMEOUT", 2.0)
+
+    app = _FakeApp(
+        [
+            {"output": "Let me check.", "comment": True},
+            {"output": "It is sunny."},
+        ]
+    )
+    server = OllamaCompatServer(stub_provider, app)
+    server.start()
+    assert server.is_running
+    yield server, app
+    server.stop()
+
+
+class TestHarnessRouting:
+    def _chat(self, server, model, token=None, stream=False):
+        return _request(
+            server,
+            "POST",
+            "/api/chat",
+            {
+                "model": model,
+                "stream": stream,
+                "messages": [
+                    {"role": "user", "content": "old"},
+                    {"role": "assistant", "content": "x"},
+                    {"role": "user", "content": "weather?"},
+                ],
+            },
+            token=token,
+        )
+
+    def test_tags_lists_harness_model_first(self, harness_server):
+        server, _ = harness_server
+        status, data = _request(server, "GET", "/api/tags")
+        assert status == 200
+        names = [m["name"] for m in json.loads(data)["models"]]
+        assert names == ["jarvis", "stub-model"]
+
+    def test_harness_model_requires_token_even_on_loopback(self, harness_server):
+        server, app = harness_server
+        status, _ = self._chat(server, "jarvis")
+        assert status == 401
+        assert app.events.injected == []
+
+    def test_harness_turn_returns_notes_then_reply(self, harness_server):
+        server, app = harness_server
+        status, data = self._chat(server, "jarvis", token=server._httpd.token)
+        assert status == 200
+        content = json.loads(data)["message"]["content"]
+        assert content == "Let me check.\n\nIt is sunny."
+        assert app.events.injected == ["weather?"]
+
+    def test_harness_turn_streams(self, harness_server):
+        server, _ = harness_server
+        status, data = self._chat(
+            server, "jarvis:latest", token=server._httpd.token, stream=True
+        )
+        assert status == 200
+        lines = [json.loads(line) for line in data.decode().splitlines()]
+        assert [l["message"]["content"] for l in lines] == [
+            "Let me check.\n\n",
+            "It is sunny.",
+            "",
+        ]
+        assert lines[-1]["done"] is True
+
+    def test_plain_model_skips_harness_and_token(self, harness_server):
+        server, app = harness_server
+        status, data = self._chat(server, "stub-model")
+        assert status == 200
+        assert json.loads(data)["message"]["content"] == "hello from stub"
+        assert app.events.injected == []
+
+    def test_slash_command_refused(self, harness_server):
+        server, app = harness_server
+        status, data = _request(
+            server,
+            "POST",
+            "/api/generate",
+            {"model": "jarvis", "prompt": "/mode allow_all", "stream": False},
+            token=server._httpd.token,
+        )
+        assert status == 500
+        assert "slash" in json.loads(data)["error"]
+        assert app.events.injected == []
+
+    def test_timeout_when_no_reply(self, harness_server, monkeypatch):
+        server, app = harness_server
+        app.events.replies = []
+        server._harness._timeout = 0.2
+        status, data = self._chat(server, "jarvis", token=server._httpd.token)
+        assert status == 500
+        assert "no reply" in json.loads(data)["error"]
+
+    def test_stop_unregisters_output_callback(self, harness_server):
+        server, app = harness_server
+        assert len(app.output_manager.callbacks) == 1
+        server.stop()
+        assert app.output_manager.callbacks == []
