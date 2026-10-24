@@ -1386,7 +1386,9 @@ def main() -> None:
             print(
                 "  Quick start: jarvis providers add --type llamacpp --model Qwen/Qwen3-4B-GGUF:Q4_K_M"
             )
-            print("  Or set a model: jarvis model qwen3:4b")
+            print(
+                "  Or use Ollama cloud: jarvis providers add --type ollama-cloud --model gpt-oss:120b"
+            )
             sys.exit(1)
         print("Starting JARVIS (dual input: voice + socket)...")
         print(
