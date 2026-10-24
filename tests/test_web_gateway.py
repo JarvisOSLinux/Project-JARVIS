@@ -272,6 +272,22 @@ class TestRelay:
             server.close()
             await daemon.stop()
 
+    async def test_the_daemons_greeting_state_reaches_the_phone(self, tmp_path):
+        # The daemon greets each client with its state before the settings
+        # reply; the handshake swallowed it and the page said "Offline".
+        daemon, server, url, _ = await _boot(tmp_path, {"t@example.com": "trusted"})
+        try:
+            async with connect(
+                url, additional_headers=_wire(url, "t@example.com")
+            ) as ws:
+                first = json.loads(await ws.recv())
+                second = json.loads(await asyncio.wait_for(ws.recv(), 3))
+            assert first["type"] == "gateway"
+            assert second == {"type": "state", "state": "idle"}
+        finally:
+            server.close()
+            await daemon.stop()
+
     async def test_guest_cannot_approve_and_nothing_reaches_daemon(self, tmp_path):
         daemon, server, url, _ = await _boot(tmp_path, {"g@example.com": "guest"})
         try:
