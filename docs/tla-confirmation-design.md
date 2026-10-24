@@ -45,9 +45,15 @@ prevents it from misrepresenting the action.
 ### Modes
 
 - **`allow_all`** — Never ask.  For power users and trusted environments.
+  FORBIDDEN calls are still refused (see below).
 - **`smart`** — Confirm any tool whose effective threat level is ELEVATED or
   above: `max(host floor, manifest declaration, payload scan)`.
 - **`ask_all`** — Ask for every tool call, regardless of metadata.
+
+A call classified FORBIDDEN is not a mode question: `dispatch_send` refuses it
+before the confirmation gate in all three modes, never prompts, and refuses the
+whole batch it arrived in. The result tells the model which tool was blocked and
+not to retry or route around it. There is no user override.
 
 ## MCP Tool Metadata
 
@@ -65,7 +71,7 @@ MCP server developers add these fields to their tool definitions:
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `threat_level` | `string` | `"safe"` | One of `safe` / `elevated` / `dangerous` / `forbidden`; tools at `elevated` or above are confirmed in smart mode |
+| `threat_level` | `string` | `"safe"` | One of `safe` / `elevated` / `dangerous` / `forbidden`; tools at `elevated` or above are confirmed in smart mode; `forbidden` is refused in every mode |
 | `confirmation_required` | `bool` | `false` | **Legacy** — equivalent to `threat_level: "elevated"`; can only raise, never lower, the host-computed level |
 | `notification_silent` | `bool` | `false` | Suppress desktop notification for this tool |
 
