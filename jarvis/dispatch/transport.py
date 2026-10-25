@@ -193,6 +193,9 @@ def require_connection(adapter: Any, logger: Logger, op_name: str) -> bool:
     return False
 
 
+_POLLED_OPS = frozenset({"get_task_status"})
+
+
 async def call_tool(
     adapter: Any,
     logger: Logger,
@@ -220,9 +223,10 @@ async def call_tool(
         )
         elapsed = time.perf_counter() - t0
         content = extractor(result)
-        logger.info(
-            f"Dispatch: {op_name} completed in {elapsed:.2f}s — result: {content}"
-        )
+        # Status is polled (every second while F4 is open): at INFO it rotated
+        # a 5 MB jarvis.log in two minutes.
+        log = logger.debug if op_name in _POLLED_OPS else logger.info
+        log(f"Dispatch: {op_name} completed in {elapsed:.2f}s — result: {content}")
         return content
     except asyncio.TimeoutError:
         elapsed = time.perf_counter() - t0

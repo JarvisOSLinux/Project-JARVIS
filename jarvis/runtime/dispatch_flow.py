@@ -610,6 +610,9 @@ async def dispatch_execute_tasks(
     # Scope the dispatch to the active goal so its PIDs link back to it and every
     # signal turn is goal-scoped, instead of logging "No goal found for PID" and
     # falling back to full-root context (#196).
+    if await _serve_job_reads(app, logger, tasks, depth):
+        return
+
     active = app.goals.get_active_goals()
     goal_id = active[-1].id if active else None
 
@@ -655,6 +658,133 @@ async def dispatch_execute_tasks(
         # auth-error EXIT names only the server behind the failing task.
         app.goals.link_dispatch_servers(goal_id, pids, tasks)
     emit_activity(app, "Tasks dispatched; awaiting results…", kind="dispatch")
+
+
+# --- reading a running job --------------------------------------------------
+#
+# The model kept calling read_output on a run_job that was still running: each
+# read's EXIT woke it, so it read again, about fifteen times for one system
+# update, and every read of the root shell server started it again under
+# pkexec, a password prompt each (2026-10-23). dispatch already holds the
+# job's live output (run_job streams it to the task's stderr; REMIND carries
+# it), so a read of a running job is answered from there: once per reminder,
+# then JARVIS tells the user the job is running and waits for the next
+# REMIND or the EXIT instead of asking the model again.
+
+# Characters of a running job's output shown for a read.
+JOB_READ_TAIL = 4000
+
+
+def _jobs(app: Any) -> dict:
+    """run_job name -> {"pid", "server"} for jobs JARVIS started."""
+    jobs = getattr(app, "_running_jobs", None)
+    if jobs is None:
+        jobs = app._running_jobs = {}
+    return jobs
+
+
+def _running_job(app: Any, task: Any) -> Optional[dict]:
+    """The running job a task reads or starts again, if JARVIS started it.
+
+    Starting a job that is still running is a read of it too: on reminders
+    the model re-dispatched `run_job demo` while demo ran, a confirmation for
+    the user each time, refused by the server ("already exists").
+    """
+    if not isinstance(task, dict) or task.get("tool") not in ("read_output", "run_job"):
+        return None
+    job = _jobs(app).get((task.get("params") or {}).get("job"))
+    if job is None or job["server"] != task.get("server"):
+        return None
+    finished = getattr(app, "_signal_ledger", (set(), {}))[0]
+    return None if job["pid"] in finished else job
+
+
+async def _serve_job_reads(app: Any, logger: Logger, tasks: list, depth: int) -> bool:
+    """Answer reads of running jobs without dispatching them; True when handled.
+
+    A read beside the run_job that starts the same job is dropped (its output
+    comes with the first reminder); the rest of that batch goes on as usual.
+    """
+    started = {
+        (t.get("params") or {}).get("job")
+        for t in tasks
+        if isinstance(t, dict)
+        and t.get("tool") == "run_job"
+        and _running_job(app, t) is None
+    }
+    if started:
+        kept = [
+            t
+            for t in tasks
+            if not (
+                isinstance(t, dict)
+                and t.get("tool") == "read_output"
+                and (t.get("params") or {}).get("job") in started
+            )
+        ]
+        if len(kept) != len(tasks):
+            logger.info("JARVIS: dropped a read of a job started in the same batch")
+            tasks[:] = kept
+        return False
+    jobs = [_running_job(app, t) for t in tasks]
+    if not tasks or any(job is None for job in jobs):
+        return False
+
+    newest = getattr(app, "_signal_ledger", (set(), {}))[1]
+    names = [t["params"]["job"] for t in tasks]
+    fresh = False
+    for job in jobs:
+        reminder = newest.get(job["pid"])
+        if "read_at" not in job or job["read_at"] is not reminder:
+            fresh = True
+        job["read_at"] = reminder
+    if not fresh:
+        _wait_for_jobs(app, logger, names, jobs)
+        return True
+
+    try:
+        listed = await app.dispatch.get_task_status(tail=JOB_READ_TAIL)
+    except Exception:
+        listed = []
+    by_pid = {t.get("pid"): t for t in listed if isinstance(t, dict)}
+    blocks = []
+    for name, job in zip(names, jobs):
+        tail = (by_pid.get(job["pid"]) or {}).get("tail")
+        output = action_events.signal_output({"data": tail})[1] if tail else ""
+        action = action_events.start(app, "tool", f"Output of job {name}")
+        action_events.end(app, action, "ok", output or "(no output yet)")
+        blocks.append(f"{name}:\n{output or '(no output yet)'}")
+    logger.info(f"JARVIS: served read_output of running job(s) {names} from dispatch")
+    context = build_root_context(app, logger)
+    context += (
+        "\nJOB_OUTPUT: "
+        + ", ".join(names)
+        + " still running; latest output, from dispatch:\n"
+        + "\n".join(blocks)
+        + "\nThey are still running: each REMIND brings their latest output and "
+        "the EXIT their result, so do not read or start them again now. If the output asks "
+        "a question, answer it with send_input; otherwise tell the user, briefly, "
+        "what is happening (respond) and wait."
+    )
+    response = await ask_llm(app, logger, context, tag="root-job-output", mode="root")
+    await app._act_on_root_response(response, depth + 1)
+    return True
+
+
+def _wait_for_jobs(app: Any, logger: Logger, names: list, jobs: list) -> None:
+    """Read again before any news: tell the user once, then wait quietly."""
+    logger.info(f"JARVIS: no news from job(s) {names} since the last read; waiting")
+    if all(job.get("told") for job in jobs):
+        emit_activity(app, f"{', '.join(names)} still running…", kind="dispatch")
+        return
+    for job in jobs:
+        job["told"] = True
+    text = (
+        f"{', '.join(names)} {'is' if len(names) == 1 else 'are'} still running. "
+        "I'll tell you when it needs you or when it's done."
+    )
+    app.output_manager.handle_response({"output": text})
+    persist_assistant_turn(app, text)
 
 
 _SHELL_TOOLS = ("execute_command", "execute_script", "run_job")
@@ -714,6 +844,9 @@ def note_dispatched_tools(app: Any, pids: list, tasks: list) -> None:
     for pid, task in zip(pids[-len(tasks) :], tasks):
         if isinstance(task, dict) and task.get("server") and task.get("tool"):
             known[pid] = (task["server"], task["tool"])
+            job = (task.get("params") or {}).get("job")
+            if task["tool"] == "run_job" and isinstance(job, str) and job:
+                _jobs(app)[job] = {"pid": pid, "server": task["server"]}
 
 
 async def do_kill(app: Any, logger: Logger, pids: Any) -> None:
