@@ -65,7 +65,9 @@ def _maybe_autoname_session(app: Any) -> None:
     session = app.jarvis.sessions.current
     if session is None:
         return
-    if not _DEFAULT_TITLE_RE.match(session.title or ""):
+    # A session the first message started has no title yet; it reads back
+    # as "New chat" later, so the name went to whatever was said next.
+    if session.title and not _DEFAULT_TITLE_RE.match(session.title):
         app._pending_autoname_text = None
         return
     words = pending.strip().split()

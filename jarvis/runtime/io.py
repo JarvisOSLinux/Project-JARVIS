@@ -745,9 +745,10 @@ def _handle_switch_session(app: Any, msg: dict) -> dict:
         return _session_error("switch_session requires 'id'")
     if not app.sessions.available:
         return _session_error("Sessions unavailable (memory disabled)")
-    session = app.sessions.switch(session_id)
+    found, why = app.sessions.find(session_id)
+    session = app.sessions.switch(found.id) if found else None
     if not session:
-        return _session_error(f"No session matches '{session_id}'")
+        return _session_error(why or f"Could not switch to '{session_id}'")
     recall_result = app.contextor.recall(
         "conversation_log", limit=SESSION_HISTORY_LIMIT, session_id=session.id
     )
@@ -766,7 +767,10 @@ def _handle_rename_session(app: Any, msg: dict) -> dict:
         return _session_error("rename_session requires 'id' and 'title'")
     if not app.sessions.available:
         return _session_error("Sessions unavailable (memory disabled)")
-    if not app.sessions.rename(title, session_id=session_id):
+    session, why = app.sessions.find(session_id)
+    if session is None:
+        return _session_error(why)
+    if not app.sessions.rename(title, session_id=session.id):
         return _session_error(f"Rename failed for '{session_id}'")
     sessions = app.sessions.list(limit=50)
     return {"type": "session_list", "sessions": [s.to_dict() for s in sessions]}
@@ -778,7 +782,10 @@ def _handle_delete_session(app: Any, msg: dict) -> dict:
         return _session_error("delete_session requires 'id'")
     if not app.sessions.available:
         return _session_error("Sessions unavailable (memory disabled)")
-    if not app.sessions.delete(session_id):
+    session, why = app.sessions.find(session_id)
+    if session is None:
+        return _session_error(why)
+    if not app.sessions.delete(session.id):
         return _session_error(f"Delete failed for '{session_id}'")
     sessions = app.sessions.list(limit=50)
     return {"type": "session_list", "sessions": [s.to_dict() for s in sessions]}
