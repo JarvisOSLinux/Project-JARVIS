@@ -48,8 +48,8 @@ def on_jarvis_output(app: Any, response: dict[str, Any]) -> None:
         if chat is not None:
             chat.end_command()
         app._append_log(f"[bold magenta]jarvis[/bold magenta] > {escape(text)}")
-        if not response.get("comment"):
-            show_activity(app, None)
+    if not response.get("comment"):
+        show_activity(app, None)
     _maybe_autoname_session(app)
     # Session might have been auto-created on first message; refresh.
     app.schedule_sidebar_refresh()
@@ -129,6 +129,22 @@ def on_jarvis_action(app: Any, event: dict[str, Any]) -> None:
         running.pop(action_id, None)
     if chat.on_action(event) is not None and event.get("phase") != "update":
         app._export_lines.append(export_line(event))
+    _close_stopped_confirmation(app, event)
+
+
+def _close_stopped_confirmation(app: Any, event: dict[str, Any]) -> None:
+    """A /stop denied a confirmation whose window is still open: close it."""
+    from .confirm_modal import ConfirmModal
+
+    action_id = str(event.get("id") or "")
+    if event.get("phase") != "end" or not action_id.startswith("confirm:"):
+        return
+    screen = getattr(app, "screen", None)
+    if (
+        isinstance(screen, ConfirmModal)
+        and screen._request_id == action_id.split(":", 1)[1]
+    ):
+        screen.dismiss(False)
 
 
 def append_log(app: Any, markup: str) -> None:

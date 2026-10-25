@@ -505,6 +505,18 @@ async def _process_gui_message(
     elif msg_type == "move_provider":
         await _reply_or_broadcast_providers(app, writer, _handle_move_provider(msg))
 
+    elif msg_type in ("stop", "stop_all"):
+        from .stop import handle_command
+
+        reply = await handle_command(
+            app, logger, "/stop all" if msg_type == "stop_all" else "/stop"
+        )
+        await _gui_write(writer, {"type": "ack", "message": reply})
+        await broadcast_to_gui_clients(
+            app, {"type": "response", "content": "", "done": True}
+        )
+        await set_gui_state(app, VoiceState.IDLE)
+
     elif msg_type == "get_status":
         await _gui_write(writer, await _status_reply(app, bool(msg.get("full"))))
 

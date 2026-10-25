@@ -161,6 +161,8 @@ def tool_detail(params: Any) -> str:
     if not isinstance(params, dict) or not params:
         return ""
     options = []
+    if params.get("job"):
+        options.append(f"job {params['job']}")
     if params.get("cwd"):
         options.append(f"in {params['cwd']}")
     if params.get("timeout"):
@@ -172,6 +174,7 @@ def tool_detail(params: Any) -> str:
         "args",
         "cwd",
         "timeout",
+        "job",
     }:
         args = params.get("args") or []
         if isinstance(args, list):
@@ -248,9 +251,15 @@ def on_signal(app: Any, signal: Dict[str, Any], exit_data: Any = None) -> None:
         return
     if kind not in ("EXIT", "KILL", "TIMEOUT"):
         return
+    end(app, action_id, *outcome(signal))
+
+
+def outcome(signal: Dict[str, Any]) -> tuple:
+    """(status, readable output) of a task's EXIT, KILL or TIMEOUT."""
+    kind = str(signal.get("type") or "").upper()
     code, text = signal_output(signal)
     text, failed = readable(text)
     status = _STATUS_OF_SIGNAL.get(kind) or (
         "ok" if code == "200" and not failed else "failed"
     )
-    end(app, action_id, status, text)
+    return status, text

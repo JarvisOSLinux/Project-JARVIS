@@ -8,6 +8,8 @@
     const COMMANDS = {
         send_message:               (a) => ({ type: 'message', content: a.content }),
         stop_stream:                ()  => ({ type: 'stop_stream' }),
+        stop:                       ()  => ({ type: 'stop' }),
+        stop_all:                   ()  => ({ type: 'stop_all' }),
         list_sessions:              ()  => ({ type: 'list_sessions' }),
         create_session:             (a) => ({ type: 'create_session', title: a.title }),
         switch_session:             (a) => ({ type: 'switch_session', id: a.id }),

@@ -38,7 +38,7 @@ JARVIS's TUI is built with **[Textual](https://textual.textualize.io/)** (Python
 | `Ctrl+N` | New session |
 | `Ctrl+D` | Delete selected session (press twice to confirm) |
 | `Ctrl+Q` | Quit |
-| `Esc` | Close modal / return focus to input (from the sidebar or the chat too) |
+| `Esc` | Close modal / return focus to input (from the sidebar or the chat too); on an empty input while JARVIS works, stop it (`/stop`) |
 
 ---
 

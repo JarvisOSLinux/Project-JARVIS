@@ -38,6 +38,11 @@ SESSION_SLASH_HELP: tuple[tuple[str, str], ...] = (
         "/context",
         "Show what filled the last prompt, part by part, and how much room is left.",
     ),
+    (
+        "/stop [all]",
+        "Stop JARVIS's work in this session; its running tasks keep running "
+        "(F4), and `all` ends them too. Esc on an empty input is /stop.",
+    ),
 )
 
 TUI_LOCAL_SLASH_HELP: tuple[tuple[str, str], ...] = (
@@ -94,7 +99,11 @@ EXTRA_KEYBOARD_HELP: tuple[tuple[str, str], ...] = (
         "Up/Down move between blocks, Enter or Space folds or unfolds one, "
         "Esc goes back to typing. Clicking a block's title folds it too.",
     ),
-    ("Esc", "Close the suggestion list, or the help modal when it is focused."),
+    (
+        "Esc",
+        "Close the suggestion list or the help modal; on an empty input while "
+        "JARVIS works, stop it (/stop).",
+    ),
 )
 
 

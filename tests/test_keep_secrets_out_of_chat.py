@@ -179,7 +179,7 @@ class TestInputFunnel:
         ):
             assert not _leaked(obj, GITHUB), f"the token reached {where}"
         app.goals.add_goal.assert_called_once_with(
-            "Here is your key: [redacted GitHub token]"
+            "Here is your key: [redacted GitHub token]", chat_session="s1"
         )
         shown = app.output_manager.handle_response.call_args.args[0]["output"]
         assert "GitHub token" in shown and GITHUB not in shown
