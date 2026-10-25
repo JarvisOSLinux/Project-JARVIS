@@ -39,9 +39,10 @@ SESSION_SLASH_HELP: tuple[tuple[str, str], ...] = (
         "Show what filled the last prompt, part by part, and how much room is left.",
     ),
     (
-        "/stop [all]",
+        "/stop [all|<n>]",
         "Stop this session's work; `all` also ends its running tasks, which "
-        "otherwise keep running (F4). Esc on an empty input is /stop.",
+        "otherwise keep running, and a number ends that one task (F4 shows the "
+        "numbers). Esc on an empty input is /stop.",
     ),
 )
 

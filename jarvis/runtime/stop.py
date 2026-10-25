@@ -13,6 +13,12 @@ reminders included.
 `/stop all` (socket `stop_all`) also kills those tasks: what quitting does
 already, without the exit and for this session only. When one of them runs a
 package manager it asks once more first.
+
+One task can be stopped too: `/stop <number>` (the number F4 shows), x in F4,
+the phone's Stop on a task (socket `stop_task`). The task is killed, asking
+once more first for a package manager, and the model hears nothing from it.
+Its request is closed when nothing else of it is under way; otherwise its next
+turn is told the user stopped the task, so the model does not run it again.
 """
 
 from __future__ import annotations
@@ -66,18 +72,32 @@ def _detached(app: Any) -> Dict[Any, str]:
     return detached
 
 
-def detached(app: Any, signal: Dict[str, Any], exit_data: Any = None) -> bool:
-    """True when the signal belongs to a task a stop left running.
+def _killed(app: Any) -> set:
+    """PIDs of tasks the user stopped one by one, until their end arrives."""
+    killed = getattr(app, "_killed_tasks", None)
+    if killed is None:
+        killed = app._killed_tasks = set()
+    return killed
 
-    Such a signal never reaches the model. Its end is told to the user in one
-    line and saved to the session, so a later question can be answered.
+
+def detached(app: Any, signal: Dict[str, Any], exit_data: Any = None) -> bool:
+    """True when the signal belongs to a task a stop left running, or killed.
+
+    Such a signal never reaches the model. The end of a task left running is
+    told to the user in one line and saved to the session, so a later
+    question can be answered; a killed task was told when it was stopped.
     """
     pid = signal.get("pid")
+    ended = exit_data if isinstance(exit_data, dict) else signal
+    is_end = str(ended.get("type") or "").upper() in ("EXIT", "KILL", "TIMEOUT")
+    if pid in _killed(app):
+        if is_end:
+            _killed(app).discard(pid)
+        return True
     tasks = _detached(app)
     if pid not in tasks:
         return False
-    ended = exit_data if isinstance(exit_data, dict) else signal
-    if str(ended.get("type") or "").upper() in ("EXIT", "KILL", "TIMEOUT"):
+    if is_end:
         title = tasks.pop(pid)
         status, _ = action_events.outcome(ended)
         word = {"ok": "finished", "stopped": "was stopped"}.get(status, "failed")
@@ -202,8 +222,13 @@ async def handle_command(app: Any, logger: Logger, text: str) -> Optional[str]:
     words = text.strip().lower().split()
     if not words or words[0] != "/stop":
         return None
+    if len(words) == 2 and words[1].isdigit():
+        return await stop_task(app, logger, int(words[1]))
     if words[1:] not in ([], ["all"]):
-        return "Usage: /stop, or /stop all to end the running tasks too."
+        return (
+            "Usage: /stop, /stop all to end the running tasks too, or /stop "
+            "<number> to end one task (F4 shows the numbers)."
+        )
     if words[1:] == []:
         return await stop_session(app, logger)
 
@@ -223,3 +248,94 @@ async def handle_command(app: Any, logger: Logger, text: str) -> Optional[str]:
         )
     app._stop_all_armed_at = None
     return await stop_session(app, logger, kill=True)
+
+
+# --- one task ----------------------------------------------------------------
+
+
+def _in_flight(app: Any, goal: Any, running: List[Any], pending: List[Any]) -> bool:
+    """True when the request has something under way besides its tasks."""
+    from ..dispatch.goal_manager import GoalStatus
+    from . import turns
+
+    if any(p in running for p in goal.task_pids):
+        return True
+    if goal.timer_pid or turns.active(app, goal.id):
+        return True
+    under_way = (GoalStatus.PENDING, GoalStatus.ACTIVE, GoalStatus.DEFERRED)
+    for cid in goal.child_goal_ids:
+        child = app.goals.get_goal(cid)
+        if child is not None and child.status in under_way:
+            return True
+    return any(item.get("session_id") == goal.id for item in pending)
+
+
+def stopped_note(app: Any, goal_id: Optional[str]) -> str:
+    """For a request's next turn: the tasks of it the user stopped since the last."""
+    notes = getattr(app, "_stopped_notes", None) or {}
+    titles = notes.pop(goal_id, None) if goal_id else None
+    if not titles:
+        return ""
+    return (
+        f"\nSTOPPED_BY_USER: the user stopped {'; '.join(titles)}. Do not run "
+        f"{'it' if len(titles) == 1 else 'them'} again unless the user asks."
+    )
+
+
+async def stop_task(app: Any, logger: Logger, pid: int) -> str:
+    """Kill one running task; returns what to tell the user."""
+    dispatch = getattr(app, "dispatch", None)
+    if not getattr(dispatch, "is_connected", False):
+        return "Cannot reach the task runner (dispatch), so nothing was stopped."
+    tasks = {
+        t.get("pid"): t
+        for t in await dispatch.get_task_status(tail=0)
+        if t.get("state") == "running"
+    }
+    task = tasks.get(pid)
+    if task is None:
+        return f"No task {pid} is running (F4 shows what is)."
+    if task.get("type") == "timer":
+        return f"Task {pid} is a timer, not a task; /stop ends its request."
+    title = _title(app, pid)
+
+    armed = getattr(app, "_stop_task_armed", None)
+    now = time.monotonic()
+    if is_package_manager(title) and not (
+        armed and armed[0] == pid and now - armed[1] < STOP_ALL_CONFIRM_SECONDS
+    ):
+        app._stop_task_armed = (pid, now)
+        return (
+            f"{title} is installing or changing packages; ending it now can leave "
+            f"the system broken. Stop it again within "
+            f"{STOP_ALL_CONFIRM_SECONDS:.0f} s to end it anyway."
+        )
+    app._stop_task_armed = None
+
+    _killed(app).add(pid)
+    _detached(app).pop(pid, None)
+    await dispatch.kill_tasks([pid])
+
+    goals = getattr(app, "goals", None)
+    goal = goals.find_goal_by_task_pid(pid) if goals is not None else None
+    closed = False
+    if goal is not None:
+        confirmation = getattr(app, "confirmation", None)
+        pending = confirmation.list_pending() if confirmation is not None else []
+        others = [p for p in tasks if p != pid]
+        if _in_flight(app, goal, others, pending):
+            notes = getattr(app, "_stopped_notes", None)
+            if notes is None:
+                notes = app._stopped_notes = {}
+            notes.setdefault(goal.id, []).append(title)
+        else:
+            goals.fail_goal(goal.id, "Stopped by the user")
+            goals.dismiss_failed()
+            closed = True
+    logger.info(
+        f"JARVIS: stopped task {pid} ({title})"
+        + (f"; closed goal [{goal.id}]" if closed else "")
+    )
+    text = f"Stopped {title}."
+    persist_assistant_turn(app, text)
+    return text

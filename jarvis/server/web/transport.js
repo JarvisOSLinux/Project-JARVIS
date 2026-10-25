@@ -10,6 +10,7 @@
         stop_stream:                ()  => ({ type: 'stop_stream' }),
         stop:                       ()  => ({ type: 'stop' }),
         stop_all:                   ()  => ({ type: 'stop_all' }),
+        stop_task:                  (a) => ({ type: 'stop_task', pid: a.pid }),
         list_sessions:              ()  => ({ type: 'list_sessions' }),
         create_session:             (a) => ({ type: 'create_session', title: a.title }),
         switch_session:             (a) => ({ type: 'switch_session', id: a.id }),
