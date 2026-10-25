@@ -680,8 +680,9 @@ async function sendMessage() {
     await invoke('send_message', { content: text });
 }
 
+// Stops JARVIS's work in the session; its running tasks keep running (#270).
 async function stopReply() {
-    await invoke('stop_stream');
+    await invoke('stop');
 }
 
 function applyGateway(info) {
@@ -729,6 +730,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         closePermissionPanel();
         closeSidebar();
     });
+    document.getElementById('stop-all-btn').addEventListener('click', () => invoke('stop_all'));
     statusBtn.addEventListener('click', () => {
         statusList.textContent = 'Checking…';
         invoke('get_status');
@@ -766,6 +768,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     await listen('ipc-session-error', (e) => showNotice('Session error: ' + e.payload));
     await listen('ipc-error',         (e) => showNotice(e.payload));
+    await listen('ipc-ack',           (e) => addSystemMessage(e.payload.message));
     await listen('ipc-daemon-shutdown', (e) => {
         addSystemMessage(`JARVIS shut down. Last state: ${e.payload.state ?? 'unknown'}.`);
         handleDisconnect(null);

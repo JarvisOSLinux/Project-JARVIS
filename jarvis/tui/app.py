@@ -20,7 +20,8 @@ Keybindings:
     Ctrl+Q  — quit
     Ctrl+,  — settings (read-only config viewer)
     Ctrl+L  — browse the chat's blocks: ↑/↓ move, Enter/Space fold, Esc back
-    Esc     — back to the message input (Ctrl+I too, where the terminal tells it from Tab)
+    Esc     — back to the message input (Ctrl+I too, where the terminal tells it from Tab);
+              on an empty input while JARVIS works, stop it (/stop)
     Ctrl+Shift+C — clear on-screen transcript (export buffer only; not memory)
     Ctrl+Shift+E — export transcript to ``JARVIS_DATA_DIR/transcripts/``
     F1      — help (keys from ``BINDINGS`` + documented slash commands)
@@ -508,6 +509,25 @@ class JarvisTUI(App):
 
         if not self._close_if_showing(SetupsScreen) and len(self.screen_stack) <= 1:
             self._open_setups()
+
+    def action_stop(self) -> None:
+        """Esc on an empty input: stop JARVIS's work in this session (#270).
+
+        Like Esc in Claude Code. Does nothing while JARVIS is idle, so a
+        stray Esc while typing costs nothing.
+        """
+        from ..runtime.stop import _session_goals
+
+        jarvis = self.jarvis
+        if jarvis is None:
+            return
+        thinking = any(not t.done() for t in getattr(jarvis, "_event_tasks", ()))
+        if not thinking and not _session_goals(jarvis):
+            return
+        chat = self.query_one("#chat-log", ChatView)
+        chat.end_command()
+        chat.begin_command("[bold cyan]you[/bold cyan] > /stop  [dim](Esc)[/dim]")
+        jarvis.events.inject_user_input("/stop")
 
     def action_tasks(self) -> None:
         from .tasks_view import TasksScreen

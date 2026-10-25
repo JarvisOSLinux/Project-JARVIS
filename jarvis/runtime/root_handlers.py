@@ -10,7 +10,7 @@ from typing import Any, Callable
 
 from ..core.secret_scrubber import redact_secrets, redaction_notice
 from ..core.voice_state import VoiceState
-from . import action_events
+from . import action_events, stop
 from .io import broadcast_to_gui_clients, enrich_pending_with_goals, set_gui_state
 from .llm_bridge import ask_llm
 from .output_hooks import emit_activity
@@ -21,7 +21,7 @@ from .root_context import (
     format_server_docs,
     required_config_keys,
 )
-from .session_commands import handle_slash_command
+from .session_commands import handle_slash_command, session_reply
 
 _NO_LLM_MSG = (
     "No LLM provider configured. "
@@ -54,6 +54,10 @@ async def on_user_input(app: Any, logger: Logger, text: str) -> None:
         await set_gui_state(app, VoiceState.PROCESSING)
 
     if text.startswith("/"):
+        reply = await stop.handle_command(app, logger, text)
+        if reply is not None:
+            session_reply(app, reply)
+            return
         handled = handle_slash_command(app, text)
         if handled:
             return
@@ -67,7 +71,8 @@ async def on_user_input(app: Any, logger: Logger, text: str) -> None:
     text = clean
 
     app.sessions.ensure_session()
-    app.goals.add_goal(text)
+    goal = app.goals.add_goal(text, chat_session=app.sessions.current_id)
+    stop.claim_turn(app, goal.id)
 
     if app.contextor:
         app.contextor.auto_store_prompt(
@@ -291,11 +296,16 @@ async def on_dispatch_signal(app: Any, logger: Logger, signal: dict[str, Any]) -
     app.goals.update_from_signal(signal)
     is_stale = _note_signal(app, signal, exit_data)
     action_events.on_signal(app, signal, exit_data)
+    # A task a /stop left running reaches the screen only, never the model.
+    if stop.detached(app, signal, exit_data):
+        return
 
     # Build a context scoped to the goal that owns this PID.
     # If no goal owns the PID (e.g. a timer from defer), fall back to
     # the full root context so the LLM still has useful information.
     owning_goal = app.goals.find_goal_by_task_pid(sig_pid) if sig_pid else None
+    if owning_goal:
+        stop.claim_turn(app, owning_goal.id)
 
     if owning_goal:
         goal_ctx = app.goals.get_goal_context(owning_goal.id)
@@ -376,6 +386,10 @@ async def on_dispatch_signals(
         app.goals.update_from_signal(sig)
         _note_signal(app, sig)
         action_events.on_signal(app, sig)
+    signals = [s for s in signals if not stop.detached(app, s)]
+    if not signals:
+        return
+    pids = [s.get("pid") for s in signals]
 
     # A fire_wake=false batch is one session, so all PIDs share a goal; scope the
     # context to it. Fall back to full root context if none owns the PIDs.
@@ -384,6 +398,7 @@ async def on_dispatch_signals(
         if pid is not None:
             owning_goal = app.goals.find_goal_by_task_pid(pid)
             if owning_goal:
+                stop.claim_turn(app, owning_goal.id)
                 break
 
     if owning_goal:
@@ -415,6 +430,7 @@ async def on_confirmation_response(
     pending = app.confirmation.resolve(data)
     if pending is None:
         return
+    stop.claim_turn(app, pending.session_id)
     action_events.end(
         app,
         f"confirm:{pending.request_id}",

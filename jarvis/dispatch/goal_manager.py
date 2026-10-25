@@ -125,6 +125,9 @@ class Goal:
     # that batch the PID is; this can, so a per-signal hint names only the
     # server that actually failed.
     dispatch_pid_server: Dict[int, str] = field(default_factory=dict)
+    # The chat session the request was made in, so /stop acts on that
+    # session's requests only (#270). Not LLM-facing.
+    chat_session: Optional[str] = None
 
     def to_context(self) -> Dict[str, Any]:
         """Flat serialization for LLM context (no children — use get_goal_context)."""
@@ -166,9 +169,9 @@ class GoalManager:
     # Goal creation
     # ------------------------------------------------------------------
 
-    def add_goal(self, description: str) -> Goal:
+    def add_goal(self, description: str, chat_session: Optional[str] = None) -> Goal:
         """Create a root-level goal from user input."""
-        goal = Goal(description=description)
+        goal = Goal(description=description, chat_session=chat_session)
         self._goals.append(goal)
         logger.info(f"GoalManager: Added root goal [{goal.id}]: {description}")
         return goal
@@ -183,6 +186,7 @@ class GoalManager:
         parent = self._find_goal(parent_id)
         if parent:
             parent.child_goal_ids.append(goal.id)
+            goal.chat_session = parent.chat_session
             if parent.status == GoalStatus.PENDING:
                 parent.status = GoalStatus.ACTIVE
         logger.info(

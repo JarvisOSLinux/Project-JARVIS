@@ -180,11 +180,12 @@ class CommandInput(Input):
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
         # Let Tab fall through to focus movement when there is no command to
-        # complete, and Esc fall through when nothing is being suggested.
+        # complete, and Esc fall through when it has nothing to close and a
+        # line is half typed (an empty line's Esc is the stop, #270).
         if action == "complete":
             return is_command_prefix(self.value) or self._completer.cycling(self.value)
         if action == "close_dropdown":
-            return self.dropdown_open
+            return self.dropdown_open or not self.value.strip()
         return True
 
     def action_complete(self) -> None:
@@ -194,7 +195,13 @@ class CommandInput(Input):
         self._write(completion, sync_dropdown=True)
 
     def action_close_dropdown(self) -> None:
-        self._close_dropdown()
+        """Esc: close the suggestions; on an empty line, stop JARVIS (#270)."""
+        if self.dropdown_open:
+            self._close_dropdown()
+            return
+        stop = getattr(self.app, "action_stop", None)
+        if stop is not None:
+            stop()
 
     def action_history_prev(self) -> None:
         dropdown = self._get_dropdown()
