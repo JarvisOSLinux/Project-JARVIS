@@ -40,8 +40,8 @@ SESSION_SLASH_HELP: tuple[tuple[str, str], ...] = (
     ),
     (
         "/stop [all]",
-        "Stop JARVIS's work in this session; its running tasks keep running "
-        "(F4), and `all` ends them too. Esc on an empty input is /stop.",
+        "Stop this session's work; `all` also ends its running tasks, which "
+        "otherwise keep running (F4). Esc on an empty input is /stop.",
     ),
 )
 

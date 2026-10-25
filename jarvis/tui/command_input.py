@@ -12,6 +12,7 @@ from typing import Any, Optional
 
 from textual import events
 from textual.binding import Binding
+from textual.content import Content
 from textual.widgets import Input, OptionList
 from textual.widgets.option_list import Option
 
@@ -122,7 +123,8 @@ class CommandInput(Input):
         dropdown.clear_options()
         dropdown.add_options(
             [
-                Option(suggestion_label(name, description), id=name)
+                # Plain text: as markup, "/stop [all]" lost its "[all]".
+                Option(Content(suggestion_label(name, description)), id=name)
                 for name, description in rows
             ]
         )
