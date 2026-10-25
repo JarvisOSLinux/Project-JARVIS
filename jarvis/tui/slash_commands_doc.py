@@ -40,9 +40,10 @@ SESSION_SLASH_HELP: tuple[tuple[str, str], ...] = (
     ),
     (
         "/stop [all|<n>]",
-        "Stop this session's work; `all` also ends its running tasks, which "
-        "otherwise keep running, and a number ends that one task (F4 shows the "
-        "numbers). Esc on an empty input is /stop.",
+        # No code span: the help drew "`all` also" as "allalso".
+        "Stop this session's work; its running tasks keep running. /stop all "
+        "ends them too, /stop <n> ends task n (F4 shows the numbers). Esc on an "
+        "empty input is /stop.",
     ),
 )
 
@@ -106,8 +107,8 @@ EXTRA_KEYBOARD_HELP: tuple[tuple[str, str], ...] = (
     ),
     (
         "Esc",
-        "Close the suggestion list or the help modal; on an empty input while "
-        "JARVIS works, stop it (/stop).",
+        "Close the suggestion list; in the help, clear the search, then close it; "
+        "on an empty input while JARVIS works, stop it (/stop).",
     ),
 )
 
@@ -137,10 +138,22 @@ def slash_command_catalog() -> tuple[tuple[str, str], ...]:
     return tuple(catalog.items())
 
 
+def _cell(text: str) -> str:
+    """Table-safe Markdown: `|` ended the cell ("/stop [all|<n>]" showed as
+    "/stop [all" and "]"), and `<id>`, `<n>`, `<title>` were read as HTML
+    tags and dropped. Code spans are left as written."""
+    parts = text.split("`")
+    for i in range(0, len(parts), 2):
+        parts[i] = (
+            parts[i].replace("|", "\\|").replace("<", "&lt;").replace(">", "&gt;")
+        )
+    return "`".join(parts)
+
+
 def _markdown_table(rows: Sequence[tuple[str, str]]) -> str:
     lines = ["| Key / command | Meaning |", "| --- | --- |"]
     for left, right in rows:
-        lines.append(f"| **{left}** | {right} |")
+        lines.append(f"| **{_cell(left)}** | {_cell(right)} |")
     return "\n".join(lines)
 
 

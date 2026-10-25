@@ -38,10 +38,9 @@ class HelpScreen(ModalScreen[None]):
         align: center middle;
     }
     #help-panel {
-        width: 78;
+        width: 110;
         max-width: 95%;
-        height: 70%;
-        max-height: 28;
+        height: 85%;
         border: tall $primary;
         background: $surface;
     }

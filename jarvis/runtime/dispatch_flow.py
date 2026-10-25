@@ -838,6 +838,9 @@ def note_dispatched_tools(app: Any, pids: list, tasks: list) -> None:
     if not pids or not tasks or len(pids) < len(tasks):
         return
     action_events.tools_started(app, pids, tasks)
+    from . import stop
+
+    stop.forget(app, pids)
     known = getattr(app, "_pid_tools", None)
     if known is None:
         known = app._pid_tools = {}
@@ -857,6 +860,7 @@ async def do_kill(app: Any, logger: Logger, pids: Any) -> None:
         logger.error(f"JARVIS: Kill error: {result['error']}")
     else:
         logger.info(f"JARVIS: Killed PID(s): {pids}")
+        action_events.stopped(app, pids if isinstance(pids, list) else [pids])
 
 
 async def do_defer(

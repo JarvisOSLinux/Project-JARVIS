@@ -72,8 +72,15 @@ def _detached(app: Any) -> Dict[Any, str]:
     return detached
 
 
+def forget(app: Any, pids: Any) -> None:
+    """A new task took these PIDs: dispatch counts from 1 again after a restart."""
+    for pid in pids or ():
+        _killed(app).discard(pid)
+        _detached(app).pop(pid, None)
+
+
 def _killed(app: Any) -> set:
-    """PIDs of tasks the user stopped one by one, until their end arrives."""
+    """PIDs of killed tasks: an end that raced the kill must not reach the model."""
     killed = getattr(app, "_killed_tasks", None)
     if killed is None:
         killed = app._killed_tasks = set()
@@ -191,7 +198,12 @@ async def stop_session(app: Any, logger: Logger, *, kill: bool = False) -> str:
     if to_kill and getattr(dispatch, "is_connected", False):
         await dispatch.kill_tasks(to_kill)
     for pid in pids:
-        _detached(app)[pid] = titles[pid]
+        if kill:
+            _killed(app).add(pid)
+        else:
+            _detached(app)[pid] = titles[pid]
+    if kill:
+        action_events.stopped(app, pids, "Stopped by the user.")
 
     for goal in goals:
         app.goals.fail_goal(goal.id, "Stopped by the user")
@@ -312,9 +324,12 @@ async def stop_task(app: Any, logger: Logger, pid: int) -> str:
         )
     app._stop_task_armed = None
 
+    result = await dispatch.kill_tasks([pid])
+    if isinstance(result, dict) and result.get("error"):
+        return f"Could not stop {title}: {result['error']}"
     _killed(app).add(pid)
     _detached(app).pop(pid, None)
-    await dispatch.kill_tasks([pid])
+    action_events.stopped(app, [pid], "Stopped by the user.")
 
     goals = getattr(app, "goals", None)
     goal = goals.find_goal_by_task_pid(pid) if goals is not None else None
