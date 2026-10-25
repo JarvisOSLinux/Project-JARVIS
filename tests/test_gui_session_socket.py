@@ -97,6 +97,7 @@ class TestHandleSwitchSession:
 
     def test_switches_and_attaches_history(self):
         sessions_mock = Mock(available=True)
+        sessions_mock.find.return_value = (_sample_session("abc12345"), "")
         sessions_mock.switch.return_value = _sample_session("abc12345")
         contextor_mock = Mock()
         contextor_mock.recall.return_value = {
@@ -125,12 +126,16 @@ class TestHandleSwitchSession:
 
     def test_no_match_returns_error(self):
         sessions_mock = Mock(available=True)
-        sessions_mock.switch.return_value = None
+        sessions_mock.find.return_value = (None, "No session id starts with 'nope'.")
         app = _make_app(sessions=sessions_mock)
 
         result = runtime_io._handle_switch_session(app, {"id": "nope"})
 
-        assert result["type"] == "session_error"
+        assert result == {
+            "type": "session_error",
+            "message": "No session id starts with 'nope'.",
+        }
+        sessions_mock.switch.assert_not_called()
 
 
 @pytest.mark.unit
@@ -148,6 +153,7 @@ class TestHandleRenameSession:
 
     def test_rename_success_returns_refreshed_list(self):
         sessions_mock = Mock(available=True)
+        sessions_mock.find.return_value = (_sample_session("abc"), "")
         sessions_mock.rename.return_value = True
         sessions_mock.list.return_value = [_sample_session("abc", title="Renamed")]
         app = _make_app(sessions=sessions_mock)
@@ -161,6 +167,7 @@ class TestHandleRenameSession:
 
     def test_rename_failure_returns_error(self):
         sessions_mock = Mock(available=True)
+        sessions_mock.find.return_value = (_sample_session("abc"), "")
         sessions_mock.rename.return_value = False
         app = _make_app(sessions=sessions_mock)
 
@@ -177,6 +184,7 @@ class TestHandleDeleteSession:
 
     def test_delete_success_returns_refreshed_list(self):
         sessions_mock = Mock(available=True)
+        sessions_mock.find.return_value = (_sample_session("abc"), "")
         sessions_mock.delete.return_value = True
         sessions_mock.list.return_value = []
         app = _make_app(sessions=sessions_mock)
@@ -188,6 +196,7 @@ class TestHandleDeleteSession:
 
     def test_delete_failure_returns_error(self):
         sessions_mock = Mock(available=True)
+        sessions_mock.find.return_value = (_sample_session("abc"), "")
         sessions_mock.delete.return_value = False
         app = _make_app(sessions=sessions_mock)
 
