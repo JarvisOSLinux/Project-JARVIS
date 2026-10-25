@@ -110,6 +110,17 @@ def end(app: Any, action_id: str, status: str = "ok", output: str = "") -> None:
     )
 
 
+def stopped(app: Any, pids: Any, why: str = "Stopped.") -> None:
+    """Close the blocks of tasks just killed.
+
+    dispatch records a KILL in its signal window but never pushes one, so
+    the block of a killed task stayed open: "1 task still running" under the
+    chat while F4 showed nothing.
+    """
+    for pid in pids or ():
+        end(app, f"tool:{pid}", "stopped", why)
+
+
 def running(app: Any) -> List[Dict[str, Any]]:
     """Actions that have started and not ended, oldest first."""
     return sorted(_open(app).values(), key=lambda r: r["at"])
@@ -130,9 +141,10 @@ def tool_title(task: Any) -> str:
 def readable(text: str) -> tuple:
     """(text, failed) for a tool's output: a shell result as what it printed.
 
-    Shell servers answer with JSON ({"stdout", "stderr", "exit_code"}), so a
-    package upgrade read as one line of escaped newlines. A non-zero exit or
-    `success: false` is a failure even though the call itself succeeded.
+    Shell servers answer with JSON ({"stdout", "stderr", "exit_code"}, or a
+    job's "transcript"), so a package upgrade read as one line of escaped
+    newlines. A non-zero exit or `success: false` is a failure even though
+    the call itself succeeded.
     """
     stripped = text.strip()
     # A failed call arrives as "Error: dmcp invocation failed: {…}".
@@ -143,13 +155,16 @@ def readable(text: str) -> tuple:
         data, _ = json.JSONDecoder().raw_decode(stripped[start:])
     except ValueError:
         return text, False
-    if not isinstance(data, dict) or not {"stdout", "stderr"} & data.keys():
+    if not isinstance(data, dict) or not {"stdout", "stderr", "transcript"} & (
+        data.keys()
+    ):
         return text, False
     code = data.get("exit_code")
     parts = [
         stripped[:start].strip(),
         str(data.get("stdout") or "").rstrip(),
         str(data.get("stderr") or "").rstrip(),
+        str(data.get("transcript") or "").rstrip(),
         f"(exit code {code})" if code not in (None, 0) else "",
     ]
     failed = data.get("success") is False or code not in (None, 0)
@@ -182,6 +197,10 @@ def tool_detail(params: Any) -> str:
     script = params.get("script")
     if isinstance(script, str) and set(params) <= {"script", "cwd", "timeout"}:
         return script.strip() + suffix
+    # send_input: what was typed into a job, Enter shown as ⏎.
+    text = params.get("text")
+    if isinstance(text, str) and params.get("job") and set(params) <= {"job", "text"}:
+        return text.replace("\r\n", "⏎").replace("\n", "⏎") + suffix
     try:
         return json.dumps(params, ensure_ascii=False)
     except (TypeError, ValueError):

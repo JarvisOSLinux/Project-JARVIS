@@ -23,21 +23,21 @@ BINDINGS = JarvisTUI.BINDINGS
 class TestFilter:
     def test_only_what_mentions_the_words(self):
         text = build_help_markdown(BINDINGS, "stop")
-        assert "**/stop [all|<n>]**" in text
+        assert "**/stop [all\\|&lt;n&gt;]**" in text
         assert "**Esc**" in text  # "…while JARVIS works, stop it"
         assert "/export" not in text and "# JARVIS — help" not in text
 
     def test_every_word_must_match(self):
         text = build_help_markdown(BINDINGS, "session delete")
-        assert "**/delete <id>**" in text
+        assert "**/delete &lt;id&gt;**" in text
         assert "/new" not in text
 
     def test_case_and_markdown_do_not_matter(self):
         # "`all`" is code in the table; the search reads it as plain text.
-        assert build_help_markdown(BINDINGS, "ALSO ENDS") == build_help_markdown(
-            BINDINGS, "also ends"
+        assert build_help_markdown(BINDINGS, "FULL ALSO") == build_help_markdown(
+            BINDINGS, "full also"
         )
-        assert "/stop" in build_help_markdown(BINDINGS, "also ends")
+        assert "/status" in build_help_markdown(BINDINGS, "full also")
 
     def test_nothing_found(self):
         assert build_help_markdown(BINDINGS, "zzz") == "Nothing mentions **zzz**."
@@ -113,3 +113,18 @@ def test_help_with_words_opens_searching(command):
     value, shown = _tui(drive)
     assert value == "stop"
     assert "/stop" in shown and "/export" not in shown
+
+
+@pytest.mark.unit
+def test_every_row_keeps_its_arguments():
+    """`|` ended a cell ("/stop [all" | "]") and `<id>` was read as an HTML tag."""
+    from markdown_it import MarkdownIt
+
+    tokens = MarkdownIt("gfm-like").parse(build_help_markdown(BINDINGS))
+    inline = [c for t in tokens if t.type == "inline" for c in t.children or []]
+    assert not [c for c in inline if c.type == "html_inline"]
+    rows = [t for t in tokens if t.type == "tr_open"]
+    cells = [t for t in tokens if t.type in ("td_open", "th_open")]
+    assert len(cells) == 2 * len(rows)
+    text = "".join(c.content for c in inline)
+    assert "/stop [all|<n>]" in text and "/switch <id>" in text

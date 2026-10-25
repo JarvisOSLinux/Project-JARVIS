@@ -365,7 +365,10 @@ def test_the_suggestions_show_stop_all(tmp_path):
         return [str(o.prompt) for o in dropdown.options]
 
     (row,) = _tui(_jarvis(tmp_path, False), drive)
-    assert row.startswith("/stop         [all|<n>]  Stop this session's work; all also")
+    assert row.startswith(
+        "/stop         [all|<n>]  Stop this session's work; its running tasks keep "
+        "running. /stop all ends them too"
+    )
 
 
 # --- one task ----------------------------------------------------------------
@@ -528,3 +531,62 @@ def test_x_in_f4_stops_the_chosen_task(tmp_path):
     assert stopped == [8]
     assert note == "Stopped task 8."
     assert "#7" in text and "#8" in text
+
+
+# --- killed tasks close their blocks (2026-10-25) ------------------------------
+# dispatch keeps a KILL in its signal window but never pushes it, so after x in
+# F4 the block stayed open: "1 task still running" under the chat, F4 empty.
+
+
+@pytest.mark.unit
+def test_a_stopped_task_closes_its_block(tmp_path):
+    app, events = _app(tmp_path)
+    _request(app, command="sleep 300")
+    _run(lambda: stop.stop_task(app, LOG, 7))
+    assert action_events.running(app) == []
+    assert events[-1]["phase"] == "end" and events[-1]["status"] == "stopped"
+
+
+@pytest.mark.unit
+def test_stop_all_closes_the_blocks_and_tells_nothing_later(tmp_path):
+    app, _ = _app(tmp_path)
+    _request(app, command="sleep 300")
+    _run(lambda: stop.stop_session(app, LOG, kill=True))
+    assert action_events.running(app) == []
+    assert stop.detached(app, {"type": "KILL", "pid": 7})
+    app.output_manager.handle_response.assert_not_called()
+
+
+@pytest.mark.unit
+def test_a_new_task_with_a_stopped_tasks_number_is_heard(tmp_path):
+    """dispatch counts from 1 again after a restart."""
+    from jarvis.runtime import dispatch_flow
+
+    app, _ = _app(tmp_path)
+    _request(app, command="sleep 300")
+    _run(lambda: stop.stop_task(app, LOG, 7))
+    dispatch_flow.note_dispatched_tools(
+        app, [7], [{"server": "shell", "tool": "run_job", "params": {"command": "ls"}}]
+    )
+    assert not stop.detached(app, {"type": "EXIT", "pid": 7})
+
+
+@pytest.mark.unit
+def test_the_models_own_kill_closes_the_block(tmp_path):
+    from jarvis.runtime import dispatch_flow
+
+    app, _ = _app(tmp_path)
+    _request(app, command="sleep 300")
+    _run(lambda: dispatch_flow.do_kill(app, LOG, [7]))
+    assert action_events.running(app) == []
+
+
+@pytest.mark.unit
+def test_a_kill_that_fails_says_so(tmp_path):
+    app, _ = _app(tmp_path)
+    _request(app, command="sleep 300")
+    app.dispatch.kill_tasks.return_value = {"error": "no such task"}
+    assert _run(lambda: stop.stop_task(app, LOG, 7)) == (
+        "Could not stop run_job (shell): sleep 300 (job u): no such task"
+    )
+    assert len(action_events.running(app)) == 1
