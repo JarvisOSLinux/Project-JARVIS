@@ -305,6 +305,8 @@ async def dispatch_send(
                     params["command"] = parts[0]
                     params["args"] = parts[1:]
 
+    _no_timeouts(tasks)
+
     # Standing constraints — path-prefix deny rules from constraints.json (#214).
     # Checked before revocation and before the confirmation gate so allow_all
     # cannot bypass them. The whole batch is refused on any match.
@@ -653,6 +655,46 @@ async def dispatch_execute_tasks(
         # auth-error EXIT names only the server behind the failing task.
         app.goals.link_dispatch_servers(goal_id, pids, tasks)
     emit_activity(app, "Tasks dispatched; awaiting results…", kind="dispatch")
+
+
+_SHELL_TOOLS = ("execute_command", "execute_script", "run_job")
+# Longest wait before the model hears about a command that had a timeout.
+TIMEOUT_REMINDER_CAP = 60
+
+
+def _no_timeouts(tasks: list) -> None:
+    """Turn a shell command's timeout into a reminder, and fix run_job's command.
+
+    A timeout kills a command wherever it is: a system update cut off
+    mid-install can leave the machine unbootable, and three jobs waiting on
+    pacman's "[Y/n]" died at it (2026-10-23). The shell servers run with no
+    timeout of their own, so the one the model sets (it did in most runs,
+    told not to) becomes a reminder no later than that: the model hears back
+    and keeps waiting, answers, or kills the job itself.
+    """
+    for task in tasks:
+        params = task.get("params")
+        if task.get("tool") not in _SHELL_TOOLS or not isinstance(params, dict):
+            continue
+        timeout = params.pop("timeout", None)
+        if timeout and not task.get("remind_after"):
+            try:
+                seconds = int(float(timeout))
+            except (TypeError, ValueError):
+                seconds = 0
+            if seconds > 0:
+                task["remind_after"] = min(seconds, TIMEOUT_REMINDER_CAP)
+        # run_job runs one shell command string; models pass execute_command's
+        # {command, args} split, and run_job would run the bare program.
+        args = params.get("args")
+        if (
+            task.get("tool") == "run_job"
+            and isinstance(params.get("command"), str)
+            and isinstance(args, list)
+        ):
+            quoted = [shlex.quote(str(a)) for a in args]
+            params["command"] = " ".join([params["command"], *quoted])
+            del params["args"]
 
 
 def note_dispatched_tools(app: Any, pids: list, tasks: list) -> None:
