@@ -20,14 +20,14 @@ from ..core.providers import (
 from .help_screen import HelpScreen
 from .output import escape
 from .provider_modal import ProviderModal
-from .slash_commands_doc import build_help_markdown
 
 
 def handle_local_input(app: Any, text: str, bindings: Any) -> bool:
     """Handle TUI-only slash commands. Return True when handled."""
     low = text.lower().strip()
-    if low in ("/help", "/?"):
-        app.push_screen(HelpScreen(build_help_markdown(bindings)))
+    if low.split(maxsplit=1)[0] in ("/help", "/?"):
+        words = text.strip().split(maxsplit=1)
+        app.push_screen(HelpScreen(bindings, words[1] if len(words) > 1 else ""))
         return True
 
     if low == "/export" or low.startswith("/export "):

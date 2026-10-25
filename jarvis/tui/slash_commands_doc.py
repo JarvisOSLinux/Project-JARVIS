@@ -47,7 +47,11 @@ SESSION_SLASH_HELP: tuple[tuple[str, str], ...] = (
 )
 
 TUI_LOCAL_SLASH_HELP: tuple[tuple[str, str], ...] = (
-    ("/help, /?", "Open help (TUI only; not sent to the LLM)."),
+    (
+        "/help [words], /? [words]",
+        "Open help, showing only the keys and commands that mention the words "
+        "(TUI only; not sent to the LLM). Typing in the help searches too.",
+    ),
     (
         "/export [file]",
         "Save plain transcript (Markdown) under `transcripts/`; optional basename only.",
@@ -147,14 +151,36 @@ def _binding_key_label(b: Binding) -> str:
     return b.key.replace("_", " ")
 
 
-def build_help_markdown(bindings: Sequence[Binding]) -> str:
-    """Full markdown for the help modal (keyboard from live bindings + static tables)."""
+def _matches(query: str, row: tuple[str, str]) -> bool:
+    """True when every word of `query` is in the row, ignoring case."""
+    text = f"{row[0]} {_plain(row[1])}".lower()
+    return all(word in text for word in query.lower().split())
+
+
+def build_help_markdown(bindings: Sequence[Binding], query: str = "") -> str:
+    """Full markdown for the help modal (keyboard from live bindings + static tables).
+
+    With a `query`, only the rows that mention all of its words (Yakup: "would
+    be nice if we could search the commands in /help").
+    """
     key_rows: list[tuple[str, str]] = [
         (_binding_key_label(b), b.description or b.action) for b in bindings
     ]
     key_rows.extend(EXTRA_KEYBOARD_HELP)
 
     slash_rows = list(TUI_LOCAL_SLASH_HELP) + list(SESSION_SLASH_HELP)
+
+    if query.strip():
+        key_rows = [r for r in key_rows if _matches(query, r)]
+        slash_rows = [r for r in slash_rows if _matches(query, r)]
+        sections = []
+        if key_rows:
+            sections.append("## Keyboard\n\n" + _markdown_table(key_rows))
+        if slash_rows:
+            sections.append("## Slash commands\n\n" + _markdown_table(slash_rows))
+        if not sections:
+            sections.append(f"Nothing mentions **{_plain(query.strip())}**.")
+        return "\n\n".join(sections)
 
     return "\n\n".join(
         [
