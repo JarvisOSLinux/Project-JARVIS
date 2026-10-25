@@ -10,7 +10,6 @@ from .chat_view import ChatView
 from .help_screen import HelpScreen
 from .local_input import export_transcript_to_disk
 from .session_sidebar import get_delete_target_session
-from .slash_commands_doc import build_help_markdown
 
 
 async def new_session(app: Any) -> None:
@@ -71,7 +70,7 @@ def focus_input(app: Any) -> None:
 
 def open_help(app: Any, bindings: Any) -> None:
     """Open the help modal (Esc / F1 closes while help is focused)."""
-    app.push_screen(HelpScreen(build_help_markdown(bindings)))
+    app.push_screen(HelpScreen(bindings))
 
 
 def clear_transcript(app: Any) -> None:

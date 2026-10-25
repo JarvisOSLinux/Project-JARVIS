@@ -28,7 +28,7 @@ JARVIS's TUI is built with **[Textual](https://textual.textualize.io/)** (Python
 | Key | Action |
 |-----|--------|
 | `Enter` | Send message |
-| `F1` / `/help` | Open keybinding + slash command help overlay (F1 again closes it) |
+| `F1` / `/help` | Open keybinding + slash command help overlay (F1 again closes it); type to search it, Esc clears the search, then closes |
 | `F2` / `/settings` / `/providers` | Open tabbed config modal (Settings + Providers tabs); Esc with unsaved settings asks first |
 | `F3` / `/setups` | Servers waiting for setup: Enter fills one in, C twice cancels it |
 | `F4` / `/tasks` | What JARVIS is doing: requests, running tasks with output and their numbers, timers. ↑/↓ choose a task, x stops it (`/stop <number>` does the same) |
@@ -48,7 +48,7 @@ TUI-only:
 
 | Command | Effect |
 |---------|--------|
-| `/help` or `/?` | Open help overlay |
+| `/help [words]` or `/? [words]` | Open help overlay, searching for the words when given |
 | `/settings` | Open config modal → Settings tab |
 | `/providers` | Open config modal → Providers tab |
 | `/providers add` | Push provider add form |
