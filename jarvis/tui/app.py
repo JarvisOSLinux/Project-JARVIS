@@ -547,7 +547,23 @@ class JarvisTUI(App):
                 return {}
             return await collect_work(jarvis)
 
-        self.push_screen(TasksScreen(collect))
+        async def stop_one(pid: Any) -> str:
+            """x in F4: `/stop <number>`, echoed in the chat like Esc's /stop."""
+            from ..runtime.session_commands import session_reply
+            from ..runtime.stop import stop_task
+
+            if jarvis is None:
+                return "JARVIS is still starting up."
+            reply = await stop_task(jarvis, logger, pid)
+            chat = self.query_one("#chat-log", ChatView)
+            chat.end_command()
+            chat.begin_command(
+                f"[bold cyan]you[/bold cyan] > /stop {pid}  [dim](F4)[/dim]"
+            )
+            session_reply(jarvis, reply)
+            return reply
+
+        self.push_screen(TasksScreen(collect, stop_one))
 
     async def action_quit(self) -> None:
         """Quit, asking first when quitting would stop work that is running."""

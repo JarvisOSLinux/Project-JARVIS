@@ -395,9 +395,16 @@ async def on_setup_result(app: Any, logger: Logger, data: dict) -> None:
     if pending is None:
         logger.warning(f"JARVIS: Ignoring a result for unknown setup {ref!r}")
         return
-    from . import stop
+    from . import stop, turns
 
     stop.claim_turn(app, pending.goal_id)
+    async with turns.turn(app, pending.goal_id):
+        await _resume_after_setup(app, logger, pending, data)
+
+
+async def _resume_after_setup(
+    app: Any, logger: Logger, pending: Any, data: dict
+) -> None:
     server_id = pending.server_id
     origin = (
         f"\nThe user originally asked: {pending.goal_description}"

@@ -31,7 +31,7 @@ JARVIS's TUI is built with **[Textual](https://textual.textualize.io/)** (Python
 | `F1` / `/help` | Open keybinding + slash command help overlay (F1 again closes it) |
 | `F2` / `/settings` / `/providers` | Open tabbed config modal (Settings + Providers tabs); Esc with unsaved settings asks first |
 | `F3` / `/setups` | Servers waiting for setup: Enter fills one in, C twice cancels it |
-| `F4` / `/tasks` | What JARVIS is doing: requests, running tasks with output, timers |
+| `F4` / `/tasks` | What JARVIS is doing: requests, running tasks with output and their numbers, timers. ↑/↓ choose a task, x stops it (`/stop <number>` does the same) |
 | `Ctrl+L` / `/commands` | Browse the chat's blocks: Up/Down move, Enter/Space fold, Esc back to typing |
 | `Ctrl+Shift+C` | Clear on-screen transcript (does not clear contextor memory) |
 | `Ctrl+Shift+E` / `/export` | Export transcript to `JARVIS_DATA_DIR/transcripts/` as Markdown |

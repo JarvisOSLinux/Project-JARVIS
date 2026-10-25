@@ -38,7 +38,7 @@ host chores, not code.
 | Role | May do |
 |---|---|
 | guest | chat, stop JARVIS (its running tasks keep running), see what JARVIS is doing (the activity line), sessions, confirmations and clients |
-| trusted | guest + approve or deny requests, create and switch sessions, see action blocks (tool parameters and output), status and running work, stop all (ends the running tasks too) |
+| trusted | guest + approve or deny requests, create and switch sessions, see action blocks (tool parameters and output), status and running work, stop all (ends the running tasks too), stop one running task |
 | owner | trusted + rename and delete sessions |
 
 No role may change settings, providers, the wake chime or setups, shut JARVIS

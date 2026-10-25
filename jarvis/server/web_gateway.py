@@ -75,8 +75,9 @@ _TRUSTED_SENDS = _GUEST_SENDS | {
     "switch_session",
     "get_status",
     "list_work",
-    # Also kills the session's running tasks.
+    # Also kills the session's running tasks; stop_task kills one.
     "stop_all",
+    "stop_task",
 }
 # Absent on purpose for every role: settings, providers, wake chime, setups,
 # shutdown_request, approve_all_confirmations, and the raw confirmation_response.
@@ -122,6 +123,7 @@ _AUDITED = frozenset(
         "stop_stream",
         "stop",
         "stop_all",
+        "stop_task",
         "approve_confirmation",
         "deny_confirmation",
         "partial_approve_confirmation",

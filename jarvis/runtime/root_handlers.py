@@ -5,12 +5,13 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from dataclasses import dataclass
 from logging import Logger
 from typing import Any, Callable
 
 from ..core.secret_scrubber import redact_secrets, redaction_notice
 from ..core.voice_state import VoiceState
-from . import action_events, stop
+from . import action_events, stop, turns
 from .io import broadcast_to_gui_clients, enrich_pending_with_goals, set_gui_state
 from .llm_bridge import ask_llm
 from .output_hooks import emit_activity
@@ -80,11 +81,11 @@ async def on_user_input(app: Any, logger: Logger, text: str) -> None:
             session_id=app.sessions.current_id,
         )
 
-    context = build_root_context(app, logger, new_input=text)
-    emit_activity(app, "Thinking about your request…", kind="llm")
-
-    response = await ask_llm(app, logger, context, tag="root", mode="root")
-    await app._act_on_root_response(response)
+    async with turns.turn(app, goal.id):
+        context = build_root_context(app, logger, new_input=text)
+        emit_activity(app, "Thinking about your request…", kind="llm")
+        response = await ask_llm(app, logger, context, tag="root", mode="root")
+        await app._act_on_root_response(response)
 
 
 # Machine-readable failure codes: unambiguous enough to trust on their own.
@@ -273,6 +274,145 @@ async def _tools_after_login(app: Any, logger: Logger, signal: dict[str, Any]) -
     )
 
 
+@dataclass
+class _Arrived:
+    """A signal waiting for its request's turn."""
+
+    signal: dict[str, Any]
+    exit_data: Any = None
+    is_stale: Callable[[], bool] = lambda: False
+
+    @property
+    def outcome(self) -> dict[str, Any]:
+        """The EXIT a merged REMIND carries, else the signal itself."""
+        return self.exit_data if isinstance(self.exit_data, dict) else self.signal
+
+
+def _others_running(app: Any, goal: Any, items: list[_Arrived]) -> bool:
+    """True when the request has tasks besides these that have not ended."""
+    finished = _signal_ledger(app)[0]
+    here = {i.signal.get("pid") for i in items}
+    pids = getattr(goal, "task_pids", None)
+    return isinstance(pids, list) and any(
+        p not in finished and p not in here for p in pids
+    )
+
+
+async def _to_turn(
+    app: Any, logger: Logger, owning_goal: Any, items: list[_Arrived]
+) -> None:
+    """Answer signals in their request's lane (#284), or now when no request owns them."""
+    if not owning_goal:
+        await _answer_signals(app, logger, None, items)
+        return
+    reminders = [
+        i
+        for i in items
+        if str(i.signal.get("type") or "").upper() == "REMIND" and i.exit_data is None
+    ]
+    if len(reminders) == len(items) and turns.busy(app, owning_goal.id):
+        logger.info(
+            f"JARVIS: Dropped a REMIND for pid(s) {[i.signal.get('pid') for i in items]}: "
+            f"a turn for goal [{owning_goal.id}] is running, and the next reminder "
+            "carries anything new"
+        )
+        return
+
+    async def answer(batch: list[_Arrived]) -> None:
+        await _answer_signals(app, logger, owning_goal, batch)
+
+    await turns.deliver(
+        app,
+        logger,
+        owning_goal.id,
+        items,
+        answer,
+        wait=_others_running(app, owning_goal, items),
+    )
+
+
+async def _answer_signals(
+    app: Any, logger: Logger, owning_goal: Any, items: list[_Arrived]
+) -> None:
+    """One ROOT turn for signals of one request (or of none).
+
+    Context is built when the turn comes, not when the signals arrived, so it
+    reflects every result in by then.
+    """
+    live = [i for i in items if not i.is_stale()]
+    if not live:
+        logger.info(
+            f"JARVIS: Dropped stale REMIND(s) for pid(s) "
+            f"{[i.signal.get('pid') for i in items]}: the task has finished or a "
+            "newer reminder replaced it"
+        )
+        return
+    one = live[0] if len(live) == 1 else None
+    outcomes = [i.outcome for i in live]
+
+    if owning_goal:
+        goal_ctx = app.goals.get_goal_context(owning_goal.id)
+        parts = []
+        if goal_ctx:
+            parts.append(f"INTENT: {owning_goal.description}")
+            parts.append(f"GOAL_STATE: {compact_payload_for_llm(goal_ctx)}")
+        if one:
+            parts.append(f"SIGNAL: {json.dumps(one.signal)}")
+        else:
+            parts.append(f"SIGNALS: {json.dumps(outcomes)}")
+        summary = app.sessions.load_summary()
+        if summary:
+            parts.append(f"CONVERSATION_SUMMARY: {summary}")
+        context = "\n".join(parts)
+        logger.debug(
+            f"JARVIS: Signal context scoped to goal [{owning_goal.id}] "
+            f"({owning_goal.description[:60]})"
+        )
+    elif one:
+        context = build_root_context(app, logger, signal=one.signal)
+    else:
+        context = build_root_context(app, logger)
+        context += f"\nSIGNALS: {json.dumps(outcomes)}"
+
+    if one and one.exit_data:
+        context += (
+            f"\nREMIND_COMPLETED: Reminder fired for pid={one.signal.get('pid')}, "
+            f"but the task finished before the LLM was reached.\n"
+            f"EXIT_DATA: {compact_payload_for_llm(one.exit_data)}"
+        )
+
+    signal_text = "".join(
+        json.dumps(i.signal)
+        + (compact_payload_for_llm(i.exit_data) if i.exit_data is not None else "")
+        for i in live
+    )
+    # A merged REMIND+EXIT arrives typed REMIND but carries the real EXIT
+    # (event_merger.py). Hint off the outcome, not off the wrapper.
+    context += await _config_hint_for_signals(
+        app, logger, outcomes, owning_goal, signal_text
+    )
+    for outcome in outcomes:
+        context += await _tools_after_login(app, logger, outcome)
+    context += stop.stopped_note(app, getattr(owning_goal, "id", None))
+
+    response = await ask_llm(
+        app,
+        logger,
+        context,
+        tag="root",
+        mode="root",
+        skip_if=lambda: all(i.is_stale() for i in live),
+    )
+    if response is None:
+        logger.info(
+            f"JARVIS: Dropped a stale REMIND for pid(s) "
+            f"{[i.signal.get('pid') for i in live]}: the task has finished or a "
+            "newer reminder replaced it"
+        )
+        return
+    await app._act_on_root_response(response)
+
+
 async def on_dispatch_signal(app: Any, logger: Logger, signal: dict[str, Any]) -> None:
     # Extract EventMerger enrichment keys before passing the signal downstream.
     remind_completed = signal.pop("_remind_completed", False)
@@ -300,63 +440,10 @@ async def on_dispatch_signal(app: Any, logger: Logger, signal: dict[str, Any]) -
     if stop.detached(app, signal, exit_data):
         return
 
-    # Build a context scoped to the goal that owns this PID.
-    # If no goal owns the PID (e.g. a timer from defer), fall back to
-    # the full root context so the LLM still has useful information.
+    # The turn is scoped to the goal that owns this PID. If none does (e.g. a
+    # timer from defer), it gets the full root context instead.
     owning_goal = app.goals.find_goal_by_task_pid(sig_pid) if sig_pid else None
-    if owning_goal:
-        stop.claim_turn(app, owning_goal.id)
-
-    if owning_goal:
-        goal_ctx = app.goals.get_goal_context(owning_goal.id)
-        parts = []
-        if goal_ctx:
-            parts.append(f"INTENT: {owning_goal.description}")
-            parts.append(f"GOAL_STATE: {compact_payload_for_llm(goal_ctx)}")
-        parts.append(f"SIGNAL: {json.dumps(signal)}")
-        summary = app.sessions.load_summary()
-        if summary:
-            parts.append(f"CONVERSATION_SUMMARY: {summary}")
-        context = "\n".join(parts)
-        logger.debug(
-            f"JARVIS: Signal context scoped to goal [{owning_goal.id}] "
-            f"({owning_goal.description[:60]})"
-        )
-    else:
-        context = build_root_context(app, logger, signal=signal)
-
-    if remind_completed and exit_data:
-        context += (
-            f"\nREMIND_COMPLETED: Reminder fired for pid={sig_pid}, but the task "
-            f"finished before the LLM was reached.\n"
-            f"EXIT_DATA: {compact_payload_for_llm(exit_data)}"
-        )
-
-    signal_text = json.dumps(signal)
-    hint_signals: list[dict[str, Any]] = [signal]
-    if exit_data is not None:
-        signal_text += compact_payload_for_llm(exit_data)
-        # A merged REMIND+EXIT arrives typed REMIND but carries the real EXIT
-        # (event_merger.py). Hint off the outcome, not off the wrapper.
-        if isinstance(exit_data, dict):
-            hint_signals = [exit_data]
-    context += await _config_hint_for_signals(
-        app, logger, hint_signals, owning_goal, signal_text
-    )
-    context += await _tools_after_login(
-        app, logger, exit_data if isinstance(exit_data, dict) else signal
-    )
-
-    response = await ask_llm(
-        app, logger, context, tag="root", mode="root", skip_if=is_stale
-    )
-    if response is None:
-        logger.info(
-            f"JARVIS: Dropped a stale REMIND for pid={sig_pid}: the task has "
-            "finished or a newer reminder replaced it"
-        )
-        return
-    await app._act_on_root_response(response)
+    await _to_turn(app, logger, owning_goal, [_Arrived(signal, exit_data, is_stale)])
 
 
 async def on_dispatch_signals(
@@ -382,46 +469,26 @@ async def on_dispatch_signals(
         logger.warning("Dispatch batch received but no LLM configured — ignoring")
         return
 
+    items = []
     for sig in signals:
         app.goals.update_from_signal(sig)
-        _note_signal(app, sig)
+        is_stale = _note_signal(app, sig)
         action_events.on_signal(app, sig)
-    signals = [s for s in signals if not stop.detached(app, s)]
-    if not signals:
+        if not stop.detached(app, sig):
+            items.append(_Arrived(sig, None, is_stale))
+    if not items:
         return
-    pids = [s.get("pid") for s in signals]
 
     # A fire_wake=false batch is one session, so all PIDs share a goal; scope the
-    # context to it. Fall back to full root context if none owns the PIDs.
+    # turn to it. Fall back to full root context if none owns the PIDs.
     owning_goal = None
-    for pid in pids:
+    for item in items:
+        pid = item.signal.get("pid")
         if pid is not None:
             owning_goal = app.goals.find_goal_by_task_pid(pid)
             if owning_goal:
-                stop.claim_turn(app, owning_goal.id)
                 break
-
-    if owning_goal:
-        goal_ctx = app.goals.get_goal_context(owning_goal.id)
-        parts = []
-        if goal_ctx:
-            parts.append(f"INTENT: {owning_goal.description}")
-            parts.append(f"GOAL_STATE: {compact_payload_for_llm(goal_ctx)}")
-        parts.append(f"SIGNALS: {json.dumps(signals)}")
-        summary = app.sessions.load_summary()
-        if summary:
-            parts.append(f"CONVERSATION_SUMMARY: {summary}")
-        context = "\n".join(parts)
-    else:
-        context = build_root_context(app, logger)
-        context += f"\nSIGNALS: {json.dumps(signals)}"
-
-    context += await _config_hint_for_signals(
-        app, logger, signals, owning_goal, json.dumps(signals)
-    )
-
-    response = await ask_llm(app, logger, context, tag="root", mode="root")
-    await app._act_on_root_response(response)
+    await _to_turn(app, logger, owning_goal, items)
 
 
 async def on_confirmation_response(
@@ -431,6 +498,11 @@ async def on_confirmation_response(
     if pending is None:
         return
     stop.claim_turn(app, pending.session_id)
+    async with turns.turn(app, pending.session_id):
+        await _resume_after_confirmation(app, logger, pending)
+
+
+async def _resume_after_confirmation(app: Any, logger: Logger, pending: Any) -> None:
     action_events.end(
         app,
         f"confirm:{pending.request_id}",

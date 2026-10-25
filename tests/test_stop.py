@@ -34,6 +34,7 @@ def _app(tmp_path, running=(7,)):
             kill_tasks=AsyncMock(return_value={}),
         ),
         output_manager=Mock(),
+        contextor=None,
         llm=object(),
         _gui_clients={},
         _event_tasks=set(),
@@ -364,4 +365,166 @@ def test_the_suggestions_show_stop_all(tmp_path):
         return [str(o.prompt) for o in dropdown.options]
 
     (row,) = _tui(_jarvis(tmp_path, False), drive)
-    assert row.startswith("/stop         [all]  Stop this session's work; all also")
+    assert row.startswith("/stop         [all|<n>]  Stop this session's work; all also")
+
+
+# --- one task ----------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestStopOneTask:
+    def test_the_task_is_killed_and_its_request_closed(self, tmp_path):
+        app, _ = _app(tmp_path)
+        _request(app, command="make -j8")
+        reply = _run(lambda: stop.stop_task(app, LOG, 7))
+        assert reply == "Stopped run_job (shell): make -j8 (job u)."
+        app.dispatch.kill_tasks.assert_awaited_once_with([7])
+        assert app.goals.get_active_goals() == []
+
+    def test_its_end_never_reaches_the_model(self, tmp_path):
+        app, _ = _app(tmp_path)
+        _request(app, command="make -j8")
+        _run(lambda: stop.stop_task(app, LOG, 7))
+        ask = AsyncMock()
+        with patch.object(root_handlers, "ask_llm", ask):
+            _run(
+                lambda: root_handlers.on_dispatch_signal(
+                    app, LOG, {"type": "KILL", "pid": 7, "timestamp": "k"}
+                )
+            )
+        ask.assert_not_awaited()
+        app.output_manager.handle_response.assert_not_called()
+        assert 7 not in app._killed_tasks
+
+    def test_a_request_with_more_under_way_carries_on_and_is_told(self, tmp_path):
+        app, _ = _app(tmp_path, running=(7, 8))
+        goal = _request(app, command="make -j8")
+        app.goals.link_tasks(goal.id, [8])
+        _run(lambda: stop.stop_task(app, LOG, 7))
+        assert [g.id for g in app.goals.get_active_goals()] == [goal.id]
+
+        contexts = []
+
+        async def ask(app_, logger, context, **kwargs):
+            contexts.append(context)
+            return {"action": "respond", "output": "ok"}
+
+        app._act_on_root_response = AsyncMock()
+        with (
+            patch.object(root_handlers, "ask_llm", ask),
+            patch.object(root_handlers, "emit_activity", lambda *a, **k: None),
+        ):
+            for n in (1, 2):
+                _run(
+                    lambda: root_handlers.on_dispatch_signal(
+                        app,
+                        LOG,
+                        {"type": "REMIND", "pid": 8, "data": "…", "timestamp": n},
+                    )
+                )
+        assert "STOPPED_BY_USER: the user stopped run_job (shell): make" in contexts[0]
+        assert "STOPPED_BY_USER" not in contexts[1]  # told once
+
+    def test_a_package_manager_asks_twice(self, tmp_path):
+        app, _ = _app(tmp_path)
+        _request(app)
+        warning = _run(lambda: stop.stop_task(app, LOG, 7))
+        assert warning.startswith("run_job (shell): pacman -Syu (job u) is installing")
+        assert "Stop it again within 15 s" in warning
+        app.dispatch.kill_tasks.assert_not_awaited()
+        assert _run(lambda: stop.stop_task(app, LOG, 7)).startswith("Stopped ")
+        app.dispatch.kill_tasks.assert_awaited_once_with([7])
+
+    def test_what_is_not_running_or_is_a_timer(self, tmp_path):
+        app, _ = _app(tmp_path)
+        assert _run(lambda: stop.stop_task(app, LOG, 9)) == (
+            "No task 9 is running (F4 shows what is)."
+        )
+        app.dispatch.get_task_status.return_value = [
+            {"pid": 9, "state": "running", "type": "timer"}
+        ]
+        assert "is a timer" in _run(lambda: stop.stop_task(app, LOG, 9))
+        app.dispatch.kill_tasks.assert_not_awaited()
+
+    def test_a_task_a_stop_left_running_says_nothing_more(self, tmp_path):
+        app, _ = _app(tmp_path)
+        _request(app, command="make -j8")
+        _run(lambda: stop.stop_session(app, LOG))
+        _run(lambda: stop.stop_task(app, LOG, 7))
+        assert stop.detached(app, {"type": "KILL", "pid": 7})
+        app.output_manager.handle_response.assert_not_called()
+
+    def test_the_slash_command_takes_the_number(self, tmp_path):
+        app, _ = _app(tmp_path)
+        _request(app, command="make -j8")
+        reply = _run(lambda: stop.handle_command(app, LOG, "/stop 7"))
+        assert reply.startswith("Stopped ")
+        assert "/stop <number>" in _run(
+            lambda: stop.handle_command(app, LOG, "/stop x")
+        )
+
+
+@pytest.mark.unit
+def test_the_socket_and_the_gateway_for_one_task(tmp_path):
+    from jarvis.runtime import io
+    from jarvis.server import web_gateway as wg
+
+    assert not wg.sendable("guest", {"type": "stop_task", "pid": 7})
+    assert wg.sendable("trusted", {"type": "stop_task", "pid": 7})
+
+    app, _ = _app(tmp_path)
+    _request(app, command="make -j8")
+    written = []
+
+    async def write(writer, msg):
+        written.append(msg)
+
+    with patch.object(io, "_gui_write", write):
+        _run(
+            lambda: io._process_gui_message(
+                app, LOG, {"type": "stop_task", "pid": "7"}, None
+            )
+        )
+        _run(
+            lambda: io._process_gui_message(
+                app, LOG, {"type": "stop_task", "pid": 7}, None
+            )
+        )
+    assert written[0]["message"].startswith("stop_task needs the task's pid")
+    assert written[1] == {
+        "type": "ack",
+        "message": "Stopped run_job (shell): make -j8 (job u).",
+    }
+
+
+@pytest.mark.unit
+def test_x_in_f4_stops_the_chosen_task(tmp_path):
+    from jarvis.tui.tasks_view import TasksScreen
+
+    work = {
+        "tasks": [
+            {"pid": 7, "kind": "tool", "title": "run_job (shell)", "detail": "make"},
+            {"pid": 8, "kind": "tool", "title": "run_job (shell)", "detail": "pytest"},
+        ]
+    }
+    stopped = []
+
+    async def collect():
+        return work
+
+    async def stop_one(pid):
+        stopped.append(pid)
+        return f"Stopped task {pid}."
+
+    async def drive(app, pilot):
+        screen = TasksScreen(collect, stop_one)
+        app.push_screen(screen)
+        await pilot.pause()
+        await pilot.press("down", "x")
+        await pilot.pause()
+        return str(screen._note.render()), str(screen._text.render())
+
+    note, text = _tui(_jarvis(tmp_path, False), drive)
+    assert stopped == [8]
+    assert note == "Stopped task 8."
+    assert "#7" in text and "#8" in text

@@ -36,6 +36,7 @@ client keeps its view in step by listening, not by polling.
 | `message` | `content` | Says something to JARVIS, as if typed. Slash commands (`/new`, `/switch 110`, `/context`) work too; their replies carry `command: true`. The state becomes `processing`. |
 | `stop` | | Stops JARVIS's work in the current session (#270): the model's turn is cancelled, confirmations waiting are denied, reminders and timers cancelled, the requests closed. Tasks already running keep running and reach only the screen from then on, never the model. → `ack` with what was stopped and what still runs; the state becomes `idle`. |
 | `stop_all` | | `stop`, and the session's running tasks are killed too. When one runs a package manager the first `stop_all` only warns (`ack`); a second within 15 s kills it. |
+| `stop_task` | `pid` | Kills one running task (the `pid` from `work`); the model hears nothing from it. Its request is closed when nothing else of it is under way; otherwise the request's next turn is told the user stopped it. A package manager is only warned about at first (`ack`); a second `stop_task` for it within 15 s kills it. → `ack` with what was stopped. |
 | `stop_stream` | | Ends the reply being shown (`response` with `done: true`) and sets the state to `idle`; JARVIS's work goes on. |
 | `hello` | `label`, `subscribe` (optional list: `activity`, `action`) | Names this client in `list_clients`, and asks for the pushed events it can show. |
 | `list_clients` | | → `client_list` |

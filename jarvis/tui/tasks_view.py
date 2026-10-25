@@ -2,14 +2,14 @@
 
 Requests still being worked on, the tools running for them with how long
 they have run and their latest output, timers, and what waits on you. It
-refreshes every second while open. Stopping a request or a task is #270,
-still being specified; Ctrl+Q stops everything when quitting.
+refreshes every second while open. ↑/↓ choose a running task and x stops it
+(#270), like `/stop <number>`; Ctrl+Q stops everything when quitting.
 """
 
 from __future__ import annotations
 
 import time
-from typing import Any, Awaitable, Callable, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from rich.text import Text
 from textual.app import ComposeResult
@@ -36,8 +36,14 @@ def _ago(seconds: Optional[float]) -> str:
     return f"{hours}h {minutes:02d}m"
 
 
-def work_markup(work: Dict[str, Any], now: Optional[float] = None) -> str:
-    """The tasks view's text, from runtime.work.collect_work."""
+def work_markup(
+    work: Dict[str, Any], now: Optional[float] = None, selected: Any = None
+) -> str:
+    """The tasks view's text, from runtime.work.collect_work.
+
+    Each tool shows its number for `/stop <number>`; `selected` is the PID of
+    the one x would stop.
+    """
     now = time.time() if now is None else now
     lines = []
     requests = work.get("requests") or []
@@ -69,8 +75,12 @@ def work_markup(work: Dict[str, Any], now: Optional[float] = None) -> str:
             )
             continue
         ran = _ago(t.get("running_for"))
+        title = escape(t["title"])
+        if t.get("pid") == selected:
+            title = f"[reverse]{title}[/reverse]"
         lines.append(
-            f"  [yellow]⋯[/yellow] {escape(t['title'])}"
+            f"  [yellow]{'▶' if t.get('pid') == selected else '⋯'}[/yellow] {title}"
+            f"  [dim]#{t.get('pid')}[/dim]"
             + (f"  [dim]running {ran}[/dim]" if ran else "")
         )
         if t.get("detail"):
@@ -97,9 +107,13 @@ def work_markup(work: Dict[str, Any], now: Optional[float] = None) -> str:
 
 
 class TasksScreen(ModalScreen[None]):
+    # The scroll area has the focus and scrolls on ↑/↓; here they choose a task.
     BINDINGS = [
         Binding("escape", "close", "Close"),
         Binding("f4", "close", "Close", show=False),
+        Binding("up", "move(-1)", "Previous task", show=False, priority=True),
+        Binding("down", "move(1)", "Next task", show=False, priority=True),
+        Binding("x,delete", "stop_task", "Stop the task", show=False, priority=True),
     ]
 
     DEFAULT_CSS = """
@@ -128,21 +142,33 @@ class TasksScreen(ModalScreen[None]):
         color: $text-muted;
         margin-top: 1;
     }
+    TasksScreen #tasks-note {
+        margin-top: 1;
+    }
     """
 
-    def __init__(self, collect: Callable[[], Awaitable[Dict[str, Any]]]) -> None:
+    def __init__(
+        self,
+        collect: Callable[[], Awaitable[Dict[str, Any]]],
+        stop: Optional[Callable[[Any], Awaitable[str]]] = None,
+    ) -> None:
         super().__init__()
         self._collect = collect
+        self._stop = stop
+        self._work: Dict[str, Any] = {}
+        self._selected: Any = None
         self._text = Static("Checking…", id="tasks-text")
+        self._note = Static("", id="tasks-note")
 
     def compose(self) -> ComposeResult:
         with Vertical(id="tasks-dialog"):
             yield Label("What JARVIS is doing", id="tasks-title")
             with VerticalScroll(id="tasks-body"):
                 yield self._text
+            yield self._note
             yield Static(
-                "Updates every second · Esc or F4 closes · Ctrl+Q stops everything "
-                "and quits",
+                "↑/↓ choose a task · x stops it · Esc or F4 closes · Ctrl+Q stops "
+                "everything and quits",
                 classes="tasks-hint",
             )
 
@@ -156,7 +182,37 @@ class TasksScreen(ModalScreen[None]):
         except Exception as e:  # a failing check must not take the view down
             self._text.update(Text(f"Could not read what is running: {e}"))
             return
-        self._text.update(Text.from_markup(work_markup(work), emoji=False))
+        self._work = work
+        pids = self._stoppable()
+        if self._selected not in pids:
+            self._selected = pids[0] if pids else None
+        self._show()
+
+    def _stoppable(self) -> List[Any]:
+        return [
+            t.get("pid")
+            for t in self._work.get("tasks") or []
+            if t.get("kind") == "tool"
+        ]
+
+    def _show(self) -> None:
+        markup = work_markup(self._work, selected=self._selected)
+        self._text.update(Text.from_markup(markup, emoji=False))
+
+    def action_move(self, step: int) -> None:
+        pids = self._stoppable()
+        if not pids:
+            return
+        at = pids.index(self._selected) if self._selected in pids else 0
+        self._selected = pids[(at + step) % len(pids)]
+        self._show()
+
+    async def action_stop_task(self) -> None:
+        if self._stop is None or self._selected is None:
+            self._note.update(Text("Nothing running to stop."))
+            return
+        self._note.update(Text(await self._stop(self._selected)))
+        await self.refresh_work()
 
     def action_close(self) -> None:
         self.dismiss(None)

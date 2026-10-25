@@ -485,7 +485,17 @@ function renderWork(work) {
             row.append(el('div', 'work-item-meta', `fires in ${duration(t.fires_in)}`));
             return row;
         }
-        row.append(el('div', 'work-item-title', `⋯ ${t.title}`));
+        const head = el('div', 'work-item-head');
+        head.append(el('div', 'work-item-title', `⋯ ${t.title}`));
+        // Kills this task only; a package manager asks for a second tap (#270).
+        const stopTask = el('button', 'task-stop-btn', 'Stop');
+        stopTask.title = 'End this task';
+        stopTask.addEventListener('click', async () => {
+            await invoke('stop_task', { pid: t.pid });
+            invoke('list_work');
+        });
+        head.append(stopTask);
+        row.append(head);
         const meta = [t.running_for != null ? `running ${duration(t.running_for)}` : '', t.request ? `for: ${t.request}` : '']
             .filter(Boolean).join(' · ');
         if (meta) row.append(el('div', 'work-item-meta', meta));

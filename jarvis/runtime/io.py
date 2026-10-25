@@ -517,6 +517,17 @@ async def _process_gui_message(
         )
         await set_gui_state(app, VoiceState.IDLE)
 
+    elif msg_type == "stop_task":
+        from .stop import stop_task
+
+        pid = msg.get("pid")
+        reply = (
+            await stop_task(app, logger, pid)
+            if isinstance(pid, int) and not isinstance(pid, bool)
+            else "stop_task needs the task's pid, a number (list_work shows it)."
+        )
+        await _gui_write(writer, {"type": "ack", "message": reply})
+
     elif msg_type == "get_status":
         await _gui_write(writer, await _status_reply(app, bool(msg.get("full"))))
 

@@ -977,6 +977,19 @@ body:not(.can-approve) #stop-all-btn { display: none; }
 .work-item-title { color: var(--text-primary); font-size: 13px; overflow-wrap: anywhere; }
 .work-item-meta, .work-empty { color: var(--text-secondary); font-size: 11px; margin-top: 2px; }
 .work-item .action-detail, .work-item .action-output { margin-left: 0; margin-right: 0; }
+.work-item-head { display: flex; align-items: flex-start; gap: 8px; }
+.work-item-head .work-item-title { flex: 1; min-width: 0; }
+.task-stop-btn {
+    flex-shrink: 0;
+    border: 1px solid #7a2530;
+    border-radius: 8px;
+    background: rgba(255, 68, 85, 0.10);
+    color: #ff4455;
+    font-size: 12px;
+    padding: 6px 12px;
+    min-height: 32px;
+    cursor: pointer;
+}
 
 .status-check { display: flex; gap: 8px; font-size: 12px; padding: 3px 0; align-items: baseline; }
 .status-mark { width: 12px; flex-shrink: 0; text-align: center; }
