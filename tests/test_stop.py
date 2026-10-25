@@ -348,3 +348,20 @@ def test_quitting_warns_about_a_package_manager(tmp_path):
     )
     (line,) = asyncio.run(pending_work(app))
     assert "changing packages; quitting now stops it mid-way" in line
+
+
+@pytest.mark.unit
+def test_the_suggestions_show_stop_all(tmp_path):
+    """The dropdown read its rows as markup, so "/stop [all]" lost "[all]"
+    (and "/new [title]" its title): nothing said /stop all existed."""
+    from jarvis.tui.command_input import CommandDropdown
+
+    async def drive(app, pilot):
+        app.query_one("#input").focus()
+        await pilot.press(*"/sto")
+        await pilot.pause()
+        dropdown = app.query_one(CommandDropdown)
+        return [str(o.prompt) for o in dropdown.options]
+
+    (row,) = _tui(_jarvis(tmp_path, False), drive)
+    assert row.startswith("/stop         [all]  Stop this session's work; all also")
