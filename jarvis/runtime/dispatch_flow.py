@@ -838,9 +838,10 @@ def note_dispatched_tools(app: Any, pids: list, tasks: list) -> None:
     if not pids or not tasks or len(pids) < len(tasks):
         return
     action_events.tools_started(app, pids, tasks)
-    from . import stop
+    from . import stop, turns
 
     stop.forget(app, pids)
+    turns.forget(app, pids)
     known = getattr(app, "_pid_tools", None)
     if known is None:
         known = app._pid_tools = {}

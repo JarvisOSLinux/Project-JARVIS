@@ -14,7 +14,12 @@ progressing…"). A request now has one lane:
   signal waits a moment first, so tasks that end together answer once;
 - a plain reminder that comes in while the request's turn runs is dropped:
   dispatch repeats reminders while the task runs, so the next one carries
-  anything new, a question such as pacman's "[Y/n]" included.
+  anything new, a question such as pacman's "[Y/n]" included;
+- a task's result the model already read during a turn (a status check of
+  the request shows finished tasks' output) is not answered again when its
+  own signal's turn comes. In the app, "The system update has completed
+  successfully!" came twice: the status check read pacman's result while
+  its EXIT waited for the turn, and the EXIT's turn said it again.
 """
 
 from __future__ import annotations
@@ -64,6 +69,27 @@ def busy(app: Any, goal_id: Optional[str]) -> bool:
 def active(app: Any, goal_id: Optional[str]) -> bool:
     """True while the request has a turn running or signals waiting for one."""
     return bool(goal_id) and goal_id in _lanes(app)
+
+
+def _seen(app: Any) -> set:
+    seen = getattr(app, "_results_seen", None)
+    if seen is None:
+        seen = app._results_seen = set()
+    return seen
+
+
+def saw_results(app: Any, pids: Any) -> None:
+    """The model read these tasks' results in a turn for their request."""
+    _seen(app).update(p for p in pids or () if p is not None)
+
+
+def result_seen(app: Any, pid: Any) -> bool:
+    return pid in _seen(app)
+
+
+def forget(app: Any, pids: Any) -> None:
+    """A new task took these PIDs: dispatch counts from 1 again after a restart."""
+    _seen(app).difference_update(pids or ())
 
 
 @asynccontextmanager

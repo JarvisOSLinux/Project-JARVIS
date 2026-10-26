@@ -288,6 +288,14 @@ class _Arrived:
         return self.exit_data if isinstance(self.exit_data, dict) else self.signal
 
 
+def _result_read(app: Any, item: _Arrived) -> bool:
+    """True for a task's end whose result the model already read in a turn."""
+    kind = str(item.outcome.get("type") or "").upper()
+    return kind in ("EXIT", "KILL", "TIMEOUT") and turns.result_seen(
+        app, item.signal.get("pid")
+    )
+
+
 def _others_running(app: Any, goal: Any, items: list[_Arrived]) -> bool:
     """True when the request has tasks besides these that have not ended."""
     finished = _signal_ledger(app)[0]
@@ -347,6 +355,16 @@ async def _answer_signals(
             "newer reminder replaced it"
         )
         return
+    read = [i for i in live if _result_read(app, i)]
+    if read:
+        logger.info(
+            f"JARVIS: Dropped the result(s) of pid(s) "
+            f"{[i.signal.get('pid') for i in read]}: the model read them in an "
+            "earlier turn (a status check)"
+        )
+        live = [i for i in live if i not in read]
+        if not live:
+            return
     one = live[0] if len(live) == 1 else None
     outcomes = [i.outcome for i in live]
 
