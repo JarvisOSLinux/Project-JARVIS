@@ -842,6 +842,11 @@ async def _handle_status(
         if t.get("state") not in ("running", None) and "pid" in t
     ]
     held_output = await app.dispatch.get_task_output(held_pids) if held_pids else ""
+    if goal and held_output:
+        # Their own EXITs may still wait for the request's turn (#284).
+        from . import turns
+
+        turns.saw_results(app, held_pids)
 
     context = build_root_context(app, logger)
     if goal:

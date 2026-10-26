@@ -253,3 +253,69 @@ def test_a_finished_request_leaves_no_lane(setup):
 
     asyncio.run(run())
     assert app._turn_lanes == {}
+
+
+@pytest.mark.unit
+def test_a_result_the_model_read_in_a_status_check_is_not_answered_again(setup):
+    """The app's twice-said "The system update has completed successfully!":
+    the send_input result's turn checked status, read pacman's finished
+    output, and answered; pacman's EXIT, waiting meanwhile, answered again."""
+    app, goals, model = setup
+    _goal(goals, [1, 2])
+
+    async def run():
+        model.gate.clear()
+        answering = _signal(app, _exit(2, '200 {"delivered_bytes": 2}'))
+        await asyncio.wait_for(model.started.wait(), 5)
+        finished = _signal(app, _exit(1, "200 upgraded 13 packages"))
+        await asyncio.sleep(0.05)
+        turns.saw_results(app, [1])  # the turn's status check read pid 1
+        model.gate.set()
+        await _settle(answering, finished)
+
+    asyncio.run(run())
+    assert len(model.contexts) == 1
+    assert len(app.acted) == 1
+
+
+@pytest.mark.unit
+def test_a_new_task_with_a_read_tasks_number_is_answered(setup):
+    """dispatch counts from 1 again after a restart."""
+    from jarvis.runtime import dispatch_flow
+
+    app, _, _ = setup
+    turns.saw_results(app, [1])
+    dispatch_flow.note_dispatched_tools(
+        app, [1], [{"server": "shell", "tool": "run_job", "params": {"command": "ls"}}]
+    )
+    assert not turns.result_seen(app, 1)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("scoped", [True, False])
+def test_only_a_status_check_of_the_request_counts_as_read(tmp_path, scoped):
+    """An unscoped check lists every request's tasks; the model answers about
+    one, so the others' results are still told in their own turns."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    from jarvis.runtime import root_actions
+
+    goals = GoalManager(archive_dir=str(tmp_path))
+    goal = _goal(goals, [1])
+    app = SimpleNamespace(
+        goals=goals,
+        dispatch=SimpleNamespace(
+            get_task_status=AsyncMock(return_value=[{"pid": 1, "state": "exited"}]),
+            get_task_output=AsyncMock(return_value="PID 1 upgraded 13 packages"),
+        ),
+        _act_on_root_response=AsyncMock(),
+    )
+    with (
+        patch.object(root_actions, "build_root_context", lambda *a, **k: ""),
+        patch.object(root_actions, "ask_llm", AsyncMock(return_value={})),
+        patch.object(root_actions, "emit_activity", lambda *a, **k: None),
+    ):
+        parsed = {"goal_id": goal.id} if scoped else {}
+        asyncio.run(root_actions._handle_status(app, _LOG, parsed, 0, 5))
+    assert turns.result_seen(app, 1) is scoped
