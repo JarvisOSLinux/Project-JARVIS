@@ -241,7 +241,14 @@ async def call_tool(
 
 
 async def get_signal_window(adapter: Any, logger: Logger) -> List[Dict[str, Any]]:
-    """Read dispatch signal window via MCP log tool."""
+    """Read dispatch's signal window via its MCP log tool, in the pushed shape.
+
+    The entries come from ``structuredContent``: each is the SignalEntry JSON a
+    push carries, so a signal seen both ways gets one (pid, type, timestamp)
+    key, and the nonce boundary verification trusts stays its own field. The
+    text dispatch also returns cannot give either. An EXIT dispatch holds for a
+    fire_wake=false batch keeps ``held``.
+    """
     if not adapter._connected:
         return []
 
@@ -250,22 +257,26 @@ async def get_signal_window(adapter: Any, logger: Logger) -> List[Dict[str, Any]
             adapter.session.call_tool("log", {}),
             timeout=adapter.timeout,
         )
-        content = adapter._extract_content(result)
-        if isinstance(content, list):
-            signals = content
-        elif isinstance(content, dict):
-            signals = content.get("signals", [])
-        else:
-            signals = []
-
-        if signals:
-            logger.debug(f"Dispatch: Signal window returned {len(signals)} signal(s)")
-            for sig in signals:
-                logger.debug(
-                    "Dispatch:   signal: "
-                    f"type={sig.get('type')}, pid={sig.get('pid')}, data={sig.get('data', '')}"
-                )
-        return signals
     except Exception as e:
         logger.error(f"Dispatch: Failed to get signals: {e}")
         return []
+    content = adapter._extract_content(result)
+    entries = content.get("entries") if isinstance(content, dict) else None
+    if not isinstance(entries, list):
+        if not getattr(adapter, "_warned_unstructured_log", False):
+            adapter._warned_unstructured_log = True
+            logger.warning(
+                "Dispatch: its log tool returns no structured entries, so a signal "
+                "that was not pushed (a KILL, a lost push) never reaches JARVIS; "
+                "update dispatch"
+            )
+        return []
+    signals = []
+    for raw in entries:
+        if not isinstance(raw, dict):
+            continue
+        sig = _normalize_pushed_signal(raw)
+        if raw.get("held"):
+            sig["held"] = True
+        signals.append(sig)
+    return signals

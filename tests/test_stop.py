@@ -389,15 +389,17 @@ class TestStopOneTask:
         _request(app, command="make -j8")
         _run(lambda: stop.stop_task(app, LOG, 7))
         ask = AsyncMock()
+        # Its KILL comes from dispatch's window, and an EXIT whose result was in
+        # flight at the kill can come too, in either order.
+        ends = (
+            {"type": "KILL", "pid": 7, "timestamp": "k"},
+            {"type": "EXIT", "pid": 7, "timestamp": "e", "data": "200 done"},
+        )
         with patch.object(root_handlers, "ask_llm", ask):
-            _run(
-                lambda: root_handlers.on_dispatch_signal(
-                    app, LOG, {"type": "KILL", "pid": 7, "timestamp": "k"}
-                )
-            )
+            for end in ends:
+                _run(lambda: root_handlers.on_dispatch_signal(app, LOG, dict(end)))
         ask.assert_not_awaited()
         app.output_manager.handle_response.assert_not_called()
-        assert 7 not in app._killed_tasks
 
     def test_a_request_with_more_under_way_carries_on_and_is_told(self, tmp_path):
         app, _ = _app(tmp_path, running=(7, 8))
@@ -579,6 +581,48 @@ def test_the_models_own_kill_closes_the_block(tmp_path):
     _request(app, command="sleep 300")
     _run(lambda: dispatch_flow.do_kill(app, LOG, [7]))
     assert action_events.running(app) == []
+
+
+# dispatch never pushes a KILL; the poll fallback reads it from the signal
+# window, a few seconds after the kill.
+_KILL = {"type": "KILL", "pid": 7, "timestamp": "k", "data": "Terminated by LLM"}
+
+
+@pytest.mark.unit
+def test_the_models_kill_read_back_from_dispatch_is_not_told_to_it(tmp_path):
+    from jarvis.runtime import dispatch_flow
+
+    app, events = _app(tmp_path, running=(7, 8))
+    goal = _request(app, command="sleep 300")
+    app.goals.link_tasks(goal.id, [8])
+    _run(lambda: dispatch_flow.do_kill(app, LOG, [7]))
+    ended = len(events)
+    ask = AsyncMock()
+    with patch.object(root_handlers, "ask_llm", ask):
+        _run(lambda: root_handlers.on_dispatch_signal(app, LOG, dict(_KILL)))
+    ask.assert_not_awaited()
+    assert len(events) == ended
+    # The request stops counting the killed task as running, so task 8's end
+    # is answered at once instead of waiting for 7's.
+    later = root_handlers._Arrived({"type": "EXIT", "pid": 8})
+    assert not root_handlers._others_running(app, goal, [later])
+
+
+@pytest.mark.unit
+def test_a_kill_whose_reply_was_lost_still_closes_the_block(tmp_path):
+    from jarvis.runtime import dispatch_flow
+
+    app, events = _app(tmp_path)
+    _request(app, command="sleep 300")
+    app.dispatch.kill_tasks.return_value = {"error": "Kill timed out after 30s"}
+    _run(lambda: dispatch_flow.do_kill(app, LOG, [7]))
+    assert len(action_events.running(app)) == 1
+    ask = AsyncMock()
+    with patch.object(root_handlers, "ask_llm", ask):
+        _run(lambda: root_handlers.on_dispatch_signal(app, LOG, dict(_KILL)))
+    ask.assert_not_awaited()
+    assert action_events.running(app) == []
+    assert events[-1]["status"] == "stopped"
 
 
 @pytest.mark.unit

@@ -80,7 +80,11 @@ def forget(app: Any, pids: Any) -> None:
 
 
 def _killed(app: Any) -> set:
-    """PIDs of killed tasks: an end that raced the kill must not reach the model."""
+    """PIDs of killed tasks: an end that raced the kill must not reach the model.
+
+    Kept until `forget`: a killed task can end twice, by its KILL (read from
+    dispatch's window) and by an EXIT whose result was in flight at the kill.
+    """
     killed = getattr(app, "_killed_tasks", None)
     if killed is None:
         killed = app._killed_tasks = set()
@@ -95,16 +99,13 @@ def detached(app: Any, signal: Dict[str, Any], exit_data: Any = None) -> bool:
     question can be answered; a killed task was told when it was stopped.
     """
     pid = signal.get("pid")
-    ended = exit_data if isinstance(exit_data, dict) else signal
-    is_end = str(ended.get("type") or "").upper() in ("EXIT", "KILL", "TIMEOUT")
     if pid in _killed(app):
-        if is_end:
-            _killed(app).discard(pid)
         return True
     tasks = _detached(app)
     if pid not in tasks:
         return False
-    if is_end:
+    ended = exit_data if isinstance(exit_data, dict) else signal
+    if str(ended.get("type") or "").upper() in ("EXIT", "KILL", "TIMEOUT"):
         title = tasks.pop(pid)
         status, _ = action_events.outcome(ended)
         word = {"ok": "finished", "stopped": "was stopped"}.get(status, "failed")

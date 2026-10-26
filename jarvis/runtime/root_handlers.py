@@ -424,6 +424,14 @@ async def on_dispatch_signal(app: Any, logger: Logger, signal: dict[str, Any]) -
         f"JARVIS: Dispatch signal: type={sig_type}, pid={sig_pid}"
         + (" (task already completed — REMIND+EXIT merged)" if remind_completed else "")
     )
+    if str(sig_type or "").upper() == "KILL":
+        # dispatch records a KILL only for a kill JARVIS asked for, and whoever
+        # asked has acted on its result. The model would only hear of its own
+        # kill again, and a task the user stopped is never the model's to hear of.
+        _note_signal(app, signal)
+        action_events.on_signal(app, signal)
+        stop.detached(app, signal)
+        return
     if sig_type:
         emit_activity(
             app, f"Dispatch signal: {sig_type} (pid {sig_pid})", kind="dispatch"
