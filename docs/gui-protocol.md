@@ -243,7 +243,7 @@ The `/status` health check, as data.
 | `provider_error` | `message` |
 | `setup_list` | `setups` |
 | `client_list` | `clients` (labels) |
-| `ack` | `message` |
+| `ack` | `message`, and `for`: the `type` of the request it answers (`stop`, `stop_task`, `approve_confirmation`, …), so a client can show a stop's reply without echoing every decision |
 | `error` | `message` |
 | `DAEMON_SHUTDOWN` | `state`, `goals`, `session_id`, `timestamp` |
 

@@ -1,16 +1,20 @@
 'use strict';
 
-// Phone page for `jarvis web`. Ported from jarvis-app's main.js: the same
-// chat, sessions drawer and permission requests, over JarvisTransport instead
-// of Tauri. Settings, providers, widgets, voice and daemon shutdown stay on
-// the desktop; the gateway refuses those messages anyway (docs/web-gateway.md).
+// One page for jarvis-app and for `jarvis web` in a browser (Project-JARVIS
+// serves a pinned copy of this folder). transport.js says which, and carries
+// invoke/listen either way. Settings, providers, widgets, voice and daemon
+// shutdown are the desktop's (`desktop-only` in index.html); in a browser the
+// gateway's role decides what may be approved or managed.
 const { invoke, listen } = window.JarvisTransport;
+const IS_DESKTOP = window.JarvisTransport.kind === 'tauri';
 
 // ── State ──────────────────────────────────────────────────────────────────
-let isConnected      = false;
-let hasMessages      = false;
+let isConnected     = false;
+let isListening     = false;
+let hasMessages     = false;
 let currentSessionId = null;
-let role             = 'guest';
+// The desktop user owns this JARVIS; a browser learns its role from the gateway.
+let role            = IS_DESKTOP ? 'owner' : 'guest';
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
 const chatView        = document.getElementById('chat-view');
@@ -18,26 +22,72 @@ const emptyState      = document.getElementById('empty-state');
 const messages        = document.getElementById('messages');
 const messageInput    = document.getElementById('message-input');
 const sendBtn         = document.getElementById('send-btn');
+const micBtn          = document.getElementById('mic-btn');
 const stopBtn         = document.getElementById('stop-btn');
-const statusDot       = document.getElementById('status-dot');
-const statusLabel     = document.getElementById('status-label');
 const who             = document.getElementById('who');
 const notice          = document.getElementById('notice');
+const statusDot       = document.getElementById('status-dot');
+const statusLabel     = document.getElementById('status-label');
 const sessionsBtn     = document.getElementById('sessions-btn');
 const sessionBackdrop = document.getElementById('session-backdrop');
 const sessionSidebar  = document.getElementById('session-sidebar');
 const sessionList     = document.getElementById('session-list');
 const newSessionBtn   = document.getElementById('new-session-btn');
 
-const permissionsBtn       = document.getElementById('permissions-btn');
-const permissionIndicator  = document.getElementById('permission-indicator');
-const permissionCount      = document.getElementById('permission-count');
-const permissionBackdrop   = document.getElementById('permission-backdrop');
-const permissionPanel      = document.getElementById('permission-panel');
+const permissionsBtn     = document.getElementById('permissions-btn');
+const permissionIndicator = document.getElementById('permission-indicator');
+const permissionCount    = document.getElementById('permission-count');
+const permissionBackdrop = document.getElementById('permission-backdrop');
+const permissionPanel    = document.getElementById('permission-panel');
 const permissionPanelTitle = document.getElementById('permission-panel-title');
-const permissionList       = document.getElementById('permission-list');
+const permissionList     = document.getElementById('permission-list');
+const approveAllBtn      = document.getElementById('approve-all-btn');
 
 let permissionFlashTimer = null;
+
+const settingsBtn        = document.getElementById('settings-btn');
+const settingsBackdrop   = document.getElementById('settings-backdrop');
+const settingsModal      = document.getElementById('settings-modal');
+const settingsCloseBtn   = document.getElementById('settings-close-btn');
+const settingsTabGeneralBtn   = document.getElementById('settings-tab-general-btn');
+const settingsTabProvidersBtn = document.getElementById('settings-tab-providers-btn');
+const settingsTabWidgetsBtn   = document.getElementById('settings-tab-widgets-btn');
+const settingsTabGeneral      = document.getElementById('settings-tab-general');
+const settingsTabProviders    = document.getElementById('settings-tab-providers');
+const settingsTabWidgets      = document.getElementById('settings-tab-widgets');
+const settingsVoiceToggle     = document.getElementById('settings-voice-toggle');
+const settingsConfirmationMode = document.getElementById('settings-confirmation-mode');
+const settingsWakeChimePath   = document.getElementById('settings-wake-chime-path');
+const settingsChooseChimeBtn  = document.getElementById('settings-choose-chime-btn');
+const settingsResetChimeBtn   = document.getElementById('settings-reset-chime-btn');
+const settingsSocketPath      = document.getElementById('settings-socket-path');
+const settingsQuitOnShutdown  = document.getElementById('settings-quit-on-shutdown');
+const settingsShutdownBtn     = document.getElementById('settings-shutdown-btn');
+const settingsError           = document.getElementById('settings-error');
+
+const shutdownBackdrop  = document.getElementById('shutdown-backdrop');
+const shutdownModal     = document.getElementById('shutdown-modal');
+const shutdownClientList = document.getElementById('shutdown-client-list');
+const shutdownCancelBtn  = document.getElementById('shutdown-cancel-btn');
+const shutdownConfirmBtn = document.getElementById('shutdown-confirm-btn');
+
+const providerList          = document.getElementById('provider-list');
+const settingsAddProviderBtn = document.getElementById('settings-add-provider-btn');
+const providerForm           = document.getElementById('provider-form');
+const providerFormType        = document.getElementById('provider-form-type');
+const providerFormModel       = document.getElementById('provider-form-model');
+const providerFormName        = document.getElementById('provider-form-name');
+const providerFormUrl         = document.getElementById('provider-form-url');
+const providerFormTemperature = document.getElementById('provider-form-temperature');
+const providerFormKey         = document.getElementById('provider-form-key');
+const providerFormError       = document.getElementById('provider-form-error');
+const providerFormCancelBtn   = document.getElementById('provider-form-cancel-btn');
+const providerFormSaveBtn     = document.getElementById('provider-form-save-btn');
+
+let cachedProviders = [];
+let editingProviderName = null;
+
+const widgetList = document.getElementById('widget-list');
 
 const activityEl   = document.getElementById('activity');
 const workBtn      = document.getElementById('work-btn');
@@ -47,11 +97,14 @@ const workList     = document.getElementById('work-list');
 const statusList   = document.getElementById('status-list');
 const statusBtn    = document.getElementById('status-btn');
 
-// Action blocks still running, by action id (only trusted and owner get them).
+// Action blocks still running, by action id.
 const actionBlocks = new Map();
 let workTimer = null;
 
 // ── Status ─────────────────────────────────────────────────────────────────
+// woken/capturing come from the daemon's formal voice state machine
+// (Project-JARVIS#141) -- both render like the existing "listening" state
+// since, from the user's point of view, the mic is active either way.
 const STATE_COLOR = {
     idle:       '#00c8ff',
     woken:      '#00ff88',
@@ -72,21 +125,34 @@ const STATE_LABEL = {
     offline:    'Offline',
 };
 
+const LISTENING_LIKE_STATES = new Set(['listening', 'woken', 'capturing']);
+
 function setStatus(state) {
-    if (state === 'idle') showActivity('');
+    if (state === 'idle' || state === 'offline') showActivity('');
     const color = STATE_COLOR[state] ?? STATE_COLOR.offline;
-    statusDot.style.background = color;
-    statusDot.style.color      = color;
-    statusLabel.style.color    = color;
-    statusLabel.textContent    = STATE_LABEL[state] ?? 'Offline';
-    statusDot.classList.toggle('pulsing', state === 'processing' || state === 'speaking');
+    statusDot.style.background   = color;
+    statusDot.style.color        = color;
+    statusLabel.style.color      = color;
+    statusLabel.textContent      = STATE_LABEL[state] ?? 'Offline';
+
+    const pulsing = LISTENING_LIKE_STATES.has(state) || state === 'processing' || state === 'speaking';
+    statusDot.classList.toggle('pulsing', pulsing);
     document.body.classList.toggle('working', state === 'processing');
+
+    isListening = LISTENING_LIKE_STATES.has(state);
+    micBtn.classList.toggle('listening', isListening);
+    renderSettingsVoiceToggle();
 }
 
 function setConnected(connected) {
     isConnected = connected;
     messageInput.disabled    = !connected;
     messageInput.placeholder = connected ? 'Message JARVIS…' : 'Connecting…';
+    if (!connected) {
+        micBtn.classList.remove('listening');
+        isListening = false;
+        renderSettingsVoiceToggle();
+    }
     refreshSendBtn();
 }
 
@@ -94,6 +160,7 @@ function refreshSendBtn() {
     sendBtn.disabled = !isConnected || messageInput.value.trim() === '';
 }
 
+/// A line above the input for what went wrong; a click dismisses it.
 function showNotice(text) {
     notice.textContent = text;
     notice.classList.toggle('hidden', !text);
@@ -140,7 +207,7 @@ const STREAM_CURSOR = ' <span class="stream-cursor">▌</span>';
 function appendJarvisChunk(content, done, comment) {
     showMessages();
     const streaming = messages.querySelector('.jarvis-message.streaming');
-    // An answer ends the turn; a comment only says what comes next (#273).
+    // An answer ends the turn; a comment only says what comes next.
     if (done && !comment) showActivity('');
 
     if (streaming) {
@@ -353,8 +420,7 @@ function restoreSessionMessages(session, msgs) {
     });
 }
 
-
-// ── What JARVIS is doing (#267) ───────────────────────────────────────────
+// ── What JARVIS is doing (Project-JARVIS#267, #271) ─────────────────────────
 function el(tag, className, text) {
     const node = document.createElement(tag);
     if (className) node.className = className;
@@ -487,7 +553,7 @@ function renderWork(work) {
         }
         const head = el('div', 'work-item-head');
         head.append(el('div', 'work-item-title', `⋯ ${t.title}`));
-        // Kills this task only; a package manager asks for a second tap (#270).
+        // Kills this task only; a package manager asks for a second press (#270).
         const stopTask = el('button', 'task-stop-btn', 'Stop');
         stopTask.title = 'End this task';
         stopTask.addEventListener('click', async () => {
@@ -535,7 +601,7 @@ function renderStatus(sections) {
 function openPermissionPanel() {
     permissionPanel.classList.add('visible');
     permissionBackdrop.classList.add('visible');
-    invoke("list_confirmations");
+    invoke('list_confirmations');
 }
 
 function closePermissionPanel() {
@@ -653,10 +719,11 @@ function buildPermissionItem(item) {
 
 function renderPermissionList(items) {
     permissionList.innerHTML = '';
-    permissionCount.textContent = items.length ? String(items.length) : '';
     permissionPanelTitle.textContent = items.length
         ? `Permission Requests (${items.length})`
         : 'Permission Requests';
+    approveAllBtn.disabled = items.length === 0;
+    permissionCount.textContent = items.length ? String(items.length) : '';
 
     if (!items.length) {
         const empty = document.createElement('div');
@@ -679,6 +746,384 @@ async function partialApproveConfirmation(id, approvedIndices) {
     await invoke('list_confirmations');
 }
 
+async function approveAllConfirmations() {
+    await invoke('approve_all_confirmations');
+    await invoke('list_confirmations');
+}
+
+// ── Settings ───────────────────────────────────────────────────────────────
+function clearSettingsError() {
+    settingsError.textContent = '';
+    settingsError.classList.remove('visible');
+}
+
+function showSettingsError(message) {
+    settingsError.textContent = message;
+    settingsError.classList.add('visible');
+}
+
+function switchSettingsTab(tab) {
+    settingsTabGeneralBtn.classList.toggle('active', tab === 'general');
+    settingsTabProvidersBtn.classList.toggle('active', tab === 'providers');
+    settingsTabWidgetsBtn.classList.toggle('active', tab === 'widgets');
+    settingsTabGeneral.classList.toggle('active', tab === 'general');
+    settingsTabProviders.classList.toggle('active', tab === 'providers');
+    settingsTabWidgets.classList.toggle('active', tab === 'widgets');
+}
+
+function renderSettingsVoiceToggle() {
+    settingsVoiceToggle.textContent = isListening ? 'Enabled' : 'Disabled';
+    settingsVoiceToggle.classList.toggle('disabled', !isListening);
+}
+
+async function openSettingsModal() {
+    settingsModal.classList.add('visible');
+    settingsBackdrop.classList.add('visible');
+    clearSettingsError();
+    switchSettingsTab('general');
+    renderSettingsVoiceToggle();
+    await invoke('get_settings');
+    await invoke('list_providers');
+    settingsSocketPath.textContent = await invoke('get_connection_info');
+    settingsQuitOnShutdown.checked = await invoke('get_quit_on_daemon_shutdown');
+    await refreshWidgetList();
+}
+
+function closeSettingsModal() {
+    settingsModal.classList.remove('visible');
+    settingsBackdrop.classList.remove('visible');
+    closeProviderForm();
+}
+
+function toggleSettingsModal() {
+    settingsModal.classList.contains('visible') ? closeSettingsModal() : openSettingsModal();
+}
+
+function applySettings(settings) {
+    settingsConfirmationMode.value = settings.confirmation_mode;
+    settingsWakeChimePath.textContent = settings.wake_chime_path;
+}
+
+async function chooseWakeChimeFile() {
+    const path = await invoke('pick_wake_chime_file');
+    if (!path) return; // user cancelled the native picker
+    clearSettingsError();
+    await invoke('set_wake_chime_path', { path });
+}
+
+// ── Providers ──────────────────────────────────────────────────────────────
+function providerLabel(p) {
+    const temp = p.temperature != null ? `, temp ${p.temperature}` : '';
+    return `${p.type}/${p.model}${temp}`;
+}
+
+function buildProviderItem(p, index) {
+    const el = document.createElement('div');
+    el.className = 'provider-item';
+
+    const main = document.createElement('div');
+    main.className = 'provider-item-main';
+    const name = document.createElement('div');
+    name.className = 'provider-item-name';
+    name.textContent = p.name || '(unnamed)';
+    const meta = document.createElement('div');
+    meta.className = 'provider-item-meta';
+    meta.textContent = providerLabel(p);
+    main.append(name, meta);
+
+    const editBtn = document.createElement('button');
+    editBtn.className = 'provider-item-action';
+    editBtn.title = 'Edit';
+    editBtn.textContent = '✎';
+    editBtn.addEventListener('click', () => openProviderForm(p));
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'provider-item-action';
+    removeBtn.title = 'Remove';
+    removeBtn.textContent = '×';
+    removeBtn.addEventListener('click', () => removeProvider(p.name));
+
+    const actions = document.createElement('div');
+    actions.className = 'provider-item-actions';
+    if (index > 0) {
+        // JARVIS tries providers in this order; up moves one earlier.
+        const upBtn = document.createElement('button');
+        upBtn.className = 'provider-item-action';
+        upBtn.title = 'Try earlier';
+        upBtn.textContent = '↑';
+        upBtn.addEventListener('click', () => invoke('move_provider', { name: p.name, position: index }));
+        actions.append(upBtn);
+    }
+    actions.append(editBtn, removeBtn);
+
+    el.append(main, actions);
+    return el;
+}
+
+function renderProviderList(providers) {
+    cachedProviders = providers;
+    providerList.innerHTML = '';
+    if (!providers.length) {
+        const empty = document.createElement('div');
+        empty.className = 'provider-empty';
+        empty.textContent = 'No providers configured.';
+        providerList.append(empty);
+        return;
+    }
+    providers.forEach((p, index) => providerList.append(buildProviderItem(p, index)));
+}
+
+function openProviderForm(existing) {
+    editingProviderName = existing ? existing.name : null;
+    providerFormError.textContent = '';
+    providerFormError.classList.remove('visible');
+    providerFormType.value = existing?.type || 'ollama';
+    providerFormModel.value = existing?.model || '';
+    providerFormName.value = existing?.name || '';
+    providerFormUrl.value = existing?.url || '';
+    providerFormTemperature.value = existing?.temperature ?? '';
+    providerFormKey.value = '';
+    providerFormSaveBtn.textContent = existing ? 'Save' : 'Add';
+    providerForm.classList.remove('hidden');
+    settingsAddProviderBtn.classList.add('hidden');
+}
+
+function closeProviderForm() {
+    editingProviderName = null;
+    providerForm.classList.add('hidden');
+    settingsAddProviderBtn.classList.remove('hidden');
+}
+
+function showProviderFormError(message) {
+    providerFormError.textContent = message;
+    providerFormError.classList.add('visible');
+}
+
+async function saveProviderForm() {
+    const model = providerFormModel.value.trim();
+    if (!model) return showProviderFormError('Model is required.');
+
+    const ptype = providerFormType.value;
+    const apiKey = providerFormKey.value.trim();
+    if (ptype === 'api' && !apiKey && !editingProviderName) {
+        return showProviderFormError('API key is required for cloud providers.');
+    }
+
+    let temperature = null;
+    const tempStr = providerFormTemperature.value.trim();
+    if (tempStr) {
+        temperature = Number(tempStr);
+        if (Number.isNaN(temperature) || temperature < 0 || temperature > 2) {
+            return showProviderFormError('Temperature must be a number between 0.0 and 2.0.');
+        }
+    }
+
+    const url = providerFormUrl.value.trim();
+    const name = providerFormName.value.trim();
+
+    if (editingProviderName) {
+        const fields = { model, type: ptype };
+        if (url) fields.url = url;
+        if (apiKey) fields.key = apiKey;
+        if (temperature !== null) fields.temperature = temperature;
+        await invoke('edit_provider', { name: editingProviderName, fields });
+    } else {
+        await invoke('add_provider', {
+            ptype,
+            model,
+            name: name || null,
+            url: url || null,
+            apiKey: apiKey || null,
+            temperature,
+        });
+    }
+}
+
+async function removeProvider(name) {
+    await invoke('remove_provider', { name });
+}
+
+// ── Widgets (jarvisos-app#18, #16) ──────────────────────────────────────────
+function trustBadgeClass(trustStatus) {
+    if (trustStatus === 'verified') return 'trust-badge trust-verified';
+    if (trustStatus === 'community') return 'trust-badge trust-community';
+    return 'trust-badge trust-unreviewed';
+}
+
+function buildWidgetItem(w) {
+    const el = document.createElement('div');
+    el.className = 'widget-item';
+
+    const header = document.createElement('div');
+    header.className = 'widget-item-header';
+
+    const name = document.createElement('div');
+    name.className = 'widget-item-name';
+    name.textContent = w.name;
+
+    const badge = document.createElement('span');
+    badge.className = trustBadgeClass(w.trustStatus);
+    badge.textContent = w.trustStatus;
+
+    const toggleBtn = document.createElement('button');
+    toggleBtn.className = 'widget-toggle-btn' + (w.enabled ? '' : ' disabled');
+    toggleBtn.textContent = w.enabled ? 'Enabled' : 'Disabled';
+    toggleBtn.addEventListener('click', () => setWidgetEnabled(w.id, !w.enabled));
+
+    header.append(name, badge, toggleBtn);
+
+    const desc = document.createElement('div');
+    desc.className = 'widget-item-desc';
+    desc.textContent = w.description || '';
+
+    const meta = document.createElement('div');
+    meta.className = 'widget-item-meta';
+    meta.textContent = w.source === 'installed' ? 'Installed' : 'Bundled';
+
+    const actions = document.createElement('div');
+    actions.className = 'settings-row';
+    const customizeBtn = document.createElement('button');
+    customizeBtn.textContent = 'Customize appearance…';
+    customizeBtn.addEventListener('click', () => customizeWidgetAppearance(w.id));
+    const resetBtn = document.createElement('button');
+    resetBtn.textContent = 'Reset appearance';
+    resetBtn.addEventListener('click', () => resetWidgetAppearance(w.id));
+    actions.append(customizeBtn, resetBtn);
+
+    el.append(header, desc, meta, actions);
+    return el;
+}
+
+function renderWidgetList(widgets) {
+    widgetList.innerHTML = '';
+    if (!widgets.length) {
+        const empty = document.createElement('div');
+        empty.className = 'provider-empty';
+        empty.textContent = 'No widgets found.';
+        widgetList.append(empty);
+        return;
+    }
+    for (const w of widgets) widgetList.append(buildWidgetItem(w));
+}
+
+async function refreshWidgetList() {
+    renderWidgetList(await invoke('list_widgets'));
+}
+
+async function setWidgetEnabled(id, enabled) {
+    await invoke('set_widget_enabled', { id, enabled });
+    await refreshWidgetList();
+}
+
+async function customizeWidgetAppearance(id) {
+    const picked = await invoke('pick_widget_appearance_folder', { id });
+    if (!picked) return; // user cancelled, or the folder had no manifest.json
+    await refreshWidgetList();
+}
+
+async function resetWidgetAppearance(id) {
+    await invoke('reset_widget_appearance', { id });
+    await refreshWidgetList();
+}
+
+// ── Daemon shutdown (Project-JARVIS#146 / jarvisos-app#17) ──────────────────
+async function openShutdownModal() {
+    shutdownClientList.innerHTML = 'Loading&hellip;';
+    shutdownModal.classList.add('visible');
+    shutdownBackdrop.classList.add('visible');
+    await invoke('list_clients');
+}
+
+function closeShutdownModal() {
+    shutdownModal.classList.remove('visible');
+    shutdownBackdrop.classList.remove('visible');
+}
+
+function renderShutdownClientList(clients) {
+    shutdownClientList.innerHTML = '';
+    if (!clients.length) {
+        const empty = document.createElement('div');
+        empty.className = 'shutdown-client-item';
+        empty.textContent = 'No other clients connected.';
+        shutdownClientList.append(empty);
+        return;
+    }
+    for (const label of clients) {
+        const item = document.createElement('div');
+        item.className = 'shutdown-client-item';
+        item.textContent = label;
+        shutdownClientList.append(item);
+    }
+}
+
+async function confirmShutdown() {
+    closeShutdownModal();
+    await invoke('request_daemon_shutdown');
+}
+
+function formatShutdownTimestamp(epochSeconds) {
+    if (!epochSeconds) return '';
+    const d = new Date(epochSeconds * 1000);
+    return Number.isNaN(d.getTime())
+        ? ''
+        : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function handleDaemonShutdown(payload) {
+    closeShutdownModal();
+    const when = formatShutdownTimestamp(payload.timestamp);
+    addSystemMessage(
+        `JARVIS shut down${when ? ' at ' + when : ''}. Last state: ${payload.state}.`
+    );
+    // Reuses the same disconnected treatment ipc-disconnected drives --
+    // the daemon is already tearing its sockets down, so the real
+    // disconnect will follow within moments regardless; this just makes
+    // the UI reflect it immediately instead of lagging behind.
+    setConnected(false);
+    setStatus('offline');
+}
+
+// ── Stop (Project-JARVIS#270) ────────────────────────────────────────────────
+// The daemon answers each stop with an `ack` saying what stopped and what
+// still runs; acks for other requests (a confirmation decided) stay quiet.
+const STOP_COMMANDS = new Set(['stop', 'stop_all', 'stop_task']);
+
+/// Stops JARVIS's work in the session; its running tasks keep running.
+async function stopReply() {
+    await invoke('stop');
+}
+
+function onAck(ack) {
+    if (STOP_COMMANDS.has(ack.for) && ack.message) addSystemMessage(ack.message);
+}
+
+// ── Connection ─────────────────────────────────────────────────────────────
+/// The gateway's word on who this browser is (`jarvis web` only).
+function applyGateway(info) {
+    role = info.role;
+    who.textContent = `${info.login} · ${info.role}`;
+    // Only owner and trusted may answer a request; a guest watches and chats.
+    document.body.classList.toggle('can-approve', role === 'owner' || role === 'trusted');
+    document.body.classList.toggle('can-manage', role === 'owner');
+}
+
+function handleDisconnect(info) {
+    setConnected(false);
+    setStatus('offline');
+    closeWorkPanel();
+    actionBlocks.clear();
+    showActivity('');
+    if (info && info.reason) showNotice(info.reason);
+}
+
+function closePanels() {
+    closeWorkPanel();
+    closePermissionPanel();
+    closeSidebar();
+    closeSettingsModal();
+    closeShutdownModal();
+}
+
 // ── Actions ────────────────────────────────────────────────────────────────
 async function sendMessage() {
     const text = messageInput.value.trim();
@@ -690,31 +1135,17 @@ async function sendMessage() {
     await invoke('send_message', { content: text });
 }
 
-// Stops JARVIS's work in the session; its running tasks keep running (#270).
-async function stopReply() {
-    await invoke('stop');
-}
-
-function applyGateway(info) {
-    role = info.role;
-    who.textContent = `${info.login} · ${info.role}`;
-    // Only owner and trusted may answer a request; a guest watches and chats.
-    document.body.classList.toggle('can-approve', role === 'owner' || role === 'trusted');
-    document.body.classList.toggle('can-manage', role === 'owner');
-}
-
-function handleDisconnect(info) {
-    setConnected(false);
-    closeWorkPanel();
-    actionBlocks.clear();
-    showActivity('');
-    setStatus('offline');
-    if (info && info.reason) showNotice(info.reason);
+async function toggleListening() {
+    await invoke('toggle_listening');
 }
 
 // ── Boot ───────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
+    document.body.classList.add(IS_DESKTOP ? 'desktop' : 'web');
+    if (IS_DESKTOP) document.body.classList.add('can-approve', 'can-manage');
+
     messageInput.addEventListener('input', refreshSendBtn);
+
     messageInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
@@ -723,44 +1154,78 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     sendBtn.addEventListener('click', sendMessage);
+    micBtn.addEventListener('click', toggleListening);
     stopBtn.addEventListener('click', stopReply);
+    notice.addEventListener('click', () => showNotice(''));
+    // On a phone a panel covers the screen, so each has its own way out.
+    document.getElementById('permission-close').addEventListener('click', closePermissionPanel);
+    document.getElementById('stop-all-btn').addEventListener('click', () => invoke('stop_all'));
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closePanels();
+    });
     sessionsBtn.addEventListener('click', toggleSidebar);
     sessionBackdrop.addEventListener('click', closeSidebar);
     newSessionBtn.addEventListener('click', createNewSession);
     permissionsBtn.addEventListener('click', togglePermissionPanel);
     permissionBackdrop.addEventListener('click', closePermissionPanel);
-    workBtn.addEventListener('click', () => (workPanel.classList.contains('visible') ? closeWorkPanel() : openWorkPanel()));
-    workBackdrop.addEventListener('click', closeWorkPanel);
-    // On a phone a panel covers the screen, so it needs its own way out.
-    document.getElementById('work-close').addEventListener('click', closeWorkPanel);
-    document.getElementById('permission-close').addEventListener('click', closePermissionPanel);
-    document.addEventListener('keydown', (e) => {
-        if (e.key !== 'Escape') return;
-        closeWorkPanel();
-        closePermissionPanel();
-        closeSidebar();
+    approveAllBtn.addEventListener('click', approveAllConfirmations);
+
+    settingsBtn.addEventListener('click', toggleSettingsModal);
+    settingsBackdrop.addEventListener('click', closeSettingsModal);
+    settingsCloseBtn.addEventListener('click', closeSettingsModal);
+    settingsTabGeneralBtn.addEventListener('click', () => switchSettingsTab('general'));
+    settingsTabProvidersBtn.addEventListener('click', () => switchSettingsTab('providers'));
+    settingsTabWidgetsBtn.addEventListener('click', () => switchSettingsTab('widgets'));
+    settingsVoiceToggle.addEventListener('click', toggleListening);
+    settingsConfirmationMode.addEventListener('change', () => {
+        clearSettingsError();
+        invoke('set_confirmation_mode', { mode: settingsConfirmationMode.value });
     });
-    document.getElementById('stop-all-btn').addEventListener('click', () => invoke('stop_all'));
-    statusBtn.addEventListener('click', () => {
-        statusList.textContent = 'Checking…';
-        invoke('get_status');
+    settingsChooseChimeBtn.addEventListener('click', chooseWakeChimeFile);
+    settingsResetChimeBtn.addEventListener('click', () => {
+        clearSettingsError();
+        invoke('reset_wake_chime_path');
+    });
+    settingsAddProviderBtn.addEventListener('click', () => openProviderForm(null));
+    providerFormCancelBtn.addEventListener('click', closeProviderForm);
+    providerFormSaveBtn.addEventListener('click', saveProviderForm);
+
+    settingsShutdownBtn.addEventListener('click', openShutdownModal);
+    shutdownBackdrop.addEventListener('click', closeShutdownModal);
+    shutdownCancelBtn.addEventListener('click', closeShutdownModal);
+    shutdownConfirmBtn.addEventListener('click', confirmShutdown);
+    settingsQuitOnShutdown.addEventListener('change', () => {
+        invoke('set_quit_on_daemon_shutdown', { enabled: settingsQuitOnShutdown.checked });
     });
 
-    await listen('ipc-connected', () => {
+    workBtn.addEventListener('click', () => (workPanel.classList.contains('visible') ? closeWorkPanel() : openWorkPanel()));
+    workBackdrop.addEventListener('click', closeWorkPanel);
+    document.getElementById('work-close').addEventListener('click', closeWorkPanel);
+    statusBtn.addEventListener('click', () => {
+        statusList.textContent = 'Checking…';
+        invoke('get_health', { full: false });
+    });
+
+    // IPC events from Rust backend
+    await listen('ipc-connected',    ()      => {
         setConnected(true);
         showNotice('');
         invoke('list_sessions');
         invoke('list_confirmations');
     });
-    await listen('ipc-disconnected', (e) => handleDisconnect(e.payload));
-    await listen('ipc-gateway',      (e) => applyGateway(e.payload));
-    await listen('ipc-state',        (e) => setStatus(e.payload));
-    await listen('ipc-chunk',        (e) => appendJarvisChunk(e.payload.content, e.payload.done, e.payload.comment));
-    await listen('ipc-activity',     (e) => showActivity(e.payload.text));
-    await listen('ipc-action',       (e) => onAction(e.payload));
-    await listen('ipc-work',         (e) => renderWork(e.payload.work || {}));
-    await listen('ipc-status',       (e) => renderStatus(e.payload.sections));
+    await listen('ipc-disconnected', (e)     => handleDisconnect(e.payload));
+    await listen('ipc-gateway',      (e)     => applyGateway(e.payload));
+    await listen('ipc-ack',          (e)     => onAck(e.payload));
+    await listen('ipc-state',        (e)     => setStatus(e.payload));
+    await listen('ipc-chunk',        (e)     => appendJarvisChunk(e.payload.content, e.payload.done, e.payload.comment));
+    await listen('ipc-activity',     (e)     => showActivity(e.payload));
+    await listen('ipc-action',       (e)     => onAction(e.payload));
+    await listen('ipc-work',         (e)     => renderWork(e.payload || {}));
+    await listen('ipc-health',       (e)     => renderStatus(e.payload));
+    await listen('ipc-wake',         ()      => setStatus('listening'));
     await listen('ipc-confirm', () => {
+        // Non-blocking by design: no window.confirm(), no toast. Just a
+        // subtle cue that the Permission Requests panel has something new.
         flashPermissionIndicator();
         invoke('list_confirmations');
     });
@@ -774,16 +1239,48 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     await listen('ipc-session-switched', (e) => {
         restoreSessionMessages(e.payload.session, e.payload.messages);
+        // create_session/switch_session only reply with session_switched, not
+        // a refreshed list -- pull one explicitly so a newly created session
+        // (or updated_at reordering) shows up in the sidebar immediately.
         invoke('list_sessions');
     });
     await listen('ipc-session-error', (e) => showNotice('Session error: ' + e.payload));
-    await listen('ipc-error',         (e) => showNotice(e.payload));
-    await listen('ipc-ack',           (e) => addSystemMessage(e.payload.message));
-    await listen('ipc-daemon-shutdown', (e) => {
-        addSystemMessage(`JARVIS shut down. Last state: ${e.payload.state ?? 'unknown'}.`);
-        handleDisconnect(null);
+    await listen('ipc-error', (e) => showNotice(e.payload));
+    await listen('ipc-settings', (e) => applySettings(e.payload));
+    await listen('ipc-provider-list', (e) => {
+        renderProviderList(e.payload);
+        closeProviderForm(); // a refreshed list means the pending add/edit/remove succeeded
+    });
+    await listen('ipc-provider-error', (e) => showProviderFormError(e.payload));
+    await listen('ipc-client-list', (e) => renderShutdownClientList(e.payload));
+    await listen('ipc-daemon-shutdown', (e) => handleDaemonShutdown(e.payload));
+    await listen('ipc-open-shutdown-modal', openShutdownModal); // tray menu entry point
+    await listen('ipc-config-updated', (e) => {
+        if (e.payload.key === 'CONFIRMATION_MODE' || e.payload.key === 'WAKE_CHIME_PATH') {
+            clearSettingsError();
+            invoke('get_settings');
+        }
+    });
+    await listen('ipc-config-error', (e) => {
+        if (e.payload.key === 'CONFIRMATION_MODE' || e.payload.key === 'WAKE_CHIME_PATH') {
+            showSettingsError(e.payload.message);
+        }
     });
 
-    setStatus('offline');
-    window.JarvisTransport.connect();
+    if (!IS_DESKTOP) {
+        setStatus('offline');
+        window.JarvisTransport.connect();
+        return;
+    }
+
+    // Listeners are now registered, but the backend's IPC poll thread may have
+    // already emitted ipc-connected/ipc-state before this point (Tauri does not
+    // queue events for late listeners). Pull current truth to reconcile.
+    const status = await invoke('get_status');
+    setConnected(status.connected);
+    setStatus(status.state);
+    if (status.connected) {
+        await invoke('list_sessions');
+        await invoke('list_confirmations');
+    }
 });
