@@ -6,7 +6,7 @@ same dicts. Sign-ins are left out on purpose: they belong to each server, not
 to JARVIS.
 
 Fast by default. It reads JARVIS's own state and runs local checks (the dmcp
-binary, the embedding model on the local Ollama, the audio devices), each off
+binary, the embedding model's llama-server, the audio devices), each off
 the event loop and with a short timeout. ``full`` adds the one check that goes
 online: whether installed servers have registry updates.
 """
@@ -141,7 +141,7 @@ async def _search_check(app: Any) -> Check:
     if embeddings is None:
         return Check("Search", WARN, "keyword only: no embedding model was set up")
     model = getattr(embeddings, "model", "?")
-    reachable = await asyncio.to_thread(_ollama_has_model, embeddings)
+    reachable = await asyncio.to_thread(_embeddings_reachable, embeddings)
     if reachable is False:
         return Check(
             "Search",
@@ -151,19 +151,17 @@ async def _search_check(app: Any) -> Check:
     return Check("Search", OK, f"semantic ({model})")
 
 
-def _ollama_has_model(embeddings: Any) -> Optional[bool]:
+def _embeddings_reachable(embeddings: Any) -> Optional[bool]:
     base = getattr(embeddings, "base_url", None)
-    model = str(getattr(embeddings, "model", ""))
     if not base:
         return None
     try:
         with urllib.request.urlopen(
-            f"{base.rstrip('/')}/api/tags", timeout=LOCAL_TIMEOUT
+            f"{base.rstrip('/')}/health", timeout=LOCAL_TIMEOUT
         ) as resp:
-            names = [m.get("name", "") for m in json.load(resp).get("models", [])]
+            return resp.status == 200
     except Exception:
         return False
-    return any(n == model or n.split(":")[0] == model.split(":")[0] for n in names)
 
 
 # --- voice ----------------------------------------------------------------------------

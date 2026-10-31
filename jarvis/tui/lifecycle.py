@@ -14,7 +14,7 @@ def on_mount(app: Any) -> None:
 
     app._append_log("[dim]Booting JARVIS engine...[/dim]")
 
-    # Defer engine start off the Textual mount path so an Ollama
+    # Defer engine start off the Textual mount path so a model server
     # connect or contextor spawn doesn't block the first paint.
     app.run_worker(app._start_jarvis(), exclusive=True, name="jarvis-boot")
 

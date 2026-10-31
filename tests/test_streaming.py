@@ -1,4 +1,4 @@
-"""Tests for stream_chat() on BaseLLMProvider, OllamaProvider, APIProvider,
+"""Tests for stream_chat() on BaseLLMProvider, APIProvider,
 and ProviderPool (#178).
 """
 
@@ -9,7 +9,6 @@ import pytest
 from jarvis.llm.base import BaseLLMProvider
 from jarvis.llm.provider_pool import ProviderEntry, ProviderPool
 from jarvis.llm.providers.api import APIProvider
-from jarvis.llm.providers.ollama import OllamaProvider
 
 
 class _MinimalProvider(BaseLLMProvider):
@@ -25,35 +24,6 @@ class TestBaseLLMProviderDefaultStreaming:
         provider = _MinimalProvider("test-model")
         chunks = list(provider.stream_chat([{"role": "user", "content": "hi"}]))
         assert chunks == ["buffered full response"]
-
-
-class TestOllamaProviderStreaming:
-    def test_yields_content_deltas_and_captures_usage(self, monkeypatch):
-        provider = OllamaProvider("qwen3:4b")
-        monkeypatch.setattr(provider, "_maybe_autostart", lambda: None)
-        monkeypatch.setattr(provider, "_ensure_client", lambda: None)
-
-        mock_client = MagicMock()
-        mock_client.chat.return_value = iter(
-            [
-                {"message": {"content": "Hel"}, "done": False},
-                {"message": {"content": "lo"}, "done": False},
-                {
-                    "message": {"content": ""},
-                    "done": True,
-                    "prompt_eval_count": 10,
-                    "eval_count": 2,
-                },
-            ]
-        )
-        provider._client = mock_client
-
-        chunks = list(provider.stream_chat([{"role": "user", "content": "hi"}]))
-
-        assert chunks == ["Hel", "lo"]
-        assert provider.last_prompt_tokens == 10
-        assert provider.last_completion_tokens == 2
-        assert mock_client.chat.call_args.kwargs["stream"] is True
 
 
 class TestAPIProviderStreaming:
@@ -164,30 +134,6 @@ class TestStreamingConvertsImages:
         )
         return path
 
-    def test_ollama_stream_chat_encodes_images(self, tmp_path, monkeypatch):
-        image = self._png(tmp_path)
-        provider = OllamaProvider("llama3.2-vision")
-        monkeypatch.setattr(provider, "_maybe_autostart", lambda: None)
-        monkeypatch.setattr(provider, "_ensure_client", lambda: None)
-
-        mock_client = MagicMock()
-        mock_client.chat.return_value = iter(
-            [{"message": {"content": "a cat"}, "done": True}]
-        )
-        provider._client = mock_client
-
-        list(
-            provider.stream_chat(
-                [{"role": "user", "content": "what is this?", "images": [str(image)]}]
-            )
-        )
-
-        sent = mock_client.chat.call_args.kwargs["messages"][0]
-        # Path replaced by base64 payload, not passed through verbatim.
-        assert sent["images"] != [str(image)]
-        assert isinstance(sent["images"][0], str) and sent["images"][0]
-        assert str(image) not in sent["images"][0]
-
     def test_api_stream_chat_encodes_images(self, tmp_path, monkeypatch):
         image = self._png(tmp_path)
         provider = APIProvider(model="gpt-4o", api_url="http://localhost:8080")
@@ -225,19 +171,3 @@ class TestStreamingConvertsImages:
         )
         assert url.startswith("data:image/png;base64,")
         assert str(image) not in url
-
-    def test_text_only_streaming_payload_is_unchanged(self, monkeypatch):
-        provider = OllamaProvider("qwen3:4b")
-        monkeypatch.setattr(provider, "_maybe_autostart", lambda: None)
-        monkeypatch.setattr(provider, "_ensure_client", lambda: None)
-
-        mock_client = MagicMock()
-        mock_client.chat.return_value = iter(
-            [{"message": {"content": "hi"}, "done": True}]
-        )
-        provider._client = mock_client
-
-        messages = [{"role": "user", "content": "hi"}]
-        list(provider.stream_chat(messages))
-
-        assert mock_client.chat.call_args.kwargs["messages"] == messages

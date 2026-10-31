@@ -62,7 +62,7 @@ class ProviderPool(BaseLLMProvider):
         if require_vision and not any(e.vision for e in self._entries):
             raise NoVisionProviderError(
                 "No vision-capable provider configured. Add one with: "
-                "jarvis providers add --type ollama --model llama3.2-vision --vision"
+                "jarvis providers add --type llamacpp --model ggml-org/gemma-3-4b-it-GGUF --vision"
             )
 
         errors: List[tuple[str, str]] = []

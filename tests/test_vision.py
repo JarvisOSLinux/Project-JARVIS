@@ -23,7 +23,6 @@ from jarvis.llm.provider_pool import (
     ProviderPool,
 )
 from jarvis.llm.providers.api import APIProvider
-from jarvis.llm.providers.ollama import OllamaProvider
 from jarvis.runtime import root_actions
 
 _LOG = logging.getLogger("test")
@@ -35,74 +34,6 @@ WEBP_BYTES = b"RIFF\x00\x00\x00\x00WEBP" + b"fake-webp-payload"
 
 def _b64(data: bytes) -> str:
     return base64.b64encode(data).decode("ascii")
-
-
-# ------------------------------------------------------------------
-# OllamaProvider message conversion
-# ------------------------------------------------------------------
-
-
-def _ollama_with_mock_client():
-    provider = OllamaProvider(model="llama3.2-vision")
-    provider._maybe_autostart = lambda: None
-    client = Mock()
-    client.chat = Mock(return_value={"message": {"content": "ok"}})
-    provider._client = client
-    return provider, client
-
-
-@pytest.mark.integration
-class TestOllamaImageMessages:
-    def test_text_only_payload_unchanged(self):
-        provider, client = _ollama_with_mock_client()
-        messages = [
-            {"role": "system", "content": "s"},
-            {"role": "user", "content": "hi"},
-        ]
-
-        result = provider.chat(messages)
-
-        assert result == "ok"
-        sent = client.chat.call_args.kwargs["messages"]
-        assert sent is messages
-        assert sent == [
-            {"role": "system", "content": "s"},
-            {"role": "user", "content": "hi"},
-        ]
-
-    def test_image_message_becomes_base64(self, tmp_path):
-        provider, client = _ollama_with_mock_client()
-        img = tmp_path / "photo.png"
-        img.write_bytes(PNG_BYTES)
-        messages = [{"role": "user", "content": "what is this", "images": [str(img)]}]
-
-        provider.chat(messages)
-
-        sent = client.chat.call_args.kwargs["messages"]
-        assert sent[0] == {
-            "role": "user",
-            "content": "what is this",
-            "images": [_b64(PNG_BYTES)],
-        }
-        assert messages[0]["images"] == [str(img)]
-
-    def test_mixed_messages_only_rewrite_image_ones(self, tmp_path):
-        provider, client = _ollama_with_mock_client()
-        img = tmp_path / "photo.png"
-        img.write_bytes(PNG_BYTES)
-        text_msg = {"role": "system", "content": "s"}
-        image_msg = {"role": "user", "content": "look", "images": [str(img)]}
-
-        provider.chat([text_msg, image_msg])
-
-        sent = client.chat.call_args.kwargs["messages"]
-        assert sent[0] is text_msg
-        assert sent[1]["images"] == [_b64(PNG_BYTES)]
-
-
-# ------------------------------------------------------------------
-# APIProvider message conversion
-# ------------------------------------------------------------------
 
 
 class _FakeHTTPXResponse:
@@ -360,19 +291,19 @@ class TestProviderVisionFlag:
         monkeypatch.setattr(Config, "PROVIDERS_FILE", str(tmp_path / "providers.json"))
 
     def test_add_provider_with_vision(self):
-        providers_mod.add_provider("ollama", "llama3.2-vision", vision=True)
+        providers_mod.add_provider("llamacpp", "llama3.2-vision", vision=True)
 
         entry = providers_mod.list_providers()[0]
         assert entry["vision"] is True
 
     def test_add_provider_defaults_to_no_vision(self):
-        providers_mod.add_provider("ollama", "qwen3:4b")
+        providers_mod.add_provider("llamacpp", "qwen3:4b")
 
         entry = providers_mod.list_providers()[0]
         assert entry.get("vision", False) is False
 
     def test_edit_provider_vision_coerces_strings(self):
-        name, _ = providers_mod.add_provider("ollama", "llama3.2-vision")
+        name, _ = providers_mod.add_provider("llamacpp", "llama3.2-vision")
 
         providers_mod.edit_provider(name, vision="true")
         assert providers_mod.list_providers()[0]["vision"] is True
@@ -505,7 +436,7 @@ class TestAnalyzeImageHandler:
         assert label == "VISION_ERROR"
         assert "no vision-capable provider configured" in summary
         assert (
-            "jarvis providers add --type ollama --model llama3.2-vision --vision"
+            "jarvis providers add --type llamacpp --model ggml-org/gemma-3-4b-it-GGUF --vision"
             in summary
         )
 

@@ -258,7 +258,7 @@ class TestConfigurationIntegration:
         """Test that configuration affects LLM provider selection."""
         from jarvis.llm.providers import create_provider
 
-        provider = create_provider(provider="ollama", model="llama2")
+        provider = create_provider(provider="llamacpp", model="llama2")
         assert provider is not None
 
         provider = create_provider(
