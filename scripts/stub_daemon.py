@@ -165,6 +165,30 @@ async def handle(msg: dict, writer: asyncio.StreamWriter) -> None:
         await broadcast({"type": "status", "full": False, "sections": SAMPLE_STATUS})
     elif kind == "list_work":
         await broadcast({"type": "work", "work": sample_work()})
+    elif kind in ("stop", "stop_all"):
+        ended = kind == "stop_all" and bool(running)
+        if ended:
+            running.clear()
+        text = (
+            "Stopped, and ended: execute_command (jarvis-shell-system-mcp)."
+            if ended
+            else "Stopped."
+        )
+        await broadcast({"type": "ack", "for": kind, "message": text})
+        await broadcast({"type": "state", "state": "idle"})
+    elif kind == "stop_task":
+        since = running.pop(f"tool:{msg.get('pid')}", None)
+        stopped = since is not None
+        if stopped:
+            await action(
+                "end", "tool:7", kind="tool", status="stopped", started_at=since
+            )
+        text = (
+            "Stopped execute_command (jarvis-shell-system-mcp)."
+            if stopped
+            else f"No task {msg.get('pid')} is running (F4 shows what is)."
+        )
+        await broadcast({"type": "ack", "for": kind, "message": text})
     elif kind == "message":
         text = str(msg.get("content", ""))
         if text.strip().lower() == "confirm":

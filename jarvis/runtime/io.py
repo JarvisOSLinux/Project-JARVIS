@@ -132,7 +132,7 @@ async def _handle_confirmation_query(
     ack = apply_confirmation_decision(app, msg)
     if ack is None:
         return False
-    await _gui_write(writer, {"type": "ack", "message": ack})
+    await _gui_write(writer, {"type": "ack", "for": msg_type, "message": ack})
     return True
 
 
@@ -162,7 +162,11 @@ async def _handle_setup_query(
     done = "is finishing" if msg_type == "setup_completed" else "dropped"
     await _gui_write(
         writer,
-        {"type": "ack", "message": f"JARVIS {done} the setup of {setup.server_id}."},
+        {
+            "type": "ack",
+            "for": msg_type,
+            "message": f"JARVIS {done} the setup of {setup.server_id}.",
+        },
     )
     return True
 
@@ -511,7 +515,7 @@ async def _process_gui_message(
         reply = await handle_command(
             app, logger, "/stop all" if msg_type == "stop_all" else "/stop"
         )
-        await _gui_write(writer, {"type": "ack", "message": reply})
+        await _gui_write(writer, {"type": "ack", "for": msg_type, "message": reply})
         await broadcast_to_gui_clients(
             app, {"type": "response", "content": "", "done": True}
         )
@@ -526,7 +530,7 @@ async def _process_gui_message(
             if isinstance(pid, int) and not isinstance(pid, bool)
             else "stop_task needs the task's pid, a number (list_work shows it)."
         )
-        await _gui_write(writer, {"type": "ack", "message": reply})
+        await _gui_write(writer, {"type": "ack", "for": msg_type, "message": reply})
 
     elif msg_type == "get_status":
         await _gui_write(writer, await _status_reply(app, bool(msg.get("full"))))

@@ -498,6 +498,7 @@ def test_the_socket_and_the_gateway_for_one_task(tmp_path):
     assert written[0]["message"].startswith("stop_task needs the task's pid")
     assert written[1] == {
         "type": "ack",
+        "for": "stop_task",
         "message": "Stopped run_job (shell): make -j8 (job u).",
     }
 

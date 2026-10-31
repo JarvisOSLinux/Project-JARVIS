@@ -1,7 +1,12 @@
 # `jarvis web` — phone access to a home JARVIS
 
 Opt-in, off by default. Design and decisions: Project-JARVIS#266. The page is
-the jarvis-app interface ported to a phone (#267).
+jarvis-app's own UI (#267): one folder, `src/` in jarvis-app, used by the
+desktop app through Tauri and served here through `transport.js`, which picks
+the gateway's WebSocket when it runs in a browser. `jarvis/server/web/` is a
+pinned copy: change the UI in jarvis-app, then run `scripts/sync-web-ui.sh`,
+which records the jarvis-app commit and each file's hash in
+`jarvis/server/web_ui.json` (`tests/test_web_ui_pin.py` fails on a hand edit).
 
 ```
 phone browser ──(Tailscale)──▶ tailscale serve (HTTPS, adds Tailscale-User-Login)

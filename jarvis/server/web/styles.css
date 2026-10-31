@@ -450,6 +450,467 @@ body {
 
 .permission-action.deny:hover { background: rgba(255, 68, 85, 0.12); }
 
+/* ── Settings ── */
+#settings-btn {
+    width: 36px;
+    height: 36px;
+    border-color: transparent;
+    background: none;
+    color: var(--text-secondary);
+    font-size: 16px;
+}
+
+#settings-btn:hover { color: var(--primary); }
+
+#settings-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+    z-index: 30;
+}
+
+#settings-backdrop.visible {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+#settings-modal {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0.96);
+    width: 420px;
+    max-width: 90vw;
+    max-height: 84vh;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.18s ease, transform 0.18s ease;
+    z-index: 31;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+#settings-modal.visible {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translate(-50%, -50%) scale(1);
+}
+
+#settings-modal-header {
+    height: 56px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 18px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-primary);
+    font-size: 14px;
+    letter-spacing: 0.5px;
+}
+
+#settings-modal-header .icon-btn {
+    width: 30px;
+    height: 30px;
+    border-color: transparent;
+    background: none;
+    color: var(--text-secondary);
+    font-size: 18px;
+}
+
+#settings-modal-header .icon-btn:hover { color: var(--primary); }
+
+#settings-tabs {
+    display: flex;
+    flex-shrink: 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.settings-tab {
+    flex: 1;
+    padding: 10px 0;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-secondary);
+    font-size: 12px;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+}
+
+.settings-tab:hover { color: var(--text-primary); }
+
+.settings-tab.active {
+    color: var(--primary);
+    border-bottom-color: var(--primary);
+}
+
+.settings-tab-panel {
+    display: none;
+    flex-direction: column;
+    gap: 16px;
+    padding: 18px;
+    overflow-y: auto;
+}
+
+.settings-tab-panel.active { display: flex; }
+
+.settings-section { display: flex; flex-direction: column; gap: 6px; }
+
+.settings-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    letter-spacing: 0.3px;
+}
+
+.settings-hint {
+    font-size: 11px;
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
+.settings-value {
+    font-size: 12px;
+    color: var(--text-primary);
+    padding: 8px 10px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    word-break: break-all;
+}
+
+.settings-value-mono { font-family: var(--font-mono); }
+
+.settings-row { display: flex; gap: 8px; }
+.settings-row-spread { justify-content: space-between; align-items: center; }
+
+#settings-modal select,
+#settings-modal input,
+#provider-form select,
+#provider-form input {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-primary);
+    font-size: 13px;
+    padding: 8px 10px;
+    font-family: inherit;
+    width: 100%;
+}
+
+#settings-modal select:focus,
+#settings-modal input:focus,
+#provider-form select:focus,
+#provider-form input:focus {
+    outline: none;
+    border-color: var(--primary-dim);
+}
+
+#settings-modal button:not(.icon-btn):not(.settings-tab) {
+    flex: 1;
+    padding: 8px 0;
+    border-radius: 8px;
+    border: 1px solid var(--primary-dim);
+    background: rgba(0, 200, 255, 0.10);
+    color: var(--primary);
+    font-size: 12px;
+    letter-spacing: 0.3px;
+    cursor: pointer;
+}
+
+#settings-modal button:not(.icon-btn):not(.settings-tab):hover {
+    background: rgba(0, 200, 255, 0.20);
+}
+
+.settings-primary-btn {
+    border-color: var(--primary) !important;
+    background: rgba(0, 200, 255, 0.18) !important;
+}
+
+.settings-danger-btn {
+    border-color: #7a2530 !important;
+    background: rgba(255, 68, 85, 0.10) !important;
+    color: #ff4455 !important;
+}
+
+.settings-danger-btn:hover { background: rgba(255, 68, 85, 0.20) !important; }
+
+.settings-checkbox-label {
+    font-size: 12px;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+#settings-modal input[type="checkbox"] {
+    width: auto;
+    flex-shrink: 0;
+    accent-color: var(--primary);
+    cursor: pointer;
+}
+
+#settings-voice-toggle {
+    flex: none !important;
+    padding: 6px 14px !important;
+}
+
+#settings-voice-toggle.disabled {
+    border-color: #7a2530 !important;
+    color: #ff4455 !important;
+    background: rgba(255, 68, 85, 0.10) !important;
+}
+
+.settings-error {
+    color: #ff4455;
+    font-size: 11px;
+    display: none;
+}
+
+.settings-error.visible { display: block; }
+
+#provider-list { display: flex; flex-direction: column; gap: 6px; }
+
+.provider-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+.provider-item-main { flex: 1; min-width: 0; }
+
+.provider-item-name {
+    font-size: 12px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.provider-item-meta {
+    font-size: 10px;
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+}
+
+.provider-item-actions { display: flex; gap: 4px; flex-shrink: 0; }
+
+.provider-item-action {
+    width: 22px;
+    height: 22px;
+    border: none;
+    background: none;
+    color: var(--text-secondary);
+    font-size: 12px;
+    cursor: pointer;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.provider-item-action:hover {
+    background: rgba(0, 200, 255, 0.12);
+    color: var(--primary);
+}
+
+.provider-empty {
+    color: var(--text-secondary);
+    font-size: 12px;
+    padding: 8px 0;
+    text-align: center;
+}
+
+#provider-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 4px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+}
+
+#widget-list { display: flex; flex-direction: column; gap: 10px; }
+
+.widget-item {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+.widget-item-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.widget-item-name {
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.widget-item-desc {
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.widget-item-meta {
+    font-size: 10px;
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+}
+
+.trust-badge {
+    flex-shrink: 0;
+    font-size: 9px;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+}
+
+.trust-badge.trust-verified {
+    border-color: var(--primary-dim);
+    color: var(--primary);
+}
+
+.trust-badge.trust-community {
+    border-color: #7a6a1a;
+    color: #f0a500;
+}
+
+.widget-toggle-btn {
+    flex: none !important;
+    padding: 6px 14px !important;
+}
+
+.widget-toggle-btn.disabled {
+    border-color: #7a2530 !important;
+    color: #ff4455 !important;
+    background: rgba(255, 68, 85, 0.10) !important;
+}
+
+.hidden { display: none !important; }
+
+/* ── Shutdown confirmation ── */
+#shutdown-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.18s ease;
+    z-index: 40;
+}
+
+#shutdown-backdrop.visible {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+#shutdown-modal {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0.96);
+    width: 360px;
+    max-width: 88vw;
+    background: var(--surface);
+    border: 1px solid #7a2530;
+    border-radius: 14px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.18s ease, transform 0.18s ease;
+    z-index: 41;
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+}
+
+#shutdown-modal.visible {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translate(-50%, -50%) scale(1);
+}
+
+#shutdown-modal-header {
+    height: 52px;
+    display: flex;
+    align-items: center;
+    padding: 0 18px;
+    border-bottom: 1px solid var(--border);
+    color: #ff4455;
+    font-size: 14px;
+    letter-spacing: 0.5px;
+}
+
+#shutdown-modal-body {
+    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+#shutdown-modal-body p {
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
+
+#shutdown-client-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--text-primary);
+}
+
+.shutdown-client-item {
+    padding: 6px 10px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-family: var(--font-mono);
+}
+
+#shutdown-modal .settings-row {
+    padding: 0 18px 16px;
+}
+
+#shutdown-modal button:not(.icon-btn) {
+    flex: 1;
+    padding: 8px 0;
+    border-radius: 8px;
+    border: 1px solid var(--primary-dim);
+    background: rgba(0, 200, 255, 0.10);
+    color: var(--primary);
+    font-size: 12px;
+    letter-spacing: 0.3px;
+    cursor: pointer;
+}
+
+#shutdown-modal button:not(.icon-btn):hover { background: rgba(0, 200, 255, 0.20); }
+
 /* ── System messages (e.g. daemon shutdown notice) ── */
 .system-message {
     text-align: center;
@@ -767,47 +1228,7 @@ body {
 
 .icon-btn:disabled { opacity: 0.35; cursor: default; }
 
-/* ── Phone additions (jarvis web) ── */
-.hidden { display: none !important; }
-
-html, body { height: 100dvh; }
-
-#notice {
-    background: rgba(255, 68, 85, 0.12);
-    border-top: 1px solid #ff4455;
-    color: #ff8896;
-    font-size: 13px;
-    padding: 10px 16px;
-    flex-shrink: 0;
-}
-
-#permission-count {
-    position: absolute;
-    top: 2px;
-    right: 2px;
-    min-width: 16px;
-    padding: 0 4px;
-    border-radius: 8px;
-    background: #ffaa00;
-    color: #0a0e1a;
-    font-size: 11px;
-    font-weight: bold;
-    line-height: 16px;
-    text-align: center;
-}
-#permission-count:empty { display: none; }
-
-#permissions-btn { position: relative; }
-
-/* The stop button is always on screen, and lit while JARVIS is working. */
-#stop-btn { color: var(--text-secondary); }
-body.working #stop-btn {
-    color: #ff4455;
-    border-color: #ff4455;
-    box-shadow: 0 0 10px rgba(255, 68, 85, 0.35);
-}
-
-/* ── What JARVIS is doing: activity line, action blocks, work panel (#267, #271) ── */
+/* ── What JARVIS is doing: activity line, action blocks, work panel (Project-JARVIS#267, #271) ── */
 #activity {
     flex-shrink: 0;
     padding: 6px 16px;
@@ -936,19 +1357,6 @@ details.action-block > summary:hover { background: var(--card); }
 
 #work-panel-header #status-btn { margin-left: auto; margin-right: 8px; }
 
-#stop-all-btn {
-    border: 1px solid #7a2530;
-    border-radius: 8px;
-    background: rgba(255, 68, 85, 0.10);
-    color: #ff4455;
-    font-size: 12px;
-    padding: 8px 12px;
-    min-height: 36px;
-    margin-right: 8px;
-    cursor: pointer;
-}
-body:not(.can-approve) #stop-all-btn { display: none; }
-
 .panel-close {
     width: 36px;
     height: 36px;
@@ -977,19 +1385,6 @@ body:not(.can-approve) #stop-all-btn { display: none; }
 .work-item-title { color: var(--text-primary); font-size: 13px; overflow-wrap: anywhere; }
 .work-item-meta, .work-empty { color: var(--text-secondary); font-size: 11px; margin-top: 2px; }
 .work-item .action-detail, .work-item .action-output { margin-left: 0; margin-right: 0; }
-.work-item-head { display: flex; align-items: flex-start; gap: 8px; }
-.work-item-head .work-item-title { flex: 1; min-width: 0; }
-.task-stop-btn {
-    flex-shrink: 0;
-    border: 1px solid #7a2530;
-    border-radius: 8px;
-    background: rgba(255, 68, 85, 0.10);
-    color: #ff4455;
-    font-size: 12px;
-    padding: 6px 12px;
-    min-height: 32px;
-    cursor: pointer;
-}
 
 .status-check { display: flex; gap: 8px; font-size: 12px; padding: 3px 0; align-items: baseline; }
 .status-mark { width: 12px; flex-shrink: 0; text-align: center; }
@@ -1010,10 +1405,83 @@ body:not(.can-approve) #stop-all-btn { display: none; }
 }
 #work-btn:hover { color: var(--primary); }
 
-/* Action blocks, status and work are for the roles trusted to approve. */
-body:not(.can-approve) #work-btn { display: none; }
+/* ── One page for the app and the browser (jarvis web) ── */
+html, body { height: 100dvh; }
 
-/* A guest watches and chats; only owner and trusted answer a request. */
+/* Settings, providers, widgets, voice and shutdown belong to the desktop. */
+body.web .desktop-only { display: none !important; }
+
+#who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+#notice {
+    background: rgba(255, 68, 85, 0.12);
+    border-top: 1px solid #ff4455;
+    color: #ff8896;
+    font-size: 13px;
+    padding: 10px 16px;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+#permissions-btn { position: relative; }
+#permission-count {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    min-width: 16px;
+    padding: 0 4px;
+    border-radius: 8px;
+    background: #ffaa00;
+    color: #0a0e1a;
+    font-size: 11px;
+    font-weight: bold;
+    line-height: 16px;
+    text-align: center;
+}
+#permission-count:empty { display: none; }
+
+/* Stop is always on screen, and lit while JARVIS is working (#270). */
+#stop-btn { color: var(--text-secondary); }
+body.working #stop-btn {
+    color: #ff4455;
+    border-color: #ff4455;
+    box-shadow: 0 0 10px rgba(255, 68, 85, 0.35);
+}
+
+#stop-all-btn {
+    border: 1px solid #7a2530;
+    border-radius: 8px;
+    background: rgba(255, 68, 85, 0.10);
+    color: #ff4455;
+    font-size: 12px;
+    padding: 8px 12px;
+    min-height: 36px;
+    margin-right: 8px;
+    cursor: pointer;
+}
+
+.work-item-head { display: flex; align-items: flex-start; gap: 8px; }
+.work-item-head .work-item-title { flex: 1; min-width: 0; }
+.task-stop-btn {
+    flex-shrink: 0;
+    border: 1px solid #7a2530;
+    border-radius: 8px;
+    background: rgba(255, 68, 85, 0.10);
+    color: #ff4455;
+    font-size: 12px;
+    padding: 6px 12px;
+    min-height: 32px;
+    cursor: pointer;
+}
+
+#permission-panel-header #approve-all-btn { margin-left: auto; margin-right: 8px; }
+#permission-panel-header .panel-close { margin-left: auto; }
+#permission-panel-header #approve-all-btn + .panel-close { margin-left: 0; }
+
+/* In a browser the gateway's role decides (docs/web-gateway.md); the desktop
+   user is the owner. Action blocks, status and work are for the roles trusted
+   to approve; a guest watches and chats. */
+body:not(.can-approve) #work-btn { display: none; }
 body:not(.can-approve) .permission-action { display: none; }
 body:not(.can-approve) .permission-task input { display: none; }
 body:not(.can-manage) .session-item-actions { display: none; }
@@ -1031,4 +1499,96 @@ body:not(.can-approve) #new-session-btn { display: none; }
     .icon-btn { min-width: 44px; min-height: 44px; }
     .permission-action { min-height: 48px; font-size: 15px; }
     #chat-view { padding: 12px; }
+}
+
+/* ── Icons: one line set (the sprite in index.html), sized by the button ── */
+.icon-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+.icon {
+    width: 20px;
+    height: 20px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    flex-shrink: 0;
+    pointer-events: none;
+}
+#sessions-btn, #work-btn, #permissions-btn, #settings-btn { width: 42px; height: 42px; }
+#sessions-btn:hover, #work-btn:hover, #permissions-btn:hover, #settings-btn:hover {
+    background: rgba(0, 200, 255, 0.08);
+}
+#header .icon { width: 22px; height: 22px; }
+#new-session-btn .icon, #settings-modal-header .icon { width: 18px; height: 18px; }
+.panel-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+}
+.panel-close:hover { background: rgba(0, 200, 255, 0.08); }
+.session-item-action, .provider-item-action { width: 30px; height: 30px; }
+.session-item-action .icon, .provider-item-action .icon { width: 16px; height: 16px; }
+
+/* ── Form controls the page draws itself ──
+   WebKitGTK (the app's webview) draws <select> and checkboxes with the
+   system's GTK theme and ignores the page's background, so on a light theme
+   they came out white with the page's pale text on them. appearance: none
+   hands them to these rules; color-scheme asks for dark native popups. The
+   arrow and tick are gradients and borders, not data: images, which the
+   gateway's Content-Security-Policy (img-src 'self') refuses on the phone. */
+:root { color-scheme: dark; }
+
+#settings-modal select,
+#provider-form select {
+    appearance: none;
+    -webkit-appearance: none;
+    background-image:
+        linear-gradient(45deg, transparent 50%, var(--primary) 50%),
+        linear-gradient(135deg, var(--primary) 50%, transparent 50%);
+    background-position: calc(100% - 19px) 55%, calc(100% - 14px) 55%;
+    background-size: 5px 5px;
+    background-repeat: no-repeat;
+    padding-right: 36px;
+    cursor: pointer;
+}
+#settings-modal option,
+#provider-form option {
+    background: var(--card);
+    color: var(--text-primary);
+}
+
+input[type="checkbox"],
+#settings-modal input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    position: relative;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: 1.5px solid var(--primary-dim);
+    border-radius: 4px;
+    background: var(--card);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+input[type="checkbox"]:checked,
+#settings-modal input[type="checkbox"]:checked {
+    border-color: var(--primary);
+    background: var(--primary);
+}
+input[type="checkbox"]:checked::after {
+    content: '';
+    position: absolute;
+    left: 4.5px;
+    top: 1px;
+    width: 5px;
+    height: 10px;
+    border: solid var(--bg);
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+input[type="checkbox"]:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
 }
