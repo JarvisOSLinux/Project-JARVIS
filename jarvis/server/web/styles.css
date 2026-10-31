@@ -1500,3 +1500,95 @@ body:not(.can-approve) #new-session-btn { display: none; }
     .permission-action { min-height: 48px; font-size: 15px; }
     #chat-view { padding: 12px; }
 }
+
+/* ── Icons: one line set (the sprite in index.html), sized by the button ── */
+.icon-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+.icon {
+    width: 20px;
+    height: 20px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    flex-shrink: 0;
+    pointer-events: none;
+}
+#sessions-btn, #work-btn, #permissions-btn, #settings-btn { width: 42px; height: 42px; }
+#sessions-btn:hover, #work-btn:hover, #permissions-btn:hover, #settings-btn:hover {
+    background: rgba(0, 200, 255, 0.08);
+}
+#header .icon { width: 22px; height: 22px; }
+#new-session-btn .icon, #settings-modal-header .icon { width: 18px; height: 18px; }
+.panel-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+}
+.panel-close:hover { background: rgba(0, 200, 255, 0.08); }
+.session-item-action, .provider-item-action { width: 30px; height: 30px; }
+.session-item-action .icon, .provider-item-action .icon { width: 16px; height: 16px; }
+
+/* ── Form controls the page draws itself ──
+   WebKitGTK (the app's webview) draws <select> and checkboxes with the
+   system's GTK theme and ignores the page's background, so on a light theme
+   they came out white with the page's pale text on them. appearance: none
+   hands them to these rules; color-scheme asks for dark native popups. The
+   arrow and tick are gradients and borders, not data: images, which the
+   gateway's Content-Security-Policy (img-src 'self') refuses on the phone. */
+:root { color-scheme: dark; }
+
+#settings-modal select,
+#provider-form select {
+    appearance: none;
+    -webkit-appearance: none;
+    background-image:
+        linear-gradient(45deg, transparent 50%, var(--primary) 50%),
+        linear-gradient(135deg, var(--primary) 50%, transparent 50%);
+    background-position: calc(100% - 19px) 55%, calc(100% - 14px) 55%;
+    background-size: 5px 5px;
+    background-repeat: no-repeat;
+    padding-right: 36px;
+    cursor: pointer;
+}
+#settings-modal option,
+#provider-form option {
+    background: var(--card);
+    color: var(--text-primary);
+}
+
+input[type="checkbox"],
+#settings-modal input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    position: relative;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: 1.5px solid var(--primary-dim);
+    border-radius: 4px;
+    background: var(--card);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+input[type="checkbox"]:checked,
+#settings-modal input[type="checkbox"]:checked {
+    border-color: var(--primary);
+    background: var(--primary);
+}
+input[type="checkbox"]:checked::after {
+    content: '';
+    position: absolute;
+    left: 4.5px;
+    top: 1px;
+    width: 5px;
+    height: 10px;
+    border: solid var(--bg);
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+input[type="checkbox"]:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+}

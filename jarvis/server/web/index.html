@@ -8,19 +8,34 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+    <!-- One set of line icons, drawn at one size, so no button depends on
+         which emoji font the system has. Use: <svg class="icon"><use href="#i-menu"/></svg> -->
+    <svg class="icon-sprite" aria-hidden="true">
+        <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+        <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+        <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></symbol>
+        <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
+        <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+        <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+        <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M17 3a2.85 2.85 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5z"/></symbol>
+        <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6"/></symbol>
+        <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7M12 19V5"/></symbol>
+        <symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3"/></symbol>
+        <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></symbol>
+    </svg>
     <header id="header">
-        <button class="icon-btn" id="sessions-btn" title="Sessions">&#9776;</button>
+        <button class="icon-btn" id="sessions-btn" title="Sessions" aria-label="Sessions"><svg class="icon"><use href="#i-menu"/></svg></button>
         <div class="header-info">
             <div class="header-title">JARVIS</div>
             <div class="header-subtitle" id="who">AI Operating System</div>
         </div>
-        <button class="icon-btn" id="work-btn" title="What JARVIS is doing">&#9201;</button>
-        <button class="icon-btn" id="permissions-btn" title="Permission Requests">
-            &#128274;
+        <button class="icon-btn" id="work-btn" title="What JARVIS is doing" aria-label="What JARVIS is doing"><svg class="icon"><use href="#i-activity"/></svg></button>
+        <button class="icon-btn" id="permissions-btn" title="Permission Requests" aria-label="Permission requests">
+            <svg class="icon"><use href="#i-shield"/></svg>
             <span id="permission-indicator"></span>
             <span id="permission-count"></span>
         </button>
-        <button class="icon-btn desktop-only" id="settings-btn" title="Settings">&#9881;</button>
+        <button class="icon-btn desktop-only" id="settings-btn" title="Settings" aria-label="Settings"><svg class="icon"><use href="#i-settings"/></svg></button>
         <div id="status-indicator">
             <div id="status-dot"></div>
             <span id="status-label">Offline</span>
@@ -31,7 +46,7 @@
     <aside id="session-sidebar">
         <div id="session-sidebar-header">
             <span>Sessions</span>
-            <button class="icon-btn" id="new-session-btn" title="New chat">+</button>
+            <button class="icon-btn" id="new-session-btn" title="New chat" aria-label="New chat"><svg class="icon"><use href="#i-plus"/></svg></button>
         </div>
         <div id="session-list"></div>
     </aside>
@@ -41,7 +56,7 @@
         <div id="permission-panel-header">
             <span id="permission-panel-title">Permission Requests</span>
             <button class="desktop-only" id="approve-all-btn" title="Approve all" disabled>Approve All</button>
-            <button class="panel-close" id="permission-close" title="Close">&#10005;</button>
+            <button class="panel-close" id="permission-close" title="Close" aria-label="Close"><svg class="icon"><use href="#i-x"/></svg></button>
         </div>
         <div id="permission-list"></div>
     </aside>
@@ -52,7 +67,7 @@
             <span>What JARVIS is doing</span>
             <button id="status-btn" title="Check JARVIS's health">Status</button>
             <button id="stop-all-btn" title="Stop, and end the running tasks too">Stop all</button>
-            <button class="panel-close" id="work-close" title="Close">&#10005;</button>
+            <button class="panel-close" id="work-close" title="Close" aria-label="Close"><svg class="icon"><use href="#i-x"/></svg></button>
         </div>
         <div id="work-list"></div>
         <div id="status-list"></div>
@@ -62,7 +77,7 @@
     <div id="settings-modal">
         <div id="settings-modal-header">
             <span>Settings</span>
-            <button class="icon-btn" id="settings-close-btn" title="Close">&times;</button>
+            <button class="icon-btn" id="settings-close-btn" title="Close" aria-label="Close"><svg class="icon"><use href="#i-x"/></svg></button>
         </div>
         <div id="settings-tabs">
             <button class="settings-tab active" id="settings-tab-general-btn" data-tab="general">General</button>
@@ -202,9 +217,9 @@
                 disabled
             >
         </div>
-        <button class="icon-btn desktop-only" id="mic-btn" title="Toggle voice input">&#127908;</button>
-        <button class="icon-btn" id="stop-btn" title="Stop JARVIS (its running tasks keep running)">&#9632;</button>
-        <button class="icon-btn" id="send-btn" title="Send message" disabled>&#9654;</button>
+        <button class="icon-btn desktop-only" id="mic-btn" title="Toggle voice input" aria-label="Voice input"><svg class="icon"><use href="#i-mic"/></svg></button>
+        <button class="icon-btn" id="stop-btn" title="Stop JARVIS (its running tasks keep running)" aria-label="Stop"><svg class="icon"><use href="#i-stop"/></svg></button>
+        <button class="icon-btn" id="send-btn" title="Send message" aria-label="Send" disabled><svg class="icon"><use href="#i-arrow-up"/></svg></button>
     </div>
 
     <script src="markdown.js"></script>

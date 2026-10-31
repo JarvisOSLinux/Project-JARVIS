@@ -167,8 +167,27 @@ function showNotice(text) {
 }
 
 // ── Messages ───────────────────────────────────────────────────────────────
-function timestamp() {
-    return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+/// When a message was said: `at` is the daemon's stored time in seconds, or
+/// now for a live one. An older day gets its date, so a restored chat does
+/// not read as if it all happened a minute ago.
+function timestamp(at) {
+    const d = at ? new Date(at * 1000) : new Date();
+    const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+    if (d.toDateString() === new Date().toDateString()) return time;
+    return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${time}`;
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/// One of the line icons in index.html's sprite (#i-<name>).
+function icon(name) {
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('class', 'icon');
+    svg.setAttribute('aria-hidden', 'true');
+    const use = document.createElementNS(SVG_NS, 'use');
+    use.setAttribute('href', `#i-${name}`);
+    svg.append(use);
+    return svg;
 }
 
 function showMessages() {
@@ -178,7 +197,7 @@ function showMessages() {
     }
 }
 
-function addUserMessage(content) {
+function addUserMessage(content, at) {
     showMessages();
     foldOlderBlocks(null);
     const el = document.createElement('div');
@@ -193,7 +212,7 @@ function addUserMessage(content) {
 
     const ts = document.createElement('div');
     ts.className = 'timestamp right';
-    ts.textContent = timestamp();
+    ts.textContent = timestamp(at);
 
     col.append(bubble, ts);
     el.append(col);
@@ -204,7 +223,7 @@ function addUserMessage(content) {
 
 const STREAM_CURSOR = ' <span class="stream-cursor">▌</span>';
 
-function appendJarvisChunk(content, done, comment) {
+function appendJarvisChunk(content, done, comment, at) {
     showMessages();
     const streaming = messages.querySelector('.jarvis-message.streaming');
     // An answer ends the turn; a comment only says what comes next.
@@ -239,7 +258,7 @@ function appendJarvisChunk(content, done, comment) {
 
         const ts = document.createElement('div');
         ts.className   = 'timestamp';
-        ts.textContent = timestamp();
+        ts.textContent = timestamp(at);
 
         bubble.append(textEl);
         col.append(bubble, ts);
@@ -332,7 +351,7 @@ function buildSessionItem(session) {
     const renameBtn = document.createElement('button');
     renameBtn.className = 'session-item-action';
     renameBtn.title = 'Rename';
-    renameBtn.textContent = '✎';
+    renameBtn.append(icon('pencil'));
     renameBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         startRename(title, session);
@@ -341,7 +360,7 @@ function buildSessionItem(session) {
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'session-item-action';
     deleteBtn.title = 'Delete';
-    deleteBtn.textContent = '×';
+    deleteBtn.append(icon('trash'));
     deleteBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         confirmDeleteSession(session);
@@ -412,8 +431,8 @@ function restoreSessionMessages(session, msgs) {
     hasMessages = false;
     emptyState.style.display = '';
     for (const m of msgs) {
-        if (m.role === 'user') addUserMessage(m.content);
-        else appendJarvisChunk(m.content, true);
+        if (m.role === 'user') addUserMessage(m.content, m.timestamp);
+        else appendJarvisChunk(m.content, true, false, m.timestamp);
     }
     sessionList.querySelectorAll('.session-item').forEach((el) => {
         el.classList.toggle('active', el.dataset.id === currentSessionId);
@@ -834,13 +853,13 @@ function buildProviderItem(p, index) {
     const editBtn = document.createElement('button');
     editBtn.className = 'provider-item-action';
     editBtn.title = 'Edit';
-    editBtn.textContent = '✎';
+    editBtn.append(icon('pencil'));
     editBtn.addEventListener('click', () => openProviderForm(p));
 
     const removeBtn = document.createElement('button');
     removeBtn.className = 'provider-item-action';
     removeBtn.title = 'Remove';
-    removeBtn.textContent = '×';
+    removeBtn.append(icon('trash'));
     removeBtn.addEventListener('click', () => removeProvider(p.name));
 
     const actions = document.createElement('div');
@@ -850,7 +869,7 @@ function buildProviderItem(p, index) {
         const upBtn = document.createElement('button');
         upBtn.className = 'provider-item-action';
         upBtn.title = 'Try earlier';
-        upBtn.textContent = '↑';
+        upBtn.append(icon('arrow-up'));
         upBtn.addEventListener('click', () => invoke('move_provider', { name: p.name, position: index }));
         actions.append(upBtn);
     }
