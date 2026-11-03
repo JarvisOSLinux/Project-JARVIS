@@ -189,7 +189,6 @@ def test_a_comment_is_stored_marked():
 
 
 def _tui(drive):
-    pytest.importorskip("textual")
     import asyncio
     from unittest.mock import patch
 
@@ -239,6 +238,7 @@ def _tui(drive):
 
 @pytest.mark.unit
 def test_the_tui_draws_a_sessions_blocks_and_a_running_one_still_ends():
+    pytest.importorskip("textual")
     from jarvis.tui.chat_view import ChatView
     from jarvis.tui.session_sidebar import render_session_history
 

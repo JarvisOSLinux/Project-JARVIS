@@ -235,7 +235,8 @@ function appendJarvisChunk(content, done, comment, at) {
         textEl.dataset.raw = accumulated;
         textEl.innerHTML   = renderMarkdown(accumulated) + (done ? '' : STREAM_CURSOR);
         if (done) streaming.classList.remove('streaming');
-    } else {
+    } else if (content) {
+        // An empty done chunk closes a stream; with none open it has nothing to close.
         foldOlderBlocks(null);
         const el = document.createElement('div');
         el.className = 'message jarvis-message' + (done ? '' : ' streaming')
