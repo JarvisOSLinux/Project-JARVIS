@@ -228,9 +228,20 @@ The `/status` health check, as data.
 {"type": "session_list", "sessions": [{"id": "110d5048-…", "title": "Pacman test",
   "created_at": "…", "updated_at": "…", "summary": "…", "metadata": {}, "entry_count": 12}]}
 {"type": "session_switched", "session": {"id": "110d5048-…", "title": "Pacman test"},
- "messages": [{"role": "user", "content": "run pacman -Syu", "timestamp": "…"}]}
+ "messages": [{"role": "user", "content": "run pacman -Syu", "timestamp": 1761850000.1},
+  {"role": "assistant", "content": "Let me run the update.", "comment": true, "timestamp": 1761850003.4},
+  {"role": "action", "id": "tool:4", "kind": "tool", "title": "run_job (shell)",
+   "detail": "pacman -Syu  (job update)", "status": "ok", "output": "…",
+   "started_at": 1761850003.6, "at": 1761850190.2, "timestamp": 1761850003.6}]}
 {"type": "session_error", "message": "No session matches 'zz'"}
 ```
+
+A session's messages are what was said and, with `role: "action"`, the blocks
+of what JARVIS did, each where it started, so a client can draw the chat as it
+looked live. A block carries what an action's `start` and `end` carry
+(`output` is kept to its last 8,000 characters). A block still running has
+`status: "running"`, its output so far and no `at`; its next `update` or `end`
+comes live, with the same `id`. A comment has `comment: true`.
 
 ### Everything else
 
@@ -253,8 +264,9 @@ The gateway relays this protocol over a WebSocket, narrowed by role
 (`docs/web-gateway.md`). It subscribes to `activity` and `action` for the
 phone:
 
-- **Every role** sees `state`, `response`, `activity`, confirmations, sessions,
-  `client_list`, `ack`, `error`, and a `DAEMON_SHUTDOWN` cut down to its state.
+- **Every role** sees `state`, `response`, `activity`, confirmations, sessions
+  (a guest's history without its action blocks), `client_list`, `ack`, `error`,
+  and a `DAEMON_SHUTDOWN` cut down to its state.
 - **Trusted and owner** also see `action`, `status` and `work`, and may send
   `get_status` and `list_work`. Action blocks carry tool parameters and raw
   output, so they go to the roles trusted to approve what JARVIS runs.

@@ -161,6 +161,25 @@ def shutdown_notice(msg: dict) -> dict:
     return {"type": "DAEMON_SHUTDOWN", "state": msg.get("state")}
 
 
+def shown_to(msg: Any, role: str) -> Optional[dict]:
+    """`msg` as a phone signed in as `role` may see it, or None."""
+    if not isinstance(msg, dict):
+        return None
+    if msg.get("type") == "DAEMON_SHUTDOWN":
+        return shutdown_notice(msg)
+    if not relayable(msg, role):
+        return None
+    # A session's history carries its action blocks, as the action events do.
+    if msg.get("type") == "session_switched" and "action" not in RELAYED_FOR[role]:
+        kept = [
+            m
+            for m in msg.get("messages") or []
+            if isinstance(m, dict) and m.get("role") != "action"
+        ]
+        msg = {**msg, "messages": kept}
+    return msg
+
+
 def unsafe_mode_change(msg: dict) -> bool:
     return (
         msg.get("type") == "config_updated"
@@ -433,8 +452,9 @@ class Gateway:
             return False
         await ws.send(json.dumps({"type": "gateway", "login": login, "role": role}))
         for msg in early:
-            if relayable(msg, role):
-                await ws.send(json.dumps(msg, ensure_ascii=False))
+            shown = shown_to(msg, role)
+            if shown is not None:
+                await ws.send(json.dumps(shown, ensure_ascii=False))
         return True
 
     async def _relay(
@@ -500,11 +520,10 @@ class Gateway:
                         "The host switched to allow_all; remote access ended",
                     )
                     return
-                if msg.get("type") == "DAEMON_SHUTDOWN":
-                    msg = shutdown_notice(msg)
-                elif not relayable(msg, role):
+                shown = shown_to(msg, role)
+                if shown is None:
                     continue
-                await ws.send(json.dumps(msg, ensure_ascii=False))
+                await ws.send(json.dumps(shown, ensure_ascii=False))
 
         async def watch_idle() -> None:
             while True:

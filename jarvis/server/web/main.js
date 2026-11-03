@@ -432,8 +432,10 @@ function restoreSessionMessages(session, msgs) {
     emptyState.style.display = '';
     for (const m of msgs) {
         if (m.role === 'user') addUserMessage(m.content, m.timestamp);
-        else appendJarvisChunk(m.content, true, false, m.timestamp);
+        else if (m.role === 'action') restoreActionBlock(m);
+        else appendJarvisChunk(m.content, true, !!m.comment, m.timestamp);
     }
+    showActivity('');
     sessionList.querySelectorAll('.session-item').forEach((el) => {
         el.classList.toggle('active', el.dataset.id === currentSessionId);
     });
@@ -525,6 +527,18 @@ function onAction(ev) {
         actionBlocks.delete(ev.id);
         setMark(block.mark, ev.status || 'ok');
         if (ev.started_at && ev.at) block.time.textContent = duration(ev.at - ev.started_at);
+    }
+}
+
+/// A block from a session's history, drawn as its start and end. One still
+/// running stays open, and its next update or end, sent live, finds it.
+function restoreActionBlock(m) {
+    onAction({ phase: 'start', id: m.id, kind: m.kind, title: m.title, detail: m.detail });
+    if (m.status === 'running') {
+        onAction({ phase: 'update', id: m.id, output: m.output });
+    } else {
+        onAction({ phase: 'end', id: m.id, status: m.status, output: m.output,
+                   started_at: m.started_at, at: m.at });
     }
 }
 

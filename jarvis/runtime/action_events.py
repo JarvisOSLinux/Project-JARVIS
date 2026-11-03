@@ -12,6 +12,9 @@ Events are plain dicts, meant for the TUI and for socket clients alike (#267):
 Statuses at the end: ok, failed, stopped, waiting (a setup the user has to
 fill in), approved, denied. Only an action that started can update or end, so
 a timer's signal, or a confirmation restored after a restart, shows nothing.
+
+A finished action is kept with the session it started in (sessions/block_log.py),
+so a chat opened again shows its blocks where they were.
 """
 
 from __future__ import annotations
@@ -26,6 +29,8 @@ from typing import Any, Dict, List, Optional
 # whether it worked.
 MAX_OUTPUT_CHARS = 20_000
 MAX_DETAIL_CHARS = 2_000
+# A session's history carries up to 200 blocks in one message.
+KEPT_OUTPUT_CHARS = 8_000
 
 _STATUS_OF_SIGNAL = {"KILL": "stopped", "TIMEOUT": "failed"}
 _CODE = re.compile(r"^\s*(\d{3})\b\s*")
@@ -69,22 +74,28 @@ def start(
         "detail": clip(detail, MAX_DETAIL_CHARS),
         "at": time.time(),
     }
-    _open(app)[action_id] = record
+    _open(app)[action_id] = {**record, "session_id": _session_id(app), "output": ""}
     _emit(app, {"type": "action", "phase": "start", **record})
     return action_id
 
 
+def _session_id(app: Any) -> Optional[str]:
+    return getattr(getattr(app, "sessions", None), "current_id", None)
+
+
 def update(app: Any, action_id: str, output: str) -> None:
     """Output so far from an action that is still running."""
-    if action_id not in _open(app) or not output:
+    record = _open(app).get(action_id)
+    if record is None or not output:
         return
+    record["output"] = clip(output)
     _emit(
         app,
         {
             "type": "action",
             "phase": "update",
             "id": action_id,
-            "output": clip(output),
+            "output": record["output"],
             "at": time.time(),
         },
     )
@@ -95,6 +106,7 @@ def end(app: Any, action_id: str, status: str = "ok", output: str = "") -> None:
     record = _open(app).pop(action_id, None)
     if record is None:
         return
+    ended = time.time()
     _emit(
         app,
         {
@@ -104,10 +116,56 @@ def end(app: Any, action_id: str, status: str = "ok", output: str = "") -> None:
             "kind": record["kind"],
             "status": status,
             "output": clip(output),
-            "at": time.time(),
+            "at": ended,
             "started_at": record["at"],
         },
     )
+    _keep(app, record, status, output, ended)
+
+
+def _keep(app: Any, record: Dict[str, Any], status: str, output: str, ended: float):
+    sessions = getattr(app, "sessions", None)
+    blocks = getattr(sessions, "blocks", None)
+    if blocks is None or not record.get("session_id"):
+        return
+    blocks.append(
+        record["session_id"],
+        {
+            "id": record["id"],
+            "kind": record["kind"],
+            "title": record["title"],
+            "detail": record["detail"],
+            "status": status,
+            "output": clip(output, KEPT_OUTPUT_CHARS),
+            "started_at": record["at"],
+            "at": ended,
+        },
+    )
+
+
+def history(app: Any, session_id: str, limit: int) -> List[Dict[str, Any]]:
+    """A session's blocks for its history, oldest first: kept, then still running.
+
+    A running one has status "running" and its output so far; its next update
+    or end, sent live, finds it by id.
+    """
+    sessions = getattr(app, "sessions", None)
+    blocks = getattr(sessions, "blocks", None)
+    kept = blocks.read(session_id, limit) if blocks is not None else []
+    for record in running(app):
+        if record.get("session_id") == session_id:
+            kept.append(
+                {
+                    "id": record["id"],
+                    "kind": record["kind"],
+                    "title": record["title"],
+                    "detail": record["detail"],
+                    "status": "running",
+                    "output": clip(record.get("output") or "", KEPT_OUTPUT_CHARS),
+                    "started_at": record["at"],
+                }
+            )
+    return kept[-limit:]
 
 
 def stopped(app: Any, pids: Any, why: str = "Stopped.") -> None:

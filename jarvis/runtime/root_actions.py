@@ -941,7 +941,7 @@ def _say_comment(app: Any, response: Any, action: str) -> None:
     if len(text) > COMMENT_MAX_CHARS:
         text = text[: COMMENT_MAX_CHARS - 1] + "…"
     app.output_manager.handle_response({"output": text, "comment": True})
-    persist_assistant_turn(app, text)
+    persist_assistant_turn(app, text, comment=True)
 
 
 async def act_on_root_response(

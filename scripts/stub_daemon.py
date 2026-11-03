@@ -4,7 +4,8 @@ Speaks just enough of the socket protocol for `jarvis web`: settings, sessions,
 streamed replies and confirmations. Send "confirm" in the chat to get a pending
 permission request, and "run" to watch a turn with a comment, the activity
 line and action blocks (docs/gui-protocol.md); any other text is echoed back in
-two chunks. `get_status` and `list_work` answer with sample data.
+two chunks. `get_status` and `list_work` answer with sample data. The session
+keeps what was said and the blocks, so a reload shows them as a daemon would.
 
     python scripts/stub_daemon.py <socket-path>
 """
@@ -18,9 +19,43 @@ import time
 SESSION = {"id": "demo", "title": "Demo session", "entry_count": 0}
 pending: list[dict] = []
 writers: list[asyncio.StreamWriter] = []
+history: list[dict] = []
+blocks: dict[str, dict] = {}
+
+
+def remember(msg: dict) -> None:
+    """Keep the session's messages and blocks, as session_switched returns them."""
+    kind = msg.get("type")
+    if kind == "response" and msg.get("done") and msg.get("content"):
+        said = {
+            "role": "assistant",
+            "content": msg["content"],
+            "timestamp": time.time(),
+        }
+        if msg.get("comment"):
+            said["comment"] = True
+        history.append(said)
+    elif kind == "action" and msg.get("phase") == "start":
+        block = {
+            "role": "action",
+            "status": "running",
+            "output": "",
+            "started_at": msg["at"],
+            "timestamp": msg["at"],
+            **{k: msg.get(k) for k in ("id", "kind", "title", "detail")},
+        }
+        blocks[msg["id"]] = block
+        history.append(block)
+    elif kind == "action" and msg.get("id") in blocks:
+        block = blocks[msg["id"]]
+        block["output"] = msg.get("output") or block["output"]
+        if msg.get("phase") == "end":
+            block.update(status=msg.get("status", "ok"), at=msg["at"])
+            del blocks[msg["id"]]
 
 
 async def broadcast(msg: dict) -> None:
+    remember(msg)
     data = (json.dumps(msg) + "\n").encode()
     for w in writers:
         w.write(data)
@@ -33,6 +68,13 @@ async def reply(text: str) -> None:
         await asyncio.sleep(0.4)
         await broadcast({"type": "response", "content": part, "done": False})
     await broadcast({"type": "response", "content": "", "done": True})
+    history.append(
+        {
+            "role": "assistant",
+            "content": f"You said: {text}\n\n(stub daemon, no LLM behind this)",
+            "timestamp": time.time(),
+        }
+    )
     await broadcast({"type": "state", "state": "idle"})
 
 
@@ -152,7 +194,7 @@ async def handle(msg: dict, writer: asyncio.StreamWriter) -> None:
         await broadcast({"type": "session_list", "sessions": [SESSION]})
     elif kind == "switch_session":
         await broadcast(
-            {"type": "session_switched", "session": SESSION, "messages": []}
+            {"type": "session_switched", "session": SESSION, "messages": history}
         )
     elif kind == "list_confirmations":
         await broadcast({"type": "confirmation_list", "confirmations": pending})
@@ -191,6 +233,7 @@ async def handle(msg: dict, writer: asyncio.StreamWriter) -> None:
         await broadcast({"type": "ack", "for": kind, "message": text})
     elif kind == "message":
         text = str(msg.get("content", ""))
+        history.append({"role": "user", "content": text, "timestamp": time.time()})
         if text.strip().lower() == "confirm":
             pending.append(
                 {

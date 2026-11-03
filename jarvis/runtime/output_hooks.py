@@ -15,7 +15,7 @@ def emit_activity(app: Any, text: str, kind: str = "activity") -> None:
     app.output_manager.emit_activity(text=text, kind=kind)
 
 
-def persist_assistant_turn(app: Any, text: str) -> None:
+def persist_assistant_turn(app: Any, text: str, comment: bool = False) -> None:
     """Append assistant-visible text to the session transcript in contextor."""
     if not app.contextor or not text or not str(text).strip():
         return
@@ -25,4 +25,5 @@ def persist_assistant_turn(app: Any, text: str) -> None:
     app.contextor.auto_store_assistant_reply(
         str(text).strip(),
         session_id=sid,
+        comment=comment,
     )

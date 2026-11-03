@@ -15,6 +15,7 @@ from the current-session pointer.
 from typing import Callable, List, Optional, Tuple
 
 from ..core.logger import get_logger
+from .block_log import BlockLog
 from .model import Session
 
 logger = get_logger(__name__)
@@ -23,14 +24,17 @@ logger = get_logger(__name__)
 class SessionManager:
     """Manages the active chat session and delegates storage to contextor."""
 
-    def __init__(self, contextor):
+    def __init__(self, contextor, blocks: Optional[BlockLog] = None):
         """
         Args:
             contextor: A ContextorAdapter instance.  May be None when
                 memory is disabled — the manager degrades gracefully
                 and exposes ``current_id = None``.
+            blocks: Where each session's action blocks are kept; deleting
+                a session deletes them too.
         """
         self._contextor = contextor
+        self.blocks = blocks if blocks is not None else BlockLog()
         self._current: Optional[Session] = None
         # Told when the user moves to another session (switch, new, deleting
         # the current one), so a front end can show that session's messages.
@@ -195,6 +199,7 @@ class SessionManager:
         if "error" in result:
             logger.warning(f"Sessions: delete failed: {result['error']}")
             return False
+        self.blocks.delete(session_id)
 
         if self._current and self._current.id == session_id:
             self._current = None
