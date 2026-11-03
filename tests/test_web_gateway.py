@@ -92,6 +92,29 @@ class TestPolicy:
         )
         assert notice == {"type": "DAEMON_SHUTDOWN", "state": "idle"}
 
+    def test_a_guest_gets_a_session_without_its_blocks(self):
+        history = {
+            "type": "session_switched",
+            "session": {"id": "s1"},
+            "messages": [
+                {"role": "user", "content": "update", "timestamp": 1.0},
+                {"role": "action", "id": "tool:1", "output": "secret", "timestamp": 2},
+            ],
+        }
+        assert wg.shown_to(history, "guest")["messages"] == [history["messages"][0]]
+        assert wg.shown_to(history, "owner") == history
+        assert wg.shown_to(history, None) is None
+
+    def test_shown_to_cuts_a_shutdown_and_drops_what_a_role_may_not_see(self):
+        shutdown = {"type": "DAEMON_SHUTDOWN", "state": "idle", "goals": ["secret"]}
+        assert wg.shown_to(shutdown, "guest") == {
+            "type": "DAEMON_SHUTDOWN",
+            "state": "idle",
+        }
+        assert wg.shown_to({"type": "action"}, "guest") is None
+        assert wg.shown_to({"type": "settings"}, "owner") is None
+        assert wg.shown_to(["not", "a", "dict"], "owner") is None
+
     def test_allow_all_switch_is_unsafe(self):
         assert wg.unsafe_mode_change(
             {"type": "config_updated", "key": "CONFIRMATION_MODE", "value": "allow_all"}

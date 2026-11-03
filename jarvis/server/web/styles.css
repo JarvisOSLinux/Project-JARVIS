@@ -1242,13 +1242,6 @@ body {
     text-overflow: ellipsis;
 }
 
-.jarvis-message.comment .jarvis-bubble {
-    background: none;
-    border: 1px dashed var(--border);
-    color: var(--text-secondary);
-    font-style: italic;
-}
-
 details.action-block {
     margin: 2px 0 6px 40px;
     max-width: calc(100% - 40px);

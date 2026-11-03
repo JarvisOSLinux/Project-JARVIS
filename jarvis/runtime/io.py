@@ -19,6 +19,7 @@ from ..core.providers import (
 from ..core.voice_state import VoiceState
 from ..platform import current as platform
 from ..voice.chime import validate_chime_path
+from . import action_events
 
 
 async def run_socket_listener(app: Any, logger: Logger) -> None:
@@ -735,16 +736,41 @@ def _entries_to_messages(entries: list) -> list:
     """Map conversation_log entries (chronological) to {role, content, timestamp}."""
     messages = []
     for entry in entries:
-        role = _ROLE_BY_ENTRY_TYPE.get((entry.get("metadata") or {}).get("type"))
+        metadata = entry.get("metadata") or {}
+        role = _ROLE_BY_ENTRY_TYPE.get(metadata.get("type"))
         if not role:
             continue
+        message = {
+            "role": role,
+            "content": entry.get("content", ""),
+            "timestamp": entry.get("stored_at"),
+        }
+        if metadata.get("comment"):
+            message["comment"] = True
+        messages.append(message)
+    return messages
+
+
+def session_history(app: Any, session_id: str, limit: int = SESSION_HISTORY_LIMIT):
+    """A session's messages and action blocks (role "action"), in the order they came.
+
+    A block stands where it started, as it did live. Blocks older than the
+    oldest message shown are left out with it.
+    """
+    entries = app.contextor.recall(
+        "conversation_log", limit=limit, session_id=session_id
+    ).get("entries", [])
+    messages = _entries_to_messages(entries)
+    blocks = action_events.history(app, session_id, limit)
+    if len(entries) >= limit and messages:
+        oldest = messages[0]["timestamp"] or 0
+        blocks = [b for b in blocks if (b.get("started_at") or 0) >= oldest]
+    for block in blocks:
         messages.append(
-            {
-                "role": role,
-                "content": entry.get("content", ""),
-                "timestamp": entry.get("stored_at"),
-            }
+            {"role": "action", "timestamp": block.get("started_at"), **block}
         )
+    # Stable: a message and a block stored at the same instant keep their order.
+    messages.sort(key=lambda m: m.get("timestamp") or 0)
     return messages
 
 
@@ -776,14 +802,10 @@ def _handle_switch_session(app: Any, msg: dict) -> dict:
     session = app.sessions.switch(found.id) if found else None
     if not session:
         return _session_error(why or f"Could not switch to '{session_id}'")
-    recall_result = app.contextor.recall(
-        "conversation_log", limit=SESSION_HISTORY_LIMIT, session_id=session.id
-    )
-    messages = _entries_to_messages(recall_result.get("entries", []))
     return {
         "type": "session_switched",
         "session": session.to_dict(),
-        "messages": messages,
+        "messages": session_history(app, session.id),
     }
 
 

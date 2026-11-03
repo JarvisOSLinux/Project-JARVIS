@@ -491,8 +491,8 @@ dispatch — Execute tool calls. Only after seeing SERVER_DOCS.
     ever wakes you to answer it. When a REMIND tail or a status tail shows the
     command waiting, dispatch send_input (its own task — the run_job call is still blocked) with
     EXACTLY what the output asked for; never guess input the output did not ask for. Do not
-    poll read_output: each REMIND already carries the latest output. Between reminders, tell
-    the user what is happening (respond) and wait.
+    poll read_output: each REMIND already carries the latest output. On a reminder you may tell
+    the user how it is going (respond) or say nothing ({{"action": "wait"}}); either is fine.
     NEVER send a password or any other credential: a password prompt is the user's decision, not
     yours — report it and let them answer. kill_job ends a job that is stuck or no longer wanted.
   long commands & timeouts — commands are NOT killed on a clock: there is no default timeout. For
@@ -740,8 +740,8 @@ dispatch — Execute tool calls. Only after seeing SERVER_DOCS.
     ever wakes you to answer it. When a REMIND tail or a status tail shows the
     command waiting, dispatch send_input (its own task — the run_job call is still blocked) with
     EXACTLY what the output asked for; never guess input the output did not ask for. Do not
-    poll read_output: each REMIND already carries the latest output. Between reminders, tell
-    the user what is happening (respond) and wait.
+    poll read_output: each REMIND already carries the latest output. On a reminder you may tell
+    the user how it is going (respond) or say nothing ({{"action": "wait"}}); either is fine.
     NEVER send a password or any other credential: a password prompt is the user's decision, not
     yours — report it and let them answer. kill_job ends a job that is stuck or no longer wanted.
   long commands & timeouts — commands are NOT killed on a clock: there is no default timeout. For

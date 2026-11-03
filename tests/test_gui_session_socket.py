@@ -6,11 +6,14 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from jarvis.runtime import io as runtime_io
+from jarvis.sessions.block_log import BlockLog
 from jarvis.sessions.model import Session
 
 
 def _make_app(sessions=None, contextor=None):
-    return SimpleNamespace(sessions=sessions or Mock(), contextor=contextor or Mock())
+    sessions = sessions or Mock()
+    sessions.blocks = BlockLog()
+    return SimpleNamespace(sessions=sessions, contextor=contextor or Mock())
 
 
 def _sample_session(id_="abc12345", title="Test chat"):
