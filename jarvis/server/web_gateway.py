@@ -93,6 +93,7 @@ RELAYED = frozenset(
     {
         "state",
         "response",
+        "user_message",
         "activity",
         "confirmation_request",
         "confirmation_list",
@@ -435,7 +436,11 @@ class Gateway:
         """
         await self._upstream_send(
             writer,
-            {"type": "hello", "label": label, "subscribe": ["activity", "action"]},
+            {
+                "type": "hello",
+                "label": label,
+                "subscribe": ["activity", "action", "user_message"],
+            },
         )
         await self._upstream_send(writer, {"type": "get_settings"})
         early = []

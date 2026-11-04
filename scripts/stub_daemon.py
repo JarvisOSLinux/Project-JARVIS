@@ -234,6 +234,14 @@ async def handle(msg: dict, writer: asyncio.StreamWriter) -> None:
     elif kind == "message":
         text = str(msg.get("content", ""))
         history.append({"role": "user", "content": text, "timestamp": time.time()})
+        said = (
+            json.dumps({"type": "user_message", "content": text, "at": time.time()})
+            + "\n"
+        ).encode()
+        for w in writers:
+            if w is not writer:
+                w.write(said)
+                await w.drain()
         if text.strip().lower() == "confirm":
             pending.append(
                 {

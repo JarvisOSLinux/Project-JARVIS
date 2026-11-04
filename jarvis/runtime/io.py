@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 from logging import Logger
 from typing import Any, Optional
 
@@ -17,6 +18,7 @@ from ..core.providers import (
     move_provider,
     remove_provider,
 )
+from ..core.secret_scrubber import redact_secrets
 from ..core.voice_state import VoiceState
 from ..platform import current as platform
 from . import action_events
@@ -81,6 +83,7 @@ async def handle_socket_connection(
                     pass
 
             app.events.inject_user_input(text)
+            on_user_message(app, text)
             logger.info(f"JARVIS: Socket input: {text[:80]}...")
     except (ConnectionResetError, BrokenPipeError):
         pass
@@ -340,7 +343,7 @@ DEFAULT_CLIENT_LABEL = "unlabeled"
 # Pushed events a client receives only when its `hello` asks for them. A
 # client that predates them would choke on an unknown type: jarvis-app shows
 # every unknown message as an alert.
-SUBSCRIBABLE = frozenset({"activity", "action"})
+SUBSCRIBABLE = frozenset({"activity", "action", "user_message"})
 
 
 def _subscriptions(app: Any) -> dict:
@@ -430,6 +433,7 @@ async def _process_gui_message(
         if content:
             await set_gui_state(app, VoiceState.PROCESSING)
             app.events.inject_user_input(content)
+            on_user_message(app, content, sender=writer)
             logger.info(f"JARVIS: GUI input: {content[:80]}...")
 
     elif msg_type == "confirmation_response":
@@ -823,11 +827,15 @@ def on_gui_output(app: Any, response: dict[str, Any]) -> None:
         pass
 
 
-def _broadcast_soon(app: Any, message: dict) -> None:
+def _broadcast_soon(app: Any, message: dict, skip: Any = None) -> None:
     """Send a subscribable event to the clients that asked for its type."""
     subs = _subscriptions(app)
     kind = message.get("type")
-    writers = [w for w in getattr(app, "_gui_clients", {}) if kind in subs.get(w, ())]
+    writers = [
+        w
+        for w in getattr(app, "_gui_clients", {})
+        if w is not skip and kind in subs.get(w, ())
+    ]
     if not writers:
         return
     try:
@@ -849,6 +857,17 @@ def on_gui_activity(app: Any, event: dict[str, Any]) -> None:
 def on_gui_action(app: Any, event: dict[str, Any]) -> None:
     """An action's start, update or end (runtime/action_events.py), as is."""
     _broadcast_soon(app, event)
+
+
+def on_user_message(app: Any, text: str, sender: Any = None) -> None:
+    """What the user said, typed on any screen or spoken, for the other
+    clients' chats; the client it came from (`sender`) has drawn it already.
+    Redacted as the session stores it: a phone may be another account's."""
+    text, _ = redact_secrets(text.strip())
+    if text:
+        _broadcast_soon(
+            app, {"type": "user_message", "content": text, "at": time.time()}, sender
+        )
 
 
 async def _gui_output_and_idle(app: Any, response: dict[str, Any]) -> None:

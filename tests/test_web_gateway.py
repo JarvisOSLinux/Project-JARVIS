@@ -67,8 +67,10 @@ class TestPolicy:
     def test_activity_for_everyone_actions_for_trusted(self):
         # Action blocks carry tool parameters and raw output.
         activity = {"type": "activity", "text": "Searching…", "kind": "dispatch"}
+        said = {"type": "user_message", "content": "update my system", "at": 1.0}
         for role in wg.ROLES:
             assert wg.relayable(activity, role)
+            assert wg.relayable(said, role)
         for kind in ("action", "status", "work"):
             assert not wg.relayable({"type": kind}, "guest")
             assert wg.relayable({"type": kind}, "trusted")
@@ -288,7 +290,7 @@ class TestRelay:
             assert {
                 "type": "hello",
                 "label": "web:toufic@example.com",
-                "subscribe": ["activity", "action"],
+                "subscribe": ["activity", "action", "user_message"],
             } in daemon.received
             assert {"type": "message", "content": "hello"} in daemon.received
             audit = [json.loads(x) for x in open(tmp_path / "audit.jsonl")]

@@ -324,6 +324,9 @@ class JarvisTUI(App):
         # Inject via the same path voice and sockets use.  Slash
         # commands still work — main.py's handler catches them.
         self.jarvis.events.inject_user_input(text)
+        from ..runtime.io import on_user_message
+
+        on_user_message(self.jarvis, text)
 
     @on(OptionList.OptionSelected, "#command-dropdown")
     def on_command_suggested(self, event: OptionList.OptionSelected) -> None:

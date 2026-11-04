@@ -18,8 +18,8 @@ test pins each message added by #267.
 - **On connect** the daemon sends the current `state`. Send `hello` with a
   label so `list_clients` can name you, and with `subscribe` for the pushed
   events you can show: `{"type": "hello", "label": "jarvis-app", "subscribe":
-  ["activity", "action"]}`. Without it you get neither, so a client written
-  before them never sees an unknown type.
+  ["activity", "action", "user_message"]}`. Without it you get none of them,
+  so a client written before them never sees an unknown type.
 - **Keepalive:** after 60 s without a line from you the daemon sends `ping`;
   you may send `ping` and get `pong`.
 
@@ -38,7 +38,7 @@ client keeps its view in step by listening, not by polling.
 | `stop_all` | | `stop`, and the session's running tasks are killed too. When one runs a package manager the first `stop_all` only warns (`ack`); a second within 15 s kills it. |
 | `stop_task` | `pid` | Kills one running task (the `pid` from `work`); the model hears nothing from it. Its request is closed when nothing else of it is under way; otherwise the request's next turn is told the user stopped it. A package manager is only warned about at first (`ack`); a second `stop_task` for it within 15 s kills it. → `ack` with what was stopped. |
 | `stop_stream` | | Ends the reply being shown (`response` with `done: true`) and sets the state to `idle`; JARVIS's work goes on. |
-| `hello` | `label`, `subscribe` (optional list: `activity`, `action`) | Names this client in `list_clients`, and asks for the pushed events it can show. |
+| `hello` | `label`, `subscribe` (optional list: `activity`, `action`, `user_message`) | Names this client in `list_clients`, and asks for the pushed events it can show. |
 | `list_clients` | | → `client_list` |
 | `ping` | | → `pong` |
 
@@ -49,7 +49,7 @@ client keeps its view in step by listening, not by polling.
 | `get_status` | `full` (bool, optional) | `status`: the `/status` health check. `full` also asks the registry for server updates, the one check that goes online. |
 | `list_work` | | `work`: what the TUI's F4 view shows. |
 
-Activity and action events are pushed to the clients that subscribed to them in `hello` (see below).
+Activity, action and user-message events are pushed to the clients that subscribed to them in `hello` (see below).
 
 ### Confirmations
 
@@ -156,6 +156,18 @@ this machine: `jarvis web` never relays it.
 - States: `idle`, `woken`, `capturing`, `listening`, `processing`,
   `speaking`. A state may carry `meta` (a discard reason).
 - `wake_word_detected` has no fields.
+
+### What the user said
+
+Only to clients that subscribed to `user_message`. A message the user sent
+from another client, typed into the TUI or `jarvis send`, or spoken, so every
+screen shows the whole conversation. The client a message came from does not
+get it back: it drew the message when it sent it. Secrets are redacted as the
+session stores them. `at` is seconds since the epoch.
+
+```json
+{"type": "user_message", "content": "Update my system", "at": 1762200000.5}
+```
 
 ### Activity (#267)
 
@@ -286,10 +298,10 @@ comes live, with the same `id`. A comment has `comment: true`.
 ## Through `jarvis web`
 
 The gateway relays this protocol over a WebSocket, narrowed by role
-(`docs/web-gateway.md`). It subscribes to `activity` and `action` for the
-phone:
+(`docs/web-gateway.md`). It subscribes to `activity`, `action` and
+`user_message` for the phone:
 
-- **Every role** sees `state`, `response`, `activity`, confirmations, sessions
+- **Every role** sees `state`, `response`, `user_message`, `activity`, confirmations, sessions
   (a guest's history without its action blocks), `client_list`, `ack`, `error`,
   and a `DAEMON_SHUTDOWN` cut down to its state.
 - **Trusted and owner** also see `action`, `status` and `work`, and may send
