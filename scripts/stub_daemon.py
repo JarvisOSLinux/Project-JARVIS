@@ -188,8 +188,8 @@ SAMPLE_STATUS = [
 async def handle(msg: dict, writer: asyncio.StreamWriter) -> None:
     kind = msg.get("type")
     if kind == "get_settings":
-        out = {"type": "settings", "confirmation_mode": "smart"}
-        await broadcast(out)
+        mode = {"key": "CONFIRMATION_MODE", "kind": "select", "value": "smart"}
+        await broadcast({"type": "settings", "settings": [mode]})
     elif kind == "list_sessions":
         await broadcast({"type": "session_list", "sessions": [SESSION]})
     elif kind == "switch_session":

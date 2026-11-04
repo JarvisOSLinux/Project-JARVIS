@@ -153,8 +153,7 @@ def test_the_root_prompts_ask_for_comments():
 
 @pytest.mark.unit
 def test_the_voice_settings_offer_to_silence_comments():
-    pytest.importorskip("textual")
-    from jarvis.tui.config_modal import _SETTINGS
+    from jarvis.core.settings import SETTINGS
 
-    (setting,) = [s for s in _SETTINGS if s.key == "VOICE_SPEAK_COMMENTS"]
-    assert setting.category == "Voice" and setting.kind == "bool"
+    (setting,) = [s for s in SETTINGS if s.key == "VOICE_SPEAK_COMMENTS"]
+    assert setting.section == "Voice" and setting.kind == "bool"

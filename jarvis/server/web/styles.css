@@ -588,6 +588,32 @@ body {
 
 .settings-value-mono { font-family: var(--font-mono); }
 
+/* JARVIS's settings, one group per section of its list. */
+#settings-catalog,
+.settings-group { display: flex; flex-direction: column; gap: 16px; }
+
+.settings-group-title {
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--primary);
+}
+
+details.settings-group > summary {
+    cursor: pointer;
+    list-style: none;
+}
+details.settings-group > summary::-webkit-details-marker { display: none; }
+details.settings-group > summary::before { content: '▸ '; color: var(--primary-dim); }
+details.settings-group[open] > summary::before { content: '▾ '; }
+
+#settings-modal input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
+#settings-modal input[type="number"]::-webkit-inner-spin-button,
+#settings-modal input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
 .settings-row { display: flex; gap: 8px; }
 .settings-row-spread { justify-content: space-between; align-items: center; }
 
@@ -1265,6 +1291,15 @@ details.action-block[open] > summary::before { content: '▾'; }
 details.action-block > summary:hover { background: var(--card); }
 
 .action-title { color: var(--text-primary); overflow-wrap: anywhere; }
+.action-brief {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--font-mono);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+details.action-block[open] .action-brief { visibility: hidden; }
 .action-time { margin-left: auto; white-space: nowrap; }
 .action-mark { white-space: nowrap; }
 .action-mark.running { color: #ffaa00; }
@@ -1278,6 +1313,7 @@ details.action-block > summary:hover { background: var(--card); }
     font-family: var(--font-mono);
     font-size: 11px;
     overflow-wrap: anywhere;
+    white-space: pre-wrap; /* a script reads as typed, one line per line */
 }
 
 .action-output {

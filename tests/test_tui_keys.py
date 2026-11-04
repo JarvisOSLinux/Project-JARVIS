@@ -42,6 +42,7 @@ def _tui(drive, setups=()):
             goals=SimpleNamespace(get_active_goals=lambda: []),
             dispatch=SimpleNamespace(is_connected=False),
             confirmation=SimpleNamespace(list_pending=lambda: []),
+            _gui_clients={},
         )
         app.injected = []
         async with app.run_test(size=(110, 40)) as pilot:
@@ -115,9 +116,9 @@ def test_esc_with_unsaved_settings_asks_first(monkeypatch):
     from textual.widgets import Input, Static
 
     from jarvis.config import Config
-    from jarvis.tui.config_modal import _SETTINGS
+    from jarvis.core.settings import SETTINGS
 
-    field = next(s for s in _SETTINGS if s.kind == "int")
+    field = next(s for s in SETTINGS if s.kind == "int")
     monkeypatch.setattr(Config, field.key, 5)
 
     async def drive(app, pilot):

@@ -94,23 +94,8 @@
                 <div class="settings-hint">Enable or disable wake-word listening entirely.</div>
             </div>
 
-            <div class="settings-section">
-                <label class="settings-label" for="settings-confirmation-mode">Confirmation mode</label>
-                <select id="settings-confirmation-mode">
-                    <option value="smart">Smart &mdash; only when a tool requires it</option>
-                    <option value="ask_all">Ask for everything</option>
-                    <option value="allow_all">Allow all &mdash; no prompts</option>
-                </select>
-            </div>
-
-            <div class="settings-section">
-                <label class="settings-label">Wake sound</label>
-                <div id="settings-wake-chime-path" class="settings-value"></div>
-                <div class="settings-row">
-                    <button id="settings-choose-chime-btn">Choose file&hellip;</button>
-                    <button id="settings-reset-chime-btn">Restore default</button>
-                </div>
-            </div>
+            <!-- JARVIS's own settings, drawn from its list (get_settings) -->
+            <div id="settings-catalog"></div>
 
             <div class="settings-section">
                 <label class="settings-label">Connection</label>

@@ -9,6 +9,7 @@ from logging import Logger
 from typing import Any, Optional
 
 from ..config import Config
+from ..core import settings
 from ..core.providers import (
     add_provider,
     edit_provider,
@@ -18,7 +19,6 @@ from ..core.providers import (
 )
 from ..core.voice_state import VoiceState
 from ..platform import current as platform
-from ..voice.chime import validate_chime_path
 from . import action_events
 
 
@@ -474,24 +474,11 @@ async def _process_gui_message(
         )
         await set_gui_state(app, VoiceState.IDLE)
 
-    elif msg_type == "set_wake_chime_path":
-        await _handle_set_wake_chime_path(app, msg, writer)
-
-    elif msg_type == "reset_wake_chime_path":
-        await _handle_reset_wake_chime_path(app, writer)
-
     elif msg_type == "get_settings":
-        await _gui_write(
-            writer,
-            {
-                "type": "settings",
-                "confirmation_mode": Config.CONFIRMATION_MODE,
-                "wake_chime_path": Config.WAKE_CHIME_PATH,
-            },
-        )
+        await _gui_write(writer, {"type": "settings", "settings": settings.describe()})
 
-    elif msg_type == "set_confirmation_mode":
-        await _handle_set_confirmation_mode(app, msg, writer)
+    elif msg_type == "set_setting":
+        await _handle_set_setting(app, msg, writer)
 
     elif msg_type == "list_providers":
         await _gui_write(
@@ -564,74 +551,30 @@ async def _process_gui_message(
 
 
 # ---------------------------------------------------------------------------
-# GUI socket — wake chime config
+# GUI socket — settings
 # ---------------------------------------------------------------------------
 
 
-async def _handle_set_wake_chime_path(
+async def _handle_set_setting(
     app: Any, msg: dict, writer: asyncio.StreamWriter
 ) -> None:
-    """Validated, single-purpose config write for WAKE_CHIME_PATH only --
-    deliberately NOT a generic "set any config key" message. Exposing an
-    unscoped config writer over the GUI socket would let any local client
-    silently rewrite security-relevant settings (e.g. CONFIRMATION_MODE).
+    """Change one setting from ``core/settings.py``'s list, checked first.
+
+    Any other key is refused: the list is the whole of what a client may
+    change. Every client hears of the change; only the asker of the error.
     """
-    path = msg.get("path", "")
-    error = validate_chime_path(path)
+    key = str(msg.get("key", ""))
+    val, error = settings.apply(key, msg.get("value"))
     if error:
-        await _gui_write(
-            writer, {"type": "config_error", "key": "WAKE_CHIME_PATH", "message": error}
-        )
+        await _gui_write(writer, {"type": "config_error", "key": key, "message": error})
         return
+    await broadcast_setting(app, key, val)
 
-    from ..cli import _update_env_setting
 
-    _update_env_setting("WAKE_CHIME_PATH", path)
+async def broadcast_setting(app: Any, key: str, val: Any) -> None:
+    """Tell every GUI client a setting changed, wherever it was changed."""
     await broadcast_to_gui_clients(
-        app, {"type": "config_updated", "key": "WAKE_CHIME_PATH", "value": path}
-    )
-
-
-async def _handle_reset_wake_chime_path(app: Any, writer: asyncio.StreamWriter) -> None:
-    """Restore WAKE_CHIME_PATH to the bundled default -- the settings-panel
-    counterpart to `_handle_set_wake_chime_path`'s custom-path write."""
-    from ..cli import _update_env_setting
-
-    default = Config.DEFAULT_WAKE_CHIME_PATH
-    _update_env_setting("WAKE_CHIME_PATH", default)
-    await broadcast_to_gui_clients(
-        app, {"type": "config_updated", "key": "WAKE_CHIME_PATH", "value": default}
-    )
-
-
-_VALID_CONFIRMATION_MODES = ("smart", "ask_all", "allow_all")
-
-
-async def _handle_set_confirmation_mode(
-    app: Any, msg: dict, writer: asyncio.StreamWriter
-) -> None:
-    """Validated, single-purpose config write for CONFIRMATION_MODE only --
-    same rationale as `_handle_set_wake_chime_path`: no generic config setter
-    over the GUI socket, only specific, whitelisted, validated keys.
-    """
-    mode = msg.get("mode", "")
-    if mode not in _VALID_CONFIRMATION_MODES:
-        await _gui_write(
-            writer,
-            {
-                "type": "config_error",
-                "key": "CONFIRMATION_MODE",
-                "message": f"Invalid mode '{mode}'. Use one of: "
-                f"{', '.join(_VALID_CONFIRMATION_MODES)}.",
-            },
-        )
-        return
-
-    from ..cli import _update_env_setting
-
-    _update_env_setting("CONFIRMATION_MODE", mode)
-    await broadcast_to_gui_clients(
-        app, {"type": "config_updated", "key": "CONFIRMATION_MODE", "value": mode}
+        app, {"type": "config_updated", "key": key, "value": val}
     )
 
 

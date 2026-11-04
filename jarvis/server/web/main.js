@@ -56,10 +56,7 @@ const settingsTabGeneral      = document.getElementById('settings-tab-general');
 const settingsTabProviders    = document.getElementById('settings-tab-providers');
 const settingsTabWidgets      = document.getElementById('settings-tab-widgets');
 const settingsVoiceToggle     = document.getElementById('settings-voice-toggle');
-const settingsConfirmationMode = document.getElementById('settings-confirmation-mode');
-const settingsWakeChimePath   = document.getElementById('settings-wake-chime-path');
-const settingsChooseChimeBtn  = document.getElementById('settings-choose-chime-btn');
-const settingsResetChimeBtn   = document.getElementById('settings-reset-chime-btn');
+const settingsCatalog         = document.getElementById('settings-catalog');
 const settingsSocketPath      = document.getElementById('settings-socket-path');
 const settingsQuitOnShutdown  = document.getElementById('settings-quit-on-shutdown');
 const settingsShutdownBtn     = document.getElementById('settings-shutdown-btn');
@@ -502,8 +499,10 @@ function onAction(ev) {
         const summary = el('summary');
         const mark = el('span');
         const title = el('span', 'action-title', ev.title || '');
+        // What ran, on the folded line too (the command, not just the tool).
+        const brief = el('span', 'action-brief', (ev.detail || '').split('\n')[0]);
         const time = el('span', 'action-time');
-        summary.append(mark, title, time);
+        summary.append(mark, title, brief, time);
         summary.addEventListener('click', () => { block.dataset.touched = '1'; });
         const detail = el('div', 'action-detail', ev.detail || '');
         detail.hidden = !ev.detail;
@@ -833,16 +832,100 @@ function toggleSettingsModal() {
     settingsModal.classList.contains('visible') ? closeSettingsModal() : openSettingsModal();
 }
 
-function applySettings(settings) {
-    settingsConfirmationMode.value = settings.confirmation_mode;
-    settingsWakeChimePath.textContent = settings.wake_chime_path;
+// JARVIS's settings, from the list it sends (the same one the TUI's settings
+// window draws). Each control sets its value in place, so a reply to one
+// change does not rebuild the panel under the user.
+const settingControls = new Map(); // key -> function that shows a value
+let settingsDrawn = '';
+
+function renderSettings(list) {
+    const keys = list.map((s) => s.key).join(' ');
+    if (keys !== settingsDrawn) drawSettings(list);
+    settingsDrawn = keys;
+    for (const s of list) settingControls.get(s.key)?.(s.value);
 }
 
-async function chooseWakeChimeFile() {
-    const path = await invoke('pick_wake_chime_file');
-    if (!path) return; // user cancelled the native picker
+function drawSettings(list) {
+    const advancedOpen = settingsCatalog.querySelector('details')?.open ?? false;
+    settingControls.clear();
+    settingsCatalog.replaceChildren();
+    let group = null;
+    let section = null;
+    for (const s of list) {
+        if (s.section !== section) {
+            section = s.section;
+            if (section === 'Advanced') {
+                group = el('details', 'settings-group');
+                group.open = advancedOpen;
+                group.append(el('summary', 'settings-group-title', section));
+            } else {
+                group = el('div', 'settings-group');
+                group.append(el('div', 'settings-group-title', section));
+            }
+            settingsCatalog.append(group);
+        }
+        group.append(settingField(s));
+    }
+}
+
+function settingField(s) {
+    const field = el('div', 'settings-section');
+    const label = el('label', 'settings-label', s.label);
+    label.htmlFor = 'setting-' + s.key;
+    let control;
+    let show;
+    if (s.kind === 'select') {
+        control = document.createElement('select');
+        for (const o of s.options || []) {
+            const option = el('option', null, o.label);
+            option.value = o.value;
+            control.append(option);
+        }
+        control.addEventListener('change', () => changeSetting(s.key, control.value));
+        show = (v) => { control.value = v; };
+        field.append(label, control);
+    } else if (s.kind === 'bool') {
+        control = document.createElement('input');
+        control.type = 'checkbox';
+        control.addEventListener('change', () => changeSetting(s.key, control.checked));
+        show = (v) => { control.checked = !!v; };
+        label.className = 'settings-checkbox-label';
+        const row = el('div', 'settings-row settings-row-spread');
+        row.append(label, control);
+        field.append(row);
+    } else if (s.kind === 'sound') {
+        control = el('div', 'settings-value');
+        show = (v) => { control.textContent = v; };
+        const choose = el('button', null, 'Choose file\u2026');
+        choose.addEventListener('click', async () => {
+            const path = await invoke('pick_wake_chime_file');
+            if (path) changeSetting(s.key, path);
+        });
+        const reset = el('button', null, 'Restore default');
+        reset.addEventListener('click', () => changeSetting(s.key, ''));
+        const row = el('div', 'settings-row');
+        row.append(choose, reset);
+        field.append(label, control, row);
+    } else {
+        control = document.createElement('input');
+        control.type = 'number';
+        control.step = s.kind === 'int' ? '1' : 'any';
+        if (s.min != null) control.min = s.min;
+        if (s.max != null) control.max = s.max;
+        control.addEventListener('change', () => changeSetting(s.key, control.value));
+        // Not while the user is typing in it.
+        show = (v) => { if (document.activeElement !== control) control.value = v; };
+        field.append(label, control);
+    }
+    control.id = 'setting-' + s.key;
+    if (s.hint) field.append(el('div', 'settings-hint', s.hint));
+    settingControls.set(s.key, show);
+    return field;
+}
+
+function changeSetting(key, value) {
     clearSettingsError();
-    await invoke('set_wake_chime_path', { path });
+    invoke('set_setting', { key, value });
 }
 
 // ── Providers ──────────────────────────────────────────────────────────────
@@ -1211,15 +1294,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     settingsTabProvidersBtn.addEventListener('click', () => switchSettingsTab('providers'));
     settingsTabWidgetsBtn.addEventListener('click', () => switchSettingsTab('widgets'));
     settingsVoiceToggle.addEventListener('click', toggleListening);
-    settingsConfirmationMode.addEventListener('change', () => {
-        clearSettingsError();
-        invoke('set_confirmation_mode', { mode: settingsConfirmationMode.value });
-    });
-    settingsChooseChimeBtn.addEventListener('click', chooseWakeChimeFile);
-    settingsResetChimeBtn.addEventListener('click', () => {
-        clearSettingsError();
-        invoke('reset_wake_chime_path');
-    });
     settingsAddProviderBtn.addEventListener('click', () => openProviderForm(null));
     providerFormCancelBtn.addEventListener('click', closeProviderForm);
     providerFormSaveBtn.addEventListener('click', saveProviderForm);
@@ -1280,7 +1354,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     await listen('ipc-session-error', (e) => showNotice('Session error: ' + e.payload));
     await listen('ipc-error', (e) => showNotice(e.payload));
-    await listen('ipc-settings', (e) => applySettings(e.payload));
+    await listen('ipc-settings', (e) => renderSettings(e.payload || []));
     await listen('ipc-provider-list', (e) => {
         renderProviderList(e.payload);
         closeProviderForm(); // a refreshed list means the pending add/edit/remove succeeded
@@ -1290,15 +1364,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     await listen('ipc-daemon-shutdown', (e) => handleDaemonShutdown(e.payload));
     await listen('ipc-open-shutdown-modal', openShutdownModal); // tray menu entry point
     await listen('ipc-config-updated', (e) => {
-        if (e.payload.key === 'CONFIRMATION_MODE' || e.payload.key === 'WAKE_CHIME_PATH') {
-            clearSettingsError();
-            invoke('get_settings');
-        }
+        settingControls.get(e.payload.key)?.(e.payload.value);
     });
     await listen('ipc-config-error', (e) => {
-        if (e.payload.key === 'CONFIRMATION_MODE' || e.payload.key === 'WAKE_CHIME_PATH') {
-            showSettingsError(e.payload.message);
-        }
+        showSettingsError(e.payload.message);
+        invoke('get_settings'); // put the refused control back to what JARVIS runs with
     });
 
     if (!IS_DESKTOP) {
