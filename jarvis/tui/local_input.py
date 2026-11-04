@@ -333,28 +333,6 @@ def _handle_model(app: Any, text: str) -> None:
     )
 
 
-def _apply_in_memory(key: str, value: str) -> None:
-    """Apply a setting change to the live Config object with proper type coercion."""
-    from ..config import Config
-
-    bool_keys = {"RESET_HISTORY_AFTER_RESPONSE", "VOICE_SPEAK_COMMENTS"}
-    int_keys = {
-        "RAG_TOP_K",
-        "MAX_GOALS_IN_CONTEXT",
-        "CONFIRMATION_TIMEOUT",
-    }
-    float_keys = {"RAG_MIN_SCORE"}
-
-    if key in bool_keys:
-        setattr(Config, key, value.lower() == "true")
-    elif key in int_keys:
-        setattr(Config, key, int(value))
-    elif key in float_keys:
-        setattr(Config, key, float(value))
-    else:
-        setattr(Config, key, value)
-
-
 def export_transcript_to_disk(app: Any, filename: Optional[str]) -> None:
     """Save plain transcript as Markdown under ``JARVIS_DATA_DIR/transcripts``."""
     root = Path(Config.JARVIS_DATA_DIR).expanduser().resolve()

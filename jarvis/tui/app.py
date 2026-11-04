@@ -592,20 +592,20 @@ class JarvisTUI(App):
         self.push_screen(QuitConfirmModal(pending), decided)
 
     def _open_config(self, tab: str = "settings") -> None:
-        from .local_input import _apply_in_memory
+        from ..core import settings
+        from ..runtime.io import broadcast_setting
 
         def _on_config(result: ConfigModalResult) -> None:
             if result.settings_changes:
-                from ..cli import _update_env_setting
-
                 applied = []
                 for key, value in result.settings_changes.items():
-                    try:
-                        _update_env_setting(key, value)
-                        _apply_in_memory(key, value)
-                        applied.append(f"{key}={value}")
-                    except Exception as e:
-                        self._append_log(f"[red]Error setting {key}: {e}[/red]")
+                    val, error = settings.apply(key, value)
+                    if error:
+                        self._append_log(f"[red]Not saved: {error}[/red]")
+                        continue
+                    applied.append(f"{key}={value}")
+                    if self.jarvis is not None:
+                        asyncio.create_task(broadcast_setting(self.jarvis, key, val))
                 if applied:
                     self._append_log(
                         f"[green]Settings updated: {', '.join(applied)}[/green]"

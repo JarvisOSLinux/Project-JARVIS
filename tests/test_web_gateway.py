@@ -44,12 +44,11 @@ class TestPolicy:
         [
             "approve_all_confirmations",
             "confirmation_response",
-            "set_confirmation_mode",
+            "set_setting",
             "add_provider",
             "edit_provider",
             "remove_provider",
             "get_settings",
-            "set_wake_chime_path",
             "shutdown_request",
             "setup_completed",
             "cancel_setup",
@@ -209,10 +208,13 @@ class FakeDaemon:
             msg = json.loads(line)
             self.received.append(msg)
             if msg["type"] == "get_settings":
+                listed = [] if self.mode is None else [self.mode]
                 out = {
                     "type": "settings",
-                    "confirmation_mode": self.mode,
-                    "wake_chime_path": "/x",
+                    "settings": [
+                        {"key": "CONFIRMATION_MODE", "kind": "select", "value": m}
+                        for m in listed
+                    ],
                 }
                 writer.write((json.dumps(out) + "\n").encode())
                 await writer.drain()
@@ -384,6 +386,21 @@ class TestRelay:
     async def test_refused_while_host_is_allow_all(self, tmp_path):
         daemon, server, url, _ = await _boot(
             tmp_path, {"t@example.com": "owner"}, mode="allow_all"
+        )
+        try:
+            async with connect(
+                url, additional_headers=_wire(url, "t@example.com")
+            ) as ws:
+                with pytest.raises(ConnectionClosed) as err:
+                    await ws.recv()
+                assert err.value.rcvd.code == wg.CLOSE_UNSAFE
+        finally:
+            server.close()
+            await daemon.stop()
+
+    async def test_refused_when_the_host_does_not_say_its_mode(self, tmp_path):
+        daemon, server, url, _ = await _boot(
+            tmp_path, {"t@example.com": "owner"}, mode=None
         )
         try:
             async with connect(

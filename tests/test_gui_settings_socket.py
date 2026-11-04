@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from jarvis.config import Config
+from jarvis.core import settings
 from jarvis.runtime import io as runtime_io
 
 
@@ -18,90 +19,107 @@ def _make_app():
 @pytest.mark.unit
 class TestGetSettings:
     @pytest.mark.asyncio
-    async def test_returns_whitelisted_settings_only(self):
+    async def test_replies_with_every_setting_and_its_value(self):
         app = _make_app()
         writer = Mock()
         with (
-            patch.object(Config, "CONFIRMATION_MODE", "smart"),
-            patch.object(Config, "WAKE_CHIME_PATH", "/some/chime.wav"),
+            patch.object(Config, "CONFIRMATION_MODE", "ask_all"),
             patch.object(runtime_io, "_gui_write", new=AsyncMock()) as gw,
         ):
             await runtime_io._process_gui_message(
                 app, Mock(), {"type": "get_settings"}, writer
             )
-        gw.assert_awaited_once_with(
-            writer,
-            {
-                "type": "settings",
-                "confirmation_mode": "smart",
-                "wake_chime_path": "/some/chime.wav",
-            },
+        (sent_to, reply), _ = gw.await_args
+        assert sent_to is writer and reply["type"] == "settings"
+        assert [e["key"] for e in reply["settings"]] == [
+            s.key for s in settings.SETTINGS
+        ]
+        (mode,) = [e for e in reply["settings"] if e["key"] == "CONFIRMATION_MODE"]
+        assert mode["value"] == "ask_all"
+        assert [o["value"] for o in mode["options"]] == [
+            "smart",
+            "ask_all",
+            "allow_all",
+        ]
+
+
+async def _set(key, value):
+    app = _make_app()
+    writer = Mock()
+    with (
+        patch("jarvis.cli._update_env_setting") as write,
+        patch.object(runtime_io, "broadcast_to_gui_clients", new=AsyncMock()) as bc,
+        patch.object(runtime_io, "_gui_write", new=AsyncMock()) as gw,
+    ):
+        await runtime_io._process_gui_message(
+            app, Mock(), {"type": "set_setting", "key": key, "value": value}, writer
         )
+    return app, writer, write, bc, gw
 
 
 @pytest.mark.unit
-class TestResetWakeChimePath:
+class TestSetSetting:
     @pytest.mark.asyncio
-    async def test_restores_bundled_default_and_broadcasts(self):
-        app = _make_app()
-        writer = Mock()
-        with (
-            patch("jarvis.cli._update_env_setting") as mock_update,
-            patch.object(runtime_io, "broadcast_to_gui_clients", new=AsyncMock()) as bc,
-        ):
-            await runtime_io._handle_reset_wake_chime_path(app, writer)
-        mock_update.assert_called_once_with(
-            "WAKE_CHIME_PATH", Config.DEFAULT_WAKE_CHIME_PATH
-        )
-        bc.assert_awaited_once_with(
-            app,
-            {
-                "type": "config_updated",
-                "key": "WAKE_CHIME_PATH",
-                "value": Config.DEFAULT_WAKE_CHIME_PATH,
-            },
-        )
-
-
-@pytest.mark.unit
-class TestSetConfirmationMode:
-    @pytest.mark.asyncio
-    async def test_valid_mode_persists_and_broadcasts(self):
-        app = _make_app()
-        writer = Mock()
-        with (
-            patch("jarvis.cli._update_env_setting") as mock_update,
-            patch.object(runtime_io, "broadcast_to_gui_clients", new=AsyncMock()) as bc,
-        ):
-            await runtime_io._handle_set_confirmation_mode(
-                app, {"mode": "ask_all"}, writer
-            )
-        mock_update.assert_called_once_with("CONFIRMATION_MODE", "ask_all")
+    async def test_a_valid_value_is_saved_applied_and_told_to_everyone(self):
+        with patch.object(Config, "CONFIRMATION_MODE", "smart"):
+            app, _, write, bc, gw = await _set("CONFIRMATION_MODE", "ask_all")
+            assert Config.CONFIRMATION_MODE == "ask_all"
+        write.assert_called_once_with("CONFIRMATION_MODE", "ask_all")
         bc.assert_awaited_once_with(
             app,
             {"type": "config_updated", "key": "CONFIRMATION_MODE", "value": "ask_all"},
         )
+        gw.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_invalid_mode_replies_error_to_requester_only(self):
-        app = _make_app()
-        writer = Mock()
-        with (
-            patch("jarvis.cli._update_env_setting") as mock_update,
-            patch.object(runtime_io, "broadcast_to_gui_clients", new=AsyncMock()) as bc,
-            patch.object(runtime_io, "_gui_write", new=AsyncMock()) as gw,
-        ):
-            await runtime_io._handle_set_confirmation_mode(
-                app, {"mode": "yolo"}, writer
-            )
-        mock_update.assert_not_called()
+    async def test_values_keep_their_type(self):
+        with patch.object(Config, "VOICE_SPEAK_COMMENTS", True):
+            app, _, write, bc, _ = await _set("VOICE_SPEAK_COMMENTS", False)
+            assert Config.VOICE_SPEAK_COMMENTS is False
+        write.assert_called_once_with("VOICE_SPEAK_COMMENTS", "false")
+        bc.assert_awaited_once_with(
+            app,
+            {"type": "config_updated", "key": "VOICE_SPEAK_COMMENTS", "value": False},
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_bad_value_is_told_to_the_asker_only(self):
+        with patch.object(Config, "CONFIRMATION_MODE", "smart"):
+            _, writer, write, bc, gw = await _set("CONFIRMATION_MODE", "yolo")
+            assert Config.CONFIRMATION_MODE == "smart"
+        write.assert_not_called()
         bc.assert_not_awaited()
         gw.assert_awaited_once_with(
             writer,
             {
                 "type": "config_error",
                 "key": "CONFIRMATION_MODE",
-                "message": "Invalid mode 'yolo'. Use one of: smart, ask_all, allow_all.",
+                "message": "Confirmation mode: one of smart, ask_all, allow_all",
+            },
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("key", ["JARVIS_SUDO_ENABLED", "LLM_URL", "", "LOG_FILE"])
+    async def test_a_key_outside_the_list_is_refused(self, key):
+        _, writer, write, bc, gw = await _set(key, "true")
+        write.assert_not_called()
+        bc.assert_not_awaited()
+        (_, reply), _ = gw.await_args
+        assert reply["type"] == "config_error"
+        assert reply["message"] == f"{key} is not a setting JARVIS can change"
+
+    @pytest.mark.asyncio
+    async def test_an_empty_wake_sound_restores_the_bundled_one(self):
+        with patch.object(Config, "WAKE_CHIME_PATH", "/somewhere/else.wav"):
+            app, _, write, bc, _ = await _set("WAKE_CHIME_PATH", "")
+            assert Config.WAKE_CHIME_PATH == Config.DEFAULT_WAKE_CHIME_PATH
+        write.assert_called_once_with("WAKE_CHIME_PATH", Config.DEFAULT_WAKE_CHIME_PATH)
+        bc.assert_awaited_once_with(
+            app,
+            {
+                "type": "config_updated",
+                "key": "WAKE_CHIME_PATH",
+                "value": Config.DEFAULT_WAKE_CHIME_PATH,
             },
         )
 

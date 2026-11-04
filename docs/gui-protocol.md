@@ -93,14 +93,39 @@ An unknown id answers `error`.
 | `type` | Fields | Reply |
 |---|---|---|
 | `get_settings` | | `settings` |
-| `set_confirmation_mode` | `mode`: `smart`, `ask_all` or `allow_all` | `config_updated` (to everyone) or `config_error` |
-| `set_wake_chime_path` | `path` | `config_updated` or `config_error` |
-| `reset_wake_chime_path` | | `config_updated` |
+| `set_setting` | `key`, `value` | `config_updated` (to everyone) or `config_error` |
 | `list_providers` | | `provider_list` |
 | `add_provider` | `ptype`, `model`, and optional `name`, `url`, `api_key`, `temperature` | `provider_list` (to everyone) or `provider_error` |
 | `edit_provider` | `name`, `fields` (a dict of the fields to change) | as above |
 | `remove_provider` | `name` | as above |
 | `move_provider` | `name`, `position` (1 = tried first) | as above (#267) |
+
+`settings` lists what JARVIS can change while it runs, the same list the
+TUI's settings window draws (`jarvis/core/settings.py`), with each one's
+current value:
+
+```json
+{"type": "settings", "settings": [
+  {"key": "CONFIRMATION_MODE", "label": "Confirmation mode", "section": "Safety",
+   "kind": "select", "value": "smart",
+   "options": [{"value": "smart", "label": "Smart: ask when a tool can change something"}, ...]},
+  {"key": "CONFIRMATION_TIMEOUT", "label": "Deny unanswered requests after (seconds)",
+   "section": "Safety", "kind": "int", "value": 0, "min": 0,
+   "hint": "0 keeps them waiting until you answer"},
+  ...
+]}
+```
+
+`kind` is `select` (one of `options`), `bool`, `int` or `float` (within `min`
+and `max` when given), or `sound` (a WAV file's path; `""` sets the bundled
+one). A setting in the `Advanced` section tunes JARVIS rather than uses it; a
+client can keep that section folded. `set_setting` takes the value as JSON
+(`true`, `30`) or as text (`"on"`, `"30"`); JARVIS checks it, saves it to its
+config file and applies it at once. `config_updated` carries the value as
+applied, typed, and goes to every client, also when the change was made in the
+TUI. A key that is not in the list, or a value that does not fit, gets
+`config_error` with a message naming the setting (`"Memories per search: at
+least 1"`), to the sender only, and nothing is written.
 
 `provider_list` carries API keys as stored in `providers.json`. It stays on
 this machine: `jarvis web` never relays it.
@@ -247,7 +272,7 @@ comes live, with the same `id`. A comment has `comment: true`.
 
 | `type` | Fields |
 |---|---|
-| `settings` | `confirmation_mode`, `wake_chime_path` |
+| `settings` | `settings`: the list above |
 | `config_updated` | `key`, `value` |
 | `config_error` | `key`, `message` |
 | `provider_list` | `providers` |
@@ -278,4 +303,3 @@ phone:
 - Stopping a request or a task (#270).
 - Filling in a setup from an outside app: plain settings could travel here;
   secrets would not leave the desktop (#267 phase 2, open).
-- The remaining runtime settings that the TUI's settings window offers.

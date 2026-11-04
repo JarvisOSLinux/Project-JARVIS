@@ -180,6 +180,15 @@ def shown_to(msg: Any, role: str) -> Optional[dict]:
     return msg
 
 
+def confirmation_mode(settings_reply: dict) -> Optional[str]:
+    """The host's mode in a ``settings`` reply; None when it does not say."""
+    for entry in settings_reply.get("settings") or []:
+        if isinstance(entry, dict) and entry.get("key") == "CONFIRMATION_MODE":
+            mode = entry.get("value")
+            return mode if isinstance(mode, str) else None
+    return None
+
+
 def unsafe_mode_change(msg: dict) -> bool:
     return (
         msg.get("type") == "config_updated"
@@ -440,10 +449,12 @@ class Gateway:
                 if msg.get("type") != "settings":
                     early.append(msg)
                     continue
-                if msg.get("confirmation_mode") == "allow_all":
+                mode = confirmation_mode(msg)
+                if mode != "smart" and mode != "ask_all":
                     await ws.close(
                         CLOSE_UNSAFE,
-                        "Remote access needs confirmations on; the host is set to allow_all",
+                        "Remote access needs confirmations on; the host is set to "
+                        f"{mode or 'an unknown mode'}",
                     )
                     return False
                 break
