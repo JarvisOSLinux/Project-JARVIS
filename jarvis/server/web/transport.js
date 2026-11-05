@@ -85,6 +85,7 @@
             return emit('ipc-chunk', { content: msg.content, done: msg.done, comment: !!msg.comment });
         case 'activity':             return emit('ipc-activity', msg.text || '');
         case 'action':               return emit('ipc-action', msg);
+        case 'user_message':         return emit('ipc-user-message', msg);
         case 'status':               return emit('ipc-health', msg.sections || []);
         case 'work':                 return emit('ipc-work', msg.work || {});
         case 'ack':                  return emit('ipc-ack', { message: msg.message || '', for: msg.for || null });

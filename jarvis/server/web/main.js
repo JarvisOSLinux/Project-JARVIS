@@ -311,6 +311,40 @@ function toggleSidebar() {
     sessionSidebar.classList.contains('visible') ? closeSidebar() : openSidebar();
 }
 
+// A drawer follows a finger pushing it back off the edge it came from
+// (side -1: left, 1: right) and closes past 60px; a mostly vertical drag is
+// left to scroll the list.
+function swipeToClose(panel, close, side) {
+    let startX = null, startY = 0, dx = 0, dragging = false;
+    const end = () => {
+        startX = null;
+        panel.style.transition = '';
+        panel.style.transform = '';
+        if (dragging && Math.abs(dx) > 60) close();
+        dragging = false;
+    };
+    panel.addEventListener('touchstart', (e) => {
+        startX = e.touches[0].clientX;
+        startY = e.touches[0].clientY;
+        dx = 0;
+    }, { passive: true });
+    panel.addEventListener('touchmove', (e) => {
+        if (startX === null) return;
+        const x = e.touches[0].clientX - startX;
+        const y = e.touches[0].clientY - startY;
+        if (!dragging) {
+            if (Math.abs(y) > 10 && Math.abs(y) > Math.abs(x)) { startX = null; return; }
+            if (Math.abs(x) < 10) return;
+            dragging = true;
+        }
+        dx = side < 0 ? Math.min(0, x) : Math.max(0, x);
+        panel.style.transition = 'none';
+        panel.style.transform = `translateX(${dx}px)`;
+    }, { passive: true });
+    panel.addEventListener('touchend', end);
+    panel.addEventListener('touchcancel', end);
+}
+
 function renderSessionList(sessions) {
     sessionList.innerHTML = '';
     if (!sessions.length) {
@@ -1282,6 +1316,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     sessionsBtn.addEventListener('click', toggleSidebar);
     sessionBackdrop.addEventListener('click', closeSidebar);
+    document.getElementById('session-close').addEventListener('click', closeSidebar);
+    swipeToClose(sessionSidebar, closeSidebar, -1);
+    swipeToClose(permissionPanel, closePermissionPanel, 1);
+    swipeToClose(workPanel, closeWorkPanel, 1);
     newSessionBtn.addEventListener('click', createNewSession);
     permissionsBtn.addEventListener('click', togglePermissionPanel);
     permissionBackdrop.addEventListener('click', closePermissionPanel);
@@ -1327,6 +1365,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     await listen('ipc-state',        (e)     => setStatus(e.payload));
     await listen('ipc-chunk',        (e)     => appendJarvisChunk(e.payload.content, e.payload.done, e.payload.comment));
     await listen('ipc-activity',     (e)     => showActivity(e.payload));
+    // Said on another screen, in the TUI or aloud; this one drew its own.
+    await listen('ipc-user-message', (e)     => addUserMessage(e.payload.content || '', e.payload.at));
     await listen('ipc-action',       (e)     => onAction(e.payload));
     await listen('ipc-work',         (e)     => renderWork(e.payload || {}));
     await listen('ipc-health',       (e)     => renderStatus(e.payload));
