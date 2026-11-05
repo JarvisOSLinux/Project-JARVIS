@@ -42,7 +42,7 @@ body {
     gap: 12px;
 }
 
-.header-info { flex: 1; }
+.header-info { flex: 1; min-width: 0; }
 
 .header-title {
     font-size: 20px;
@@ -55,6 +55,9 @@ body {
     font-size: 10px;
     letter-spacing: 1px;
     color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* ── Status indicator ── */
@@ -62,6 +65,7 @@ body {
     display: flex;
     align-items: center;
     gap: 8px;
+    flex-shrink: 0;
 }
 
 #status-dot {
@@ -162,11 +166,14 @@ body {
     align-items: center;
     justify-content: space-between;
     padding: 0 16px;
+    gap: 8px;
     border-bottom: 1px solid var(--border);
     color: var(--text-primary);
     font-size: 14px;
     letter-spacing: 1px;
 }
+
+#session-sidebar-header > span { flex: 1; }
 
 #new-session-btn {
     width: 32px;
@@ -1528,6 +1535,24 @@ body:not(.can-approve) #new-session-btn { display: none; }
     .icon-btn { min-width: 44px; min-height: 44px; }
     .permission-action { min-height: 48px; font-size: 15px; }
     #chat-view { padding: 12px; }
+    /* A reply gets the avatar's width back; otherwise it is a narrow column
+       of a few words a line. */
+    .message { padding: 0; }
+    .jarvis-message .avatar { display: none; }
+    .bubble-col { max-width: 92%; }
+    /* A folded block's command takes its own line under the title, so a long
+       title is cut short instead of wrapping and pushing the command out. */
+    details.action-block > summary { flex-wrap: wrap; row-gap: 2px; }
+    .action-title {
+        flex: 1 1 0;
+        min-width: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .action-brief { order: 1; flex: 1 0 100%; padding-left: 18px; }
+    .action-brief:empty,
+    details.action-block[open] .action-brief { display: none; }
 }
 
 /* ── Icons: one line set (the sprite in index.html), sized by the button ── */
