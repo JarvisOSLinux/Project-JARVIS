@@ -101,6 +101,25 @@ class TestSystemScopeManifests:
         assert self._read("new") == {"from": "registry"}
         assert self._read("missing") == {}
 
+    def test_a_moved_install_directory_is_where_dmcp_says(self, monkeypatch, tmp_path):
+        """MCP_USER_INSTALL_DIR moves installs away from data_dir/installed;
+        JARVIS looked there anyway, found no manifest for a server it had just
+        installed, and asked to approve its safe tools (2026-11-07)."""
+        monkeypatch.setattr(
+            dmcp_registry,
+            "_dmcp_paths",
+            lambda: {
+                "data_dir": str(tmp_path / "data"),
+                "install_dir": str(tmp_path / "elsewhere"),
+            },
+        )
+        _manifest(
+            tmp_path / "elsewhere",
+            "currency",
+            {"tools": [{"name": "convert", "threat_level": "safe"}]},
+        )
+        assert self._read("currency")["tools"][0]["threat_level"] == "safe"
+
     def test_without_dmcp_paths_linux_still_looks_in_usr_share(self, monkeypatch):
         monkeypatch.setattr(dmcp_registry, "_dmcp_paths", lambda: {})
         monkeypatch.setattr(dmcp_registry.sys, "platform", "linux")
