@@ -110,7 +110,7 @@ class TestRequests:
             providers.Config, "PROVIDERS_FILE", str(tmp_path / "providers.json")
         )
         for name in ("a", "b", "c"):
-            providers.add_provider("ollama", "m", name=name)
+            providers.add_provider("llamacpp", "m", name=name)
         app, writer = _app()
         _ask(app, writer, {"type": "move_provider", "name": "c", "position": 1})
         listed = [m for m in writer.sent if m["type"] == "provider_list"][-1]

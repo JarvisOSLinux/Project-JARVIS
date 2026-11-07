@@ -44,7 +44,7 @@ def describe_provider_error(error: Exception) -> str:
             else "a DNS or network problem"
         )
     elif any(k in lowered for k in ("connection refused", "failed to connect")):
-        reason = "nothing answered at the model's address; is Ollama running?"
+        reason = "nothing answered at the model's address; is the model server running?"
     elif "timed out" in lowered or "timeout" in lowered:
         reason = "the model did not answer in time"
     elif any(k in lowered for k in ("401", "403", "unauthorized", "forbidden")):
@@ -108,7 +108,7 @@ class LLM:
 
         logger.info("LLM: Initiating Preload...")
         try:
-            # Preload with a copy — warms Ollama's KV cache for the system
+            # Preload with a copy — warms the server's KV cache for the system
             # prompt without affecting the live chat_history reference.
             self.provider.chat(list(self.chat_history))
             logger.info("LLM: Initiation Complete!")
@@ -233,7 +233,7 @@ class LLM:
         try:
             response_text = self.provider.chat(messages)
         except Exception as e:
-            # Provider-level failure (timeout, network, Ollama down). Don't
+            # Provider-level failure (timeout, network, model server down). Don't
             # burn through all JSON retries waiting — each retry would hit
             # the same dead endpoint and waste LLM_TIMEOUT seconds per attempt.
             error_str = str(e).lower()
@@ -248,9 +248,9 @@ class LLM:
                 )
             ):
                 logger.error(
-                    "LLM: Cannot reach Ollama — is it running?\n"
-                    f"  Expected at: {getattr(self.provider, 'base_url', 'http://localhost:11434')}\n"
-                    "  Start Ollama with: ollama serve\n"
+                    "LLM: Cannot reach the model server — is it running?\n"
+                    f"  Expected at: {getattr(self.provider, 'api_url', 'unknown')}\n"
+                    "  JARVIS starts llama-server itself; check llama-server.log\n"
                     "  Or check your provider config: jarvis providers"
                 )
             else:

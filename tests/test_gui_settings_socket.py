@@ -135,10 +135,10 @@ class TestProviderCrudHandlers:
         providers_file = str(tmp_path / "providers.json")
         with patch.object(Config, "PROVIDERS_FILE", providers_file):
             result = runtime_io._handle_add_provider(
-                {"ptype": "ollama", "model": "qwen3:8b", "name": "my-ollama"}
+                {"ptype": "llamacpp", "model": "qwen3:8b", "name": "my-local"}
             )
         assert result["type"] == "provider_list"
-        assert [p["name"] for p in result["providers"]] == ["my-ollama"]
+        assert [p["name"] for p in result["providers"]] == ["my-local"]
 
     def test_add_provider_failure_returns_provider_error(self, tmp_path):
         providers_file = str(tmp_path / "providers.json")
@@ -157,10 +157,10 @@ class TestProviderCrudHandlers:
         providers_file = str(tmp_path / "providers.json")
         with patch.object(Config, "PROVIDERS_FILE", providers_file):
             runtime_io._handle_add_provider(
-                {"ptype": "ollama", "model": "qwen3:8b", "name": "my-ollama"}
+                {"ptype": "llamacpp", "model": "qwen3:8b", "name": "my-local"}
             )
             result = runtime_io._handle_edit_provider(
-                {"name": "my-ollama", "fields": {"model": "qwen3:14b"}}
+                {"name": "my-local", "fields": {"model": "qwen3:14b"}}
             )
         assert result["type"] == "provider_list"
         assert result["providers"][0]["model"] == "qwen3:14b"
@@ -180,9 +180,9 @@ class TestProviderCrudHandlers:
         providers_file = str(tmp_path / "providers.json")
         with patch.object(Config, "PROVIDERS_FILE", providers_file):
             runtime_io._handle_add_provider(
-                {"ptype": "ollama", "model": "qwen3:8b", "name": "my-ollama"}
+                {"ptype": "llamacpp", "model": "qwen3:8b", "name": "my-local"}
             )
-            result = runtime_io._handle_remove_provider({"name": "my-ollama"})
+            result = runtime_io._handle_remove_provider({"name": "my-local"})
         assert result["type"] == "provider_list"
         assert result["providers"] == []
 
@@ -244,7 +244,7 @@ class TestProcessGuiMessageRouting:
             patch.object(runtime_io, "_gui_write", new=AsyncMock()) as gw,
         ):
             runtime_io._handle_add_provider(
-                {"ptype": "ollama", "model": "qwen3:8b", "name": "solo"}
+                {"ptype": "llamacpp", "model": "qwen3:8b", "name": "solo"}
             )
             await runtime_io._process_gui_message(
                 app, Mock(), {"type": "list_providers"}, writer
@@ -266,7 +266,7 @@ class TestProcessGuiMessageRouting:
             await runtime_io._process_gui_message(
                 app,
                 Mock(),
-                {"type": "add_provider", "ptype": "ollama", "model": "qwen3:8b"},
+                {"type": "add_provider", "ptype": "llamacpp", "model": "qwen3:8b"},
                 writer,
             )
         bc.assert_awaited_once()
