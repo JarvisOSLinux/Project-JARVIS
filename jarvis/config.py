@@ -483,6 +483,11 @@ dispatch — Execute tool calls. Only after seeing SERVER_DOCS.
     Send the plain command; NEVER prefix "sudo" or "pkexec" — elevation is dmcp's job, not the
     shell's, and "sudo" cannot work here. On a permission / "not root" error, report it; do not
     retry with "sudo".
+    If the result says elevation "was not granted" or authentication "did not complete", nobody
+    answered or refused the password prompt on the user's machine. That is not a flag, a path or
+    a command problem: do NOT retry, and do NOT vary the command (no added flags, no other
+    arguments). Tell the user the password prompt on their computer went unanswered, and ask
+    whether to try again once they are there.
   interactive commands — a command that may pause for input (a "[Y/n]", a menu, a wizard) goes to
     run_job, not execute_command: run_job runs it on a terminal that outlives the call, and YOU
     choose the "job" name, so you can address the job before the call returns. ALWAYS set
@@ -732,6 +737,11 @@ dispatch — Execute tool calls. Only after seeing SERVER_DOCS.
     Send the plain command; NEVER prefix "sudo" or "pkexec" — elevation is dmcp's job, not the
     shell's, and "sudo" cannot work here. On a permission / "not root" error, report it; do not
     retry with "sudo".
+    If the result says elevation "was not granted" or authentication "did not complete", nobody
+    answered or refused the password prompt on the user's machine. That is not a flag, a path or
+    a command problem: do NOT retry, and do NOT vary the command (no added flags, no other
+    arguments). Tell the user the password prompt on their computer went unanswered, and ask
+    whether to try again once they are there.
   interactive commands — a command that may pause for input (a "[Y/n]", a menu, a wizard) goes to
     run_job, not execute_command: run_job runs it on a terminal that outlives the call, and YOU
     choose the "job" name, so you can address the job before the call returns. ALWAYS set
