@@ -1419,6 +1419,7 @@ details.action-block[open] .action-brief { visibility: hidden; }
 .work-item { padding: 6px 0; border-bottom: 1px solid var(--border); }
 .work-item:last-child { border-bottom: none; }
 .work-item-title { color: var(--text-primary); font-size: 13px; overflow-wrap: anywhere; }
+.work-item-alert { color: #ffb347; font-size: 12px; margin-top: 2px; overflow-wrap: anywhere; }
 .work-item-meta, .work-empty { color: var(--text-secondary); font-size: 11px; margin-top: 2px; }
 .work-item .action-detail, .work-item .action-output { margin-left: 0; margin-right: 0; }
 
