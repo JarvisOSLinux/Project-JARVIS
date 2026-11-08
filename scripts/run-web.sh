@@ -168,7 +168,10 @@ if ! command -v tailscale >/dev/null; then
     echo "==> installing tailscale"
     pm_install tailscale
 fi
-sudo systemctl enable --now tailscaled
+# Only when it is not already up: otherwise every start asks for a password.
+if ! systemctl is-active --quiet tailscaled; then
+    sudo systemctl enable --now tailscaled
+fi
 
 # One read of the node's state: prints "<state>|<dns name>|<ip>|<login>|<certs>".
 node_info() {
