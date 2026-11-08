@@ -234,7 +234,8 @@ The `/status` health check, as data.
   "tasks": [
     {"pid": 7, "kind": "tool", "title": "execute_command (jarvis-shell-system-mcp)",
      "detail": "pacman -Syu --noconfirm", "running_for": 65.2,
-     "output": ":: Synchronizing package databases...", "request": "update my system"},
+     "output": ":: Synchronizing package databases...", "awaiting_password": false,
+     "request": "update my system"},
     {"pid": 9, "kind": "timer", "title": "goal_reminder:a1b2c3d4", "detail": "",
      "fires_in": 120, "request": ""}],
   "thinking": 1, "confirmations": 0, "setups": 0}}
@@ -242,6 +243,9 @@ The `/status` health check, as data.
 
 - `running_for` is `null` for a task JARVIS did not start this run.
 - `output` is the task's latest output, up to 2,000 characters.
+- `awaiting_password` is `true` while a root call waits for the administrator
+  password on the host's own screen (dmcp's stderr says so; #310). Show it as
+  waiting, not running.
 - `thinking` counts requests waiting on the model.
 
 ### Confirmations

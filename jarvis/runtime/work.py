@@ -12,6 +12,7 @@ import time
 from typing import Any, Dict, List
 
 from . import action_events
+from .password_wait import awaiting_password
 
 # Enough of a running task's output to see where it is.
 TAIL_CHARS = 2_000
@@ -73,6 +74,7 @@ async def collect_work(app: Any, *, tail: int = TAIL_CHARS) -> Dict[str, Any]:
                         round(now - record["at"], 1) if record.get("at") else None
                     ),
                     "output": output,
+                    "awaiting_password": awaiting_password(t.get("tail")),
                     "request": owner.get(pid, ""),
                 }
             )
