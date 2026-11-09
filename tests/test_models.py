@@ -190,3 +190,24 @@ class TestListAndRemove:
     def test_remove_missing_raises(self):
         with pytest.raises(models.ModelError, match="not pulled"):
             models.remove("a/b")
+
+
+class TestRegistryEmbeddingModel:
+    def test_registry_name_and_its_gguf_are_one_model(self):
+        assert models.same_embed_model(
+            "nomic-embed-text", "nomic-ai/nomic-embed-text-v1.5-GGUF:Q8_0"
+        )
+        assert models.same_embed_model(
+            "nomic-embed-text:latest", "nomic-ai/nomic-embed-text-v1.5-GGUF:F16"
+        )
+
+    def test_another_model_differs(self):
+        assert not models.same_embed_model(
+            "mxbai-embed-large", "nomic-ai/nomic-embed-text-v1.5-GGUF:Q8_0"
+        )
+        assert models.registry_embed_spec("mxbai-embed-large") is None
+
+    def test_embedding_names_are_spotted_for_the_pull_hint(self):
+        assert models.looks_like_embedding("nomic-ai/nomic-embed-text-v1.5-GGUF")
+        assert models.looks_like_embedding("BAAI/bge-small-en-v1.5-gguf")
+        assert not models.looks_like_embedding("Qwen/Qwen3-4B-GGUF:Q4_K_M")

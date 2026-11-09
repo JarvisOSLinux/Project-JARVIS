@@ -73,6 +73,19 @@ class LlamaEmbeddings:
             dim = self._dim or 768
             return [[0.0] * dim for _ in texts]
 
+    def use_model(self, spec: str) -> bool:
+        """Embed with ``spec`` from now on; its server replaces the old one."""
+        if self._server is None:
+            logger.warning(
+                f"Embeddings: EMBED_URL is a server JARVIS does not run, so it "
+                f"cannot switch it to '{spec}'"
+            )
+            return False
+        self.model = spec
+        self._server = runner.get_server(spec, Config.EMBED_PORT, embedding=True)
+        self._dim = None
+        return self.ensure_model()
+
     def ensure_model(self) -> bool:
         """Start the embedding server if needed and confirm it answers."""
         try:

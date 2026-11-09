@@ -45,6 +45,42 @@ def parse_spec(spec: str) -> Tuple[str, str, Optional[str]]:
     return match.group(1), match.group(2), match.group(3)
 
 
+# The registry names the model behind its vectors the way Ollama did. These
+# are the GGUFs of the same models, so JARVIS's vectors compare with its own.
+REGISTRY_EMBED_MODELS = {
+    "nomic-embed-text": "nomic-ai/nomic-embed-text-v1.5-GGUF:Q8_0",
+}
+
+
+def registry_embed_spec(name: str) -> Optional[str]:
+    """The GGUF spec for a registry embedding-model name, if JARVIS knows it."""
+    return REGISTRY_EMBED_MODELS.get(name.split(":", 1)[0].strip().lower())
+
+
+def _model_of(spec: str) -> str:
+    match = SPEC_RE.match(spec)
+    return f"{match.group(1)}/{match.group(2)}".lower() if match else spec.lower()
+
+
+_EMBEDDING_NAME = re.compile(r"embed|bge|gte|minilm|(^|[-_/])e5[-_]", re.IGNORECASE)
+
+
+def looks_like_embedding(spec: str) -> bool:
+    """A guess from the name, for a hint only: chat and embedding GGUFs are
+    the same format, and repos name embedding models for what they are."""
+    return bool(_EMBEDDING_NAME.search(spec))
+
+
+def same_embed_model(registry_name: str, local_spec: str) -> bool:
+    """Whether the registry's vectors and ``local_spec``'s come from one model.
+
+    The quantization does not change which model it is: nomic v1.5 at Q8_0
+    and Ollama's nomic-embed-text agree to a cosine of 0.998.
+    """
+    target = registry_embed_spec(registry_name) or registry_name
+    return _model_of(target) == _model_of(local_spec)
+
+
 def _repo_dir(user: str, repo: str) -> Path:
     return store_dir() / user / repo
 

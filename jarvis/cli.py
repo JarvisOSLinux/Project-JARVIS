@@ -1122,7 +1122,13 @@ def _cmd_model() -> None:
 
             path = models.pull(spec, show)
             print(f"\nReady: {path}")
-            print(f"Use it: jarvis providers add --type llamacpp --model {spec}")
+            if models.looks_like_embedding(spec):
+                print(
+                    f"Use it for memory and tool search: EMBED_MODEL={spec} in "
+                    "JARVIS's config (jarvis.conf), then restart JARVIS"
+                )
+            else:
+                print(f"Use it: jarvis providers add --type llamacpp --model {spec}")
         except models.ModelError as exc:
             print(f"Error: {exc}")
             sys.exit(1)
