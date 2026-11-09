@@ -8,13 +8,14 @@ reference (``user/repo[:quant]``) that ``models.ensure`` downloads into
 """
 
 import atexit
+import json
 import shutil
 import subprocess
 import threading
 import time
 import urllib.request
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from ..config import Config
 from ..core.logger import JarvisLogger, get_logger
@@ -23,6 +24,11 @@ from . import models
 logger = get_logger(__name__)
 
 POLL_INTERVAL = 1.0
+
+# llama-server's own default is the model's full context, and a 7-8B model's
+# 128k context reserves more KV cache than a 16 GB laptop has. JARVIS's
+# instructions alone are about 7k tokens.
+DEFAULT_CONTEXT = 16384
 
 
 class RunnerError(RuntimeError):
@@ -55,6 +61,19 @@ class LlamaServer:
         except Exception:
             return False
 
+    def serves(self, model: str) -> bool:
+        """Whether the server on this port answers as ``model`` (its --alias).
+
+        A server too old to list its models is taken at its word.
+        """
+        try:
+            with urllib.request.urlopen(f"{self.url}/v1/models", timeout=2) as response:
+                listed = json.loads(response.read()).get("data") or []
+        except Exception:
+            return True
+        ids = [m.get("id") for m in listed if isinstance(m, dict)]
+        return not ids or model in ids
+
     def _command(self, binary: str, model_path: Path) -> List[str]:
         cmd = [
             binary,
@@ -72,8 +91,7 @@ class LlamaServer:
             cmd.append("--embedding")
         else:
             cmd.append("--jinja")
-            if Config.LLM_CONTEXT_WINDOW > 0:
-                cmd += ["-c", str(Config.LLM_CONTEXT_WINDOW)]
+            cmd += ["-c", str(Config.LLM_CONTEXT_WINDOW or DEFAULT_CONTEXT)]
         return cmd
 
     def ensure_running(self) -> None:
@@ -85,7 +103,12 @@ class LlamaServer:
         """
         with self._lock:
             if self.is_up():
-                return
+                if self.serves(self.model):
+                    return
+                raise RunnerError(
+                    f"port {self.port} is taken by a llama-server serving another "
+                    f"model; stop it or move JARVIS (JARVIS_LLM_PORT / JARVIS_EMBED_PORT)"
+                )
             if self._proc is None or self._proc.poll() is not None:
                 self._spawn()
             self._wait_ready()
@@ -114,6 +137,8 @@ class LlamaServer:
             )
         except OSError as exc:
             raise RunnerError(f"could not start llama-server: {exc}") from exc
+        with _servers_lock:
+            _spawned.add(self)
 
     def _wait_ready(self) -> None:
         deadline = time.monotonic() + Config.LLM_START_TIMEOUT
@@ -147,6 +172,9 @@ class LlamaServer:
 
 
 _servers: Dict[int, LlamaServer] = {}
+# Every server that started a process, replaced on its port or not, so that
+# stop_all leaves nothing running.
+_spawned: Set[LlamaServer] = set()
 _servers_lock = threading.Lock()
 
 
@@ -170,7 +198,8 @@ def get_server(model: str, port: int, embedding: bool = False) -> LlamaServer:
 
 def stop_all() -> None:
     with _servers_lock:
-        servers = list(_servers.values())
+        servers = set(_servers.values()) | _spawned
+        _spawned.clear()
     for server in servers:
         server.stop()
 

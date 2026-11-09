@@ -25,16 +25,20 @@ class LlamaCppProvider(APIProvider):
         base_url: Optional[str] = None,
         temperature: Optional[float] = None,
     ):
-        self._server = None if base_url else runner.get_server(model, Config.LLM_PORT)
+        self._managed = not base_url
         super().__init__(
             model=model,
-            api_url=base_url or self._server.url,
+            api_url=base_url or f"http://{Config.LLM_HOST}:{Config.LLM_PORT}",
             temperature=temperature,
         )
 
     def _ensure_server(self) -> None:
-        if self._server is not None and Config.LLM_AUTO_START:
-            self._server.ensure_running()
+        # The pool builds every provider at start, and LLM_PORT serves one
+        # model: the provider being used claims it now, so failing over from
+        # one local model to another swaps the server instead of talking to
+        # the first model under the second's name.
+        if self._managed and Config.LLM_AUTO_START:
+            runner.get_server(self.model, Config.LLM_PORT).ensure_running()
 
     def chat(self, messages: List[Dict[str, str]]) -> str:
         self._ensure_server()
@@ -50,6 +54,9 @@ class LlamaCppProvider(APIProvider):
         )
 
     def is_available(self) -> bool:
-        if self._server is None:
+        if not self._managed:
             return super().is_available()
-        return self._server.is_up() or runner.find_binary() is not None
+        if runner.find_binary() is not None:
+            return True
+        server = runner.LlamaServer(self.model, Config.LLM_PORT)
+        return server.is_up() and server.serves(self.model)

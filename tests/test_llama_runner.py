@@ -14,8 +14,10 @@ from jarvis.llm.providers.llamacpp import LlamaCppProvider
 @pytest.fixture(autouse=True)
 def _clean_registry():
     runner._servers.clear()
+    runner._spawned.clear()
     yield
     runner._servers.clear()
+    runner._spawned.clear()
 
 
 class TestCommand:
@@ -36,6 +38,20 @@ class TestCommand:
         )
         assert "--embedding" in cmd
         assert "--jinja" not in cmd
+
+    def test_chat_context_defaults_below_the_models_full_context(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(Config, "LLM_CONTEXT_WINDOW", 0)
+        cmd = runner.LlamaServer("m", 11445)._command("llama-server", tmp_path / "m")
+        assert cmd[cmd.index("-c") + 1] == str(runner.DEFAULT_CONTEXT) == "16384"
+        monkeypatch.setattr(Config, "LLM_CONTEXT_WINDOW", 32768)
+        cmd = runner.LlamaServer("m", 11445)._command("llama-server", tmp_path / "m")
+        assert cmd[cmd.index("-c") + 1] == "32768"
+        cmd = runner.LlamaServer("e", 11446, embedding=True)._command(
+            "llama-server", tmp_path / "e"
+        )
+        assert "-c" not in cmd
 
     def test_binds_loopback_on_requested_port(self, tmp_path):
         cmd = runner.LlamaServer("m", 11445)._command("llama-server", tmp_path / "m")
@@ -121,6 +137,41 @@ class TestStop:
     def test_stop_without_process_is_a_noop(self):
         runner.LlamaServer("m", 11445).stop()
 
+    def test_stop_all_reaches_a_server_no_longer_registered(
+        self, monkeypatch, tmp_path
+    ):
+        proc = MagicMock()
+        proc.poll.return_value = None
+        monkeypatch.setattr(runner, "find_binary", lambda: "llama-server")
+        monkeypatch.setattr(runner.models, "ensure", lambda spec: tmp_path / "m.gguf")
+        monkeypatch.setattr(runner.subprocess, "Popen", lambda *a, **kw: proc)
+        server = runner.get_server("a", 11445)
+        server._spawn()
+        runner._servers.clear()
+        runner.stop_all()
+        proc.terminate.assert_called_once()
+
+    def test_a_port_serving_another_model_is_refused(self, monkeypatch):
+        server = runner.LlamaServer("mine", 11445)
+        monkeypatch.setattr(server, "is_up", lambda: True)
+        monkeypatch.setattr(server, "serves", lambda model: False)
+        with pytest.raises(runner.RunnerError, match="another model"):
+            server.ensure_running()
+
+    def test_serves_reads_the_alias(self, monkeypatch):
+        import io
+        import json as _json
+
+        def answer(ids):
+            body = _json.dumps({"data": [{"id": i} for i in ids]}).encode()
+            return lambda url, timeout=0: io.BytesIO(body)
+
+        server = runner.LlamaServer("org/a:Q4", 11445)
+        monkeypatch.setattr(runner.urllib.request, "urlopen", answer(["org/a:Q4"]))
+        assert server.serves("org/a:Q4")
+        monkeypatch.setattr(runner.urllib.request, "urlopen", answer(["org/b:Q4"]))
+        assert not server.serves("org/a:Q4")
+
 
 class TestProvider:
     def test_factory_builds_managed_provider(self):
@@ -128,16 +179,24 @@ class TestProvider:
         assert isinstance(provider, LlamaCppProvider)
         assert provider.api_url == f"http://{Config.LLM_HOST}:{Config.LLM_PORT}"
 
-    def test_base_url_means_unmanaged(self):
+    def test_base_url_means_unmanaged(self, monkeypatch):
+        get_server = MagicMock()
+        monkeypatch.setattr(runner, "get_server", get_server)
         provider = LlamaCppProvider("m", base_url="http://gpu-box:8080")
-        assert provider._server is None
+        provider._ensure_server()
+        get_server.assert_not_called()
         assert provider.api_url == "http://gpu-box:8080"
+
+    def test_building_a_provider_claims_no_port(self):
+        LlamaCppProvider("a")
+        LlamaCppProvider("b")
+        assert runner._servers == {}
 
     def test_chat_starts_server_first(self, monkeypatch):
         provider = LlamaCppProvider("m")
         calls = []
         monkeypatch.setattr(
-            provider._server, "ensure_running", lambda: calls.append("start")
+            runner.LlamaServer, "ensure_running", lambda self: calls.append("start")
         )
         monkeypatch.setattr(
             "jarvis.llm.providers.api.APIProvider.chat",
@@ -149,16 +208,44 @@ class TestProvider:
     def test_auto_start_off_skips_spawn(self, monkeypatch):
         monkeypatch.setattr(Config, "LLM_AUTO_START", False)
         provider = LlamaCppProvider("m")
-        ensure = MagicMock()
-        monkeypatch.setattr(provider._server, "ensure_running", ensure)
+        get_server = MagicMock()
+        monkeypatch.setattr(runner, "get_server", get_server)
         provider._ensure_server()
-        ensure.assert_not_called()
+        get_server.assert_not_called()
+
+    def test_failover_between_local_models_swaps_the_server(self, monkeypatch):
+        started, stopped = [], []
+        monkeypatch.setattr(
+            runner.LlamaServer,
+            "ensure_running",
+            lambda self: started.append(self.model),
+        )
+        monkeypatch.setattr(
+            runner.LlamaServer, "stop", lambda self: stopped.append(self.model)
+        )
+        big, small = LlamaCppProvider("big"), LlamaCppProvider("small")
+        big._ensure_server()
+        small._ensure_server()
+        assert started == ["big", "small"]
+        assert stopped == ["big"]
+        assert runner._servers[Config.LLM_PORT].model == "small"
+        big._ensure_server()
+        assert started[-1] == "big" and stopped[-1] == "small"
 
     def test_unavailable_without_binary_or_server(self, monkeypatch):
         provider = LlamaCppProvider("m")
-        monkeypatch.setattr(provider._server, "is_up", lambda: False)
+        monkeypatch.setattr(runner.LlamaServer, "is_up", lambda self: False)
         monkeypatch.setattr(runner, "find_binary", lambda: None)
         assert provider.is_available() is False
+
+    def test_available_through_a_running_server_without_the_binary(self, monkeypatch):
+        provider = LlamaCppProvider("m")
+        monkeypatch.setattr(runner.LlamaServer, "is_up", lambda self: True)
+        monkeypatch.setattr(
+            runner.LlamaServer, "serves", lambda self, model: model == "m"
+        )
+        monkeypatch.setattr(runner, "find_binary", lambda: None)
+        assert provider.is_available() is True
 
     def test_temperature_reaches_payload(self, monkeypatch):
         provider = LlamaCppProvider("m", base_url="http://x:1", temperature=0.2)
