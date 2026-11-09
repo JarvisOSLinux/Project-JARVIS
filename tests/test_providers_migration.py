@@ -263,3 +263,10 @@ def test_a_read_only_system_file_still_starts(file, caplog):
     assert data["providers"][0]["type"] == "ollama-cloud"
     assert file.read_text() == before
     assert "could not be rewritten" in caplog.text and KEY not in caplog.text
+
+
+def test_the_suite_never_reaches_the_real_config_dir():
+    from jarvis.platform import current
+
+    real = str(current.config_dir())
+    assert not Config.PROVIDERS_FILE.startswith(real)
