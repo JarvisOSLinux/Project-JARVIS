@@ -1,4 +1,3 @@
-import json
 import os
 from typing import Optional
 
@@ -20,6 +19,7 @@ from .command_parser import TaskParser
 from .confirmation_manager import STORE_FILENAME, ConfirmationManager
 from .logger import get_logger
 from .output_manager import OutputManager
+from .providers import load_providers
 from .setup_queue import SetupQueue
 from .setup_queue import store_path as setup_store_path
 from .system_info import SystemInfo
@@ -35,14 +35,16 @@ class ComponentFactory:
 
         if os.path.isfile(providers_file):
             logger.info(f"Loading provider pool from {providers_file}")
-            with open(providers_file) as f:
-                data = json.load(f)
+            data = load_providers()
 
             entries = []
             for spec in data.get("providers", []):
                 name = spec.get("name", f"provider-{len(entries)}")
                 ptype = spec.get("type", "llamacpp")
                 model = spec.get("model", "")
+                if spec.get("inactive"):
+                    logger.warning(f"Provider '{name}' is inactive: {spec['inactive']}")
+                    continue
                 if not model:
                     logger.warning(f"Provider '{name}' has no model, skipping")
                     continue
