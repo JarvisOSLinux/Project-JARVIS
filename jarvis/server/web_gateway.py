@@ -59,6 +59,8 @@ _GUEST_SENDS = frozenset(
     {
         "message",
         "stop_stream",
+        # Stops JARVIS's work in the session; kills nothing (#270).
+        "stop",
         "list_sessions",
         "list_confirmations",
         "list_clients",
@@ -73,6 +75,9 @@ _TRUSTED_SENDS = _GUEST_SENDS | {
     "switch_session",
     "get_status",
     "list_work",
+    # Also kills the session's running tasks; stop_task kills one.
+    "stop_all",
+    "stop_task",
 }
 # Absent on purpose for every role: settings, providers, wake chime, setups,
 # shutdown_request, approve_all_confirmations, and the raw confirmation_response.
@@ -88,6 +93,7 @@ RELAYED = frozenset(
     {
         "state",
         "response",
+        "user_message",
         "activity",
         "confirmation_request",
         "confirmation_list",
@@ -116,6 +122,9 @@ _AUDITED = frozenset(
     {
         "message",
         "stop_stream",
+        "stop",
+        "stop_all",
+        "stop_task",
         "approve_confirmation",
         "deny_confirmation",
         "partial_approve_confirmation",
@@ -151,6 +160,34 @@ def relayable(msg: Any, role: str = "guest") -> bool:
 def shutdown_notice(msg: dict) -> dict:
     """A shutdown snapshot carries session detail; a phone gets only the state."""
     return {"type": "DAEMON_SHUTDOWN", "state": msg.get("state")}
+
+
+def shown_to(msg: Any, role: str) -> Optional[dict]:
+    """`msg` as a phone signed in as `role` may see it, or None."""
+    if not isinstance(msg, dict):
+        return None
+    if msg.get("type") == "DAEMON_SHUTDOWN":
+        return shutdown_notice(msg)
+    if not relayable(msg, role):
+        return None
+    # A session's history carries its action blocks, as the action events do.
+    if msg.get("type") == "session_switched" and "action" not in RELAYED_FOR[role]:
+        kept = [
+            m
+            for m in msg.get("messages") or []
+            if isinstance(m, dict) and m.get("role") != "action"
+        ]
+        msg = {**msg, "messages": kept}
+    return msg
+
+
+def confirmation_mode(settings_reply: dict) -> Optional[str]:
+    """The host's mode in a ``settings`` reply; None when it does not say."""
+    for entry in settings_reply.get("settings") or []:
+        if isinstance(entry, dict) and entry.get("key") == "CONFIRMATION_MODE":
+            mode = entry.get("value")
+            return mode if isinstance(mode, str) else None
+    return None
 
 
 def unsafe_mode_change(msg: dict) -> bool:
@@ -391,12 +428,22 @@ class Gateway:
         role: Optional[str],
         label: str,
     ) -> bool:
-        """Label this client, and refuse to run while confirmations are off."""
+        """Label this client, and refuse to run while confirmations are off.
+
+        What the daemon sends before its settings reply is kept and relayed
+        once the session opens: it greets every client with its current
+        state, and the page, never told, said "Offline" until the next change.
+        """
         await self._upstream_send(
             writer,
-            {"type": "hello", "label": label, "subscribe": ["activity", "action"]},
+            {
+                "type": "hello",
+                "label": label,
+                "subscribe": ["activity", "action", "user_message"],
+            },
         )
         await self._upstream_send(writer, {"type": "get_settings"})
+        early = []
         try:
             while True:
                 line = await asyncio.wait_for(reader.readline(), timeout=5.0)
@@ -405,11 +452,14 @@ class Gateway:
                     return False
                 msg = json.loads(line)
                 if msg.get("type") != "settings":
+                    early.append(msg)
                     continue
-                if msg.get("confirmation_mode") == "allow_all":
+                mode = confirmation_mode(msg)
+                if mode != "smart" and mode != "ask_all":
                     await ws.close(
                         CLOSE_UNSAFE,
-                        "Remote access needs confirmations on; the host is set to allow_all",
+                        "Remote access needs confirmations on; the host is set to "
+                        f"{mode or 'an unknown mode'}",
                     )
                     return False
                 break
@@ -417,6 +467,10 @@ class Gateway:
             await ws.close(CLOSE_UPSTREAM, "JARVIS did not answer")
             return False
         await ws.send(json.dumps({"type": "gateway", "login": login, "role": role}))
+        for msg in early:
+            shown = shown_to(msg, role)
+            if shown is not None:
+                await ws.send(json.dumps(shown, ensure_ascii=False))
         return True
 
     async def _relay(
@@ -482,11 +536,10 @@ class Gateway:
                         "The host switched to allow_all; remote access ended",
                     )
                     return
-                if msg.get("type") == "DAEMON_SHUTDOWN":
-                    msg = shutdown_notice(msg)
-                elif not relayable(msg, role):
+                shown = shown_to(msg, role)
+                if shown is None:
                     continue
-                await ws.send(json.dumps(msg, ensure_ascii=False))
+                await ws.send(json.dumps(shown, ensure_ascii=False))
 
         async def watch_idle() -> None:
             while True:

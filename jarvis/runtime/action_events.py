@@ -12,6 +12,9 @@ Events are plain dicts, meant for the TUI and for socket clients alike (#267):
 Statuses at the end: ok, failed, stopped, waiting (a setup the user has to
 fill in), approved, denied. Only an action that started can update or end, so
 a timer's signal, or a confirmation restored after a restart, shows nothing.
+
+A finished action is kept with the session it started in (sessions/block_log.py),
+so a chat opened again shows its blocks where they were.
 """
 
 from __future__ import annotations
@@ -26,6 +29,8 @@ from typing import Any, Dict, List, Optional
 # whether it worked.
 MAX_OUTPUT_CHARS = 20_000
 MAX_DETAIL_CHARS = 2_000
+# A session's history carries up to 200 blocks in one message.
+KEPT_OUTPUT_CHARS = 8_000
 
 _STATUS_OF_SIGNAL = {"KILL": "stopped", "TIMEOUT": "failed"}
 _CODE = re.compile(r"^\s*(\d{3})\b\s*")
@@ -69,22 +74,28 @@ def start(
         "detail": clip(detail, MAX_DETAIL_CHARS),
         "at": time.time(),
     }
-    _open(app)[action_id] = record
+    _open(app)[action_id] = {**record, "session_id": _session_id(app), "output": ""}
     _emit(app, {"type": "action", "phase": "start", **record})
     return action_id
 
 
+def _session_id(app: Any) -> Optional[str]:
+    return getattr(getattr(app, "sessions", None), "current_id", None)
+
+
 def update(app: Any, action_id: str, output: str) -> None:
     """Output so far from an action that is still running."""
-    if action_id not in _open(app) or not output:
+    record = _open(app).get(action_id)
+    if record is None or not output:
         return
+    record["output"] = clip(output)
     _emit(
         app,
         {
             "type": "action",
             "phase": "update",
             "id": action_id,
-            "output": clip(output),
+            "output": record["output"],
             "at": time.time(),
         },
     )
@@ -95,6 +106,7 @@ def end(app: Any, action_id: str, status: str = "ok", output: str = "") -> None:
     record = _open(app).pop(action_id, None)
     if record is None:
         return
+    ended = time.time()
     _emit(
         app,
         {
@@ -104,10 +116,67 @@ def end(app: Any, action_id: str, status: str = "ok", output: str = "") -> None:
             "kind": record["kind"],
             "status": status,
             "output": clip(output),
-            "at": time.time(),
+            "at": ended,
             "started_at": record["at"],
         },
     )
+    _keep(app, record, status, output, ended)
+
+
+def _keep(app: Any, record: Dict[str, Any], status: str, output: str, ended: float):
+    sessions = getattr(app, "sessions", None)
+    blocks = getattr(sessions, "blocks", None)
+    if blocks is None or not record.get("session_id"):
+        return
+    blocks.append(
+        record["session_id"],
+        {
+            "id": record["id"],
+            "kind": record["kind"],
+            "title": record["title"],
+            "detail": record["detail"],
+            "status": status,
+            "output": clip(output, KEPT_OUTPUT_CHARS),
+            "started_at": record["at"],
+            "at": ended,
+        },
+    )
+
+
+def history(app: Any, session_id: str, limit: int) -> List[Dict[str, Any]]:
+    """A session's blocks for its history, oldest first: kept, then still running.
+
+    A running one has status "running" and its output so far; its next update
+    or end, sent live, finds it by id.
+    """
+    sessions = getattr(app, "sessions", None)
+    blocks = getattr(sessions, "blocks", None)
+    kept = blocks.read(session_id, limit) if blocks is not None else []
+    for record in running(app):
+        if record.get("session_id") == session_id:
+            kept.append(
+                {
+                    "id": record["id"],
+                    "kind": record["kind"],
+                    "title": record["title"],
+                    "detail": record["detail"],
+                    "status": "running",
+                    "output": clip(record.get("output") or "", KEPT_OUTPUT_CHARS),
+                    "started_at": record["at"],
+                }
+            )
+    return kept[-limit:]
+
+
+def stopped(app: Any, pids: Any, why: str = "Stopped.") -> None:
+    """Close the blocks of tasks just killed.
+
+    dispatch records a KILL in its signal window but never pushes one, so
+    the block of a killed task stayed open: "1 task still running" under the
+    chat while F4 showed nothing.
+    """
+    for pid in pids or ():
+        end(app, f"tool:{pid}", "stopped", why)
 
 
 def running(app: Any) -> List[Dict[str, Any]]:
@@ -130,9 +199,10 @@ def tool_title(task: Any) -> str:
 def readable(text: str) -> tuple:
     """(text, failed) for a tool's output: a shell result as what it printed.
 
-    Shell servers answer with JSON ({"stdout", "stderr", "exit_code"}), so a
-    package upgrade read as one line of escaped newlines. A non-zero exit or
-    `success: false` is a failure even though the call itself succeeded.
+    Shell servers answer with JSON ({"stdout", "stderr", "exit_code"}, or a
+    job's "transcript"), so a package upgrade read as one line of escaped
+    newlines. A non-zero exit or `success: false` is a failure even though
+    the call itself succeeded.
     """
     stripped = text.strip()
     # A failed call arrives as "Error: dmcp invocation failed: {…}".
@@ -143,13 +213,16 @@ def readable(text: str) -> tuple:
         data, _ = json.JSONDecoder().raw_decode(stripped[start:])
     except ValueError:
         return text, False
-    if not isinstance(data, dict) or not {"stdout", "stderr"} & data.keys():
+    if not isinstance(data, dict) or not {"stdout", "stderr", "transcript"} & (
+        data.keys()
+    ):
         return text, False
     code = data.get("exit_code")
     parts = [
         stripped[:start].strip(),
         str(data.get("stdout") or "").rstrip(),
         str(data.get("stderr") or "").rstrip(),
+        str(data.get("transcript") or "").rstrip(),
         f"(exit code {code})" if code not in (None, 0) else "",
     ]
     failed = data.get("success") is False or code not in (None, 0)
@@ -161,6 +234,8 @@ def tool_detail(params: Any) -> str:
     if not isinstance(params, dict) or not params:
         return ""
     options = []
+    if params.get("job"):
+        options.append(f"job {params['job']}")
     if params.get("cwd"):
         options.append(f"in {params['cwd']}")
     if params.get("timeout"):
@@ -172,6 +247,7 @@ def tool_detail(params: Any) -> str:
         "args",
         "cwd",
         "timeout",
+        "job",
     }:
         args = params.get("args") or []
         if isinstance(args, list):
@@ -179,6 +255,10 @@ def tool_detail(params: Any) -> str:
     script = params.get("script")
     if isinstance(script, str) and set(params) <= {"script", "cwd", "timeout"}:
         return script.strip() + suffix
+    # send_input: what was typed into a job, Enter shown as ⏎.
+    text = params.get("text")
+    if isinstance(text, str) and params.get("job") and set(params) <= {"job", "text"}:
+        return text.replace("\r\n", "⏎").replace("\n", "⏎") + suffix
     try:
         return json.dumps(params, ensure_ascii=False)
     except (TypeError, ValueError):
@@ -248,9 +328,15 @@ def on_signal(app: Any, signal: Dict[str, Any], exit_data: Any = None) -> None:
         return
     if kind not in ("EXIT", "KILL", "TIMEOUT"):
         return
+    end(app, action_id, *outcome(signal))
+
+
+def outcome(signal: Dict[str, Any]) -> tuple:
+    """(status, readable output) of a task's EXIT, KILL or TIMEOUT."""
+    kind = str(signal.get("type") or "").upper()
     code, text = signal_output(signal)
     text, failed = readable(text)
     status = _STATUS_OF_SIGNAL.get(kind) or (
         "ok" if code == "200" and not failed else "failed"
     )
-    end(app, action_id, status, text)
+    return status, text

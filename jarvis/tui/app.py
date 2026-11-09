@@ -20,7 +20,8 @@ Keybindings:
     Ctrl+Q  — quit
     Ctrl+,  — settings (read-only config viewer)
     Ctrl+L  — browse the chat's blocks: ↑/↓ move, Enter/Space fold, Esc back
-    Esc     — back to the message input (Ctrl+I too, where the terminal tells it from Tab)
+    Esc     — back to the message input (Ctrl+I too, where the terminal tells it from Tab);
+              on an empty input while JARVIS works, stop it (/stop)
     Ctrl+Shift+C — clear on-screen transcript (export buffer only; not memory)
     Ctrl+Shift+E — export transcript to ``JARVIS_DATA_DIR/transcripts/``
     F1      — help (keys from ``BINDINGS`` + documented slash commands)
@@ -323,6 +324,9 @@ class JarvisTUI(App):
         # Inject via the same path voice and sockets use.  Slash
         # commands still work — main.py's handler catches them.
         self.jarvis.events.inject_user_input(text)
+        from ..runtime.io import on_user_message
+
+        on_user_message(self.jarvis, text)
 
     @on(OptionList.OptionSelected, "#command-dropdown")
     def on_command_suggested(self, event: OptionList.OptionSelected) -> None:
@@ -509,6 +513,25 @@ class JarvisTUI(App):
         if not self._close_if_showing(SetupsScreen) and len(self.screen_stack) <= 1:
             self._open_setups()
 
+    def action_stop(self) -> None:
+        """Esc on an empty input: stop JARVIS's work in this session (#270).
+
+        Like Esc in Claude Code. Does nothing while JARVIS is idle, so a
+        stray Esc while typing costs nothing.
+        """
+        from ..runtime.stop import _session_goals
+
+        jarvis = self.jarvis
+        if jarvis is None:
+            return
+        thinking = any(not t.done() for t in getattr(jarvis, "_event_tasks", ()))
+        if not thinking and not _session_goals(jarvis):
+            return
+        chat = self.query_one("#chat-log", ChatView)
+        chat.end_command()
+        chat.begin_command("[bold cyan]you[/bold cyan] > /stop  [dim](Esc)[/dim]")
+        jarvis.events.inject_user_input("/stop")
+
     def action_tasks(self) -> None:
         from .tasks_view import TasksScreen
 
@@ -527,7 +550,23 @@ class JarvisTUI(App):
                 return {}
             return await collect_work(jarvis)
 
-        self.push_screen(TasksScreen(collect))
+        async def stop_one(pid: Any) -> str:
+            """x in F4: `/stop <number>`, echoed in the chat like Esc's /stop."""
+            from ..runtime.session_commands import session_reply
+            from ..runtime.stop import stop_task
+
+            if jarvis is None:
+                return "JARVIS is still starting up."
+            reply = await stop_task(jarvis, logger, pid)
+            chat = self.query_one("#chat-log", ChatView)
+            chat.end_command()
+            chat.begin_command(
+                f"[bold cyan]you[/bold cyan] > /stop {pid}  [dim](F4)[/dim]"
+            )
+            session_reply(jarvis, reply)
+            return reply
+
+        self.push_screen(TasksScreen(collect, stop_one))
 
     async def action_quit(self) -> None:
         """Quit, asking first when quitting would stop work that is running."""
@@ -556,20 +595,20 @@ class JarvisTUI(App):
         self.push_screen(QuitConfirmModal(pending), decided)
 
     def _open_config(self, tab: str = "settings") -> None:
-        from .local_input import _apply_in_memory
+        from ..core import settings
+        from ..runtime.io import broadcast_setting
 
         def _on_config(result: ConfigModalResult) -> None:
             if result.settings_changes:
-                from ..cli import _update_env_setting
-
                 applied = []
                 for key, value in result.settings_changes.items():
-                    try:
-                        _update_env_setting(key, value)
-                        _apply_in_memory(key, value)
-                        applied.append(f"{key}={value}")
-                    except Exception as e:
-                        self._append_log(f"[red]Error setting {key}: {e}[/red]")
+                    val, error = settings.apply(key, value)
+                    if error:
+                        self._append_log(f"[red]Not saved: {error}[/red]")
+                        continue
+                    applied.append(f"{key}={value}")
+                    if self.jarvis is not None:
+                        asyncio.create_task(broadcast_setting(self.jarvis, key, val))
                 if applied:
                     self._append_log(
                         f"[green]Settings updated: {', '.join(applied)}[/green]"

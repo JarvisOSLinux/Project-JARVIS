@@ -18,8 +18,8 @@ test pins each message added by #267.
 - **On connect** the daemon sends the current `state`. Send `hello` with a
   label so `list_clients` can name you, and with `subscribe` for the pushed
   events you can show: `{"type": "hello", "label": "jarvis-app", "subscribe":
-  ["activity", "action"]}`. Without it you get neither, so a client written
-  before them never sees an unknown type.
+  ["activity", "action", "user_message"]}`. Without it you get none of them,
+  so a client written before them never sees an unknown type.
 - **Keepalive:** after 60 s without a line from you the daemon sends `ping`;
   you may send `ping` and get `pong`.
 
@@ -34,8 +34,11 @@ client keeps its view in step by listening, not by polling.
 | `type` | Fields | What it does |
 |---|---|---|
 | `message` | `content` | Says something to JARVIS, as if typed. Slash commands (`/new`, `/switch 110`, `/context`) work too; their replies carry `command: true`. The state becomes `processing`. |
-| `stop_stream` | | Ends the reply being shown (`response` with `done: true`) and sets the state to `idle`. It does not stop the work behind it: that is #270, still being specified. |
-| `hello` | `label`, `subscribe` (optional list: `activity`, `action`) | Names this client in `list_clients`, and asks for the pushed events it can show. |
+| `stop` | | Stops JARVIS's work in the current session (#270): the model's turn is cancelled, confirmations waiting are denied, reminders and timers cancelled, the requests closed. Tasks already running keep running and reach only the screen from then on, never the model. → `ack` with what was stopped and what still runs; the state becomes `idle`. |
+| `stop_all` | | `stop`, and the session's running tasks are killed too. When one runs a package manager the first `stop_all` only warns (`ack`); a second within 15 s kills it. |
+| `stop_task` | `pid` | Kills one running task (the `pid` from `work`); the model hears nothing from it. Its request is closed when nothing else of it is under way; otherwise the request's next turn is told the user stopped it. A package manager is only warned about at first (`ack`); a second `stop_task` for it within 15 s kills it. → `ack` with what was stopped. |
+| `stop_stream` | | Ends the reply being shown (`response` with `done: true`) and sets the state to `idle`; JARVIS's work goes on. |
+| `hello` | `label`, `subscribe` (optional list: `activity`, `action`, `user_message`) | Names this client in `list_clients`, and asks for the pushed events it can show. |
 | `list_clients` | | → `client_list` |
 | `ping` | | → `pong` |
 
@@ -46,7 +49,7 @@ client keeps its view in step by listening, not by polling.
 | `get_status` | `full` (bool, optional) | `status`: the `/status` health check. `full` also asks the registry for server updates, the one check that goes online. |
 | `list_work` | | `work`: what the TUI's F4 view shows. |
 
-Activity and action events are pushed to the clients that subscribed to them in `hello` (see below).
+Activity, action and user-message events are pushed to the clients that subscribed to them in `hello` (see below).
 
 ### Confirmations
 
@@ -90,14 +93,39 @@ An unknown id answers `error`.
 | `type` | Fields | Reply |
 |---|---|---|
 | `get_settings` | | `settings` |
-| `set_confirmation_mode` | `mode`: `smart`, `ask_all` or `allow_all` | `config_updated` (to everyone) or `config_error` |
-| `set_wake_chime_path` | `path` | `config_updated` or `config_error` |
-| `reset_wake_chime_path` | | `config_updated` |
+| `set_setting` | `key`, `value` | `config_updated` (to everyone) or `config_error` |
 | `list_providers` | | `provider_list` |
 | `add_provider` | `ptype`, `model`, and optional `name`, `url`, `api_key`, `temperature` | `provider_list` (to everyone) or `provider_error` |
 | `edit_provider` | `name`, `fields` (a dict of the fields to change) | as above |
 | `remove_provider` | `name` | as above |
 | `move_provider` | `name`, `position` (1 = tried first) | as above (#267) |
+
+`settings` lists what JARVIS can change while it runs, the same list the
+TUI's settings window draws (`jarvis/core/settings.py`), with each one's
+current value:
+
+```json
+{"type": "settings", "settings": [
+  {"key": "CONFIRMATION_MODE", "label": "Confirmation mode", "section": "Safety",
+   "kind": "select", "value": "smart",
+   "options": [{"value": "smart", "label": "Smart: ask when a tool can change something"}, ...]},
+  {"key": "CONFIRMATION_TIMEOUT", "label": "Deny unanswered requests after (seconds)",
+   "section": "Safety", "kind": "int", "value": 0, "min": 0,
+   "hint": "0 keeps them waiting until you answer"},
+  ...
+]}
+```
+
+`kind` is `select` (one of `options`), `bool`, `int` or `float` (within `min`
+and `max` when given), or `sound` (a WAV file's path; `""` sets the bundled
+one). A setting in the `Advanced` section tunes JARVIS rather than uses it; a
+client can keep that section folded. `set_setting` takes the value as JSON
+(`true`, `30`) or as text (`"on"`, `"30"`); JARVIS checks it, saves it to its
+config file and applies it at once. `config_updated` carries the value as
+applied, typed, and goes to every client, also when the change was made in the
+TUI. A key that is not in the list, or a value that does not fit, gets
+`config_error` with a message naming the setting (`"Memories per search: at
+least 1"`), to the sender only, and nothing is written.
 
 `provider_list` carries API keys as stored in `providers.json`. It stays on
 this machine: `jarvis web` never relays it.
@@ -128,6 +156,18 @@ this machine: `jarvis web` never relays it.
 - States: `idle`, `woken`, `capturing`, `listening`, `processing`,
   `speaking`. A state may carry `meta` (a discard reason).
 - `wake_word_detected` has no fields.
+
+### What the user said
+
+Only to clients that subscribed to `user_message`. A message the user sent
+from another client, typed into the TUI or `jarvis send`, or spoken, so every
+screen shows the whole conversation. The client a message came from does not
+get it back: it drew the message when it sent it. Secrets are redacted as the
+session stores them. `at` is seconds since the epoch.
+
+```json
+{"type": "user_message", "content": "Update my system", "at": 1762200000.5}
+```
 
 ### Activity (#267)
 
@@ -194,7 +234,8 @@ The `/status` health check, as data.
   "tasks": [
     {"pid": 7, "kind": "tool", "title": "execute_command (jarvis-shell-system-mcp)",
      "detail": "pacman -Syu --noconfirm", "running_for": 65.2,
-     "output": ":: Synchronizing package databases...", "request": "update my system"},
+     "output": ":: Synchronizing package databases...", "awaiting_password": false,
+     "request": "update my system"},
     {"pid": 9, "kind": "timer", "title": "goal_reminder:a1b2c3d4", "detail": "",
      "fires_in": 120, "request": ""}],
   "thinking": 1, "confirmations": 0, "setups": 0}}
@@ -202,6 +243,9 @@ The `/status` health check, as data.
 
 - `running_for` is `null` for a task JARVIS did not start this run.
 - `output` is the task's latest output, up to 2,000 characters.
+- `awaiting_password` is `true` while a root call waits for the administrator
+  password on the host's own screen (dmcp's stderr says so; #310). Show it as
+  waiting, not running.
 - `thinking` counts requests waiting on the model.
 
 ### Confirmations
@@ -225,33 +269,45 @@ The `/status` health check, as data.
 {"type": "session_list", "sessions": [{"id": "110d5048-…", "title": "Pacman test",
   "created_at": "…", "updated_at": "…", "summary": "…", "metadata": {}, "entry_count": 12}]}
 {"type": "session_switched", "session": {"id": "110d5048-…", "title": "Pacman test"},
- "messages": [{"role": "user", "content": "run pacman -Syu", "timestamp": "…"}]}
+ "messages": [{"role": "user", "content": "run pacman -Syu", "timestamp": 1761850000.1},
+  {"role": "assistant", "content": "Let me run the update.", "comment": true, "timestamp": 1761850003.4},
+  {"role": "action", "id": "tool:4", "kind": "tool", "title": "run_job (shell)",
+   "detail": "pacman -Syu  (job update)", "status": "ok", "output": "…",
+   "started_at": 1761850003.6, "at": 1761850190.2, "timestamp": 1761850003.6}]}
 {"type": "session_error", "message": "No session matches 'zz'"}
 ```
+
+A session's messages are what was said and, with `role: "action"`, the blocks
+of what JARVIS did, each where it started, so a client can draw the chat as it
+looked live. A block carries what an action's `start` and `end` carry
+(`output` is kept to its last 8,000 characters). A block still running has
+`status: "running"`, its output so far and no `at`; its next `update` or `end`
+comes live, with the same `id`. A comment has `comment: true`.
 
 ### Everything else
 
 | `type` | Fields |
 |---|---|
-| `settings` | `confirmation_mode`, `wake_chime_path` |
+| `settings` | `settings`: the list above |
 | `config_updated` | `key`, `value` |
 | `config_error` | `key`, `message` |
 | `provider_list` | `providers` |
 | `provider_error` | `message` |
 | `setup_list` | `setups` |
 | `client_list` | `clients` (labels) |
-| `ack` | `message` |
+| `ack` | `message`, and `for`: the `type` of the request it answers (`stop`, `stop_task`, `approve_confirmation`, …), so a client can show a stop's reply without echoing every decision |
 | `error` | `message` |
 | `DAEMON_SHUTDOWN` | `state`, `goals`, `session_id`, `timestamp` |
 
 ## Through `jarvis web`
 
 The gateway relays this protocol over a WebSocket, narrowed by role
-(`docs/web-gateway.md`). It subscribes to `activity` and `action` for the
-phone:
+(`docs/web-gateway.md`). It subscribes to `activity`, `action` and
+`user_message` for the phone:
 
-- **Every role** sees `state`, `response`, `activity`, confirmations, sessions,
-  `client_list`, `ack`, `error`, and a `DAEMON_SHUTDOWN` cut down to its state.
+- **Every role** sees `state`, `response`, `user_message`, `activity`, confirmations, sessions
+  (a guest's history without its action blocks), `client_list`, `ack`, `error`,
+  and a `DAEMON_SHUTDOWN` cut down to its state.
 - **Trusted and owner** also see `action`, `status` and `work`, and may send
   `get_status` and `list_work`. Action blocks carry tool parameters and raw
   output, so they go to the roles trusted to approve what JARVIS runs.
@@ -263,4 +319,3 @@ phone:
 - Stopping a request or a task (#270).
 - Filling in a setup from an outside app: plain settings could travel here;
   secrets would not leave the desktop (#267 phase 2, open).
-- The remaining runtime settings that the TUI's settings window offers.

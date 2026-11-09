@@ -93,38 +93,70 @@ def show_session(app: Any, session: Any) -> None:
 
 
 def render_session_history(app: Any, session_id: str) -> None:
-    """Write a session's stored conversation into the chat, oldest first."""
+    """Write a session's stored conversation and blocks into the chat, oldest first."""
     if app.jarvis is None:
         return
     ctx = getattr(app.jarvis, "contextor", None)
     if ctx is None or not getattr(ctx, "is_connected", False):
         return
+    from ..runtime.io import session_history
+
     try:
-        result = ctx.recall("conversation_log", limit=100, session_id=session_id)
-        entries = result.get("entries", [])
+        history = session_history(app.jarvis, session_id, limit=100)
     except Exception:
         return
-    if not entries:
+    if not history:
         app._append_log("[dim](no messages in this session yet)[/dim]")
         return
-    # Sort chronologically — contextor returns most-recent-first by default.
-    try:
-        entries.sort(key=lambda e: e.get("stored_at", ""))
-    except Exception:
-        pass
-    for entry in entries:
-        content = (entry.get("content") or "").strip()
+    for item in history:
+        if item.get("role") == "action":
+            _replay_block(app, item)
+            continue
+        content = (item.get("content") or "").strip()
         if not content:
             continue
-        meta = entry.get("metadata") or {}
-        entry_type = meta.get("type", "")
         escaped = tui_output.escape(content)
-        if entry_type == "user_prompt":
+        if item.get("role") == "user":
             app._append_log(f"[bold cyan]you[/bold cyan] > {escaped}")
-        elif entry_type == "assistant_reply":
-            app._append_log(f"[bold magenta]jarvis[/bold magenta] > {escaped}")
         else:
-            app._append_log(escaped)
+            app._append_log(f"[bold magenta]jarvis[/bold magenta] > {escaped}")
+
+
+def _replay_block(app: Any, block: dict) -> None:
+    """A kept block, drawn as its start and end; a running one stays open for its end."""
+    from .chat_view import ChatView, export_line
+
+    try:
+        chat = app.query_one("#chat-log", ChatView)
+    except Exception:
+        return
+    events = [
+        {
+            "phase": "start",
+            "id": block.get("id"),
+            "kind": block.get("kind"),
+            "title": block.get("title"),
+            "detail": block.get("detail"),
+            "at": block.get("started_at"),
+        }
+    ]
+    if block.get("status") == "running":
+        events.append(
+            {"phase": "update", "id": block.get("id"), "output": block.get("output")}
+        )
+    else:
+        events.append(
+            {
+                "phase": "end",
+                "id": block.get("id"),
+                "status": block.get("status"),
+                "output": block.get("output"),
+                "at": block.get("at"),
+            }
+        )
+    for event in events:
+        if chat.on_action(event) is not None and event["phase"] != "update":
+            app._export_lines.append(export_line(event))
 
 
 async def on_session_selected(app: Any, event: Any) -> None:

@@ -25,14 +25,14 @@ def _unquote(text: str) -> str:
 def _rename_target(app: Any, raw: str, whole: str) -> tuple:
     """(session, title) for `/rename`: `<id> <title>` names a session, else the current.
 
-    The first word is taken as an id only when it starts exactly one session's
-    id and a title follows, the rule `/delete` uses for its prefix.
+    The first word is taken as an id only when it names a session
+    (`SessionManager.find`) and a title follows.
     """
     first, _, rest = raw.partition(" ")
     if rest.strip():
-        matches = [s for s in app.sessions.list(limit=500) if s.id.startswith(first)]
-        if len(matches) == 1:
-            return matches[0], _unquote(rest.strip())
+        session, _ = app.sessions.find(first)
+        if session is not None:
+            return session, _unquote(rest.strip())
     return app.sessions.current, whole
 
 
@@ -84,14 +84,14 @@ def handle_slash_command(app: Any, text: str) -> bool:
         if not arg:
             session_reply(app, "Usage: /switch <session_id_prefix>")
             return True
-        session = app.sessions.switch(arg)
-        if session:
-            session_reply(
-                app,
-                f"Switched to {session.short_id()} ('{session.title}')",
-            )
-        else:
-            session_reply(app, f"No session matches '{arg}'.")
+        session, why = app.sessions.find(arg)
+        if session is None or app.sessions.switch(session.id) is None:
+            session_reply(app, why or f"Could not switch to '{arg}'.")
+            return True
+        session_reply(
+            app,
+            f"Switched to {session.short_id()} ('{session.display_label()}')",
+        )
         return True
 
     if cmd == "/rename":
@@ -116,16 +116,12 @@ def handle_slash_command(app: Any, text: str) -> bool:
         if not arg:
             session_reply(app, "Usage: /delete <session_id_prefix>")
             return True
-        sessions = app.sessions.list(limit=500)
-        matches = [s for s in sessions if s.id.startswith(arg)]
-        if len(matches) != 1:
-            session_reply(
-                app,
-                f"Need a unique id prefix; got {len(matches)} match(es).",
-            )
+        session, why = app.sessions.find(arg)
+        if session is None:
+            session_reply(app, why)
             return True
-        if app.sessions.delete(matches[0].id):
-            session_reply(app, f"Deleted session {matches[0].short_id()}.")
+        if app.sessions.delete(session.id):
+            session_reply(app, f"Deleted session {session.short_id()}.")
         else:
             session_reply(app, "Delete failed.")
         return True

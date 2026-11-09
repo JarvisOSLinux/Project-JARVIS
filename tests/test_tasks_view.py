@@ -117,7 +117,7 @@ def test_the_view_reads_like_a_list():
     work = asyncio.run(collect_work(_app()))
     text = Text.from_markup(work_markup(work)).plain
     assert "• update my system  1m 1" in text
-    assert "⋯ execute_command (shell)  running 1m 0" in text
+    assert "⋯ execute_command (shell)  #4  running 1m 0" in text
     assert "    pacman -Syu" in text and "    │  core 1/40" in text
     assert "⏲ goal_reminder:g1  fires in 2m 00s" in text
     assert "1 confirmation (jarvis confirm)" in text

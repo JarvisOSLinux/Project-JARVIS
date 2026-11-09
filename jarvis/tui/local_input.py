@@ -20,14 +20,14 @@ from ..core.providers import (
 from .help_screen import HelpScreen
 from .output import escape
 from .provider_modal import ProviderModal
-from .slash_commands_doc import build_help_markdown
 
 
 def handle_local_input(app: Any, text: str, bindings: Any) -> bool:
     """Handle TUI-only slash commands. Return True when handled."""
     low = text.lower().strip()
-    if low in ("/help", "/?"):
-        app.push_screen(HelpScreen(build_help_markdown(bindings)))
+    if low.split(maxsplit=1)[0] in ("/help", "/?"):
+        words = text.strip().split(maxsplit=1)
+        app.push_screen(HelpScreen(bindings, words[1] if len(words) > 1 else ""))
         return True
 
     if low == "/export" or low.startswith("/export "):
@@ -331,28 +331,6 @@ def _handle_model(app: Any, text: str) -> None:
     app._append_log(
         "[yellow]Use /providers edit <name> --model <model> to change a provider's model.[/yellow]"
     )
-
-
-def _apply_in_memory(key: str, value: str) -> None:
-    """Apply a setting change to the live Config object with proper type coercion."""
-    from ..config import Config
-
-    bool_keys = {"RESET_HISTORY_AFTER_RESPONSE", "VOICE_SPEAK_COMMENTS"}
-    int_keys = {
-        "RAG_TOP_K",
-        "MAX_GOALS_IN_CONTEXT",
-        "CONFIRMATION_TIMEOUT",
-    }
-    float_keys = {"RAG_MIN_SCORE"}
-
-    if key in bool_keys:
-        setattr(Config, key, value.lower() == "true")
-    elif key in int_keys:
-        setattr(Config, key, int(value))
-    elif key in float_keys:
-        setattr(Config, key, float(value))
-    else:
-        setattr(Config, key, value)
 
 
 def export_transcript_to_disk(app: Any, filename: Optional[str]) -> None:

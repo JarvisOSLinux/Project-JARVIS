@@ -539,3 +539,15 @@ class TestTui:
         assert waiting == "⋯ 1 task still running (F4 shows them)"
         assert idle is True
         assert not any("Searching" in line for line in lines)
+
+
+@pytest.mark.unit
+def test_a_jobs_transcript_and_typed_input_read_as_text():
+    from jarvis.runtime import action_events as ae
+
+    text, failed = ae.readable(
+        '{"success": true, "exit_code": 0, "job": "u", '
+        '"transcript": ":: Synchronizing\\nthere is nothing to do\\n"}'
+    )
+    assert text == ":: Synchronizing\nthere is nothing to do" and not failed
+    assert ae.tool_detail({"job": "update", "text": "Y\n"}) == "Y⏎  (job update)"

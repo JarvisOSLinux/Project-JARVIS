@@ -14,6 +14,7 @@ from ..config import Config
 from ..core.voice_state import VoiceState
 from ..llm import runner as llm_runner
 from ..platform import current as platform
+from . import action_events
 from .io import (
     apply_confirmation_decision,
     broadcast_to_gui_clients,
@@ -22,6 +23,7 @@ from .io import (
     on_gui_activity,
     set_gui_state,
 )
+from .stop import is_package_manager
 from .voice_activation_thread import run_voice_activation
 
 
@@ -394,6 +396,19 @@ async def pending_work(app: Any) -> list[str]:
                 )
             else:
                 line = f"{task.get('server')} · {task.get('tool')}"
+                record = next(
+                    (
+                        a
+                        for a in action_events.running(app)
+                        if a["id"] == f"tool:{task.get('pid')}"
+                    ),
+                    None,
+                )
+                if record and is_package_manager(record.get("detail", "")):
+                    line += (
+                        f" — {record['detail'][:60]}: changing packages; quitting "
+                        "now stops it mid-way and can leave the system broken"
+                    )
             goal = goal_of.get(task.get("pid"))
             if goal:
                 line += f": {goal[:80]}"

@@ -38,10 +38,21 @@ SESSION_SLASH_HELP: tuple[tuple[str, str], ...] = (
         "/context",
         "Show what filled the last prompt, part by part, and how much room is left.",
     ),
+    (
+        "/stop [all|<n>]",
+        # No code span: the help drew "`all` also" as "allalso".
+        "Stop this session's work; its running tasks keep running. /stop all "
+        "ends them too, /stop <n> ends task n (F4 shows the numbers). Esc on an "
+        "empty input is /stop.",
+    ),
 )
 
 TUI_LOCAL_SLASH_HELP: tuple[tuple[str, str], ...] = (
-    ("/help, /?", "Open help (TUI only; not sent to the LLM)."),
+    (
+        "/help [words], /? [words]",
+        "Open help, showing only the keys and commands that mention the words "
+        "(TUI only; not sent to the LLM). Typing in the help searches too.",
+    ),
     (
         "/export [file]",
         "Save plain transcript (Markdown) under `transcripts/`; optional basename only.",
@@ -94,7 +105,11 @@ EXTRA_KEYBOARD_HELP: tuple[tuple[str, str], ...] = (
         "Up/Down move between blocks, Enter or Space folds or unfolds one, "
         "Esc goes back to typing. Clicking a block's title folds it too.",
     ),
-    ("Esc", "Close the suggestion list, or the help modal when it is focused."),
+    (
+        "Esc",
+        "Close the suggestion list; in the help, clear the search, then close it; "
+        "on an empty input while JARVIS works, stop it (/stop).",
+    ),
 )
 
 
@@ -123,10 +138,22 @@ def slash_command_catalog() -> tuple[tuple[str, str], ...]:
     return tuple(catalog.items())
 
 
+def _cell(text: str) -> str:
+    """Table-safe Markdown: `|` ended the cell ("/stop [all|<n>]" showed as
+    "/stop [all" and "]"), and `<id>`, `<n>`, `<title>` were read as HTML
+    tags and dropped. Code spans are left as written."""
+    parts = text.split("`")
+    for i in range(0, len(parts), 2):
+        parts[i] = (
+            parts[i].replace("|", "\\|").replace("<", "&lt;").replace(">", "&gt;")
+        )
+    return "`".join(parts)
+
+
 def _markdown_table(rows: Sequence[tuple[str, str]]) -> str:
     lines = ["| Key / command | Meaning |", "| --- | --- |"]
     for left, right in rows:
-        lines.append(f"| **{left}** | {right} |")
+        lines.append(f"| **{_cell(left)}** | {_cell(right)} |")
     return "\n".join(lines)
 
 
@@ -137,14 +164,36 @@ def _binding_key_label(b: Binding) -> str:
     return b.key.replace("_", " ")
 
 
-def build_help_markdown(bindings: Sequence[Binding]) -> str:
-    """Full markdown for the help modal (keyboard from live bindings + static tables)."""
+def _matches(query: str, row: tuple[str, str]) -> bool:
+    """True when every word of `query` is in the row, ignoring case."""
+    text = f"{row[0]} {_plain(row[1])}".lower()
+    return all(word in text for word in query.lower().split())
+
+
+def build_help_markdown(bindings: Sequence[Binding], query: str = "") -> str:
+    """Full markdown for the help modal (keyboard from live bindings + static tables).
+
+    With a `query`, only the rows that mention all of its words (Yakup: "would
+    be nice if we could search the commands in /help").
+    """
     key_rows: list[tuple[str, str]] = [
         (_binding_key_label(b), b.description or b.action) for b in bindings
     ]
     key_rows.extend(EXTRA_KEYBOARD_HELP)
 
     slash_rows = list(TUI_LOCAL_SLASH_HELP) + list(SESSION_SLASH_HELP)
+
+    if query.strip():
+        key_rows = [r for r in key_rows if _matches(query, r)]
+        slash_rows = [r for r in slash_rows if _matches(query, r)]
+        sections = []
+        if key_rows:
+            sections.append("## Keyboard\n\n" + _markdown_table(key_rows))
+        if slash_rows:
+            sections.append("## Slash commands\n\n" + _markdown_table(slash_rows))
+        if not sections:
+            sections.append(f"Nothing mentions **{_plain(query.strip())}**.")
+        return "\n\n".join(sections)
 
     return "\n\n".join(
         [

@@ -18,6 +18,7 @@ from . import action_events
 from .goal_updates import apply_goal_updates
 from .llm_bridge import ask_llm
 from .output_hooks import emit_activity, get_embeddings, persist_assistant_turn
+from .password_wait import WAITING_NOTE, awaiting_password
 from .root_context import (
     build_root_context,
     compact_payload_for_llm,
@@ -395,6 +396,16 @@ async def on_setup_result(app: Any, logger: Logger, data: dict) -> None:
     if pending is None:
         logger.warning(f"JARVIS: Ignoring a result for unknown setup {ref!r}")
         return
+    from . import stop, turns
+
+    stop.claim_turn(app, pending.goal_id)
+    async with turns.turn(app, pending.goal_id):
+        await _resume_after_setup(app, logger, pending, data)
+
+
+async def _resume_after_setup(
+    app: Any, logger: Logger, pending: Any, data: dict
+) -> None:
     server_id = pending.server_id
     origin = (
         f"\nThe user originally asked: {pending.goal_description}"
@@ -832,6 +843,11 @@ async def _handle_status(
         if t.get("state") not in ("running", None) and "pid" in t
     ]
     held_output = await app.dispatch.get_task_output(held_pids) if held_pids else ""
+    if goal and held_output:
+        # Their own EXITs may still wait for the request's turn (#284).
+        from . import turns
+
+        turns.saw_results(app, held_pids)
 
     context = build_root_context(app, logger)
     if goal:
@@ -842,6 +858,8 @@ async def _handle_status(
     context += f"\n{compact_payload_for_llm(rows)}"
     for pid, tail in tails:
         context += f"\nLIVE_OUTPUT (pid {pid}, newest output so far):\n{tail}"
+        if awaiting_password(tail):
+            context += f"\nWAITING_FOR_PASSWORD (pid {pid}): {WAITING_NOTE}"
     if held_output:
         context += f"\nHELD_OUTPUT:\n{held_output}"
     if not tasks:
@@ -926,7 +944,7 @@ def _say_comment(app: Any, response: Any, action: str) -> None:
     if len(text) > COMMENT_MAX_CHARS:
         text = text[: COMMENT_MAX_CHARS - 1] + "…"
     app.output_manager.handle_response({"output": text, "comment": True})
-    persist_assistant_turn(app, text)
+    persist_assistant_turn(app, text, comment=True)
 
 
 async def act_on_root_response(

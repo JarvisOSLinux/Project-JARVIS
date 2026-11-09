@@ -49,6 +49,7 @@ _PART_OF_LABEL = {
     "REMIND_COMPLETED": "Task results",
     "EXIT_DATA": "Task results",
     "HELD_OUTPUT": "Task results",
+    "JOB_OUTPUT": "Task results",
     "CONVERSATION_SUMMARY": "Conversation summary",
     "NEW INPUT": "Your message",
 }

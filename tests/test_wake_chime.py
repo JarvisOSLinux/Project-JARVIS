@@ -1,6 +1,6 @@
 """Tests for the wake-word earcon (Project-JARVIS#139): path validation,
 best-effort playback, the unconditional wake_word_detected broadcast, and
-the validated set_wake_chime_path GUI-socket message.
+setting WAKE_CHIME_PATH over the GUI socket (set_setting, checked here too).
 """
 
 import asyncio
@@ -237,9 +237,10 @@ class TestSetWakeChimePathHandler:
             patch("jarvis.cli._update_env_setting") as mock_update,
             patch.object(runtime_io, "broadcast_to_gui_clients", new=AsyncMock()) as bc,
         ):
-            await runtime_io._handle_set_wake_chime_path(
-                app, {"path": str(path)}, writer
-            )
+            with patch.object(Config, "WAKE_CHIME_PATH", Config.WAKE_CHIME_PATH):
+                await runtime_io._handle_set_setting(
+                    app, {"key": "WAKE_CHIME_PATH", "value": str(path)}, writer
+                )
 
         mock_update.assert_called_once_with("WAKE_CHIME_PATH", str(path))
         bc.assert_awaited_once_with(
@@ -257,8 +258,8 @@ class TestSetWakeChimePathHandler:
             patch.object(runtime_io, "broadcast_to_gui_clients", new=AsyncMock()) as bc,
             patch.object(runtime_io, "_gui_write", new=AsyncMock()) as gw,
         ):
-            await runtime_io._handle_set_wake_chime_path(
-                app, {"path": "/nonexistent.wav"}, writer
+            await runtime_io._handle_set_setting(
+                app, {"key": "WAKE_CHIME_PATH", "value": "/nonexistent.wav"}, writer
             )
 
         mock_update.assert_not_called()
@@ -268,6 +269,6 @@ class TestSetWakeChimePathHandler:
             {
                 "type": "config_error",
                 "key": "WAKE_CHIME_PATH",
-                "message": "not a file: /nonexistent.wav",
+                "message": "Wake sound: not a file: /nonexistent.wav",
             },
         )

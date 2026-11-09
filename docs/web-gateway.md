@@ -1,7 +1,12 @@
 # `jarvis web` — phone access to a home JARVIS
 
 Opt-in, off by default. Design and decisions: Project-JARVIS#266. The page is
-the jarvis-app interface ported to a phone (#267).
+jarvis-app's own UI (#267): one folder, `src/` in jarvis-app, used by the
+desktop app through Tauri and served here through `transport.js`, which picks
+the gateway's WebSocket when it runs in a browser. `jarvis/server/web/` is a
+pinned copy: change the UI in jarvis-app, then run `scripts/sync-web-ui.sh`,
+which records the jarvis-app commit and each file's hash in
+`jarvis/server/web_ui.json` (`tests/test_web_ui_pin.py` fails on a hand edit).
 
 ```
 phone browser ──(Tailscale)──▶ tailscale serve (HTTPS, adds Tailscale-User-Login)
@@ -33,12 +38,27 @@ Each step ends with a check.
 Sleep, keyring and service wiring (runbook sections C and E of #266) are still
 host chores, not code.
 
+## Headscale (self-hosted control server)
+
+This machine is only a client of your Headscale server; nothing about the
+gateway changes. `scripts/run-web.sh --tailscale --login-server https://hs.example.com`
+does the client side: installs tailscale, joins (an auth key from `$TS_AUTHKEY`
+is passed by file, not on the command line; without one it prompts), and sets
+`JARVIS_WEB_HOST_SUFFIX` to the node's MagicDNS suffix instead of `.ts.net`.
+
+Headscale does not issue HTTPS certificates, as far as we know, so the script
+falls back to `tailscale serve --http=80`. The tunnel is still WireGuard, but
+browsers treat the page as insecure, so the phone's microphone and speech
+recognition do not work. Headscale logins are plain user names, not emails:
+give `jarvis web allow` exactly what `tailscale whois <ip>` shows, or pass
+`--allow name:role` to the script.
+
 ## Roles
 
 | Role | May do |
 |---|---|
-| guest | chat, stop the reply, see what JARVIS is doing (the activity line), sessions, confirmations and clients |
-| trusted | guest + approve or deny requests, create and switch sessions, see action blocks (tool parameters and output), status and running work |
+| guest | chat, stop JARVIS (its running tasks keep running), see what JARVIS is doing (the activity line), sessions (their history without action blocks), confirmations and clients |
+| trusted | guest + approve or deny requests, create and switch sessions, see action blocks (tool parameters and output), status and running work, stop all (ends the running tasks too), stop one running task |
 | owner | trusted + rename and delete sessions |
 
 No role may change settings, providers, the wake chime or setups, shut JARVIS

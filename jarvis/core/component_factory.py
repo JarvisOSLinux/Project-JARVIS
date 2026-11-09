@@ -9,6 +9,8 @@ from ..kernel_client import KernelClient, provider_from_config
 from ..llm import LLM
 from ..llm.provider_pool import ProviderEntry, ProviderPool
 from ..llm.providers import create_provider as create_llm_provider
+from ..sessions.block_log import DIRNAME as BLOCKS_DIRNAME
+from ..sessions.block_log import BlockLog
 from ..voice.audio import (
     AudioUnavailableError,
     check_audio_input_available,
@@ -193,6 +195,11 @@ class ComponentFactory:
     def create_setup_queue() -> SetupQueue:
         """The daemon's pending server setups, kept across restarts (#254)."""
         return SetupQueue(store_path=str(setup_store_path()))
+
+    @staticmethod
+    def create_block_log() -> BlockLog:
+        """Each session's action blocks, so a reopened chat shows them."""
+        return BlockLog(os.path.join(Config.JARVIS_DATA_DIR, BLOCKS_DIRNAME))
 
     @staticmethod
     def create_tts_optional() -> Optional[any]:
@@ -447,6 +454,7 @@ class ComponentFactory:
         components["event_merger"] = ComponentFactory.create_event_merger()
         components["task_parser"] = ComponentFactory.create_task_parser()
         components["setup_queue"] = ComponentFactory.create_setup_queue()
+        components["block_log"] = ComponentFactory.create_block_log()
         components["confirmation_manager"] = (
             ComponentFactory.create_confirmation_manager()
         )

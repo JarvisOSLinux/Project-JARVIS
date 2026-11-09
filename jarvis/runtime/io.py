@@ -5,10 +5,12 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 from logging import Logger
 from typing import Any, Optional
 
 from ..config import Config
+from ..core import settings
 from ..core.providers import (
     add_provider,
     edit_provider,
@@ -16,9 +18,10 @@ from ..core.providers import (
     move_provider,
     remove_provider,
 )
+from ..core.secret_scrubber import redact_secrets
 from ..core.voice_state import VoiceState
 from ..platform import current as platform
-from ..voice.chime import validate_chime_path
+from . import action_events
 
 
 async def run_socket_listener(app: Any, logger: Logger) -> None:
@@ -80,6 +83,7 @@ async def handle_socket_connection(
                     pass
 
             app.events.inject_user_input(text)
+            on_user_message(app, text)
             logger.info(f"JARVIS: Socket input: {text[:80]}...")
     except (ConnectionResetError, BrokenPipeError):
         pass
@@ -132,7 +136,7 @@ async def _handle_confirmation_query(
     ack = apply_confirmation_decision(app, msg)
     if ack is None:
         return False
-    await _gui_write(writer, {"type": "ack", "message": ack})
+    await _gui_write(writer, {"type": "ack", "for": msg_type, "message": ack})
     return True
 
 
@@ -162,7 +166,11 @@ async def _handle_setup_query(
     done = "is finishing" if msg_type == "setup_completed" else "dropped"
     await _gui_write(
         writer,
-        {"type": "ack", "message": f"JARVIS {done} the setup of {setup.server_id}."},
+        {
+            "type": "ack",
+            "for": msg_type,
+            "message": f"JARVIS {done} the setup of {setup.server_id}.",
+        },
     )
     return True
 
@@ -335,7 +343,7 @@ DEFAULT_CLIENT_LABEL = "unlabeled"
 # Pushed events a client receives only when its `hello` asks for them. A
 # client that predates them would choke on an unknown type: jarvis-app shows
 # every unknown message as an alert.
-SUBSCRIBABLE = frozenset({"activity", "action"})
+SUBSCRIBABLE = frozenset({"activity", "action", "user_message"})
 
 
 def _subscriptions(app: Any) -> dict:
@@ -425,6 +433,7 @@ async def _process_gui_message(
         if content:
             await set_gui_state(app, VoiceState.PROCESSING)
             app.events.inject_user_input(content)
+            on_user_message(app, content, sender=writer)
             logger.info(f"JARVIS: GUI input: {content[:80]}...")
 
     elif msg_type == "confirmation_response":
@@ -469,24 +478,11 @@ async def _process_gui_message(
         )
         await set_gui_state(app, VoiceState.IDLE)
 
-    elif msg_type == "set_wake_chime_path":
-        await _handle_set_wake_chime_path(app, msg, writer)
-
-    elif msg_type == "reset_wake_chime_path":
-        await _handle_reset_wake_chime_path(app, writer)
-
     elif msg_type == "get_settings":
-        await _gui_write(
-            writer,
-            {
-                "type": "settings",
-                "confirmation_mode": Config.CONFIRMATION_MODE,
-                "wake_chime_path": Config.WAKE_CHIME_PATH,
-            },
-        )
+        await _gui_write(writer, {"type": "settings", "settings": settings.describe()})
 
-    elif msg_type == "set_confirmation_mode":
-        await _handle_set_confirmation_mode(app, msg, writer)
+    elif msg_type == "set_setting":
+        await _handle_set_setting(app, msg, writer)
 
     elif msg_type == "list_providers":
         await _gui_write(
@@ -504,6 +500,29 @@ async def _process_gui_message(
 
     elif msg_type == "move_provider":
         await _reply_or_broadcast_providers(app, writer, _handle_move_provider(msg))
+
+    elif msg_type in ("stop", "stop_all"):
+        from .stop import handle_command
+
+        reply = await handle_command(
+            app, logger, "/stop all" if msg_type == "stop_all" else "/stop"
+        )
+        await _gui_write(writer, {"type": "ack", "for": msg_type, "message": reply})
+        await broadcast_to_gui_clients(
+            app, {"type": "response", "content": "", "done": True}
+        )
+        await set_gui_state(app, VoiceState.IDLE)
+
+    elif msg_type == "stop_task":
+        from .stop import stop_task
+
+        pid = msg.get("pid")
+        reply = (
+            await stop_task(app, logger, pid)
+            if isinstance(pid, int) and not isinstance(pid, bool)
+            else "stop_task needs the task's pid, a number (list_work shows it)."
+        )
+        await _gui_write(writer, {"type": "ack", "for": msg_type, "message": reply})
 
     elif msg_type == "get_status":
         await _gui_write(writer, await _status_reply(app, bool(msg.get("full"))))
@@ -536,74 +555,30 @@ async def _process_gui_message(
 
 
 # ---------------------------------------------------------------------------
-# GUI socket — wake chime config
+# GUI socket — settings
 # ---------------------------------------------------------------------------
 
 
-async def _handle_set_wake_chime_path(
+async def _handle_set_setting(
     app: Any, msg: dict, writer: asyncio.StreamWriter
 ) -> None:
-    """Validated, single-purpose config write for WAKE_CHIME_PATH only --
-    deliberately NOT a generic "set any config key" message. Exposing an
-    unscoped config writer over the GUI socket would let any local client
-    silently rewrite security-relevant settings (e.g. CONFIRMATION_MODE).
+    """Change one setting from ``core/settings.py``'s list, checked first.
+
+    Any other key is refused: the list is the whole of what a client may
+    change. Every client hears of the change; only the asker of the error.
     """
-    path = msg.get("path", "")
-    error = validate_chime_path(path)
+    key = str(msg.get("key", ""))
+    val, error = settings.apply(key, msg.get("value"))
     if error:
-        await _gui_write(
-            writer, {"type": "config_error", "key": "WAKE_CHIME_PATH", "message": error}
-        )
+        await _gui_write(writer, {"type": "config_error", "key": key, "message": error})
         return
+    await broadcast_setting(app, key, val)
 
-    from ..cli import _update_env_setting
 
-    _update_env_setting("WAKE_CHIME_PATH", path)
+async def broadcast_setting(app: Any, key: str, val: Any) -> None:
+    """Tell every GUI client a setting changed, wherever it was changed."""
     await broadcast_to_gui_clients(
-        app, {"type": "config_updated", "key": "WAKE_CHIME_PATH", "value": path}
-    )
-
-
-async def _handle_reset_wake_chime_path(app: Any, writer: asyncio.StreamWriter) -> None:
-    """Restore WAKE_CHIME_PATH to the bundled default -- the settings-panel
-    counterpart to `_handle_set_wake_chime_path`'s custom-path write."""
-    from ..cli import _update_env_setting
-
-    default = Config.DEFAULT_WAKE_CHIME_PATH
-    _update_env_setting("WAKE_CHIME_PATH", default)
-    await broadcast_to_gui_clients(
-        app, {"type": "config_updated", "key": "WAKE_CHIME_PATH", "value": default}
-    )
-
-
-_VALID_CONFIRMATION_MODES = ("smart", "ask_all", "allow_all")
-
-
-async def _handle_set_confirmation_mode(
-    app: Any, msg: dict, writer: asyncio.StreamWriter
-) -> None:
-    """Validated, single-purpose config write for CONFIRMATION_MODE only --
-    same rationale as `_handle_set_wake_chime_path`: no generic config setter
-    over the GUI socket, only specific, whitelisted, validated keys.
-    """
-    mode = msg.get("mode", "")
-    if mode not in _VALID_CONFIRMATION_MODES:
-        await _gui_write(
-            writer,
-            {
-                "type": "config_error",
-                "key": "CONFIRMATION_MODE",
-                "message": f"Invalid mode '{mode}'. Use one of: "
-                f"{', '.join(_VALID_CONFIRMATION_MODES)}.",
-            },
-        )
-        return
-
-    from ..cli import _update_env_setting
-
-    _update_env_setting("CONFIRMATION_MODE", mode)
-    await broadcast_to_gui_clients(
-        app, {"type": "config_updated", "key": "CONFIRMATION_MODE", "value": mode}
+        app, {"type": "config_updated", "key": key, "value": val}
     )
 
 
@@ -708,16 +683,41 @@ def _entries_to_messages(entries: list) -> list:
     """Map conversation_log entries (chronological) to {role, content, timestamp}."""
     messages = []
     for entry in entries:
-        role = _ROLE_BY_ENTRY_TYPE.get((entry.get("metadata") or {}).get("type"))
+        metadata = entry.get("metadata") or {}
+        role = _ROLE_BY_ENTRY_TYPE.get(metadata.get("type"))
         if not role:
             continue
+        message = {
+            "role": role,
+            "content": entry.get("content", ""),
+            "timestamp": entry.get("stored_at"),
+        }
+        if metadata.get("comment"):
+            message["comment"] = True
+        messages.append(message)
+    return messages
+
+
+def session_history(app: Any, session_id: str, limit: int = SESSION_HISTORY_LIMIT):
+    """A session's messages and action blocks (role "action"), in the order they came.
+
+    A block stands where it started, as it did live. Blocks older than the
+    oldest message shown are left out with it.
+    """
+    entries = app.contextor.recall(
+        "conversation_log", limit=limit, session_id=session_id
+    ).get("entries", [])
+    messages = _entries_to_messages(entries)
+    blocks = action_events.history(app, session_id, limit)
+    if len(entries) >= limit and messages:
+        oldest = messages[0]["timestamp"] or 0
+        blocks = [b for b in blocks if (b.get("started_at") or 0) >= oldest]
+    for block in blocks:
         messages.append(
-            {
-                "role": role,
-                "content": entry.get("content", ""),
-                "timestamp": entry.get("stored_at"),
-            }
+            {"role": "action", "timestamp": block.get("started_at"), **block}
         )
+    # Stable: a message and a block stored at the same instant keep their order.
+    messages.sort(key=lambda m: m.get("timestamp") or 0)
     return messages
 
 
@@ -745,17 +745,14 @@ def _handle_switch_session(app: Any, msg: dict) -> dict:
         return _session_error("switch_session requires 'id'")
     if not app.sessions.available:
         return _session_error("Sessions unavailable (memory disabled)")
-    session = app.sessions.switch(session_id)
+    found, why = app.sessions.find(session_id)
+    session = app.sessions.switch(found.id) if found else None
     if not session:
-        return _session_error(f"No session matches '{session_id}'")
-    recall_result = app.contextor.recall(
-        "conversation_log", limit=SESSION_HISTORY_LIMIT, session_id=session.id
-    )
-    messages = _entries_to_messages(recall_result.get("entries", []))
+        return _session_error(why or f"Could not switch to '{session_id}'")
     return {
         "type": "session_switched",
         "session": session.to_dict(),
-        "messages": messages,
+        "messages": session_history(app, session.id),
     }
 
 
@@ -766,7 +763,10 @@ def _handle_rename_session(app: Any, msg: dict) -> dict:
         return _session_error("rename_session requires 'id' and 'title'")
     if not app.sessions.available:
         return _session_error("Sessions unavailable (memory disabled)")
-    if not app.sessions.rename(title, session_id=session_id):
+    session, why = app.sessions.find(session_id)
+    if session is None:
+        return _session_error(why)
+    if not app.sessions.rename(title, session_id=session.id):
         return _session_error(f"Rename failed for '{session_id}'")
     sessions = app.sessions.list(limit=50)
     return {"type": "session_list", "sessions": [s.to_dict() for s in sessions]}
@@ -778,7 +778,10 @@ def _handle_delete_session(app: Any, msg: dict) -> dict:
         return _session_error("delete_session requires 'id'")
     if not app.sessions.available:
         return _session_error("Sessions unavailable (memory disabled)")
-    if not app.sessions.delete(session_id):
+    session, why = app.sessions.find(session_id)
+    if session is None:
+        return _session_error(why)
+    if not app.sessions.delete(session.id):
         return _session_error(f"Delete failed for '{session_id}'")
     sessions = app.sessions.list(limit=50)
     return {"type": "session_list", "sessions": [s.to_dict() for s in sessions]}
@@ -824,11 +827,15 @@ def on_gui_output(app: Any, response: dict[str, Any]) -> None:
         pass
 
 
-def _broadcast_soon(app: Any, message: dict) -> None:
+def _broadcast_soon(app: Any, message: dict, skip: Any = None) -> None:
     """Send a subscribable event to the clients that asked for its type."""
     subs = _subscriptions(app)
     kind = message.get("type")
-    writers = [w for w in getattr(app, "_gui_clients", {}) if kind in subs.get(w, ())]
+    writers = [
+        w
+        for w in getattr(app, "_gui_clients", {})
+        if w is not skip and kind in subs.get(w, ())
+    ]
     if not writers:
         return
     try:
@@ -850,6 +857,17 @@ def on_gui_activity(app: Any, event: dict[str, Any]) -> None:
 def on_gui_action(app: Any, event: dict[str, Any]) -> None:
     """An action's start, update or end (runtime/action_events.py), as is."""
     _broadcast_soon(app, event)
+
+
+def on_user_message(app: Any, text: str, sender: Any = None) -> None:
+    """What the user said, typed on any screen or spoken, for the other
+    clients' chats; the client it came from (`sender`) has drawn it already.
+    Redacted as the session stores it: a phone may be another account's."""
+    text, _ = redact_secrets(text.strip())
+    if text:
+        _broadcast_soon(
+            app, {"type": "user_message", "content": text, "at": time.time()}, sender
+        )
 
 
 async def _gui_output_and_idle(app: Any, response: dict[str, Any]) -> None:

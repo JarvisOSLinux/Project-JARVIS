@@ -141,7 +141,7 @@ The Python dispatch layer bridges the ROOT LLM to the Rust `dispatch` binary.
 | `sudo_manager.py` | Enable/disable the `jarvis` sudoers drop-in (sudo capability toggle, #158) |
 | `voice_state.py` | `VoiceState` — formal voice/response session state machine |
 
-**Confirmation system:** 4-tier threat classification (SAFE/ELEVATED/DANGEROUS/FORBIDDEN) is enforced in userspace by the TLA gate (`jarvis/core/threat_level.py` + `ConfirmationManager`) per `CONFIRMATION_MODE`. The kernel policy engine (`jarvis_policy.c`, `/dev/jarvis`) mirrors the same tiers OS-side but is not consulted from the daemon's execution path today (`KernelClient.policy_check` has no callers). Channels in priority order: TUI modal > desktop notification (`notify-send` on Linux, `osascript` on macOS) > output socket > CLI stdin.
+**Confirmation system:** 4-tier threat classification (SAFE/ELEVATED/DANGEROUS/FORBIDDEN) is enforced in userspace by the TLA gate (`jarvis/core/threat_level.py` + `ConfirmationManager`) per `CONFIRMATION_MODE`; FORBIDDEN is refused in `dispatch_flow.dispatch_send` ahead of that gate in every mode, so `allow_all` cannot bypass it. The kernel policy engine (`jarvis_policy.c`, `/dev/jarvis`) mirrors the same tiers OS-side but is not consulted from the daemon's execution path today (`KernelClient.policy_check` has no callers). Channels in priority order: TUI modal > desktop notification (`notify-send` on Linux, `osascript` on macOS) > output socket > CLI stdin.
 
 ---
 
@@ -251,18 +251,20 @@ A short, pre-rendered earcon (not TTS) plays the instant a wake word fires, so a
 
 `validate_chime_path()` checks the file exists, is readable, and parses as a valid WAV — used both before playback (so a bad path just skips the chime with a logged warning, never crashes the wake-word thread) and before persisting a client-supplied override. `play_chime()` is entirely best-effort: missing `sounddevice`, no output device, or any playback error is caught and logged, never raised.
 
-`WAKE_CHIME_PATH` is writable by any connected GUI-socket client via a single-purpose `{"type": "set_wake_chime_path", "path": "..."}` message (`jarvis.runtime.io._handle_set_wake_chime_path`) — validated the same way, persisted via the same `.env`/`jarvis.conf` write path the TUI settings modal and provider config already use, and broadcasts `{"type": "config_updated", "key": "WAKE_CHIME_PATH", "value": "..."}` to every connected client on success (or `{"type": "config_error", ...}` to the requester only on failure). This is deliberately a single dedicated message, not a generic "set any config key" — a generic writer over an unauthenticated local socket would let any connected client silently rewrite security-relevant settings like `CONFIRMATION_MODE`.
-
-`{"type": "reset_wake_chime_path"}` restores `WAKE_CHIME_PATH` to `Config.DEFAULT_WAKE_CHIME_PATH` (the bundled two-tone WAV) — the settings-panel counterpart to a custom-path write, for a "restore default" action.
+`WAKE_CHIME_PATH` is one of the settings in `jarvis/core/settings.py` (below): a GUI-socket client sets it with `{"type": "set_setting", "key": "WAKE_CHIME_PATH", "value": "..."}`, validated the same way before it is written; an empty value restores `Config.DEFAULT_WAKE_CHIME_PATH` (the bundled two-tone WAV).
 
 ### GUI socket settings + provider CRUD (jarvisos-app#12)
 
-`jarvis/runtime/io.py` exposes the same settings surface the TUI's config
-modal (`jarvis/tui/config_modal.py`) already has in-process, so `jarvisos-app`
-can build an equivalent settings panel without a special-cased protocol:
+`jarvis/core/settings.py` lists the settings JARVIS can change while it runs
+(confirmation mode and timeout, replies shown or spoken, spoken comments, wake
+sound, and under Advanced the memory, goal, history and log-level knobs). The
+TUI's settings window (`jarvis/tui/config_modal.py`) and the GUI socket both
+draw from it and change a setting only through `settings.apply`, which checks
+the value, writes it to `jarvis.conf` and sets it live (the log level is
+re-applied to the loggers; everything else is read where it is used):
 
-- `{"type": "get_settings"}` → `{"type": "settings", "confirmation_mode": ..., "wake_chime_path": ...}` — a small, explicit whitelist (matching `set_wake_chime_path`'s existing rationale: no generic arbitrary-key reader/writer over the socket).
-- `{"type": "set_confirmation_mode", "mode": "smart"|"ask_all"|"allow_all"}` → validated the same way as `set_wake_chime_path`, live-applies via `Config.CONFIRMATION_MODE` (read fresh by `ConfirmationManager` on every check, so this takes effect immediately, no restart) and persists via `_update_env_setting`. Broadcasts `config_updated`/replies `config_error` with the exact same shape `set_wake_chime_path` uses.
+- `{"type": "get_settings"}` → `{"type": "settings", "settings": [...]}`: each setting with its label, section, kind, options or bounds, and current value (`docs/gui-protocol.md`).
+- `{"type": "set_setting", "key": ..., "value": ...}` → `config_updated` to every client, or `config_error` to the requester only. Only keys in the list: the socket has no way to write any other config key (dmcp paths, LLM URLs, the sudo flag), and no value is written before it is checked. The socket is same-user only, and `jarvis web` never relays either message.
 - `{"type": "list_providers"}` → replies `{"type": "provider_list", "providers": [...]}` (requester only, a read query).
 - `{"type": "add_provider", "ptype": ..., "model": ..., "name": ..., "url": ..., "api_key": ..., "temperature": ...}`, `{"type": "edit_provider", "name": ..., "fields": {...}}`, `{"type": "remove_provider", "name": ...}` — thin wrappers around `jarvis/core/providers.py`'s existing CRUD (already shared between CLI and TUI). A successful mutation broadcasts the refreshed `provider_list` to every GUI client (providers.json is shared daemon state, same rationale as session CRUD's `_reply_or_broadcast`); a `ValueError` (unknown type, missing required field, duplicate name, not found) replies `provider_error` to the requester only.
 - **Known limitation, not introduced by this protocol**: there is no live `ProviderPool` reload. Like the TUI's own provider modal, a provider add/edit/remove only takes effect for the *next* daemon start — `create_llm()` builds the pool once from `providers.json` at startup. Any settings-panel UI built on this should say so.

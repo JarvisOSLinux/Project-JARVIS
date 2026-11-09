@@ -4,7 +4,8 @@ Speaks just enough of the socket protocol for `jarvis web`: settings, sessions,
 streamed replies and confirmations. Send "confirm" in the chat to get a pending
 permission request, and "run" to watch a turn with a comment, the activity
 line and action blocks (docs/gui-protocol.md); any other text is echoed back in
-two chunks. `get_status` and `list_work` answer with sample data.
+two chunks. `get_status` and `list_work` answer with sample data. The session
+keeps what was said and the blocks, so a reload shows them as a daemon would.
 
     python scripts/stub_daemon.py <socket-path>
 """
@@ -18,9 +19,43 @@ import time
 SESSION = {"id": "demo", "title": "Demo session", "entry_count": 0}
 pending: list[dict] = []
 writers: list[asyncio.StreamWriter] = []
+history: list[dict] = []
+blocks: dict[str, dict] = {}
+
+
+def remember(msg: dict) -> None:
+    """Keep the session's messages and blocks, as session_switched returns them."""
+    kind = msg.get("type")
+    if kind == "response" and msg.get("done") and msg.get("content"):
+        said = {
+            "role": "assistant",
+            "content": msg["content"],
+            "timestamp": time.time(),
+        }
+        if msg.get("comment"):
+            said["comment"] = True
+        history.append(said)
+    elif kind == "action" and msg.get("phase") == "start":
+        block = {
+            "role": "action",
+            "status": "running",
+            "output": "",
+            "started_at": msg["at"],
+            "timestamp": msg["at"],
+            **{k: msg.get(k) for k in ("id", "kind", "title", "detail")},
+        }
+        blocks[msg["id"]] = block
+        history.append(block)
+    elif kind == "action" and msg.get("id") in blocks:
+        block = blocks[msg["id"]]
+        block["output"] = msg.get("output") or block["output"]
+        if msg.get("phase") == "end":
+            block.update(status=msg.get("status", "ok"), at=msg["at"])
+            del blocks[msg["id"]]
 
 
 async def broadcast(msg: dict) -> None:
+    remember(msg)
     data = (json.dumps(msg) + "\n").encode()
     for w in writers:
         w.write(data)
@@ -33,6 +68,13 @@ async def reply(text: str) -> None:
         await asyncio.sleep(0.4)
         await broadcast({"type": "response", "content": part, "done": False})
     await broadcast({"type": "response", "content": "", "done": True})
+    history.append(
+        {
+            "role": "assistant",
+            "content": f"You said: {text}\n\n(stub daemon, no LLM behind this)",
+            "timestamp": time.time(),
+        }
+    )
     await broadcast({"type": "state", "state": "idle"})
 
 
@@ -146,13 +188,13 @@ SAMPLE_STATUS = [
 async def handle(msg: dict, writer: asyncio.StreamWriter) -> None:
     kind = msg.get("type")
     if kind == "get_settings":
-        out = {"type": "settings", "confirmation_mode": "smart"}
-        await broadcast(out)
+        mode = {"key": "CONFIRMATION_MODE", "kind": "select", "value": "smart"}
+        await broadcast({"type": "settings", "settings": [mode]})
     elif kind == "list_sessions":
         await broadcast({"type": "session_list", "sessions": [SESSION]})
     elif kind == "switch_session":
         await broadcast(
-            {"type": "session_switched", "session": SESSION, "messages": []}
+            {"type": "session_switched", "session": SESSION, "messages": history}
         )
     elif kind == "list_confirmations":
         await broadcast({"type": "confirmation_list", "confirmations": pending})
@@ -165,8 +207,41 @@ async def handle(msg: dict, writer: asyncio.StreamWriter) -> None:
         await broadcast({"type": "status", "full": False, "sections": SAMPLE_STATUS})
     elif kind == "list_work":
         await broadcast({"type": "work", "work": sample_work()})
+    elif kind in ("stop", "stop_all"):
+        ended = kind == "stop_all" and bool(running)
+        if ended:
+            running.clear()
+        text = (
+            "Stopped, and ended: execute_command (jarvis-shell-system-mcp)."
+            if ended
+            else "Stopped."
+        )
+        await broadcast({"type": "ack", "for": kind, "message": text})
+        await broadcast({"type": "state", "state": "idle"})
+    elif kind == "stop_task":
+        since = running.pop(f"tool:{msg.get('pid')}", None)
+        stopped = since is not None
+        if stopped:
+            await action(
+                "end", "tool:7", kind="tool", status="stopped", started_at=since
+            )
+        text = (
+            "Stopped execute_command (jarvis-shell-system-mcp)."
+            if stopped
+            else f"No task {msg.get('pid')} is running (F4 shows what is)."
+        )
+        await broadcast({"type": "ack", "for": kind, "message": text})
     elif kind == "message":
         text = str(msg.get("content", ""))
+        history.append({"role": "user", "content": text, "timestamp": time.time()})
+        said = (
+            json.dumps({"type": "user_message", "content": text, "at": time.time()})
+            + "\n"
+        ).encode()
+        for w in writers:
+            if w is not writer:
+                w.write(said)
+                await w.drain()
         if text.strip().lower() == "confirm":
             pending.append(
                 {
