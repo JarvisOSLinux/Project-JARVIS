@@ -146,16 +146,32 @@ def migrate(
 
 
 def _migrate_file(path: str, data: dict) -> dict:
+    """Migrate, and rewrite the file only when an entry changed.
+
+    A system install keeps the file in /etc/jarvis, which the daemon cannot
+    write: there the converted entries are used for this run and the admin
+    is told, instead of JARVIS failing to start.
+    """
     data, notes = migrate(data)
+    if not notes:
+        return data
     backup = f"{path}.v1.bak"
-    if not os.path.exists(backup):
-        shutil.copy2(path, backup)
-        os.chmod(backup, 0o600)
-    _write_private(path, data)
-    logger.warning(
-        f"providers.json updated for this JARVIS (Ollama is no longer built in); "
-        f"the old file is kept as {backup}"
-    )
+    try:
+        if not os.path.exists(backup):
+            shutil.copy2(path, backup)
+            os.chmod(backup, 0o600)
+        _write_private(path, data)
+    except OSError as exc:
+        logger.warning(
+            f"providers.json needs updating (Ollama is no longer built in) but "
+            f"could not be rewritten ({exc}); using the converted entries for "
+            f"this run. Rewrite {path} as below, or run JARVIS once as its owner."
+        )
+    else:
+        logger.warning(
+            f"providers.json updated for this JARVIS (Ollama is no longer built "
+            f"in); the old file is kept as {backup}"
+        )
     for note in notes:
         logger.warning(f"  {note}")
     return data

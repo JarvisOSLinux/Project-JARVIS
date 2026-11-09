@@ -225,3 +225,41 @@ def test_pool_starts_with_the_migrated_entry_and_skips_inactive(file):
     assert provider.api_url == "https://ollama.com"
     assert provider.model == "nemotron-3-ultra"
     assert provider.headers["Authorization"] == f"Bearer {KEY}"
+
+
+def test_a_file_with_nothing_to_convert_is_left_alone(file):
+    _write(
+        file, [{"name": "q", "type": "llamacpp", "model": "Qwen/Qwen3-4B-GGUF:Q4_K_M"}]
+    )
+    before = file.read_text()
+    data = providers_mod.load_providers()
+    assert data["version"] == providers_mod.PROVIDERS_VERSION
+    assert file.read_text() == before
+    assert not file.with_name("providers.json.v1.bak").exists()
+
+
+@pytest.mark.skipif(
+    os.name != "posix" or os.geteuid() == 0, reason="needs a read-only dir"
+)
+def test_a_read_only_system_file_still_starts(file, caplog):
+    _write(
+        file,
+        [
+            {
+                "name": "c",
+                "type": "ollama",
+                "model": "nemotron-3-ultra:cloud",
+                "api_key": KEY,
+            }
+        ],
+    )
+    before = file.read_text()
+    file.parent.chmod(0o555)
+    try:
+        with caplog.at_level("WARNING"):
+            data = providers_mod.load_providers()
+    finally:
+        file.parent.chmod(0o755)
+    assert data["providers"][0]["type"] == "ollama-cloud"
+    assert file.read_text() == before
+    assert "could not be rewritten" in caplog.text and KEY not in caplog.text
