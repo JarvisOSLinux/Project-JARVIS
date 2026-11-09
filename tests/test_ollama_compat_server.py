@@ -45,11 +45,11 @@ def running_server(stub_provider, tmp_path, monkeypatch):
     server.stop()
 
 
-def _request(server, method, path, body=None):
+def _request(server, method, path, body=None, headers=None):
     host, port = server._httpd.server_address[:2]
     conn = http.client.HTTPConnection(host, port, timeout=5)
     payload = json.dumps(body).encode() if body is not None else None
-    conn.request(method, path, body=payload)
+    conn.request(method, path, body=payload, headers=headers or {})
     response = conn.getresponse()
     data = response.read()
     conn.close()
@@ -162,3 +162,66 @@ class TestEndpoints:
         conn.request("POST", "/api/chat", body=b"{not json")
         assert conn.getresponse().status == 400
         conn.close()
+
+
+class TestWebPagesRefused:
+    """No token on loopback, so the page-only headers are what keep a website out."""
+
+    def test_rebound_host_refused(self, running_server):
+        status, _ = _request(
+            running_server,
+            "POST",
+            "/api/chat",
+            {"messages": [{"role": "user", "content": "hi"}], "stream": False},
+            headers={"Host": "attacker.example:11456"},
+        )
+        assert status == 403
+
+    def test_cross_site_origin_refused(self, running_server):
+        status, _ = _request(
+            running_server,
+            "POST",
+            "/api/generate",
+            {"prompt": "hi", "stream": False},
+            headers={"Origin": "https://attacker.example"},
+        )
+        assert status == 403
+
+    @pytest.mark.parametrize("origin", ["null", "file://", "chrome-extension://abc"])
+    def test_opaque_or_odd_origins_refused(self, running_server, origin):
+        status, _ = _request(
+            running_server, "GET", "/api/tags", headers={"Origin": origin}
+        )
+        assert status == 403
+
+    @pytest.mark.parametrize(
+        "host", ["localhost:11456", "127.0.0.1", "[::1]:11456", "LOCALHOST"]
+    )
+    def test_loopback_hosts_allowed(self, running_server, host):
+        status, _ = _request(running_server, "GET", "/api/tags", headers={"Host": host})
+        assert status == 200
+
+    def test_loopback_page_allowed(self, running_server):
+        status, _ = _request(
+            running_server,
+            "GET",
+            "/api/tags",
+            headers={"Origin": "http://localhost:3000"},
+        )
+        assert status == 200
+
+    def test_banner_needs_no_check(self, running_server):
+        status, _ = _request(
+            running_server, "GET", "/", headers={"Host": "attacker.example"}
+        )
+        assert status == 200
+
+    def test_oversized_body_refused_unread(self, running_server):
+        host, port = running_server._httpd.server_address[:2]
+        conn = http.client.HTTPConnection(host, port, timeout=5)
+        conn.putrequest("POST", "/api/chat")
+        conn.putheader("Content-Length", str(64 * 1024 * 1024))
+        conn.endheaders()
+        status = conn.getresponse().status
+        conn.close()
+        assert status == 413

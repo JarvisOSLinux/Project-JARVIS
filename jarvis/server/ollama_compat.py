@@ -15,6 +15,12 @@ the same safeguards except one:
 3. **Token only off-loopback.** Ollama clients cannot send a bearer token, so
    a loopback bind is open to every local user, exactly like Ollama. A
    non-loopback bind requires the same bearer token as the OpenAI endpoint.
+   Without a token, a web page in the user's browser could still reach a
+   loopback port: a cross-site POST goes out without a preflight, and after
+   DNS rebinding the page can read the answer (Ollama was open this way,
+   CVE-2024-28224). So a tokenless bind refuses a ``Host`` that is not a
+   loopback name and an ``Origin`` that is not a loopback page; the clients
+   this is for send no ``Origin`` at all.
 4. **Inference only.** It proxies to a ``BaseLLMProvider`` and does not go
    through ROOT/DISPATCH, MCP tools, or the TLA confirmation gate.
 """
@@ -37,6 +43,19 @@ logger = get_logger(__name__)
 
 # Reported by /api/version. Clients only compare it against a minimum.
 OLLAMA_API_VERSION = "0.6.0"
+
+# A chat with a few base64 images stays well under this.
+MAX_BODY_BYTES = 32 * 1024 * 1024
+
+
+def _loopback_name(authority: str) -> bool:
+    """True for "localhost", "127.0.0.1:11456", "[::1]:11456" and the like."""
+    host = authority.strip().lower()
+    if host.startswith("["):
+        host = host[1 : host.find("]")] if "]" in host else ""
+    elif host.count(":") == 1:
+        host = host.split(":", 1)[0]
+    return host in _LOOPBACK_HOSTS
 
 
 def _now() -> str:
@@ -61,12 +80,27 @@ class _OllamaCompatHandler(BaseHTTPRequestHandler):
 
     def _check_auth(self) -> bool:
         if self.server.token is None:
-            return True
+            return self._check_caller()
         expected = f"Bearer {self.server.token}"
         actual = self.headers.get("Authorization", "")
         if not hmac.compare_digest(actual, expected):
             self._send_json(401, {"error": "unauthorized"})
             return False
+        return True
+
+    def _check_caller(self) -> bool:
+        """Refuse what only a web page sends; see the module docstring."""
+        if not _loopback_name(self.headers.get("Host", "")):
+            self._send_json(403, {"error": "host not allowed"})
+            return False
+        origin = self.headers.get("Origin")
+        if origin is not None:
+            scheme, _, rest = origin.partition("://")
+            if scheme not in ("http", "https") or not _loopback_name(
+                rest.split("/", 1)[0]
+            ):
+                self._send_json(403, {"error": "origin not allowed"})
+                return False
         return True
 
     def _send_json(self, status: int, payload: dict) -> None:
@@ -133,8 +167,15 @@ class _OllamaCompatHandler(BaseHTTPRequestHandler):
         if not self._check_auth():
             return
 
-        length = int(self.headers.get("Content-Length", 0) or 0)
-        raw = self.rfile.read(length) if length else b""
+        try:
+            length = int(self.headers.get("Content-Length", 0) or 0)
+        except ValueError:
+            self._send_json(400, {"error": "invalid Content-Length"})
+            return
+        if length > MAX_BODY_BYTES:
+            self._send_json(413, {"error": "request body too large"})
+            return
+        raw = self.rfile.read(length) if length > 0 else b""
         try:
             payload = json.loads(raw or b"{}")
         except json.JSONDecodeError:
