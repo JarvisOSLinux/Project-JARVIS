@@ -41,7 +41,7 @@ def _act(app, response):
         patch.object(
             root_actions,
             "persist_assistant_turn",
-            lambda a, text: order.append(("saved", text)),
+            lambda a, text, comment=False: order.append(("saved", text, comment)),
         ),
         patch.object(root_actions, "apply_goal_updates"),
     ):
@@ -65,7 +65,8 @@ class TestComment:
                 "said",
                 {"output": "Let me find a calendar tool for you.", "comment": True},
             ),
-            ("saved", "Let me find a calendar tool for you."),
+            # Marked, so a reopened chat shows it as a comment too.
+            ("saved", "Let me find a calendar tool for you.", True),
             ("searched", None),
         ]
 
@@ -74,7 +75,10 @@ class TestComment:
             _app(),
             {"action": "respond", "output": "Hello!", "comment": "Let me say hello."},
         )
-        assert order == [("said", {"output": "Hello!"}), ("saved", "Hello!")]
+        assert order == [
+            ("said", {"output": "Hello!"}),
+            ("saved", "Hello!", False),
+        ]
 
     @pytest.mark.parametrize("comment", [None, "", "   ", 42, ["a list"]])
     def test_no_usable_comment_adds_nothing(self, comment):
@@ -149,8 +153,7 @@ def test_the_root_prompts_ask_for_comments():
 
 @pytest.mark.unit
 def test_the_voice_settings_offer_to_silence_comments():
-    pytest.importorskip("textual")
-    from jarvis.tui.config_modal import _SETTINGS
+    from jarvis.core.settings import SETTINGS
 
-    (setting,) = [s for s in _SETTINGS if s.key == "VOICE_SPEAK_COMMENTS"]
-    assert setting.category == "Voice" and setting.kind == "bool"
+    (setting,) = [s for s in SETTINGS if s.key == "VOICE_SPEAK_COMMENTS"]
+    assert setting.section == "Voice" and setting.kind == "bool"

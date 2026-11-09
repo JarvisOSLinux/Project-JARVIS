@@ -1,7 +1,12 @@
 # `jarvis web` — phone access to a home JARVIS
 
 Opt-in, off by default. Design and decisions: Project-JARVIS#266. The page is
-the jarvis-app interface ported to a phone (#267).
+jarvis-app's own UI (#267): one folder, `src/` in jarvis-app, used by the
+desktop app through Tauri and served here through `transport.js`, which picks
+the gateway's WebSocket when it runs in a browser. `jarvis/server/web/` is a
+pinned copy: change the UI in jarvis-app, then run `scripts/sync-web-ui.sh`,
+which records the jarvis-app commit and each file's hash in
+`jarvis/server/web_ui.json` (`tests/test_web_ui_pin.py` fails on a hand edit).
 
 ```
 phone browser ──(Tailscale)──▶ tailscale serve (HTTPS, adds Tailscale-User-Login)
@@ -33,12 +38,27 @@ Each step ends with a check.
 Sleep, keyring and service wiring (runbook sections C and E of #266) are still
 host chores, not code.
 
+## Headscale (self-hosted control server)
+
+This machine is only a client of your Headscale server; nothing about the
+gateway changes. `scripts/run-web.sh --tailscale --login-server https://hs.example.com`
+does the client side: installs tailscale, joins (an auth key from `$TS_AUTHKEY`
+is passed by file, not on the command line; without one it prompts), and sets
+`JARVIS_WEB_HOST_SUFFIX` to the node's MagicDNS suffix instead of `.ts.net`.
+
+Headscale does not issue HTTPS certificates, as far as we know, so the script
+falls back to `tailscale serve --http=80`. The tunnel is still WireGuard, but
+browsers treat the page as insecure, so the phone's microphone and speech
+recognition do not work. Headscale logins are plain user names, not emails:
+give `jarvis web allow` exactly what `tailscale whois <ip>` shows, or pass
+`--allow name:role` to the script.
+
 ## Roles
 
 | Role | May do |
 |---|---|
-| guest | chat, stop the reply, see sessions, confirmations and clients |
-| trusted | guest + approve or deny requests, create and switch sessions |
+| guest | chat, stop JARVIS (its running tasks keep running), see what JARVIS is doing (the activity line), sessions (their history without action blocks), confirmations and clients |
+| trusted | guest + approve or deny requests, create and switch sessions, see action blocks (tool parameters and output), status and running work, stop all (ends the running tasks too), stop one running task |
 | owner | trusted + rename and delete sessions |
 
 No role may change settings, providers, the wake chime or setups, shut JARVIS
@@ -66,8 +86,10 @@ Every request that changes something is appended to
 | `JARVIS_WEB_HOST_SUFFIX` | `.ts.net` |
 
 `scripts/run-web.sh` starts the daemon and the gateway for you: `--stub` uses a
-fake daemon so no LLM is needed, `--tailscale` also publishes it on your tailnet
-and adds your own account as owner when the allowlist is empty.
+fake daemon so no LLM is needed (type `confirm` for a permission request, `run`
+for a turn with the activity line and action blocks), `--tailscale` also
+publishes it on your tailnet and adds your own account as owner when the
+allowlist is empty.
 
 `jarvis web start --insecure-dev-login <login>` treats every request as that
 account, for trying the page on `localhost` without Tailscale. It prints a
@@ -86,8 +108,9 @@ Not yet run, since they need a tailnet:
 
 ## Protocol
 
-JSON text frames, one message each, the `jarvis.sock` protocol narrowed by the
-table above. The gateway adds `{"type": "gateway", "login": …, "role": …}` as
-the first frame and closes with 4003 (not allowed or revoked), 4008 (idle),
-4009 (host in `allow_all`) or 4010 (JARVIS not running). The activity, status
-and running-task messages of #267 phase 2 do not exist yet.
+JSON text frames, one message each: the `jarvis.sock` protocol
+(`docs/gui-protocol.md`), narrowed by the table above. The gateway adds
+`{"type": "gateway", "login": …, "role": …}` as the first frame and closes with
+4003 (not allowed or revoked), 4008 (idle), 4009 (host in `allow_all`) or 4010
+(JARVIS not running). A role taken away while a phone is connected stops what
+it relays at that phone's next message.

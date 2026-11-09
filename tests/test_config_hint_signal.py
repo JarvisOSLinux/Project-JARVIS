@@ -408,7 +408,8 @@ class TestSignalTypeGate:
             )
         )
 
-        assert "CONFIG_HINT" not in seen["context"]
+        # A KILL never reaches the model at all, so it cannot carry a hint.
+        assert "context" not in seen
         assert app.dispatch.asked_for == []
 
     def test_merged_remind_exit_still_hints_off_the_exit(self, tmp_path, monkeypatch):

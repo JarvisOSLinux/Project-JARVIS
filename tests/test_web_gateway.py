@@ -44,12 +44,11 @@ class TestPolicy:
         [
             "approve_all_confirmations",
             "confirmation_response",
-            "set_confirmation_mode",
+            "set_setting",
             "add_provider",
             "edit_provider",
             "remove_provider",
             "get_settings",
-            "set_wake_chime_path",
             "shutdown_request",
             "setup_completed",
             "cancel_setup",
@@ -58,6 +57,25 @@ class TestPolicy:
     def test_no_role_may_send_admin_messages(self, kind):
         for role in wg.ROLES:
             assert not wg.sendable(role, {"type": kind})
+
+    def test_status_and_work_need_trust(self):
+        for kind in ("get_status", "list_work"):
+            assert not wg.sendable("guest", {"type": kind})
+            assert wg.sendable("trusted", {"type": kind})
+            assert wg.sendable("owner", {"type": kind})
+
+    def test_activity_for_everyone_actions_for_trusted(self):
+        # Action blocks carry tool parameters and raw output.
+        activity = {"type": "activity", "text": "Searching…", "kind": "dispatch"}
+        said = {"type": "user_message", "content": "update my system", "at": 1.0}
+        for role in wg.ROLES:
+            assert wg.relayable(activity, role)
+            assert wg.relayable(said, role)
+        for kind in ("action", "status", "work"):
+            assert not wg.relayable({"type": kind}, "guest")
+            assert wg.relayable({"type": kind}, "trusted")
+            assert wg.relayable({"type": kind}, "owner")
+        assert not wg.relayable({"type": "action"}, None)
 
     def test_malformed_messages_are_refused(self):
         assert not wg.sendable("owner", [])
@@ -74,6 +92,29 @@ class TestPolicy:
             {"type": "DAEMON_SHUTDOWN", "state": "idle", "goals": ["secret"]}
         )
         assert notice == {"type": "DAEMON_SHUTDOWN", "state": "idle"}
+
+    def test_a_guest_gets_a_session_without_its_blocks(self):
+        history = {
+            "type": "session_switched",
+            "session": {"id": "s1"},
+            "messages": [
+                {"role": "user", "content": "update", "timestamp": 1.0},
+                {"role": "action", "id": "tool:1", "output": "secret", "timestamp": 2},
+            ],
+        }
+        assert wg.shown_to(history, "guest")["messages"] == [history["messages"][0]]
+        assert wg.shown_to(history, "owner") == history
+        assert wg.shown_to(history, None) is None
+
+    def test_shown_to_cuts_a_shutdown_and_drops_what_a_role_may_not_see(self):
+        shutdown = {"type": "DAEMON_SHUTDOWN", "state": "idle", "goals": ["secret"]}
+        assert wg.shown_to(shutdown, "guest") == {
+            "type": "DAEMON_SHUTDOWN",
+            "state": "idle",
+        }
+        assert wg.shown_to({"type": "action"}, "guest") is None
+        assert wg.shown_to({"type": "settings"}, "owner") is None
+        assert wg.shown_to(["not", "a", "dict"], "owner") is None
 
     def test_allow_all_switch_is_unsafe(self):
         assert wg.unsafe_mode_change(
@@ -169,10 +210,13 @@ class FakeDaemon:
             msg = json.loads(line)
             self.received.append(msg)
             if msg["type"] == "get_settings":
+                listed = [] if self.mode is None else [self.mode]
                 out = {
                     "type": "settings",
-                    "confirmation_mode": self.mode,
-                    "wake_chime_path": "/x",
+                    "settings": [
+                        {"key": "CONFIRMATION_MODE", "kind": "select", "value": m}
+                        for m in listed
+                    ],
                 }
                 writer.write((json.dumps(out) + "\n").encode())
                 await writer.drain()
@@ -246,10 +290,27 @@ class TestRelay:
             assert {
                 "type": "hello",
                 "label": "web:toufic@example.com",
+                "subscribe": ["activity", "action", "user_message"],
             } in daemon.received
             assert {"type": "message", "content": "hello"} in daemon.received
             audit = [json.loads(x) for x in open(tmp_path / "audit.jsonl")]
             assert audit[0]["login"] == "toufic@example.com"
+        finally:
+            server.close()
+            await daemon.stop()
+
+    async def test_the_daemons_greeting_state_reaches_the_phone(self, tmp_path):
+        # The daemon greets each client with its state before the settings
+        # reply; the handshake swallowed it and the page said "Offline".
+        daemon, server, url, _ = await _boot(tmp_path, {"t@example.com": "trusted"})
+        try:
+            async with connect(
+                url, additional_headers=_wire(url, "t@example.com")
+            ) as ws:
+                first = json.loads(await ws.recv())
+                second = json.loads(await asyncio.wait_for(ws.recv(), 3))
+            assert first["type"] == "gateway"
+            assert second == {"type": "state", "state": "idle"}
         finally:
             server.close()
             await daemon.stop()
@@ -289,9 +350,59 @@ class TestRelay:
             server.close()
             await daemon.stop()
 
+    async def test_a_guest_sees_activity_but_not_actions(self, tmp_path):
+        daemon, server, url, gateway = await _boot(
+            tmp_path, {"g@example.com": "guest", "t@example.com": "trusted"}
+        )
+        try:
+            async with (
+                connect(url, additional_headers=_wire(url, "g@example.com")) as guest,
+                connect(url, additional_headers=_wire(url, "t@example.com")) as trusted,
+            ):
+                await guest.recv()
+                await trusted.recv()
+                await asyncio.sleep(0.2)
+                await daemon.push({"type": "action", "phase": "start", "id": "tool:1"})
+                await daemon.push({"type": "activity", "text": "Running…"})
+                guest_saw = await _recv_types(guest, "activity")
+                trusted_saw = await _recv_types(trusted, "activity")
+                assert [m["type"] for m in guest_saw if m["type"] != "state"] == [
+                    "activity"
+                ]
+                assert [m["type"] for m in trusted_saw if m["type"] != "state"] == [
+                    "action",
+                    "activity",
+                ]
+                # Demoted while connected: actions stop at the phone's next message.
+                gateway.allowlist.set("t@example.com", "guest")
+                await trusted.send(json.dumps({"type": "ping"}))
+                await asyncio.sleep(0.2)
+                await daemon.push({"type": "action", "phase": "end", "id": "tool:1"})
+                await daemon.push({"type": "activity", "text": "Done"})
+                later = await _recv_types(trusted, "activity")
+                assert all(m["type"] != "action" for m in later)
+        finally:
+            server.close()
+            await daemon.stop()
+
     async def test_refused_while_host_is_allow_all(self, tmp_path):
         daemon, server, url, _ = await _boot(
             tmp_path, {"t@example.com": "owner"}, mode="allow_all"
+        )
+        try:
+            async with connect(
+                url, additional_headers=_wire(url, "t@example.com")
+            ) as ws:
+                with pytest.raises(ConnectionClosed) as err:
+                    await ws.recv()
+                assert err.value.rcvd.code == wg.CLOSE_UNSAFE
+        finally:
+            server.close()
+            await daemon.stop()
+
+    async def test_refused_when_the_host_does_not_say_its_mode(self, tmp_path):
+        daemon, server, url, _ = await _boot(
+            tmp_path, {"t@example.com": "owner"}, mode=None
         )
         try:
             async with connect(

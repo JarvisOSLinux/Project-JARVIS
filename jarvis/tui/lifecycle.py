@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from textual.widgets import Input, RichLog
+from textual.widgets import Input
 
 
 def on_mount(app: Any) -> None:
@@ -35,8 +35,10 @@ async def start_jarvis(app: Any, logger: Any) -> None:
     app.jarvis = jarvis
     app._output_cb = app._on_jarvis_output
     app._activity_cb = app._on_jarvis_activity
+    app._action_cb = app._on_jarvis_action
     jarvis.output_manager.add_output_callback(app._output_cb)
     jarvis.output_manager.add_activity_callback(app._activity_cb)
+    jarvis.output_manager.add_action_callback(app._action_cb)
     jarvis.setup_ready_callback = app._offer_setup
     jarvis.setups.on_change = app._update_status
     jarvis.sessions.on_switch = app._on_session_switch
@@ -73,8 +75,7 @@ async def run_engine(app: Any, logger: Any) -> None:
         pass
     except Exception as e:  # pragma: no cover
         logger.error(f"TUI: Engine crashed: {e}", exc_info=True)
-        chat_log = app.query_one("#chat-log", RichLog)
-        chat_log.write(f"[red]Engine crashed: {e}[/red]")
+        app._append_log(f"[red]Engine crashed: {e}[/red]")
 
 
 async def on_unmount(app: Any) -> None:
@@ -84,6 +85,8 @@ async def on_unmount(app: Any) -> None:
                 app.jarvis.output_manager.remove_output_callback(app._output_cb)
             if app._activity_cb is not None:
                 app.jarvis.output_manager.remove_activity_callback(app._activity_cb)
+            if app._action_cb is not None:
+                app.jarvis.output_manager.remove_action_callback(app._action_cb)
         except Exception:
             pass
         try:

@@ -12,9 +12,10 @@ lives in the Rust contextor binary.  This class is stateless aside
 from the current-session pointer.
 """
 
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Tuple
 
 from ..core.logger import get_logger
+from .block_log import BlockLog
 from .model import Session
 
 logger = get_logger(__name__)
@@ -23,14 +24,17 @@ logger = get_logger(__name__)
 class SessionManager:
     """Manages the active chat session and delegates storage to contextor."""
 
-    def __init__(self, contextor):
+    def __init__(self, contextor, blocks: Optional[BlockLog] = None):
         """
         Args:
             contextor: A ContextorAdapter instance.  May be None when
                 memory is disabled — the manager degrades gracefully
                 and exposes ``current_id = None``.
+            blocks: Where each session's action blocks are kept; deleting
+                a session deletes them too.
         """
         self._contextor = contextor
+        self.blocks = blocks if blocks is not None else BlockLog()
         self._current: Optional[Session] = None
         # Told when the user moves to another session (switch, new, deleting
         # the current one), so a front end can show that session's messages.
@@ -112,39 +116,46 @@ class SessionManager:
             self._announce()
         return self._current
 
-    def switch(self, session_id: str) -> Optional[Session]:
-        """
-        Switch to an existing session by id.
+    def find(self, text: str) -> Tuple[Optional[Session], str]:
+        """The session `text` names, or (None, why not) to show the user.
 
-        Accepts either a full UUID or a unique prefix (first match wins).
+        `text` is a full id or the start of exactly one session's id. The one
+        rule for /switch, /rename, /delete and the GUI socket, which each had
+        their own: /switch took the first match, the others wanted a unique
+        prefix, and all three said something different when nothing matched.
         """
+        text = text.strip()
         if not self.available:
-            return None
-
-        # Exact fetch first — cheapest path.
-        result = self._contextor.get_session(session_id)
-        if "error" not in result and result.get("session"):
-            self._current = Session.from_dict(result["session"])
-            logger.info(f"Sessions: Switched to {self._current.short_id()}")
-            self._announce()
-            return self._current
-
-        # Try prefix match via list_sessions — useful for short ids typed
-        # at the CLI.
-        all_sessions = self.list(limit=500)
-        matches = [s for s in all_sessions if s.id.startswith(session_id)]
+            return None, "Memory is disabled — sessions unavailable."
+        if not text:
+            return None, "Which session? Give the start of its id."
+        sessions = self.list(limit=500)
+        for s in sessions:
+            if s.id == text:
+                return s, ""
+        matches = [s for s in sessions if s.id.startswith(text)]
         if len(matches) == 1:
-            self._current = matches[0]
-            logger.info(f"Sessions: Switched to {self._current.short_id()}")
-            self._announce()
-            return self._current
-        if len(matches) > 1:
-            logger.warning(
-                f"Sessions: id prefix '{session_id}' matched {len(matches)} sessions"
+            return matches[0], ""
+        if matches:
+            ids = ", ".join(s.short_id() for s in matches[:5])
+            return None, (
+                f"'{text}' starts {len(matches)} session ids ({ids}); "
+                "type more of the id."
             )
-        else:
-            logger.warning(f"Sessions: No session matches '{session_id}'")
-        return None
+        near = [s.short_id() for s in sessions if _one_off(s.id[: len(text)], text)]
+        hint = f" Did you mean {' or '.join(near[:3])}?" if near else ""
+        return None, f"No session id starts with '{text}'.{hint}"
+
+    def switch(self, session_id: str) -> Optional[Session]:
+        """Switch to the session a full id or the start of one names (see find)."""
+        session, why = self.find(session_id)
+        if session is None:
+            logger.warning(f"Sessions: {why}")
+            return None
+        self._current = session
+        logger.info(f"Sessions: Switched to {self._current.short_id()}")
+        self._announce()
+        return self._current
 
     def list(self, limit: int = 50, offset: int = 0) -> List[Session]:
         """Return sessions, most-recently-updated first."""
@@ -188,6 +199,7 @@ class SessionManager:
         if "error" in result:
             logger.warning(f"Sessions: delete failed: {result['error']}")
             return False
+        self.blocks.delete(session_id)
 
         if self._current and self._current.id == session_id:
             self._current = None
@@ -217,3 +229,8 @@ class SessionManager:
         if self._current:
             return self._current.summary or ""
         return ""
+
+
+def _one_off(a: str, b: str) -> bool:
+    """Same length, one character different: "5d" for "5b…"."""
+    return len(a) == len(b) >= 2 and sum(x != y for x, y in zip(a, b)) == 1

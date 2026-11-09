@@ -25,6 +25,17 @@ def _broadcast_gui_state(app: Any, state: VoiceState, meta: dict | None = None) 
     )
 
 
+def _show_on_screens(app: Any, text: str) -> None:
+    """Thread-safe: put what was said in the GUI clients' chats."""
+    events = getattr(app, "events", None)
+    if events is None:
+        return
+
+    from .io import on_user_message
+
+    events.call_soon_threadsafe(lambda: on_user_message(app, text))
+
+
 def _broadcast_wake_word_detected(app: Any) -> None:
     """Thread-safe: unconditionally notify GUI clients a wake word fired.
 
@@ -90,6 +101,7 @@ def process_voice_command_inject(app: Any, logger: Logger) -> None:
                 if is_final and text.strip():
                     logger.info(f"Voice input: {text}")
                     app.events.inject_user_input(text.strip())
+                    _show_on_screens(app, text.strip())
                     return
         finally:
             app.voice_manager.stt.stop()

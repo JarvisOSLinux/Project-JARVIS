@@ -1,13 +1,36 @@
 'use strict';
 
-// The connection switch. main.js talks to JARVIS through invoke(command, args)
-// and listen(event, callback), the same shape jarvis-app gets from Tauri; here
-// both ride one WebSocket to the `jarvis web` gateway, which relays the
-// jarvis.sock protocol (docs/web-gateway.md).
+// How the page reaches JARVIS. main.js only calls invoke(command, args) and
+// listen(event, callback), and sees the same commands, events and payloads
+// either way:
+// - in jarvis-app, Tauri carries them to the Rust side, which talks to the
+//   daemon's local socket (src-tauri/src/ipc.rs);
+// - opened in a browser through `jarvis web`, they ride one WebSocket to the
+//   gateway, which relays the same socket protocol to the roles allowed it
+//   (Project-JARVIS docs/web-gateway.md). This file is the only place the two
+//   differ, and Project-JARVIS serves a pinned copy of this folder.
 (function (global) {
+    if (global.__TAURI__) {
+        global.JarvisTransport = {
+            kind: 'tauri',
+            invoke: global.__TAURI__.core.invoke,
+            listen: global.__TAURI__.event.listen,
+            // The Rust side connects, and reconnects, by itself.
+            connect() {},
+            reconnect() {},
+        };
+        return;
+    }
+
+    // Tauri command -> socket message. Desktop-only commands (settings,
+    // providers, widgets, voice, daemon shutdown) are absent: the page hides
+    // their controls in a browser, and the gateway refuses them anyway.
     const COMMANDS = {
         send_message:               (a) => ({ type: 'message', content: a.content }),
         stop_stream:                ()  => ({ type: 'stop_stream' }),
+        stop:                       ()  => ({ type: 'stop' }),
+        stop_all:                   ()  => ({ type: 'stop_all' }),
+        stop_task:                  (a) => ({ type: 'stop_task', pid: a.pid }),
         list_sessions:              ()  => ({ type: 'list_sessions' }),
         create_session:             (a) => ({ type: 'create_session', title: a.title }),
         switch_session:             (a) => ({ type: 'switch_session', id: a.id }),
@@ -20,21 +43,9 @@
             type: 'partial_approve_confirmation', id: a.id, approved_indices: a.approvedIndices,
         }),
         list_clients:               ()  => ({ type: 'list_clients' }),
-    };
-
-    const EVENTS = {
-        state:                'ipc-state',
-        response:             'ipc-chunk',
-        confirmation_request: 'ipc-confirm',
-        confirmation_list:    'ipc-confirmation-list',
-        session_list:         'ipc-session-list',
-        session_switched:     'ipc-session-switched',
-        session_error:        'ipc-session-error',
-        client_list:          'ipc-client-list',
-        error:                'ipc-error',
-        ack:                  'ipc-ack',
-        gateway:              'ipc-gateway',
-        DAEMON_SHUTDOWN:      'ipc-daemon-shutdown',
+        // The daemon's health check; `get_status` below is the connection's.
+        get_health:                 (a) => ({ type: 'get_status', full: !!a.full }),
+        list_work:                  ()  => ({ type: 'list_work' }),
     };
 
     const listeners = {};
@@ -42,6 +53,7 @@
     let retryMs = 1000;
     let keepalive = null;
     let closedByGateway = false;
+    let state = 'offline';
 
     function emit(event, payload) {
         (listeners[event] || []).forEach((cb) => cb({ payload }));
@@ -51,36 +63,42 @@
         (listeners[event] = listeners[event] || []).push(callback);
     }
 
-    async function invoke(command, args) {
-        const build = COMMANDS[command];
-        if (!build) throw new Error('Unknown command: ' + command);
-        if (!socket || socket.readyState !== WebSocket.OPEN) return;
-        socket.send(JSON.stringify(build(args || {})));
+    function connected() {
+        return !!socket && socket.readyState === WebSocket.OPEN;
     }
 
+    async function invoke(command, args) {
+        // Answered here, as the Tauri side answers it from its own state.
+        if (command === 'get_status') return { connected: connected(), state };
+        const build = COMMANDS[command];
+        if (!build) throw new Error('Not available in the browser: ' + command);
+        if (connected()) socket.send(JSON.stringify(build(args || {})));
+    }
+
+    // Socket message -> the event and payload the Tauri side emits for it.
     function route(msg) {
-        if (msg.type === 'response') {
-            emit('ipc-chunk', { content: msg.content, done: msg.done });
-        } else if (msg.type === 'confirmation_list') {
-            emit('ipc-confirmation-list', msg.confirmations);
-        } else if (msg.type === 'session_list') {
-            emit('ipc-session-list', msg.sessions);
-        } else if (msg.type === 'session_switched') {
-            emit('ipc-session-switched', { session: msg.session, messages: msg.messages });
-        } else if (msg.type === 'session_error') {
-            emit('ipc-session-error', msg.message);
-        } else if (msg.type === 'client_list') {
-            emit('ipc-client-list', msg.clients);
-        } else if (msg.type === 'error') {
-            emit('ipc-error', msg.message);
-        } else if (msg.type === 'state') {
-            emit('ipc-state', msg.state);
-        } else if (msg.type === 'gateway') {
-            emit('ipc-gateway', msg);
-        } else if (msg.type === 'DAEMON_SHUTDOWN') {
-            emit('ipc-daemon-shutdown', msg);
-        } else if (EVENTS[msg.type]) {
-            emit(EVENTS[msg.type], msg);
+        switch (msg.type) {
+        case 'state':
+            state = msg.state;
+            return emit('ipc-state', msg.state);
+        case 'response':
+            return emit('ipc-chunk', { content: msg.content, done: msg.done, comment: !!msg.comment });
+        case 'activity':             return emit('ipc-activity', msg.text || '');
+        case 'action':               return emit('ipc-action', msg);
+        case 'user_message':         return emit('ipc-user-message', msg);
+        case 'status':               return emit('ipc-health', msg.sections || []);
+        case 'work':                 return emit('ipc-work', msg.work || {});
+        case 'ack':                  return emit('ipc-ack', { message: msg.message || '', for: msg.for || null });
+        case 'confirmation_request': return emit('ipc-confirm', msg);
+        case 'confirmation_list':    return emit('ipc-confirmation-list', msg.confirmations || []);
+        case 'session_list':         return emit('ipc-session-list', msg.sessions || []);
+        case 'session_switched':     return emit('ipc-session-switched', { session: msg.session, messages: msg.messages || [] });
+        case 'session_error':        return emit('ipc-session-error', msg.message);
+        case 'client_list':          return emit('ipc-client-list', msg.clients || []);
+        case 'error':                return emit('ipc-error', msg.message);
+        case 'gateway':              return emit('ipc-gateway', msg);
+        case 'DAEMON_SHUTDOWN':      return emit('ipc-daemon-shutdown', msg);
+        default:                     return undefined; // the protocol grows
         }
     }
 
@@ -92,7 +110,7 @@
             closedByGateway = false;
             emit('ipc-connected');
             keepalive = setInterval(() => {
-                if (socket.readyState === WebSocket.OPEN) socket.send('{"type":"ping"}');
+                if (connected()) socket.send('{"type":"ping"}');
             }, 25000);
         });
         socket.addEventListener('message', (e) => {
@@ -100,6 +118,7 @@
         });
         socket.addEventListener('close', (e) => {
             clearInterval(keepalive);
+            state = 'offline';
             emit('ipc-disconnected', { code: e.code, reason: e.reason });
             // 4000-range codes are the gateway ending the session on purpose
             // (idle timeout, refused, unsafe settings): do not hammer it.
@@ -109,5 +128,11 @@
         });
     }
 
-    global.JarvisTransport = { invoke, listen, connect, reconnect: () => { if (closedByGateway) connect(); } };
+    global.JarvisTransport = {
+        kind: 'web',
+        invoke,
+        listen,
+        connect,
+        reconnect: () => { if (closedByGateway) connect(); },
+    };
 })(window);

@@ -22,6 +22,7 @@ Sessions (chat conversations):
 
 import json
 import subprocess
+import sys
 import threading
 from typing import Any, Dict, Optional
 
@@ -50,12 +51,19 @@ class ContextorAdapter:
     def connect(self) -> bool:
         """Spawn the contextor binary and verify connectivity."""
         try:
+            from ..core.logger import JarvisLogger
+
+            # A pipe nobody reads blocks contextor once it fills, and the
+            # terminal belongs to the TUI.
+            stderr = JarvisLogger.child_stderr("contextor")
             self._process = subprocess.Popen(
                 [self._binary],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stderr=stderr,
             )
+            if stderr is not sys.__stderr__:
+                stderr.close()
             status = self._send({"cmd": "status"})
             self._connected = status.get("ok", False)
             if self._connected:
@@ -244,6 +252,7 @@ class ContextorAdapter:
         text: str,
         role: str,
         session_id: Optional[str] = None,
+        marks: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Store a conversation turn under ``conversation_log``.
 
@@ -251,6 +260,7 @@ class ContextorAdapter:
             text: The utterance to store.
             role: ``"user_prompt"`` or ``"assistant_reply"``.
             session_id: Chat session scope.  None = global.
+            marks: Kept beside the type, e.g. ``{"comment": True}``.
         """
         if not self._connected or not (text or "").strip():
             return
@@ -267,7 +277,7 @@ class ContextorAdapter:
                 "theme": "conversation_log",
                 "content": text,
                 "vector": vector,
-                "metadata": {"type": role},
+                "metadata": {"type": role, **(marks or {})},
                 "session_id": session_id,
             }
         )
@@ -290,15 +300,19 @@ class ContextorAdapter:
         self,
         text: str,
         session_id: Optional[str] = None,
+        comment: bool = False,
     ) -> None:
         """Store assistant replies under ``conversation_log``.
 
         Produces a searchable per-session transcript (user + assistant turns).
-        Skips empty replies and replies without a session scope.
+        Skips empty replies and replies without a session scope. A comment
+        (what JARVIS is about to do, #273) is marked so a reopened chat shows
+        it as one.
         """
         if not session_id:
             return
-        self._auto_store_message(text, "assistant_reply", session_id)
+        marks = {"comment": True} if comment else None
+        self._auto_store_message(text, "assistant_reply", session_id, marks)
 
     def recall(
         self,

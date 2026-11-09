@@ -10,9 +10,13 @@ Dispatch signals arrive by two paths that share one ingest (_ingest_one):
   task completes or a reminder fires; the MCP session's logging handler calls
   enqueue_pushed_signal, so ROOT is woken on completion without polling.
 - POLL (fallback): a background asyncio Task polls the dispatch signal window
-  as a catch-up net. Each signal is fingerprinted by (pid, type, timestamp)
-  and tracked in a seen-set; duplicates are silently dropped, so a signal
-  observed by both push and poll is delivered exactly once.
+  as a catch-up net for what no push delivered: a KILL, which dispatch never
+  pushes, and a push that was lost. Each signal is fingerprinted by
+  (pid, type, timestamp) and tracked in a seen-set; duplicates are silently
+  dropped, so a signal observed by both push and poll is delivered exactly
+  once. The poll delivers a signal only when a second poll still finds it
+  unseen, so a push in flight always wins, and it never touches an EXIT
+  dispatch holds for a fire_wake=false batch: that batch is pushed whole.
 
 On the first poll, all already-present signals are marked seen without being
 enqueued — this prevents stale signals from a previous JARVIS session being
@@ -34,6 +38,7 @@ mark_signals_seen() so the background poller does not re-enqueue them.
 """
 
 import asyncio
+import threading
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Awaitable, Callable, Dict, List, Optional
@@ -120,11 +125,38 @@ class EventMerger:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._poll_interval = poll_interval
         self._seen: set = set()
+        # Keys the last poll found unseen; the next poll delivers those still unseen.
+        self._sighted: set = set()
         self._signals_initialized = False
+        # What arrives before start() is held, not dropped: the TUI says
+        # "Ready" while the engine is still syncing its tool index, and a
+        # message typed in those seconds simply vanished.
+        self._early: List[Event] = []
+        self._early_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Thread-safe injection helpers
     # ------------------------------------------------------------------
+
+    def _inject(self, event: "Event", what: str) -> None:
+        """Queue an event from any thread; before start, hold it until start."""
+        with self._early_lock:
+            loop = self._loop
+            if loop is None:
+                if self._queue.maxsize and len(self._early) >= self._queue.maxsize:
+                    logger.warning(f"EventMerger: Not started, dropping {what}")
+                    return
+                self._early.append(event)
+                logger.info(f"EventMerger: {what} held until the engine starts")
+                return
+
+        def _put() -> None:
+            try:
+                self._queue.put_nowait(event)
+            except asyncio.QueueFull:
+                logger.warning(f"EventMerger: Queue full, dropping {what}")
+
+        loop.call_soon_threadsafe(_put)
 
     def inject_user_input(self, text: str) -> None:
         """
@@ -134,55 +166,19 @@ class EventMerger:
         if not text or not str(text).strip():
             return
         t = str(text).strip()
-        if self._loop is None:
-            logger.warning(
-                "EventMerger: inject_user_input called before start, dropping input"
-            )
-            return
-
-        def _put() -> None:
-            try:
-                self._queue.put_nowait(Event.user_input(t))
-                logger.debug(f"EventMerger: Injected user input ({len(t)} chars)")
-            except asyncio.QueueFull:
-                logger.warning("EventMerger: User input queue full, dropping")
-
-        self._loop.call_soon_threadsafe(_put)
+        self._inject(Event.user_input(t), "user input")
+        logger.debug(f"EventMerger: Injected user input ({len(t)} chars)")
 
     def inject_confirmation_response(self, data: Dict[str, Any]) -> None:
         """Thread-safe."""
-        if self._loop is None:
-            logger.warning(
-                "EventMerger: inject_confirmation_response called before start"
-            )
-            return
-
-        def _put() -> None:
-            try:
-                self._queue.put_nowait(Event.confirmation_response(data))
-                logger.debug(
-                    f"EventMerger: Injected confirmation response id={data.get('id')}"
-                )
-            except asyncio.QueueFull:
-                logger.warning(
-                    "EventMerger: Queue full, dropping confirmation response"
-                )
-
-        self._loop.call_soon_threadsafe(_put)
+        self._inject(
+            Event.confirmation_response(data),
+            f"confirmation response id={data.get('id')}",
+        )
 
     def inject_setup_result(self, data: Dict[str, Any]) -> None:
         """Thread-safe."""
-        if self._loop is None:
-            logger.warning("EventMerger: inject_setup_result called before start")
-            return
-
-        def _put() -> None:
-            try:
-                self._queue.put_nowait(Event.setup_result(data))
-            except asyncio.QueueFull:
-                logger.warning("EventMerger: Queue full, dropping setup result")
-
-        self._loop.call_soon_threadsafe(_put)
+        self._inject(Event.setup_result(data), "setup result")
 
     def call_soon_threadsafe(self, callback: Callable[[], None]) -> None:
         """Schedule a plain callback on the event loop from any thread.
@@ -245,7 +241,13 @@ class EventMerger:
                 inject_user_input() and socket listeners feed user input.
         """
         self._running = True
-        self._loop = asyncio.get_running_loop()
+        with self._early_lock:
+            self._loop = asyncio.get_running_loop()
+            held, self._early = self._early, []
+        for event in held:
+            self._queue.put_nowait(event)
+        if held:
+            logger.info(f"EventMerger: Queued {len(held)} event(s) that came early")
         tasks = [asyncio.create_task(self._listen_signals(signal_window_source))]
         if user_source is not None:
             tasks.append(asyncio.create_task(self._listen_user_source(user_source)))
@@ -296,73 +298,93 @@ class EventMerger:
         self,
         window_source: Callable[[], Awaitable[List[Dict[str, Any]]]],
     ) -> None:
-        """
-        Poll the dispatch signal window, deduplicate, and enqueue new signals.
-
-        INIT and WAIT signals are never delivered — INIT is always captured
-        inline by the send_tasks result; WAIT is an internal acknowledgement.
-
-        On the first poll, all present signals are marked seen without enqueueing
-        to avoid replaying stale signals from a previous JARVIS session.
-
-        REMIND+EXIT merging: if a REMIND for PID X is seen for the first time
-        and an EXIT for the same PID is already in the same window snapshot, the
-        signal is enriched with _remind_completed=True and _exit=<exit sig> so
-        ROOT can respond with the actual task output in a single LLM turn.
-        """
+        """Poll the dispatch signal window and catch up on what no push delivered."""
         while self._running:
             try:
-                signals = await window_source()
-
-                if not self._signals_initialized:
-                    # Mark pre-existing signals as seen on the first poll.
-                    # This prevents replaying signals from a previous session.
-                    for sig in signals:
-                        self._seen.add(self._signal_key(sig))
-                    self._signals_initialized = True
-                    logger.debug(
-                        f"EventMerger: Signal seen-set initialized "
-                        f"({len(self._seen)} pre-existing signal(s) skipped)"
-                    )
-                    await asyncio.sleep(self._poll_interval)
-                    continue
-
-                if signals:
-                    exits_by_pid: Dict[Any, Dict[str, Any]] = {
-                        s["pid"]: s
-                        for s in signals
-                        if s.get("type") in ("EXIT", "TIMEOUT") and "pid" in s
-                    }
-                    for sig in signals:
-                        # REMIND+EXIT merging needs the batch snapshot, so it
-                        # happens here (the push path sees signals one at a time
-                        # and can't merge). Only enrich a first-seen REMIND whose
-                        # task has already exited, so ROOT gets the full picture
-                        # in one LLM turn.
-                        if (
-                            sig.get("type") == "REMIND"
-                            and sig.get("pid") in exits_by_pid
-                            and self._signal_key(sig) not in self._seen
-                        ):
-                            pid = sig.get("pid")
-                            verify_and_mark(exits_by_pid[pid])
-                            sig = {
-                                **sig,
-                                "_remind_completed": True,
-                                "_exit": exits_by_pid[pid],
-                            }
-                            logger.info(
-                                f"EventMerger: REMIND+EXIT merged for pid={pid}"
-                            )
-
-                        self._ingest_one(sig)
-
+                self._catch_up(await window_source())
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"EventMerger: Signal reader error: {e}")
 
             await asyncio.sleep(self._poll_interval)
+
+    def _catch_up(self, window: List[Dict[str, Any]]) -> None:
+        """Deliver the signals in one window snapshot that no push delivered.
+
+        On the first poll, all present signals are marked seen without enqueueing
+        to avoid replaying stale signals from a previous JARVIS session.
+
+        An EXIT dispatch holds for a fire_wake=false batch is left alone, neither
+        seen nor delivered: the batch push brings it with its group (#189).
+
+        Anything else unseen is delivered once a second poll still finds it
+        unseen. The SDK runs a push's handler as a task of its own, which can
+        run after the log reply that already lists the signal; delivered from
+        the first sighting, a batch dispatch had just flushed could go out one
+        signal at a time, its push then finding every signal seen.
+
+        REMIND+EXIT merging: if a REMIND for PID X is delivered and an EXIT for
+        the same PID is already in the same window snapshot, the signal is
+        enriched with _remind_completed=True and _exit=<exit sig> so ROOT can
+        respond with the actual task output in a single LLM turn.
+        """
+        window = [s for s in window if not s.get("held")]
+        if not self._signals_initialized:
+            for sig in window:
+                self._seen.add(self._signal_key(sig))
+            self._signals_initialized = True
+            logger.debug(
+                f"EventMerger: Signal seen-set initialized "
+                f"({len(self._seen)} pre-existing signal(s) skipped)"
+            )
+            return
+
+        unseen = [s for s in window if self._signal_key(s) not in self._seen]
+        sighted = self._sighted
+        self._sighted = {self._signal_key(s) for s in unseen}
+        due = [s for s in unseen if self._signal_key(s) in sighted]
+        if not due:
+            return
+        exits_by_pid: Dict[Any, Dict[str, Any]] = {
+            s["pid"]: s
+            for s in window
+            if s.get("type") in ("EXIT", "TIMEOUT") and "pid" in s
+        }
+        for sig in due:
+            # REMIND+EXIT merging needs the batch snapshot, so it happens here
+            # (the push path sees signals one at a time and can't merge). Only
+            # enrich a first-seen REMIND whose task has already exited, so ROOT
+            # gets the full picture in one LLM turn.
+            if (
+                sig.get("type") == "REMIND"
+                and sig.get("pid") in exits_by_pid
+                and self._signal_key(sig) not in self._seen
+            ):
+                pid = sig.get("pid")
+                exit_sig = exits_by_pid[pid]
+                if self._signal_key(exit_sig) in self._seen:
+                    # The outcome was delivered already: a reminder for a task
+                    # that has finished adds nothing.
+                    self._seen.add(self._signal_key(sig))
+                    continue
+                verify_and_mark(exit_sig)
+                # The EXIT rides inside this event. Left unseen, the same
+                # snapshot delivered it a second time, and ROOT reported one
+                # result twice.
+                self._seen.add(self._signal_key(exit_sig))
+                sig = {
+                    **sig,
+                    "_remind_completed": True,
+                    "_exit": exit_sig,
+                }
+                logger.info(f"EventMerger: REMIND+EXIT merged for pid={pid}")
+
+            if self._ingest_one(sig):
+                logger.info(
+                    f"EventMerger: Caught up on {sig.get('type')} pid={sig.get('pid')} "
+                    "from the signal window (not pushed)"
+                )
 
     def _prepare_signal(self, sig: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Dedup, INLINE-filter, and boundary-verify one signal.

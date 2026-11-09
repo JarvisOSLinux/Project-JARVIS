@@ -8,8 +8,12 @@ from ..config import Config
 
 
 def session_reply(app: Any, message: str) -> None:
-    """Emit a local reply for slash-commands (no LLM roundtrip)."""
-    app.output_manager.handle_response({"output": message})
+    """Emit a local reply for slash-commands (no LLM roundtrip).
+
+    Marked as a command's reply so a front end can keep it with the command
+    that asked for it (#271).
+    """
+    app.output_manager.handle_response({"output": message, "command": True})
 
 
 def _unquote(text: str) -> str:
@@ -21,14 +25,14 @@ def _unquote(text: str) -> str:
 def _rename_target(app: Any, raw: str, whole: str) -> tuple:
     """(session, title) for `/rename`: `<id> <title>` names a session, else the current.
 
-    The first word is taken as an id only when it starts exactly one session's
-    id and a title follows, the rule `/delete` uses for its prefix.
+    The first word is taken as an id only when it names a session
+    (`SessionManager.find`) and a title follows.
     """
     first, _, rest = raw.partition(" ")
     if rest.strip():
-        matches = [s for s in app.sessions.list(limit=500) if s.id.startswith(first)]
-        if len(matches) == 1:
-            return matches[0], _unquote(rest.strip())
+        session, _ = app.sessions.find(first)
+        if session is not None:
+            return session, _unquote(rest.strip())
     return app.sessions.current, whole
 
 
@@ -80,14 +84,14 @@ def handle_slash_command(app: Any, text: str) -> bool:
         if not arg:
             session_reply(app, "Usage: /switch <session_id_prefix>")
             return True
-        session = app.sessions.switch(arg)
-        if session:
-            session_reply(
-                app,
-                f"Switched to {session.short_id()} ('{session.title}')",
-            )
-        else:
-            session_reply(app, f"No session matches '{arg}'.")
+        session, why = app.sessions.find(arg)
+        if session is None or app.sessions.switch(session.id) is None:
+            session_reply(app, why or f"Could not switch to '{arg}'.")
+            return True
+        session_reply(
+            app,
+            f"Switched to {session.short_id()} ('{session.display_label()}')",
+        )
         return True
 
     if cmd == "/rename":
@@ -112,46 +116,80 @@ def handle_slash_command(app: Any, text: str) -> bool:
         if not arg:
             session_reply(app, "Usage: /delete <session_id_prefix>")
             return True
-        sessions = app.sessions.list(limit=500)
-        matches = [s for s in sessions if s.id.startswith(arg)]
-        if len(matches) != 1:
-            session_reply(
-                app,
-                f"Need a unique id prefix; got {len(matches)} match(es).",
-            )
+        session, why = app.sessions.find(arg)
+        if session is None:
+            session_reply(app, why)
             return True
-        if app.sessions.delete(matches[0].id):
-            session_reply(app, f"Deleted session {matches[0].short_id()}.")
+        if app.sessions.delete(session.id):
+            session_reply(app, f"Deleted session {session.short_id()}.")
         else:
             session_reply(app, "Delete failed.")
         return True
 
     if cmd == "/context":
-        lines = ["Context usage (last LLM call):"]
-        jarvis = getattr(app, "jarvis", app)
-        raw_provider = None
-        if hasattr(jarvis, "llm"):
-            raw_provider = getattr(jarvis.llm, "provider", None)
-        prompt_toks = getattr(raw_provider, "last_prompt_tokens", 0) or 0
-        completion_toks = getattr(raw_provider, "last_completion_tokens", 0) or 0
-        if prompt_toks == 0 and completion_toks == 0:
-            lines.append("  No LLM calls made yet in this session.")
-        else:
-            window = getattr(Config, "LLM_CONTEXT_WINDOW", 0)
-            lines.append(f"  Prompt tokens:     {prompt_toks}")
-            lines.append(f"  Completion tokens: {completion_toks}")
-            lines.append(f"  Total:             {prompt_toks + completion_toks}")
-            if window > 0:
-                pct = int(prompt_toks / window * 100)
-                lines.append(f"  Context window:    {window} ({pct}% used)")
-        dispatch_docs = getattr(jarvis, "mcp_dispatch_docs", {})
-        if dispatch_docs:
-            lines.append(f"  Active server docs: {len(dispatch_docs)} server(s)")
-            for sid in dispatch_docs:
-                lines.append(f"    {sid}")
-        session_reply(app, "\n".join(lines))
+        session_reply(app, context_report(app))
         return True
 
     # Unknown slash-command — let it through to the LLM so the user
     # can still type "/foo" as literal input if they insist.
     return False
+
+
+def context_report(app: Any) -> str:
+    """What filled the last prompt, part by part (#272)."""
+    from ..llm.context_breakdown import token_rows
+
+    jarvis = getattr(app, "jarvis", app)
+    llm = getattr(jarvis, "llm", None)
+    provider = getattr(llm, "provider", None)
+    last = getattr(llm, "last_breakdown", None)
+    if not last:
+        return "Context: no model call yet."
+    prompt = getattr(provider, "last_prompt_tokens", 0) or 0
+    completion = getattr(provider, "last_completion_tokens", 0) or 0
+    rows = token_rows(last["chars"], prompt)
+    used = prompt or sum(tokens for _, tokens in rows)
+    window = getattr(Config, "LLM_CONTEXT_WINDOW", 0)
+    of = window if window > 0 else used
+    lines = [
+        (
+            f"Context: {used:,} of {window:,} tokens ({used * 100 // window}%) in the last prompt"
+            if window > 0
+            else f"Context: {used:,} tokens in the last prompt"
+        )
+    ]
+    width = max([len(part) for part, _ in rows] + [len("Free space")])
+    for part, tokens in rows:
+        share = tokens * 100 / of if of else 0
+        bar = "█" * max(1, round(share / 5)) if tokens else ""
+        note = ""
+        if part == "Recent conversation":
+            kept = last.get("exchanges_kept", 0)
+            note = f"  {kept} exchange{'s' if kept != 1 else ''} in full"
+        lines.append(f"  {part:<{width}}  {tokens:>7,}  {share:5.1f}%  {bar}{note}")
+    if window > 0:
+        free = max(0, window - used)
+        lines.append(
+            f"  {'Free space':<{width}}  {free:>7,}  {free * 100 / window:5.1f}%"
+        )
+    if completion:
+        lines.append(f"Reply: {completion:,} tokens.")
+    root_window = getattr(llm, "_root_window", None)
+    if root_window:
+        lines.append(
+            f"History: the last {root_window} exchanges stay in full; older ones are "
+            "folded into the conversation summary."
+        )
+    lines.append(
+        "Sizes per part are scaled from their length to the provider's count."
+        if prompt
+        else "Sizes are estimated from length (about 4 characters a token)."
+    )
+    if window <= 0:
+        lines.append(
+            "Set LLM_CONTEXT_WINDOW to see the share of the window and the free space."
+        )
+    docs = getattr(jarvis, "mcp_dispatch_docs", {}) or {}
+    if docs:
+        lines.append(f"Tool docs loaded for: {', '.join(docs)}")
+    return "\n".join(lines)

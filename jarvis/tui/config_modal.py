@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional
 
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -21,6 +21,7 @@ from textual.widgets import (
     TabPane,
 )
 
+from ..core import settings
 from ..core.providers import (
     add_provider,
     edit_provider,
@@ -29,99 +30,6 @@ from ..core.providers import (
     remove_provider,
 )
 from .provider_modal import ProviderModal
-
-# ---------------------------------------------------------------------------
-#  Settings definitions
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class _SettingDef:
-    key: str
-    label: str
-    category: str
-    kind: str  # "int", "float", "bool", "select"
-    options: Optional[List[Tuple[str, str]]] = None
-    hint: str = ""
-
-
-_SETTINGS: List[_SettingDef] = [
-    _SettingDef(
-        "CONFIRMATION_MODE",
-        "Confirmation mode",
-        "Security",
-        "select",
-        [("smart", "smart"), ("ask_all", "ask_all"), ("allow_all", "allow_all")],
-    ),
-    _SettingDef(
-        "CONFIRMATION_TIMEOUT",
-        "Confirmation timeout (s)",
-        "Security",
-        "int",
-        hint="Auto-deny after N seconds; 0 disables (pending list instead)",
-    ),
-    _SettingDef(
-        "RAG_TOP_K",
-        "RAG top-k",
-        "Memory",
-        "int",
-        hint="Memories per RAG query",
-    ),
-    _SettingDef(
-        "RAG_MIN_SCORE",
-        "RAG min score",
-        "Memory",
-        "float",
-        hint="Minimum cosine similarity (0.0–1.0)",
-    ),
-    _SettingDef(
-        "MAX_GOALS_IN_CONTEXT",
-        "Max goals in context",
-        "LLM",
-        "int",
-        hint="Goal cap sent to LLM per turn",
-    ),
-    _SettingDef(
-        "RESET_HISTORY_AFTER_RESPONSE",
-        "Reset history after response",
-        "LLM",
-        "bool",
-    ),
-    _SettingDef(
-        "WAKE_CHIME_PATH",
-        "Wake chime path",
-        "Voice",
-        "str",
-        hint="Must be a readable WAV file; bundled default used if unset",
-    ),
-    _SettingDef(
-        "VOICE_SPEAK_COMMENTS",
-        "Speak JARVIS's comments",
-        "Voice",
-        "bool",
-        hint="Say aloud what JARVIS is about to do; off still shows it in the chat",
-    ),
-    _SettingDef(
-        "OUTPUT_MODE",
-        "Output mode",
-        "Output",
-        "select",
-        [("text", "text"), ("voice", "voice")],
-    ),
-    _SettingDef(
-        "LOG_LEVEL",
-        "Log level",
-        "Output",
-        "select",
-        [
-            ("DEBUG", "DEBUG"),
-            ("INFO", "INFO"),
-            ("WARNING", "WARNING"),
-            ("ERROR", "ERROR"),
-        ],
-    ),
-]
-
 
 # ---------------------------------------------------------------------------
 #  Result dataclass
@@ -271,23 +179,22 @@ class ConfigModal(ModalScreen[ConfigModalResult]):
         self._initial_tab = initial_tab
         self._settings_changes: Dict[str, str] = {}
         self._providers_changed = False
+        self._discard_armed = False
 
     def compose(self) -> ComposeResult:
-        from ..config import Config
-
         with Vertical(id="config-dialog"):
             yield Label("Configuration", id="config-title")
 
             with TabbedContent("Settings", "Providers", id="config-tabs"):
                 with TabPane("Settings", id="tab-settings"):
                     with VerticalScroll(id="settings-pane"):
-                        current_category = ""
-                        for s in _SETTINGS:
-                            if s.category != current_category:
-                                current_category = s.category
+                        current_section = ""
+                        for s in settings.SETTINGS:
+                            if s.section != current_section:
+                                current_section = s.section
                                 with Horizontal(classes="settings-category-row"):
                                     yield Label(
-                                        f"— {current_category}",
+                                        f"— {current_section}",
                                         classes="settings-category",
                                     )
                                     yield Rule()
@@ -296,28 +203,22 @@ class ConfigModal(ModalScreen[ConfigModalResult]):
                             if s.hint:
                                 yield Label(s.hint, classes="settings-hint")
 
-                            raw = getattr(Config, s.key, "")
-                            value = str(raw).lower() if s.kind == "bool" else str(raw)
-
-                            if s.kind == "select" and s.options:
+                            options = (
+                                [("on", "true"), ("off", "false")]
+                                if s.kind == "bool"
+                                else [(lbl, val) for val, lbl in s.options]
+                            )
+                            if options:
                                 with Horizontal(classes="settings-select-row"):
                                     yield Select(
-                                        [(lbl, val) for lbl, val in s.options],
-                                        value=value,
-                                        id=f"setting-{s.key}",
-                                        allow_blank=False,
-                                    )
-                            elif s.kind == "bool":
-                                with Horizontal(classes="settings-select-row"):
-                                    yield Select(
-                                        [("true", "true"), ("false", "false")],
-                                        value="true" if raw else "false",
+                                        options,
+                                        value=settings.text(s),
                                         id=f"setting-{s.key}",
                                         allow_blank=False,
                                     )
                             else:
                                 yield Input(
-                                    value=value,
+                                    value=settings.text(s),
                                     id=f"setting-{s.key}",
                                 )
 
@@ -381,45 +282,15 @@ class ConfigModal(ModalScreen[ConfigModalResult]):
     # -- Settings save ------------------------------------------------------
 
     def _save_settings(self) -> None:
-        from ..config import Config
+        for s in settings.SETTINGS:
+            _, error = settings.parse(s, self._field(s))
+            if error:
+                err = self.query_one("#settings-error", Static)
+                err.update(f"Fix: {error}")
+                err.add_class("visible")
+                return
 
-        changes: Dict[str, str] = {}
-        for s in _SETTINGS:
-            widget_id = f"setting-{s.key}"
-
-            if s.kind in ("select", "bool"):
-                widget = self.query_one(f"#{widget_id}", Select)
-                new_val = str(widget.value)
-            else:
-                widget = self.query_one(f"#{widget_id}", Input)
-                new_val = widget.value.strip()
-
-            if s.kind == "int":
-                try:
-                    int(new_val)
-                except ValueError:
-                    err = self.query_one("#settings-error", Static)
-                    err.update(f"{s.label} must be an integer.")
-                    err.add_class("visible")
-                    return
-            elif s.kind == "float":
-                try:
-                    float(new_val)
-                except ValueError:
-                    err = self.query_one("#settings-error", Static)
-                    err.update(f"{s.label} must be a number.")
-                    err.add_class("visible")
-                    return
-
-            old_raw = getattr(Config, s.key, "")
-            if s.kind == "bool":
-                old_val = "true" if old_raw else "false"
-            else:
-                old_val = str(old_raw)
-
-            if new_val != old_val:
-                changes[s.key] = new_val
-
+        changes = self._edited()
         if not changes:
             err = self.query_one("#settings-error", Static)
             err.update("No changes to save.")
@@ -510,7 +381,33 @@ class ConfigModal(ModalScreen[ConfigModalResult]):
 
     # -- Dismiss ------------------------------------------------------------
 
+    def _field(self, s: settings.Setting) -> str:
+        widget_id = f"#setting-{s.key}"
+        if s.kind in ("select", "bool"):
+            return str(self.query_one(widget_id, Select).value)
+        return self.query_one(widget_id, Input).value.strip()
+
+    def _edited(self) -> Dict[str, str]:
+        """Settings whose field differs from the value JARVIS runs with."""
+        edited: Dict[str, str] = {}
+        for s in settings.SETTINGS:
+            new_val = self._field(s)
+            if new_val != settings.text(s):
+                edited[s.key] = new_val
+        return edited
+
     def action_cancel(self) -> None:
+        """Close; with unsaved edits, the first Esc says so and the second discards."""
+        edited = self._edited()
+        if edited and not self._discard_armed:
+            self._discard_armed = True
+            labels = [s.label for s in settings.SETTINGS if s.key in edited]
+            err = self.query_one("#settings-error", Static)
+            err.update(
+                f"Not saved: {', '.join(labels)}. Ctrl+S saves; Esc again discards."
+            )
+            err.add_class("visible")
+            return
         self.dismiss(
             ConfigModalResult(
                 settings_changes={},

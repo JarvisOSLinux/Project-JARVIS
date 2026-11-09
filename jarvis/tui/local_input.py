@@ -18,21 +18,26 @@ from ..core.providers import (
     remove_provider,
 )
 from .help_screen import HelpScreen
+from .output import escape
 from .provider_modal import ProviderModal
-from .slash_commands_doc import build_help_markdown
 
 
 def handle_local_input(app: Any, text: str, bindings: Any) -> bool:
     """Handle TUI-only slash commands. Return True when handled."""
     low = text.lower().strip()
-    if low in ("/help", "/?"):
-        app.push_screen(HelpScreen(build_help_markdown(bindings)))
+    if low.split(maxsplit=1)[0] in ("/help", "/?"):
+        words = text.strip().split(maxsplit=1)
+        app.push_screen(HelpScreen(bindings, words[1] if len(words) > 1 else ""))
         return True
 
     if low == "/export" or low.startswith("/export "):
         parts = text.split(maxsplit=1)
         name_arg = parts[1].strip() if len(parts) > 1 else None
         export_transcript_to_disk(app, name_arg)
+        return True
+
+    if low == "/commands" or low.startswith("/commands "):
+        _handle_commands(app, low)
         return True
 
     if low == "/clear":
@@ -45,8 +50,8 @@ def handle_local_input(app: Any, text: str, bindings: Any) -> bool:
         app.exit()
         return True
 
-    if low == "/status":
-        _show_status(app)
+    if low in ("/status", "/status full"):
+        _show_status(app, full=low.endswith("full"))
         return True
 
     if low == "/providers" or low.startswith("/providers "):
@@ -65,33 +70,68 @@ def handle_local_input(app: Any, text: str, bindings: Any) -> bool:
         app._open_setups()
         return True
 
+    if low == "/tasks":
+        app._open_tasks()
+        return True
+
     return False
 
 
-def _show_status(app: Any) -> None:
-    """Display current provider, model, and session info."""
-    model = "(unset)"
-    provider_name = "(none)"
+def _handle_commands(app: Any, low: str) -> None:
+    """`/commands`: browse the chat's blocks, or fold or unfold them all (#271)."""
+    from .chat_view import ChatView
 
-    pool = None
-    if app.jarvis is not None and hasattr(app.jarvis, "llm"):
-        pool = getattr(app.jarvis.llm, "provider", None)
+    chat = app.query_one("#chat-log", ChatView)
+    arg = low.split(maxsplit=1)[1].strip() if " " in low else ""
+    if arg not in ("", "collapse", "expand"):
+        app._append_log("[yellow]Usage: /commands [collapse|expand][/yellow]")
+        return
+    chat.end_command()
+    if arg:
+        chat.set_all(arg == "collapse")
+    elif not chat.browse():
+        app._append_log("[dim]Nothing to browse yet.[/dim]")
 
-    if pool is not None and hasattr(pool, "active_provider_name"):
-        provider_name = pool.active_provider_name or provider_name
-        model = getattr(pool, "model", model)
 
-    session_id = "(none)"
-    if app.jarvis is not None and app.jarvis.sessions.current:
-        session_id = app.jarvis.sessions.current.short_id()
+_MARKS = {
+    "ok": "[green]✓[/green]",
+    "warn": "[yellow]![/yellow]",
+    "fail": "[red]✗[/red]",
+    "off": "[dim]–[/dim]",
+}
 
-    lines = [
-        "[bold cyan]Status[/bold cyan]",
-        f"  provider: {provider_name}",
-        f"  model: {model}",
-        f"  session: {session_id}",
-    ]
-    app._append_log("\n".join(lines))
+
+def status_markup(sections: Any) -> str:
+    """The health check (#272) as chat lines: one mark, name and reason per check."""
+    lines = ["[bold cyan]Status[/bold cyan]"]
+    for section in sections:
+        lines.append(f"[bold]{escape(section.title)}[/bold]")
+        for check in section.checks:
+            mark = _MARKS.get(check.state, "?")
+            detail = f": {escape(check.detail)}" if check.detail else ""
+            lines.append(f"  {mark} {escape(check.name)}{detail}")
+    return "\n".join(lines)
+
+
+def _show_status(app: Any, *, full: bool = False) -> None:
+    """Check JARVIS's health without blocking the TUI, then print the result."""
+    if app.jarvis is None:
+        app._append_log("[yellow]JARVIS is still starting up.[/yellow]")
+        return
+    from ..runtime.health import collect_status
+
+    if full:
+        app._append_log("[dim]Checking, including registry updates…[/dim]")
+
+    async def run() -> None:
+        try:
+            sections = await collect_status(app.jarvis, full=full)
+        except Exception as e:  # a broken check must not take the TUI down
+            app._append_log(f"[red]Status check failed: {escape(str(e))}[/red]")
+            return
+        app._append_log(status_markup(sections))
+
+    app.run_worker(run(), exclusive=False)
 
 
 def _show_providers(app: Any) -> None:
@@ -291,28 +331,6 @@ def _handle_model(app: Any, text: str) -> None:
     app._append_log(
         "[yellow]Use /providers edit <name> --model <model> to change a provider's model.[/yellow]"
     )
-
-
-def _apply_in_memory(key: str, value: str) -> None:
-    """Apply a setting change to the live Config object with proper type coercion."""
-    from ..config import Config
-
-    bool_keys = {"RESET_HISTORY_AFTER_RESPONSE", "VOICE_SPEAK_COMMENTS"}
-    int_keys = {
-        "RAG_TOP_K",
-        "MAX_GOALS_IN_CONTEXT",
-        "CONFIRMATION_TIMEOUT",
-    }
-    float_keys = {"RAG_MIN_SCORE"}
-
-    if key in bool_keys:
-        setattr(Config, key, value.lower() == "true")
-    elif key in int_keys:
-        setattr(Config, key, int(value))
-    elif key in float_keys:
-        setattr(Config, key, float(value))
-    else:
-        setattr(Config, key, value)
 
 
 def export_transcript_to_disk(app: Any, filename: Optional[str]) -> None:

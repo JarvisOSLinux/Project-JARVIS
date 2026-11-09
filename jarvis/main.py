@@ -68,7 +68,7 @@ from .runtime.voice_activation_thread import (
 from .runtime.voice_activation_thread import (
     run_voice_activation as runtime_run_voice_activation,
 )
-from .sessions import SessionManager
+from .sessions import BlockLog, SessionManager
 
 logger = get_logger(__name__)
 
@@ -122,7 +122,9 @@ class Jarvis:
         # without blocking the engine. Signature: async (PendingSetup) -> None
         self.setup_ready_callback: Any = None
 
-        self.sessions = SessionManager(self.contextor)
+        self.sessions = SessionManager(
+            self.contextor, blocks=self.components.get("block_log") or BlockLog()
+        )
 
     # ------------------------------------------------------------------
     # Event-driven main loop

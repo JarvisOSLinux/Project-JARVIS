@@ -26,6 +26,7 @@ class OutputManager:
         self._has_tts = tts is not None
         self._output_callbacks: List[Callable[[Dict[str, Any]], None]] = []
         self._activity_callbacks: List[Callable[[Dict[str, Any]], None]] = []
+        self._action_callbacks: List[Callable[[Dict[str, Any]], None]] = []
         self._suppress_stdout = suppress_stdout
         self._state_callback: Optional[Callable[[VoiceState], None]] = None
         self._speaking = threading.Event()
@@ -99,6 +100,23 @@ class OutputManager:
                 cb(payload)
             except Exception as e:
                 logger.warning(f"Activity callback error: {e}")
+
+    def add_action_callback(self, cb: Callable[[Dict[str, Any]], None]) -> None:
+        """Register a callback for action events (see runtime/action_events.py)."""
+        self._action_callbacks.append(cb)
+
+    def remove_action_callback(self, cb: Callable[[Dict[str, Any]], None]) -> None:
+        """Unregister an action callback."""
+        if cb in self._action_callbacks:
+            self._action_callbacks.remove(cb)
+
+    def emit_action(self, event: Dict[str, Any]) -> None:
+        """Send an action's start, update or end to front ends; never spoken."""
+        for cb in self._action_callbacks:
+            try:
+                cb(dict(event))
+            except Exception as e:
+                logger.warning(f"Action callback error: {e}")
 
     def handle_response(self, response: Dict[str, Any]) -> None:
         """

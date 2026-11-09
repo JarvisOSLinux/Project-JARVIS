@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 import time
 from logging import Logger
 from typing import Any, Callable, Dict, List, Optional
@@ -93,6 +94,30 @@ def _desktop_session_env() -> Dict[str, str]:
     return {k: os.environ[k] for k in _DESKTOP_SESSION_VARS if os.environ.get(k)}
 
 
+# Where dmcp keeps its sources, installs and index, and its tunables. JARVIS
+# runs dmcp itself for installs and settings (with the full environment) and
+# through dispatch for search and tool calls, so without these the two disagree
+# whenever one is set: a server installed into MCP_USER_INSTALL_DIR was then
+# searched for and called in the default directories.
+_DMCP_VARS = (
+    "MCP_USER_SOURCES_PATH",
+    "MCP_USER_INSTALL_DIR",
+    "MCP_SYSTEM_SOURCES_PATH",
+    "MCP_SYSTEM_INSTALL_DIR",
+    "MCP_VECTOR_INDEX_DIR",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "XDG_CACHE_HOME",
+    "DMCP_ELEVATION_TIMEOUT_SECS",
+    "DMCP_SESSION_TTL_SECS",
+    "DMCP_ELICIT_MAX_PROMPTS",
+)
+
+
+def _dmcp_env() -> Dict[str, str]:
+    return {k: os.environ[k] for k in _DMCP_VARS if os.environ.get(k)}
+
+
 async def connect(adapter: Any, logger: Logger) -> None:
     """Connect DispatchAdapter to dispatch serve over stdio MCP."""
     try:
@@ -110,10 +135,15 @@ async def connect(adapter: Any, logger: Logger) -> None:
             env={
                 **get_default_environment(),
                 **_desktop_session_env(),
+                **_dmcp_env(),
                 "RUST_LOG": "dispatch=warn",
             },
         )
-        client = stdio_client(params)
+        from ..core.logger import JarvisLogger
+
+        # Its stderr must not reach the terminal: the TUI draws there.
+        adapter._errlog = JarvisLogger.child_stderr("dispatch")
+        client = stdio_client(params, errlog=adapter._errlog)
         read, write = await client.__aenter__()
         adapter._client = client
         try:
@@ -172,6 +202,10 @@ async def disconnect(adapter: Any, logger: Logger) -> None:
             await ctx.__aexit__(None, None, None)
         except Exception as e:
             logger.error(f"Dispatch: Disconnect error ({name}): {e}")
+    errlog = getattr(adapter, "_errlog", None)
+    adapter._errlog = None
+    if errlog is not None and errlog is not sys.__stderr__:
+        errlog.close()
     if client is not None:
         logger.info("Dispatch: Disconnected")
 
@@ -182,6 +216,9 @@ def require_connection(adapter: Any, logger: Logger, op_name: str) -> bool:
         return True
     logger.warning(f"Dispatch: {op_name} called but not connected")
     return False
+
+
+_POLLED_OPS = frozenset({"get_task_status"})
 
 
 async def call_tool(
@@ -211,9 +248,10 @@ async def call_tool(
         )
         elapsed = time.perf_counter() - t0
         content = extractor(result)
-        logger.info(
-            f"Dispatch: {op_name} completed in {elapsed:.2f}s — result: {content}"
-        )
+        # Status is polled (every second while F4 is open): at INFO it rotated
+        # a 5 MB jarvis.log in two minutes.
+        log = logger.debug if op_name in _POLLED_OPS else logger.info
+        log(f"Dispatch: {op_name} completed in {elapsed:.2f}s — result: {content}")
         return content
     except asyncio.TimeoutError:
         elapsed = time.perf_counter() - t0
@@ -228,7 +266,14 @@ async def call_tool(
 
 
 async def get_signal_window(adapter: Any, logger: Logger) -> List[Dict[str, Any]]:
-    """Read dispatch signal window via MCP log tool."""
+    """Read dispatch's signal window via its MCP log tool, in the pushed shape.
+
+    The entries come from ``structuredContent``: each is the SignalEntry JSON a
+    push carries, so a signal seen both ways gets one (pid, type, timestamp)
+    key, and the nonce boundary verification trusts stays its own field. The
+    text dispatch also returns cannot give either. An EXIT dispatch holds for a
+    fire_wake=false batch keeps ``held``.
+    """
     if not adapter._connected:
         return []
 
@@ -237,22 +282,26 @@ async def get_signal_window(adapter: Any, logger: Logger) -> List[Dict[str, Any]
             adapter.session.call_tool("log", {}),
             timeout=adapter.timeout,
         )
-        content = adapter._extract_content(result)
-        if isinstance(content, list):
-            signals = content
-        elif isinstance(content, dict):
-            signals = content.get("signals", [])
-        else:
-            signals = []
-
-        if signals:
-            logger.debug(f"Dispatch: Signal window returned {len(signals)} signal(s)")
-            for sig in signals:
-                logger.debug(
-                    "Dispatch:   signal: "
-                    f"type={sig.get('type')}, pid={sig.get('pid')}, data={sig.get('data', '')}"
-                )
-        return signals
     except Exception as e:
         logger.error(f"Dispatch: Failed to get signals: {e}")
         return []
+    content = adapter._extract_content(result)
+    entries = content.get("entries") if isinstance(content, dict) else None
+    if not isinstance(entries, list):
+        if not getattr(adapter, "_warned_unstructured_log", False):
+            adapter._warned_unstructured_log = True
+            logger.warning(
+                "Dispatch: its log tool returns no structured entries, so a signal "
+                "that was not pushed (a KILL, a lost push) never reaches JARVIS; "
+                "update dispatch"
+            )
+        return []
+    signals = []
+    for raw in entries:
+        if not isinstance(raw, dict):
+            continue
+        sig = _normalize_pushed_signal(raw)
+        if raw.get("held"):
+            sig["held"] = True
+        signals.append(sig)
+    return signals
