@@ -1,6 +1,8 @@
 """OpenAI-compatible API LLM provider."""
 
 import json
+import re
+import urllib.parse
 from typing import Any, Dict, Iterator, List, Optional
 
 from ...core.logger import get_logger
@@ -8,6 +10,10 @@ from ..base import BaseLLMProvider
 from ..images import detect_image_format, encode_image_base64
 
 logger = get_logger(__name__)
+
+# A path ending in an API version (/v1, /v1beta, /v1beta/openai) is already the
+# base the endpoints hang off; any other address gets /v1, as OpenAI's own does.
+_VERSIONED_PATH = re.compile(r"/v\d+[a-z0-9]*(/openai)?$", re.IGNORECASE)
 
 
 def _convert_image_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -72,6 +78,16 @@ class APIProvider(BaseLLMProvider):
 
         self._httpx: Any = None
 
+    def _endpoint(self, name: str) -> str:
+        """``{url}/v1/{name}``, or ``{url}/{name}`` when the url ends in its version.
+
+        LM Studio's address is ``…/v1`` and Gemini's ``…/v1beta/openai``, and
+        appending /v1 to those asked for /v1/v1/… (#316).
+        """
+        path = urllib.parse.urlsplit(self.api_url).path.rstrip("/")
+        base = self.api_url if _VERSIONED_PATH.search(path) else f"{self.api_url}/v1"
+        return f"{base}/{name}"
+
     def _ensure_client(self) -> None:
         """Import httpx on first use."""
         if self._httpx is not None:
@@ -100,7 +116,7 @@ class APIProvider(BaseLLMProvider):
         try:
             with self._httpx.Client(timeout=60.0) as client:
                 response = client.post(
-                    f"{self.api_url}/v1/chat/completions",
+                    self._endpoint("chat/completions"),
                     headers=self.headers,
                     json=payload,
                 )
@@ -135,7 +151,7 @@ class APIProvider(BaseLLMProvider):
             with self._httpx.Client(timeout=60.0) as client:
                 with client.stream(
                     "POST",
-                    f"{self.api_url}/v1/chat/completions",
+                    self._endpoint("chat/completions"),
                     headers=self.headers,
                     json=payload,
                 ) as response:
@@ -182,7 +198,7 @@ class APIProvider(BaseLLMProvider):
             with self._httpx.Client(timeout=5.0) as client:
                 try:
                     response = client.get(
-                        f"{self.api_url}/v1/models",
+                        self._endpoint("models"),
                         headers=self.headers,
                     )
                     if response.status_code == 200:
@@ -202,7 +218,7 @@ class APIProvider(BaseLLMProvider):
         try:
             with self._httpx.Client(timeout=60.0) as client:
                 response = client.post(
-                    f"{self.api_url}/v1/embeddings",
+                    self._endpoint("embeddings"),
                     headers=self.headers,
                     json=payload,
                 )
