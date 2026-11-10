@@ -421,6 +421,9 @@ async def _answer_signals(
     for outcome in outcomes:
         context += await _tools_after_login(app, logger, outcome)
     context += stop.stopped_note(app, getattr(owning_goal, "id", None))
+    from .dispatch_flow import job_note
+
+    context += job_note(app, [i.signal for i in live])
 
     response = await ask_llm(
         app,
