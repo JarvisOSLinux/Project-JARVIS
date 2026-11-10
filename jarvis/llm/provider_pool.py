@@ -10,13 +10,20 @@ fails over on errors:
 - 5xx / timeout       → cooldown 30 s
 
 Cooled-down providers restore automatically when their timer expires.
+
+Given a ``reload`` callable, the pool asks it before each call whether the
+provider list changed (``providers.json`` is edited by the TUI, the CLI and the
+app while JARVIS runs) and swaps in the new list. A provider whose settings are
+unchanged keeps its entry, so its cooldown and failure count survive an edit
+to another one.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import threading
+from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional
 
 from ..core.logger import get_logger
 from .base import BaseLLMProvider
@@ -44,18 +51,51 @@ class ProviderEntry:
     failure_count: int = 0
     last_error: Optional[str] = None
     vision: bool = False
+    # What the entry was built from; an entry whose settings did not change
+    # survives a reload with its state.
+    fingerprint: str = ""
 
 
 class ProviderPool(BaseLLMProvider):
     """Failover pool — tries providers in list order, skipping unavailable ones."""
 
-    def __init__(self, entries: List[ProviderEntry]) -> None:
+    def __init__(
+        self,
+        entries: List[ProviderEntry],
+        reload: Optional[Callable[[], Optional[List[ProviderEntry]]]] = None,
+    ) -> None:
         if not entries:
             raise ValueError("ProviderPool requires at least one provider")
         super().__init__(entries[0].provider.model)
         self._entries = entries
+        self._reload = reload
+        self._reload_lock = threading.Lock()
+
+    def refresh(self) -> None:
+        """Take up a changed provider list, keeping the state of unchanged entries."""
+        if self._reload is None:
+            return
+        with self._reload_lock:
+            fresh = self._reload()
+            if fresh is None:
+                return
+            kept = {(e.name, e.fingerprint): e for e in self._entries if e.fingerprint}
+            self._entries = [kept.get((e.name, e.fingerprint), e) for e in fresh]
+            if self._entries:
+                self.model = self._entries[0].provider.model
+            names = ", ".join(e.name for e in self._entries) or "none"
+            logger.info(f"Provider list changed; now: {names}")
+
+    def _none_configured(self) -> RuntimeError:
+        return RuntimeError(
+            "No LLM provider is configured. Add one with /providers add or in "
+            "Settings (F2); JARVIS uses it from the next message."
+        )
 
     def chat(self, messages: List[Dict[str, str]], require_vision: bool = False) -> str:
+        self.refresh()
+        if not self._entries:
+            raise self._none_configured()
         now = datetime.now()
         self._restore_cooled_down(now)
 
@@ -100,6 +140,9 @@ class ProviderPool(BaseLLMProvider):
         )
 
     def embed(self, texts: List[str]) -> List[List[float]]:
+        self.refresh()
+        if not self._entries:
+            raise self._none_configured()
         now = datetime.now()
         self._restore_cooled_down(now)
 
@@ -145,6 +188,9 @@ class ProviderPool(BaseLLMProvider):
         cannot be silently retried on another provider without risking
         duplicated/garbled output, so it propagates instead of failing over.
         """
+        self.refresh()
+        if not self._entries:
+            raise self._none_configured()
         now = datetime.now()
         self._restore_cooled_down(now)
 
@@ -198,11 +244,13 @@ class ProviderPool(BaseLLMProvider):
         return "\n".join(status_lines)
 
     def is_available(self) -> bool:
+        self.refresh()
         self._restore_cooled_down(datetime.now())
         return any(e.status == "active" for e in self._entries)
 
     def get_status(self) -> List[Dict[str, Any]]:
         """Status of all providers — for TUI status bar and settings modal."""
+        self.refresh()
         now = datetime.now()
         self._restore_cooled_down(now)
         result = []

@@ -232,7 +232,11 @@ Shipped (#78): `ProviderPool` (`jarvis/llm/provider_pool.py`) is built from
 `providers.json` at startup (`ComponentFactory._build_provider_pool()`), walks
 providers in priority order, and fails over with per-error cooldowns
 (429 → 60 s, 402 → 1 h, 401/403 → permanent, 5xx/timeout → 30 s) plus
-automatic restore when a cooldown expires.
+automatic restore when a cooldown expires. It follows `providers.json` while JARVIS
+runs (#315): before each call it checks the file's size and modification time
+and, when they changed, rebuilds its list, keeping the entry (and its cooldown)
+of every provider whose settings did not change. A JARVIS started with no
+provider builds its LLM on the first message after one is added.
 
 ---
 
@@ -306,6 +310,8 @@ make check                  # Format + lint + typecheck + tests
 ---
 
 ## Changelog — corrected claims
+
+*2026-11-10:* a provider change takes effect without a restart, and a failed request names every provider (#315). Switching Yakup's JARVIS from Ollama cloud (402, out of credits) to NVIDIA took three restarts: `_build_provider_pool` read `providers.json` once, while the TUI form, `jarvis providers` and the app all write it. The pool now takes a `reload` callable (`component_factory._ProvidersFile.changed_entries`, a stat of size and mtime, re-read only on change; a file caught mid-write does not parse and is read again on the next call), and `ProviderPool.refresh` swaps in the new list while keeping each unchanged entry by name and settings fingerprint, so a cooldown survives an edit to another provider; an edited one starts fresh, and an emptied file answers "No LLM provider is configured". `root_handlers._ensure_llm` builds the LLM for a JARVIS started without one, and neither it nor the TUI says "restart" any more. And with every provider failing, the user saw one: `describe_provider_error` kept the pool error's last line and took the first `retry in Ns` in the text, so NVIDIA's 404 never showed and its 16 s was printed beside Ollama's error, cut mid-word at 160 characters ("…(ref: …) (s; retrying it in 16 s)"). It now reads the pool error per provider, a provider's continuation lines included, and gives each its own reason and retry (`nvidia: the model is not available there (404): … ; retrying it in 16 s | general: the account's usage or credits are used up (402); retrying it in 60 min`), with wording for 402 and 404 and a cut at a word boundary. Checked live: a pool built over a broken local provider took up an NVIDIA entry written into the file and answered in 0.4 s.
 
 *2026-11-08:* an Ollama-compatible endpoint (#279, Toufic): `jarvis/server/ollama_compat.py` serves `/api/chat`, `/api/generate`, `/api/tags` and the probes Ollama clients make, on `127.0.0.1:11456` when `JARVIS_OLLAMA_SERVER_ENABLED=true`, inference only like the OpenAI endpoint. On loopback it takes no token (Ollama clients cannot send one), so in review it got what Ollama itself lacked until CVE-2024-28224: a tokenless bind refuses a `Host` that is not a loopback name, so a DNS-rebound page cannot read answers, and an `Origin` that is not a loopback page, so a cross-site POST cannot spend the provider blind. Bodies over 32 MiB are refused unread. `docs/SECURITY-ARCHITECTURE.md` names it as the second listener exception.
 

@@ -59,7 +59,7 @@ async def start_jarvis(app: Any, logger: Any) -> None:
             "[yellow]No LLM provider configured.[/yellow]\n"
             "  Use [bold]/providers add[/bold] or open "
             "[bold]Settings (F2)[/bold] to get started.\n"
-            "  After adding a provider, restart the TUI."
+            "  JARVIS uses it from your next message."
         )
     else:
         app._append_log(
