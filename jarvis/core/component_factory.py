@@ -1,6 +1,7 @@
+import hashlib
 import json
 import os
-from typing import Optional
+from typing import List, Optional
 
 from ..config import Config
 from ..contextor import ContextorAdapter
@@ -27,70 +28,124 @@ from .system_info import SystemInfo
 logger = get_logger(__name__)
 
 
+def _fingerprint(spec: dict) -> str:
+    """Identifies a provider's settings without keeping its key in the clear."""
+    blob = json.dumps(spec, sort_keys=True, default=str).encode()
+    return hashlib.sha256(blob).hexdigest()
+
+
+class _ProvidersFile:
+    """providers.json as the pool sees it: re-read only when it changed.
+
+    The TUI, `jarvis providers` and the app all write the file while JARVIS
+    runs (#315). A file read mid-write does not parse; its stamp is then not
+    kept, so the next call reads it again.
+    """
+
+    def __init__(self, path: str) -> None:
+        self.path = path
+        self._stamp: Optional[tuple] = None
+
+    def _current_stamp(self) -> Optional[tuple]:
+        try:
+            st = os.stat(self.path)
+        except OSError:
+            return None
+        return (st.st_mtime_ns, st.st_size)
+
+    def read(self) -> Optional[dict]:
+        stamp = self._current_stamp()
+        if stamp is None:
+            self._stamp = None
+            return None
+        try:
+            with open(self.path) as f:
+                data = json.load(f)
+        except (OSError, ValueError) as e:
+            logger.warning(f"Could not read {self.path}: {e}")
+            return None
+        self._stamp = stamp
+        return data if isinstance(data, dict) else {}
+
+    def changed_entries(self) -> Optional[List[ProviderEntry]]:
+        """The new entries if the file changed since it was last read, else None."""
+        stamp = self._current_stamp()
+        if stamp == self._stamp:
+            return None
+        if stamp is None:
+            self._stamp = None
+            return []
+        data = self.read()
+        if data is None:
+            return None
+        return ComponentFactory._pool_entries(data)
+
+
 class ComponentFactory:
     @staticmethod
-    def _build_provider_pool() -> ProviderPool:
-        """Build a ProviderPool from providers.json or legacy env vars."""
+    def _pool_entries(data: dict) -> List[ProviderEntry]:
+        """Build a pool entry for each usable provider in providers.json's data."""
+        entries = []
+        for spec in data.get("providers", []):
+            name = spec.get("name", f"provider-{len(entries)}")
+            ptype = spec.get("type", "ollama")
+            model = spec.get("model", "")
+            if not model:
+                logger.warning(f"Provider '{name}' has no model, skipping")
+                continue
+
+            kwargs = {}
+            if ptype == "ollama":
+                kwargs["base_url"] = spec.get("url", "http://localhost:11434")
+                if spec.get("api_key"):
+                    kwargs["api_key"] = spec["api_key"]
+                kwargs["auto_pull"] = spec.get("auto_pull", False)
+                kwargs["temperature"] = spec.get(
+                    "temperature",
+                    getattr(Config, "LLM_TEMPERATURE", 0.7),
+                )
+                kwargs["strict_json"] = spec.get("strict_json", False)
+                llm_think = getattr(Config, "LLM_THINK", None)
+                if spec.get("think") is not None:
+                    kwargs["think"] = spec["think"]
+                elif llm_think is not None:
+                    kwargs["think"] = llm_think
+            elif ptype in ("api", "lmstudio"):
+                default_url = "http://localhost:1234/v1" if ptype == "lmstudio" else ""
+                kwargs["api_url"] = spec.get("url") or default_url
+                kwargs["api_key"] = spec.get("api_key", "")
+                if spec.get("headers"):
+                    kwargs["headers"] = spec["headers"]
+
+            try:
+                provider = create_llm_provider(provider=ptype, model=model, **kwargs)
+                entries.append(
+                    ProviderEntry(
+                        provider=provider,
+                        name=name,
+                        vision=bool(spec.get("vision", False)),
+                        fingerprint=_fingerprint(spec),
+                    )
+                )
+                logger.info(f"  [{len(entries)}] {name}: {ptype}/{model}")
+            except Exception as e:
+                logger.warning(f"Failed to create provider '{name}': {e}")
+
+        return entries
+
+    @staticmethod
+    def _build_provider_pool() -> Optional[ProviderPool]:
+        """Build a ProviderPool from providers.json that follows later edits to it."""
         providers_file = Config.PROVIDERS_FILE
-
-        if os.path.isfile(providers_file):
-            logger.info(f"Loading provider pool from {providers_file}")
-            with open(providers_file) as f:
-                data = json.load(f)
-
-            entries = []
-            for spec in data.get("providers", []):
-                name = spec.get("name", f"provider-{len(entries)}")
-                ptype = spec.get("type", "ollama")
-                model = spec.get("model", "")
-                if not model:
-                    logger.warning(f"Provider '{name}' has no model, skipping")
-                    continue
-
-                kwargs = {}
-                if ptype == "ollama":
-                    kwargs["base_url"] = spec.get("url", "http://localhost:11434")
-                    if spec.get("api_key"):
-                        kwargs["api_key"] = spec["api_key"]
-                    kwargs["auto_pull"] = spec.get("auto_pull", False)
-                    kwargs["temperature"] = spec.get(
-                        "temperature",
-                        getattr(Config, "LLM_TEMPERATURE", 0.7),
-                    )
-                    kwargs["strict_json"] = spec.get("strict_json", False)
-                    llm_think = getattr(Config, "LLM_THINK", None)
-                    if spec.get("think") is not None:
-                        kwargs["think"] = spec["think"]
-                    elif llm_think is not None:
-                        kwargs["think"] = llm_think
-                elif ptype in ("api", "lmstudio"):
-                    default_url = (
-                        "http://localhost:1234/v1" if ptype == "lmstudio" else ""
-                    )
-                    kwargs["api_url"] = spec.get("url") or default_url
-                    kwargs["api_key"] = spec.get("api_key", "")
-                    if spec.get("headers"):
-                        kwargs["headers"] = spec["headers"]
-
-                try:
-                    provider = create_llm_provider(
-                        provider=ptype, model=model, **kwargs
-                    )
-                    entries.append(
-                        ProviderEntry(
-                            provider=provider,
-                            name=name,
-                            vision=bool(spec.get("vision", False)),
-                        )
-                    )
-                    logger.info(f"  [{len(entries)}] {name}: {ptype}/{model}")
-                except Exception as e:
-                    logger.warning(f"Failed to create provider '{name}': {e}")
-
-            if entries:
-                return ProviderPool(entries)
-
-        return None
+        watcher = _ProvidersFile(providers_file)
+        data = watcher.read()
+        if data is None:
+            return None
+        logger.info(f"Loading provider pool from {providers_file}")
+        entries = ComponentFactory._pool_entries(data)
+        if not entries:
+            return None
+        return ProviderPool(entries, reload=watcher.changed_entries)
 
     @staticmethod
     def create_llm() -> Optional[LLM]:

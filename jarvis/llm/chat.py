@@ -31,32 +31,97 @@ logger = get_logger(__name__)
 ROOT_HISTORY_WINDOW = 3
 
 
-def describe_provider_error(error: Exception) -> str:
-    """A short, plain reason a provider call failed, for the user to read."""
-    text = str(error)
+# One provider per line in ProviderPool's "All LLM providers are unavailable"
+# error; a provider's own error can run onto further lines.
+_POOL_LINE = re.compile(
+    r"^\s+(?P<name>[^:\n]+): (?P<status>active|cooldown|exhausted|error)"
+    r"(?: \(retry in (?P<retry>\d+)s\))?(?: — (?P<error>.*))?$"
+)
+_DETAIL_LIMIT = 120
+
+
+def _pool_failures(text: str) -> list:
+    """(name, retry seconds, error text) per provider in a pool error, else []."""
+    failures: list = []
+    for line in text.splitlines():
+        match = _POOL_LINE.match(line)
+        if match:
+            failures.append([match["name"], match["retry"], match["error"] or ""])
+        elif failures and line.strip():
+            failures[-1][2] += "\n" + line.strip()
+    return failures
+
+
+def _clip(text: str) -> str:
+    if len(text) <= _DETAIL_LIMIT:
+        return text
+    return text[:_DETAIL_LIMIT].rsplit(" ", 1)[0].rstrip(" ,;:(") + "…"
+
+
+def _reason(text: str) -> str:
+    """A short, plain reason one call failed."""
     lowered = text.lower()
     host = re.search(r"lookup ([\w.-]+)", text)
-    retry = re.search(r"retry in (\d+)s", text)
-    if "no such host" in lowered or host:
-        reason = (
+    dns = (
+        "no such host",
+        "name resolution",
+        "name or service not known",
+        "nodename nor servname",
+    )
+    if host or any(k in lowered for k in dns):
+        return (
             f"could not look up {host.group(1)}: a DNS or network problem"
             if host
             else "a DNS or network problem"
         )
-    elif any(k in lowered for k in ("connection refused", "failed to connect")):
-        reason = "nothing answered at the model's address; is Ollama running?"
-    elif "timed out" in lowered or "timeout" in lowered:
-        reason = "the model did not answer in time"
-    elif any(k in lowered for k in ("401", "403", "unauthorized", "forbidden")):
-        reason = "the provider rejected the API key"
-    elif "429" in lowered or "rate limit" in lowered:
-        reason = "the provider is rate-limiting requests"
-    else:
-        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-        detail = lines[-1] if lines else type(error).__name__
-        reason = detail[:160]
+    if any(k in lowered for k in ("connection refused", "failed to connect")):
+        return "nothing answered at the model's address; is Ollama running?"
+    if "timed out" in lowered or "timeout" in lowered:
+        return "the model did not answer in time"
+    if "402" in lowered or "usage credits" in lowered or "payment required" in lowered:
+        return "the account's usage or credits are used up (402)"
+    if any(k in lowered for k in ("401", "403", "unauthorized", "forbidden")):
+        return "the provider rejected the API key"
+    if "429" in lowered or "rate limit" in lowered:
+        return "the provider is rate-limiting requests"
+    if "404" in lowered or "not found" in lowered:
+        return "the model is not available there (404): check its name, and that the account may use it"
+    lines = [
+        ln.strip()
+        for ln in text.splitlines()
+        if ln.strip() and not ln.strip().lower().startswith("for more information")
+    ]
+    return _clip(lines[-1]) if lines else "an unknown error"
+
+
+def _retry_in(seconds: int) -> str:
+    return f"{seconds} s" if seconds < 90 else f"{round(seconds / 60)} min"
+
+
+def describe_provider_error(error: Exception) -> str:
+    """A short, plain reason a provider call failed, for the user to read.
+
+    A pool error names each provider with its own reason and retry time: the
+    last line alone hid every provider but one, and its retry time came from
+    another provider's line (#315).
+    """
+    text = str(error)
+    failures = _pool_failures(text)
+    if failures:
+        parts = []
+        for name, retry, detail in failures:
+            if not detail and not retry:
+                continue
+            reason = _reason(detail) if detail else "resting after an error"
+            if retry and int(retry) > 0:
+                reason += f"; retrying it in {_retry_in(int(retry))}"
+            parts.append(f"{name}: {reason}")
+        if parts:
+            return "; ".join(parts) if len(parts) == 1 else " | ".join(parts)
+    reason = _reason(text) if text.strip() else type(error).__name__
+    retry = re.search(r"retry in (\d+)s", text)
     if retry and int(retry.group(1)) > 0:
-        reason += f"; retrying it in {retry.group(1)} s"
+        reason += f"; retrying it in {_retry_in(int(retry.group(1)))}"
     return reason
 
 
