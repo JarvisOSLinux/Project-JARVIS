@@ -165,6 +165,18 @@ the transport differs by OS because Windows lacks Unix domain sockets:
   endpoint proxies to LLM inference only (`chat`/`stream_chat`) — it does
   not go through ROOT/DISPATCH, MCP tool calls, or the TLA confirmation
   gate, so a client hitting it gets completions, not shell access.
+  ⚠️ **Second conditional exception:** `jarvis/server/ollama_compat.py`
+  adds an **opt-in** Ollama-compatible listener
+  (`JARVIS_OLLAMA_SERVER_ENABLED`, default `false`, port 11456) for clients
+  that speak Ollama's API. Same loopback rule and second opt-in, same
+  inference-only scope, and off loopback the same bearer token. **On
+  loopback it takes no token**, because Ollama clients cannot send one: every
+  local user and every same-user process can use the configured provider
+  through it, as with a stock Ollama. A web page in the user's browser cannot:
+  a tokenless bind refuses a `Host` that is not a loopback name (DNS
+  rebinding, Ollama's CVE-2024-28224) and an `Origin` that is not a loopback
+  page (a cross-site POST needs no preflight). Bodies over 32 MiB are refused
+  unread.
 
 ### Malicious Skill Marketplace
 
@@ -233,6 +245,12 @@ LLM interprets as a user command and routes to a shell server.
   — URL install, unreadable manifest, legacy tier vocabulary — cannot
   self-declare its way past confirmation. All four inputs raise only; a
   registry outage can therefore add prompts but never remove one.
+- FORBIDDEN is a hard block, not a prompt (#250, mcp-registry#88).
+  `dispatch_flow.dispatch_send` classifies every task before sending any, and
+  refuses the whole batch if one is FORBIDDEN, in every `CONFIRMATION_MODE`.
+  It runs ahead of `should_confirm`, the layer `allow_all` skips, and has no
+  override. Only a manifest `threat_level: "forbidden"` produces it today.
+  Confirmations persisted before this shipped are not re-checked on approval.
 - `jarvis/core/threat_level.py` — scans dispatched tool *parameters* for
   dangerous payloads (sudo, `rm -rf`, pipe-to-shell, …) and raises the
   confirmation threat level accordingly. (There is no scanner on direct user
@@ -251,7 +269,8 @@ LLM interprets as a user command and routes to a shell server.
 **Not yet mitigated:**
 - Injection arriving through LLM-processed external content (web pages,
   documents) that bypasses the direct-input scanner.
-- `CONFIRMATION_MODE=allow_all` disables all execution gates.
+- `CONFIRMATION_MODE=allow_all` disables every execution gate except the
+  FORBIDDEN block and standing constraints.
 
 **Recommendation:** Never set `CONFIRMATION_MODE=allow_all` in environments
 where JARVIS has web-browsing or file-reading capabilities.
@@ -326,7 +345,7 @@ into future LLM contexts through RAG retrieval.
 
 | Setting | Safe default | Risk if changed |
 |---|---|---|
-| `CONFIRMATION_MODE` | `smart` | `allow_all` disables all tool confirmation |
+| `CONFIRMATION_MODE` | `smart` | `allow_all` disables tool confirmation for every tier except FORBIDDEN, which is always refused |
 | `CONFIRMATION_TIMEOUT` | `0` (never auto-deny; confirmations stay pending until answered, #185) | a positive value auto-denies unanswered confirmations after N seconds — safer for unattended/headless hosts, at the cost of killing unattended legitimate work |
 | `JARVIS_SUDO_ENABLED` | `false` | `true` grants shell access to privileged commands |
 | `providers.json` | (empty) | API providers store keys in this file |
@@ -345,6 +364,8 @@ vulnerabilities.
 
 ## Changelog — corrected claims
 
+*2026-10-18:* FORBIDDEN is now an unconditional block (#250). The earlier statements that `allow_all` bypasses every tier, FORBIDDEN included, no longer hold: `dispatch_send` refuses a FORBIDDEN call before the confirmation gate in every mode. `allow_all` still bypasses ELEVATED and DANGEROUS.
+
 *2026-08-25:* cross-platform IPC disclosure corrected (#174). The Exposed-Instances section described only the Linux Unix-socket shape and claimed the endpoints are "not TCP ports", while Windows has shipped a loopback-TCP transport (`127.0.0.1`, ephemeral port) since the platform backend landed — accurate in `PORTABILITY-SPEC.md`/`architecture.md` but not in this canonical file. Reworded to state the real guarantee (never network-reachable on any platform: Unix socket on Linux/macOS, loopback-only TCP on Windows, contrasted with OpenClaw's `0.0.0.0`) and the honest per-OS same-machine story (filesystem `0600` + kernel peer credentials vs a per-startup, best-effort-ACL'd token). The same-user "Planned" block also mixed shipped and unshipped work: accept-time peer authentication on the **input and GUI** sockets (`SO_PEERCRED`/`LOCAL_PEERCRED`, Windows token) shipped 2026-07-16 (`cf7c056`) yet was still listed as planned — a genuine docs-lag now corrected. Peer auth on the **output** socket was NOT a docs-lag: it was unenforced until `c27b8a3` (this cycle, #174) added it, so `ipc_verify_peer` now guards all three accept sites. The only remaining planned item is the Windows named-pipe + DACL backend. This doc edit is itself documentation-only, but — unlike a pure docs-lag correction — part of what it now documents (the output-socket guard) is code that landed alongside it, not pre-existing behavior.
 
 *2026-08-17:* Threat 3/#223 — the registry trust tier now scales the TLA gate. `classify()` gains a fourth raise-only input: the dispatch path stamps `registry_tier` (the install-time `trustStatus` dmcp records in the local manifest — dmcp normalizes it at install and stamps `unknown` on URL/connect installs, closing a spoofing hole where a fetched manifest's self-declared tier persisted verbatim) and `registry_declared` (this tool has a manifest declaration), and `_tier_floor` returns ELEVATED unless the tier is `official`/`community` AND the tool is declared — so the measured 193-of-215-unconfirmed gap is closed by review-backed declarations rather than a longer name allowlist, and an unreviewed server cannot self-declare `safe`. Legacy tiers (`vetted`/`unreviewed`) deliberately land in the unknown bucket until a reinstall refreshes them. In the same pass the declaration merge became authoritative for `threat_level`/`confirmation_required`: `tools/list` cannot legitimately carry them, so a runtime value is server-controlled injection and no longer shadows the reviewed declaration (this supersedes the 2026-08-07 "never clobbers" wording below). Fail-toward-caution replaces fail-open: an unreadable manifest now floors the tool at ELEVATED instead of falling back to host floor + payload scan, still logged loud. Verified red-then-green in `tests/test_threat_level_manifest_merge.py` + `tests/test_threat_level.py` (13 fail against the unfixed gate) and against real installed manifests on a live box. Bare-metadata callers are unchanged — the caution default lives in the dispatch plumbing, not in `classify()`'s handling of absent metadata.
@@ -354,6 +375,8 @@ vulnerabilities.
 *2026-08-01 (later):* the dead path behind Threat 6's saturation face is repaired (#213). `LLM.ask()` now calls `_trim_root_history()` on every ROOT turn before appending the new input, instead of relying on `switch_mode("root")` — which early-returns on an unchanged mode and therefore never fired. The hot window (`ROOT_HISTORY_WINDOW`, 3 exchange pairs) is applied for real, and evicted pairs are compressed into the rolling summary by `compress_evicted()` rather than accumulating. `_trim_root_history()` rebinds `_histories["root"]`, so `ask()` re-aliases `chat_history` onto the new list; without that the appended turn would land on the discarded one. Threat 6's enforcement column and status are updated accordingly: the saturation face is now bounded by the window being applied and evicted turns being compressed, not merely by dispatch's signal window and contextor pruning. **The non-persistence face is unchanged and still open** — a rolling summary is lossy compression, not a durable constraint store, so a constraint can still be summarized away; the persistent constraint register enforced at the dispatch gate (#214) remains the mitigation and the highest-priority open item. Note the running cost this restores by design: once a conversation exceeds the window, each turn evicts a pair and `compress_evicted()` issues its own provider call, so a steady-state ROOT turn now costs one extra LLM round trip. Raising `ROOT_HISTORY_WINDOW` reduces how often that fires. Regression-tested in `tests/test_integration_llm.py::TestRootHistoryWindow` (history stays bounded, the rolling summary is populated, `chat_history` is not left aliasing the discarded list); the first two fail against the pre-fix code. `SessionManager.save_summary()` still has zero callers, so the summary remains in-memory and does not survive a restart — that half is untouched.
 
 *2026-08-01:* taxonomy merged back to **six** threats — Forgetful Context (the 2026-07 split-out) folded back into Bloated Context, which keeps its name, carries the "(novel)" marker, and now covers **both faces** of the context-lifecycle failure: constraints crowded out of a saturated window, and constraints never durably stored so a context refresh loses them structurally. They were one failure the whole time. A single dead code path produces both presentations: the daemon's two-tier context manager (hot window + rolling summary) never executes — `_trim_root_history()` (which drives `compress_evicted()`) is reachable only from `switch_mode("root")`, and `switch_mode()` early-returns when the mode is unchanged; the LLM never leaves root mode because the only switch-away lives in `_run_dispatch_subchain_legacy`, which has zero callers, so `_rolling_summary` stays empty and `SessionManager.save_summary()` (also zero callers) never fires. With that path dead, one config flag decides which face you see: `RESET_HISTORY_AFTER_RESPONSE=false` (default) grows history unbounded (constraints crowded out — the "bloated" face); set it true and history is cleared while the summary that should carry constraints forward is empty (constraints lost — the "forgetful" face). Accuracy fix in the same pass: Threat 6's enforcement no longer claims the "daemon two-tier context" mitigates it (that path does not run), the status now reads "partial — saturation bounded, non-persistence open," and the planned mitigation is a persistent constraint register in the daemon enforced at the dispatch gate (#214). The novelty claim — first identification of context-lifecycle failure, both saturation and non-persistence, as a security threat rather than a reliability quirk — is preserved on Threat 6. The 2026-07 split entries below are left intact as history.
+
+*2026-11-08:* a second opt-in listener, the Ollama-compatible endpoint (#279). Unlike the OpenAI one it has an anonymous mode, on loopback only, so the "no anonymous-access mode" sentence above holds for the OpenAI endpoint alone; the Host and Origin checks are what keep browser pages out of the tokenless bind.
 
 *2026-07-24:* the "no TCP port listener" property now carries an explicit conditional exception — `jarvis/server/openai_compat.py` adds an **opt-in** OpenAI-compatible TCP listener (`JARVIS_OPENAI_SERVER_ENABLED`, default `false`), so the unconditional claim holds only in the default configuration. Enabling it is gated by loopback-only binding unless `JARVIS_OPENAI_SERVER_ALLOW_NONLOCAL` is separately set, a mandatory per-request bearer token (`0600`, no anonymous mode), and inference-only scope — no ROOT/DISPATCH, no MCP tool calls, no TLA gate. The seven-threat taxonomy and the Threat 2/4/5 status corrections below are unchanged.
 

@@ -452,7 +452,10 @@ def _install_dirs() -> List[Path]:
     settings, and "no readable manifest" on each dispatch.
     """
     paths = _dmcp_paths()
-    dirs = [_dmcp_base_dir(paths) / "installed"]
+    # dmcp reports its install directory, which MCP_USER_INSTALL_DIR moves
+    # away from data_dir/installed; the guess is for a dmcp too old to say.
+    user = paths.get("install_dir")
+    dirs = [Path(user) if user else _dmcp_base_dir(paths) / "installed"]
     system = paths.get("system_install_dir") or (
         "/usr/share/mcp/installed" if sys.platform.startswith("linux") else ""
     )

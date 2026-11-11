@@ -83,6 +83,11 @@ def work_markup(
             f"  [dim]#{t.get('pid')}[/dim]"
             + (f"  [dim]running {ran}[/dim]" if ran else "")
         )
+        if t.get("awaiting_password"):
+            lines.append(
+                "    [bold yellow]waiting for the administrator password "
+                "on this computer[/bold yellow]"
+            )
         if t.get("detail"):
             lines.append(f"    [dim]{escape(t['detail'][:200])}[/dim]")
         if t.get("request"):

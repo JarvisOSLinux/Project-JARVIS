@@ -141,7 +141,7 @@ The Python dispatch layer bridges the ROOT LLM to the Rust `dispatch` binary.
 | `sudo_manager.py` | Enable/disable the `jarvis` sudoers drop-in (sudo capability toggle, #158) |
 | `voice_state.py` | `VoiceState` — formal voice/response session state machine |
 
-**Confirmation system:** 4-tier threat classification (SAFE/ELEVATED/DANGEROUS/FORBIDDEN) is enforced in userspace by the TLA gate (`jarvis/core/threat_level.py` + `ConfirmationManager`) per `CONFIRMATION_MODE`. The kernel policy engine (`jarvis_policy.c`, `/dev/jarvis`) mirrors the same tiers OS-side but is not consulted from the daemon's execution path today (`KernelClient.policy_check` has no callers). Channels in priority order: TUI modal > desktop notification (`notify-send` on Linux, `osascript` on macOS) > output socket > CLI stdin.
+**Confirmation system:** 4-tier threat classification (SAFE/ELEVATED/DANGEROUS/FORBIDDEN) is enforced in userspace by the TLA gate (`jarvis/core/threat_level.py` + `ConfirmationManager`) per `CONFIRMATION_MODE`; FORBIDDEN is refused in `dispatch_flow.dispatch_send` ahead of that gate in every mode, so `allow_all` cannot bypass it. The kernel policy engine (`jarvis_policy.c`, `/dev/jarvis`) mirrors the same tiers OS-side but is not consulted from the daemon's execution path today (`KernelClient.policy_check` has no callers). Channels in priority order: TUI modal > desktop notification (`notify-send` on Linux, `osascript` on macOS) > output socket > CLI stdin.
 
 ---
 

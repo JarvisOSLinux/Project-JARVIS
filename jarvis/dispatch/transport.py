@@ -94,6 +94,30 @@ def _desktop_session_env() -> Dict[str, str]:
     return {k: os.environ[k] for k in _DESKTOP_SESSION_VARS if os.environ.get(k)}
 
 
+# Where dmcp keeps its sources, installs and index, and its tunables. JARVIS
+# runs dmcp itself for installs and settings (with the full environment) and
+# through dispatch for search and tool calls, so without these the two disagree
+# whenever one is set: a server installed into MCP_USER_INSTALL_DIR was then
+# searched for and called in the default directories.
+_DMCP_VARS = (
+    "MCP_USER_SOURCES_PATH",
+    "MCP_USER_INSTALL_DIR",
+    "MCP_SYSTEM_SOURCES_PATH",
+    "MCP_SYSTEM_INSTALL_DIR",
+    "MCP_VECTOR_INDEX_DIR",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "XDG_CACHE_HOME",
+    "DMCP_ELEVATION_TIMEOUT_SECS",
+    "DMCP_SESSION_TTL_SECS",
+    "DMCP_ELICIT_MAX_PROMPTS",
+)
+
+
+def _dmcp_env() -> Dict[str, str]:
+    return {k: os.environ[k] for k in _DMCP_VARS if os.environ.get(k)}
+
+
 async def connect(adapter: Any, logger: Logger) -> None:
     """Connect DispatchAdapter to dispatch serve over stdio MCP."""
     try:
@@ -111,6 +135,7 @@ async def connect(adapter: Any, logger: Logger) -> None:
             env={
                 **get_default_environment(),
                 **_desktop_session_env(),
+                **_dmcp_env(),
                 "RUST_LOG": "dispatch=warn",
             },
         )

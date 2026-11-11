@@ -310,6 +310,21 @@ class Config:
         os.path.join(_DEFAULT_CONFIG_DIR, "openai_server_token"),
     )
 
+    # Ollama-compatible local HTTP endpoint (opt-in, off by default). Same
+    # security caveats as the OpenAI endpoint above; port 11456 sits next to
+    # Ollama's 11434 so both can run on one machine. Loopback needs no token
+    # (Ollama clients cannot send one); a non-loopback bind needs the second
+    # opt-in and then requires the bearer token. See
+    # jarvis/server/ollama_compat.py.
+    OLLAMA_SERVER_ENABLED = (
+        os.getenv("JARVIS_OLLAMA_SERVER_ENABLED", "false").lower() == "true"
+    )
+    OLLAMA_SERVER_HOST = os.getenv("JARVIS_OLLAMA_SERVER_HOST", "127.0.0.1")
+    OLLAMA_SERVER_PORT = int(os.getenv("JARVIS_OLLAMA_SERVER_PORT", "11456"))
+    OLLAMA_SERVER_ALLOW_NONLOCAL = (
+        os.getenv("JARVIS_OLLAMA_SERVER_ALLOW_NONLOCAL", "false").lower() == "true"
+    )
+
     # Remote phone access (`jarvis web`, opt-in, off by default). A separate
     # process, bound to loopback only and reached through `tailscale serve`;
     # identity comes from Tailscale, never from a token of our own. See
@@ -487,7 +502,9 @@ dispatch — Execute tool calls. Only after seeing SERVER_DOCS.
     answered or refused the password prompt on the user's machine. That is not a flag, a path or
     a command problem: do NOT retry, and do NOT vary the command (no added flags, no other
     arguments). Tell the user the password prompt on their computer went unanswered, and ask
-    whether to try again once they are there.
+    whether to try again once they are there. A WAITING_FOR_PASSWORD note means the same
+    thing while it is still pending: tell the user to approve the prompt; do not dispatch the
+    command again.
   interactive commands — a command that may pause for input (a "[Y/n]", a menu, a wizard) goes to
     run_job, not execute_command: run_job runs it on a terminal that outlives the call, and YOU
     choose the "job" name, so you can address the job before the call returns. ALWAYS set
@@ -741,7 +758,9 @@ dispatch — Execute tool calls. Only after seeing SERVER_DOCS.
     answered or refused the password prompt on the user's machine. That is not a flag, a path or
     a command problem: do NOT retry, and do NOT vary the command (no added flags, no other
     arguments). Tell the user the password prompt on their computer went unanswered, and ask
-    whether to try again once they are there.
+    whether to try again once they are there. A WAITING_FOR_PASSWORD note means the same
+    thing while it is still pending: tell the user to approve the prompt; do not dispatch the
+    command again.
   interactive commands — a command that may pause for input (a "[Y/n]", a menu, a wizard) goes to
     run_job, not execute_command: run_job runs it on a terminal that outlives the call, and YOU
     choose the "job" name, so you can address the job before the call returns. ALWAYS set
