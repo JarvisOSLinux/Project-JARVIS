@@ -42,21 +42,77 @@ class TestPolicy:
     @pytest.mark.parametrize(
         "kind",
         [
-            "approve_all_confirmations",
             "confirmation_response",
-            "set_setting",
-            "add_provider",
-            "edit_provider",
-            "remove_provider",
-            "get_settings",
             "shutdown_request",
             "setup_completed",
             "cancel_setup",
         ],
     )
-    def test_no_role_may_send_admin_messages(self, kind):
+    def test_no_role_may_send_what_belongs_to_the_laptop(self, kind):
         for role in wg.ROLES:
             assert not wg.sendable(role, {"type": kind})
+
+    @pytest.mark.parametrize(
+        "kind",
+        [
+            "approve_all_confirmations",
+            "get_settings",
+            "set_setting",
+            "list_providers",
+            "add_provider",
+            "edit_provider",
+            "remove_provider",
+            "move_provider",
+            "start_listening",
+            "stop_listening",
+        ],
+    )
+    def test_only_the_owners_phone_is_jarvis_app(self, kind):
+        assert wg.sendable("owner", {"type": kind})
+        assert not wg.sendable("trusted", {"type": kind})
+        assert not wg.sendable("guest", {"type": kind})
+
+    def test_approvals_cannot_be_turned_off_from_a_phone(self):
+        off = {"type": "set_setting", "key": "CONFIRMATION_MODE", "value": "allow_all"}
+        assert "laptop" in wg.refused(off)
+        assert wg.refused({**off, "value": "ask_all"}) is None
+        assert wg.refused({**off, "value": "smart"}) is None
+
+    def test_the_wake_sound_can_only_be_restored_from_a_phone(self):
+        chime = {"type": "set_setting", "key": "WAKE_CHIME_PATH"}
+        assert wg.refused({**chime, "value": "/etc/shadow"})
+        assert wg.refused({**chime, "value": ""}) is None
+        assert (
+            wg.refused({"type": "set_setting", "key": "OUTPUT_MODE", "value": "voice"})
+            is None
+        )
+
+    def test_a_phone_never_sees_a_providers_key(self):
+        listed = {
+            "type": "provider_list",
+            "providers": [
+                {
+                    "name": "nvidia",
+                    "type": "api",
+                    "model": "m",
+                    "api_key": "nvapi-secret",
+                },
+                {"name": "local", "type": "llamacpp", "model": "q"},
+            ],
+        }
+        shown = wg.shown_to(listed, "owner")
+        assert "nvapi-secret" not in json.dumps(shown)
+        assert shown["providers"][0] == {
+            "name": "nvidia",
+            "type": "api",
+            "model": "m",
+            "api_key_set": True,
+        }
+        assert shown["providers"][1]["api_key_set"] is False
+        assert (
+            listed["providers"][0]["api_key"] == "nvapi-secret"
+        ), "not changed in place"
+        assert wg.shown_to(listed, "trusted") is None
 
     def test_status_and_work_need_trust(self):
         for kind in ("get_status", "list_work"):
@@ -82,9 +138,11 @@ class TestPolicy:
         assert not wg.sendable("owner", {"type": ["message"]})
         assert not wg.sendable("owner", {})
 
-    def test_provider_and_settings_broadcasts_stay_off_the_wire(self):
-        assert not wg.relayable({"type": "provider_list", "providers": []})
-        assert not wg.relayable({"type": "settings"})
+    def test_provider_and_settings_broadcasts_reach_only_the_owner(self):
+        for kind in ("provider_list", "settings", "config_updated", "config_error"):
+            assert not wg.relayable({"type": kind})
+            assert not wg.relayable({"type": kind}, "trusted")
+            assert wg.relayable({"type": kind}, "owner")
         assert wg.relayable({"type": "response", "content": "x", "done": True})
 
     def test_shutdown_snapshot_is_cut_to_the_state(self):
@@ -113,7 +171,7 @@ class TestPolicy:
             "state": "idle",
         }
         assert wg.shown_to({"type": "action"}, "guest") is None
-        assert wg.shown_to({"type": "settings"}, "owner") is None
+        assert wg.shown_to({"type": "settings"}, "trusted") is None
         assert wg.shown_to(["not", "a", "dict"], "owner") is None
 
     def test_allow_all_switch_is_unsafe(self):
@@ -189,6 +247,36 @@ class TestAllowlistAndAudit:
         assert lines[0]["login"] == "yakup@example.com"
         assert "ghp_" not in lines[0]["content"]
         assert lines[1]["id"] == "c1"
+
+    def test_audit_names_changes_but_never_keys(self, tmp_path):
+        log = wg.AuditLog(str(tmp_path / "audit.jsonl"))
+        log.record(
+            "y@example.com",
+            "owner",
+            {"type": "set_setting", "key": "OUTPUT_MODE", "value": "voice"},
+        )
+        log.record(
+            "y@example.com",
+            "owner",
+            {
+                "type": "add_provider",
+                "ptype": "api",
+                "model": "m",
+                "url": "https://integrate.api.nvidia.com",
+                "api_key": "nvapi-" + "k" * 64,
+            },
+        )
+        log.record(
+            "y@example.com",
+            "owner",
+            {"type": "edit_provider", "name": "nvidia", "fields": {"key": "sk-x"}},
+        )
+        text = open(log.path).read()
+        assert "nvapi-" not in text and "sk-x" not in text
+        setting, added, edited = [json.loads(x) for x in text.splitlines()]
+        assert (setting["key"], setting["value"]) == ("OUTPUT_MODE", "voice")
+        assert added["provider"]["model"] == "m" and added["key_changed"] is True
+        assert edited["provider"] == {"name": "nvidia"} and edited["key_changed"]
 
 
 class FakeDaemon:
@@ -328,6 +416,65 @@ class TestRelay:
             assert not [
                 m for m in daemon.received if m["type"] == "approve_confirmation"
             ]
+        finally:
+            server.close()
+            await daemon.stop()
+
+    async def test_the_owner_adds_a_provider_and_gets_the_list_without_keys(
+        self, tmp_path
+    ):
+        daemon, server, url, _ = await _boot(tmp_path, {"o@example.com": "owner"})
+        add = {
+            "type": "add_provider",
+            "ptype": "api",
+            "model": "m",
+            "url": "https://integrate.api.nvidia.com",
+            "api_key": "nvapi-typed-on-the-phone",
+        }
+        try:
+            async with connect(
+                url, additional_headers=_wire(url, "o@example.com")
+            ) as ws:
+                await ws.recv()
+                await ws.send(json.dumps(add))
+                await asyncio.sleep(0.2)
+                assert add in daemon.received, "the key reaches the daemon"
+                await daemon.push(
+                    {
+                        "type": "provider_list",
+                        "providers": [{"name": "nvidia", "api_key": add["api_key"]}],
+                    }
+                )
+                seen = await _recv_types(ws, "provider_list")
+                assert seen[-1]["providers"] == [
+                    {"name": "nvidia", "api_key_set": True}
+                ]
+            assert add["api_key"] not in open(tmp_path / "audit.jsonl").read()
+        finally:
+            server.close()
+            await daemon.stop()
+
+    async def test_allow_all_from_the_owners_phone_never_reaches_the_daemon(
+        self, tmp_path
+    ):
+        daemon, server, url, _ = await _boot(tmp_path, {"o@example.com": "owner"})
+        try:
+            async with connect(
+                url, additional_headers=_wire(url, "o@example.com")
+            ) as ws:
+                await ws.recv()
+                await ws.send(
+                    json.dumps(
+                        {
+                            "type": "set_setting",
+                            "key": "CONFIRMATION_MODE",
+                            "value": "allow_all",
+                        }
+                    )
+                )
+                seen = await _recv_types(ws, "config_error")
+                assert seen[-1]["key"] == "CONFIRMATION_MODE"
+            assert all(m["type"] != "set_setting" for m in daemon.received)
         finally:
             server.close()
             await daemon.stop()

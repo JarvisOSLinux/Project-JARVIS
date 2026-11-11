@@ -114,7 +114,10 @@ that `tailscale serve` sets (and strips from client input), checks it
 against an allowlist with a role per account on every message, and refuses
 Funnel requests. Residual risk: any local process can send that header to
 the loopback port itself (see the module docstring of
-`jarvis/server/web_gateway.py`); do not enable it on a shared host. Whether
+`jarvis/server/web_gateway.py`); do not enable it on a shared host. Since
+2026-11-10 the owner's phone may change settings and providers, keys
+included; that adds nothing such a local process lacks, since the same user
+can already edit `jarvis.conf` and `providers.json`. Whether
 `tailscale serve` really strips a forged header is checked by V2 in
 `docs/web-gateway.md`, and has not yet been run.
 

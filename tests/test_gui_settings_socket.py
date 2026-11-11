@@ -271,3 +271,51 @@ class TestProcessGuiMessageRouting:
             )
         bc.assert_awaited_once()
         assert bc.await_args.args[1]["type"] == "provider_list"
+
+
+@pytest.mark.unit
+class TestChangesFromAPhone:
+    """A change made on a phone shows on the laptop (Yakup, 2026-11-10)."""
+
+    @staticmethod
+    def _app(label):
+        writer = Mock()
+        app = SimpleNamespace(_gui_clients={writer: label})
+        return app, writer
+
+    def test_a_phone_change_is_a_finished_block(self):
+        app, writer = self._app("web:yakup@github")
+        with patch.object(runtime_io.action_events, "start", return_value="r:1") as st:
+            with patch.object(runtime_io.action_events, "end") as end:
+                runtime_io.note_change_from_phone(
+                    app, writer, "Output mode set to voice"
+                )
+        st.assert_called_once_with(
+            app, "remote", "Output mode set to voice (from yakup@github's phone)"
+        )
+        end.assert_called_once_with(app, "r:1", "ok")
+
+    def test_the_app_and_the_tui_make_no_block(self):
+        for label in ("jarvis-app", "", "tui"):
+            app, writer = self._app(label)
+            with patch.object(runtime_io.action_events, "start") as st:
+                runtime_io.note_change_from_phone(app, writer, "x")
+            st.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_a_setting_changed_from_a_phone_names_itself(self):
+        app, writer = self._app("web:yakup@github")
+        with (
+            patch.object(Config, "OUTPUT_MODE", "text"),
+            patch("jarvis.cli._update_env_setting"),
+            patch.object(runtime_io, "broadcast_to_gui_clients", new=AsyncMock()),
+            patch.object(runtime_io, "note_change_from_phone") as noted,
+        ):
+            await runtime_io._process_gui_message(
+                app,
+                Mock(),
+                {"type": "set_setting", "key": "OUTPUT_MODE", "value": "voice"},
+                writer,
+            )
+        (_, _, what), _ = noted.call_args
+        assert what == "Replies set to Shown and spoken"

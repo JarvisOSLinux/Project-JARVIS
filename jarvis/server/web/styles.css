@@ -1191,6 +1191,9 @@ details.settings-group[open] > summary::before { content: '▾ '; }
 
 .input-wrapper {
     flex: 1;
+    /* An input keeps its default width otherwise, and on a phone that pushed
+       the send button past the screen's edge. */
+    min-width: 0;
     height: 44px;
     border-radius: 22px;
     background: var(--card);
@@ -1208,6 +1211,7 @@ details.settings-group[open] > summary::before { content: '▾ '; }
 
 #message-input {
     flex: 1;
+    min-width: 0;
     background: none;
     border: none;
     outline: none;
@@ -1447,6 +1451,8 @@ html, body { height: 100dvh; }
 
 /* Settings, providers, widgets, voice and shutdown belong to the desktop. */
 body.web .desktop-only { display: none !important; }
+/* The owner's controls: always in the app, in a browser for the owner only. */
+body:not(.can-manage) .manage-only { display: none !important; }
 
 #who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -1531,7 +1537,7 @@ body:not(.can-approve) #new-session-btn { display: none; }
     #permission-panel { width: 100%; max-width: 100%; }
     #work-panel { width: 100%; max-width: 100%; }
     details.action-block { margin-left: 0; max-width: 100%; }
-    #input-bar { padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); height: auto; }
+    #input-bar { padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); height: auto; gap: 8px; }
     .input-wrapper input { font-size: 16px; } /* 16px stops iOS zooming on focus */
     .icon-btn { min-width: 44px; min-height: 44px; }
     .permission-action { min-height: 48px; font-size: 15px; }

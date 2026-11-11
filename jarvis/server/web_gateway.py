@@ -19,10 +19,16 @@ gateway. This module is one, so the same threats are closed another way:
    ``Origin`` must equal ``Host`` and ``Host`` must end in the tailnet suffix.
    That closes cross-site WebSocket hijacking and DNS rebinding.
 5. **Remote mode always asks.** A session is refused while the daemon runs in
-   ``allow_all`` and ended if it switches to it. ``approve_all_confirmations``
-   is never relayed.
+   ``allow_all`` and ended if it switches to it, and no phone may switch it
+   there.
 6. **A written trail.** Every state-changing request is appended to the audit
-   file with the account that sent it.
+   file with the account that sent it, never with an API key.
+7. **The owner's phone is jarvis-app** (Yakup, 2026-11-10): settings,
+   providers with their keys, approve all, voice listening. Keys the daemon
+   lists are removed before they reach a phone; a key typed on the phone goes
+   to the daemon over Tailscale's encrypted link. What belongs to the laptop
+   stays there: shutting JARVIS down (nothing could start it again from a
+   phone), the wake sound's file, and server setups.
 
 Residual risk: any local process can connect to the loopback port and send the
 identity header itself. On a single-user host that is no more than the same
@@ -79,12 +85,30 @@ _TRUSTED_SENDS = _GUEST_SENDS | {
     "stop_all",
     "stop_task",
 }
-# Absent on purpose for every role: settings, providers, wake chime, setups,
-# shutdown_request, approve_all_confirmations, and the raw confirmation_response.
+_PROVIDER_CHANGES = frozenset(
+    {"add_provider", "edit_provider", "remove_provider", "move_provider"}
+)
+# The owner's phone is jarvis-app (docstring, point 7).
+_OWNER_SENDS = (
+    _TRUSTED_SENDS
+    | _PROVIDER_CHANGES
+    | {
+        "rename_session",
+        "delete_session",
+        "approve_all_confirmations",
+        "get_settings",
+        "set_setting",
+        "list_providers",
+        "start_listening",
+        "stop_listening",
+    }
+)
+# Absent on purpose for every role: shutdown_request, setups, and the raw
+# confirmation_response.
 ROLE_SENDS = {
     "guest": _GUEST_SENDS,
     "trusted": _TRUSTED_SENDS,
-    "owner": _TRUSTED_SENDS | {"rename_session", "delete_session"},
+    "owner": _OWNER_SENDS,
 }
 
 # What a phone may be shown. Anything else the daemon broadcasts (provider
@@ -112,10 +136,18 @@ RELAYED = frozenset(
 # providers, and work lists every running task (#267): for the roles trusted to
 # approve what JARVIS runs, not for a guest.
 _TRUSTED_RELAYED = RELAYED | {"action", "status", "work"}
+# Provider lists reach the owner without their keys (`shown_to`).
+_OWNER_RELAYED = _TRUSTED_RELAYED | {
+    "settings",
+    "config_updated",
+    "config_error",
+    "provider_list",
+    "provider_error",
+}
 RELAYED_FOR = {
     "guest": RELAYED,
     "trusted": _TRUSTED_RELAYED,
-    "owner": _TRUSTED_RELAYED,
+    "owner": _OWNER_RELAYED,
 }
 
 _AUDITED = frozenset(
@@ -132,7 +164,12 @@ _AUDITED = frozenset(
         "switch_session",
         "rename_session",
         "delete_session",
+        "approve_all_confirmations",
+        "set_setting",
+        "start_listening",
+        "stop_listening",
     }
+    | _PROVIDER_CHANGES
 )
 
 RATE_WINDOW_S = 10.0
@@ -148,6 +185,35 @@ def sendable(role: str, msg: Any) -> bool:
         and isinstance(msg.get("type"), str)
         and msg["type"] in ROLE_SENDS.get(role, frozenset())
     )
+
+
+def refused(msg: dict) -> Optional[str]:
+    """Why a phone may not send `msg` although its role may send the type."""
+    if msg.get("type") != "set_setting":
+        return None
+    key, value = msg.get("key"), msg.get("value")
+    if key == "CONFIRMATION_MODE" and value == "allow_all":
+        return (
+            "Approvals can't be turned off from a phone: remote access needs "
+            "them on. Change it at the laptop."
+        )
+    if key == "WAKE_CHIME_PATH" and value not in ("", None):
+        return (
+            "The wake sound is a file on the laptop; from a phone it can only "
+            "be restored to the default."
+        )
+    return None
+
+
+def without_keys(providers: Any) -> list:
+    """A provider list as a phone gets it: whether each has a key, not the key."""
+    shown = []
+    for p in providers if isinstance(providers, list) else []:
+        if isinstance(p, dict):
+            kept = {k: v for k, v in p.items() if k != "api_key"}
+            p = {**kept, "api_key_set": bool(p.get("api_key"))}
+        shown.append(p)
+    return shown
 
 
 def relayable(msg: Any, role: str = "guest") -> bool:
@@ -178,6 +244,8 @@ def shown_to(msg: Any, role: str) -> Optional[dict]:
             if isinstance(m, dict) and m.get("role") != "action"
         ]
         msg = {**msg, "messages": kept}
+    if msg.get("type") == "provider_list":
+        msg = {**msg, "providers": without_keys(msg.get("providers"))}
     return msg
 
 
@@ -258,9 +326,24 @@ class AuditLog:
             "role": role,
             "type": msg.get("type"),
         }
-        if msg.get("type") == "message":
+        kind = msg.get("type")
+        if kind == "message":
             text, _ = redact_secrets(str(msg.get("content", "")))
             entry["content"] = text[:200]
+        elif kind == "set_setting":
+            entry["key"] = str(msg.get("key"))[:64]
+            entry["value"] = redact_secrets(str(msg.get("value")))[0][:200]
+        elif kind in _PROVIDER_CHANGES:
+            fields = msg.get("fields") if isinstance(msg.get("fields"), dict) else {}
+            # The message's own "type" is not the provider's.
+            given = {**{k: v for k, v in msg.items() if k != "type"}, **fields}
+            entry["provider"] = {
+                k: redact_secrets(str(given[k]))[0][:200]
+                for k in ("name", "ptype", "type", "model", "url", "position")
+                if given.get(k) is not None
+            }
+            if given.get("api_key") or given.get("key"):
+                entry["key_changed"] = True
         elif "id" in msg:
             entry["id"] = str(msg["id"])[:64]
         if "approved_indices" in msg:
@@ -505,6 +588,18 @@ class Gateway:
                             {
                                 "type": "error",
                                 "message": f"'{kind}' is not available to a {role}",
+                            }
+                        )
+                    )
+                    continue
+                why = refused(msg)
+                if why is not None:
+                    await ws.send(
+                        json.dumps(
+                            {
+                                "type": "config_error",
+                                "key": msg.get("key"),
+                                "message": why,
                             }
                         )
                     )

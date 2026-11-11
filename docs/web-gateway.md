@@ -59,12 +59,25 @@ give `jarvis web allow` exactly what `tailscale whois <ip>` shows, or pass
 |---|---|
 | guest | chat, stop JARVIS (its running tasks keep running), see what JARVIS is doing (the activity line), sessions (their history without action blocks), confirmations and clients |
 | trusted | guest + approve or deny requests, create and switch sessions, see action blocks (tool parameters and output), status and running work, stop all (ends the running tasks too), stop one running task |
-| owner | trusted + rename and delete sessions |
+| owner | trusted + rename and delete sessions, and the rest of jarvis-app: every setting, providers (add, edit with their keys, remove, reorder), approve all, the laptop's wake word on or off |
 
-No role may change settings, providers, the wake chime or setups, shut JARVIS
-down, send a raw `confirmation_response`, or `approve_all_confirmations`.
+The owner's phone is jarvis-app (Yakup, 2026-11-10), less what belongs to the
+laptop itself. No role may shut JARVIS down (nothing could start it again from
+a phone), fill in a server's setup, send a raw `confirmation_response`, or
+choose a wake-sound file; a phone may restore the default sound. Approvals
+cannot be turned off from a phone: `set_setting` of `CONFIRMATION_MODE` to
+`allow_all` is refused before it reaches JARVIS.
+
+API keys: the daemon's provider lists reach the owner with each key removed
+and `api_key_set` in its place. A key typed on the phone goes to JARVIS over
+Tailscale's encrypted link and is written only to `providers.json`.
+
 Every request that changes something is appended to
-`$JARVIS_DATA_DIR/web_audit.jsonl` with the account and role.
+`$JARVIS_DATA_DIR/web_audit.jsonl` with the account and role: a setting with
+its value, a provider change with its name, type, model and URL and whether a
+key was given, never the key. A change made from a phone also shows on every
+screen as a finished block ("Replies set to Shown and spoken (from
+you@example.com's phone)"), kept with the session.
 
 ## Safety behaviour
 
@@ -72,7 +85,8 @@ Every request that changes something is appended to
 - Idle sessions close after `JARVIS_WEB_IDLE_TIMEOUT` seconds (default 900).
 - Revoking an account (`jarvis web revoke`) cuts its open sessions at their next message.
 - 20 requests per 10 seconds per connection; frames over 64 KB are refused.
-- The daemon's provider, settings and setup broadcasts are never forwarded.
+- The daemon's provider and settings broadcasts reach only the owner, provider
+  lists without their keys; setup broadcasts reach no one.
 
 ## Configuration
 

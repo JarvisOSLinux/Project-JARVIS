@@ -2,9 +2,10 @@
 
 // One page for jarvis-app and for `jarvis web` in a browser (Project-JARVIS
 // serves a pinned copy of this folder). transport.js says which, and carries
-// invoke/listen either way. Settings, providers, widgets, voice and daemon
-// shutdown are the desktop's (`desktop-only` in index.html); in a browser the
-// gateway's role decides what may be approved or managed.
+// invoke/listen either way. In a browser the gateway's role decides what may
+// be approved or managed; the owner's phone is the app (`manage-only` in
+// index.html), less what belongs to the laptop itself: widgets, choosing a
+// file, the socket and shutting JARVIS down (`desktop-only`).
 const { invoke, listen } = window.JarvisTransport;
 const IS_DESKTOP = window.JarvisTransport.kind === 'tauri';
 
@@ -933,7 +934,7 @@ function settingField(s) {
     } else if (s.kind === 'sound') {
         control = el('div', 'settings-value');
         show = (v) => { control.textContent = v; };
-        const choose = el('button', null, 'Choose file\u2026');
+        const choose = el('button', 'desktop-only', 'Choose file\u2026');
         choose.addEventListener('click', async () => {
             const path = await invoke('pick_wake_chime_file');
             if (path) changeSetting(s.key, path);
@@ -966,9 +967,61 @@ function changeSetting(key, value) {
 }
 
 // ── Providers ──────────────────────────────────────────────────────────────
+// A phone is told whether a provider has a key (`api_key_set`), never the key.
+function hasKey(p) {
+    return !!(p.api_key || p.api_key_set);
+}
+
 function providerLabel(p) {
     const temp = p.temperature != null ? `, temp ${p.temperature}` : '';
-    return `${p.type}/${p.model}${temp}`;
+    return `${p.type}/${p.model}${temp}${hasKey(p) ? ' \u00b7 key saved' : ''}`;
+}
+
+// What each type wants, as the TUI's provider form says it (provider_modal.py).
+const PROVIDER_HINTS = {
+    '': {
+        model: 'Choose a type first',
+        url: 'Choose a type first',
+        key: 'Choose a type first',
+    },
+    api: {
+        model: 'e.g. nvidia/nemotron-3.5-lightning-30b-a3b',
+        url: 'e.g. https://integrate.api.nvidia.com or http://localhost:11434 (Ollama)',
+        key: 'The provider\u2019s API key (blank for a server on this computer)',
+    },
+    llamacpp: {
+        model: 'A GGUF file, or Hugging Face user/repo:quant (Qwen/Qwen3-4B-GGUF:Q4_K_M)',
+        url: 'Blank: JARVIS runs it here',
+        key: 'Not needed for a local model',
+    },
+    'ollama-cloud': {
+        model: 'e.g. gpt-oss:120b',
+        url: 'Blank: https://ollama.com',
+        key: 'Your ollama.com key (blank: OLLAMA_API_KEY)',
+    },
+    lmstudio: {
+        model: 'The model loaded in LM Studio',
+        url: 'Blank: http://localhost:1234/v1',
+        key: 'Not needed',
+    },
+};
+
+function isLoopback(url) {
+    try {
+        return ['localhost', '127.0.0.1', '[::1]'].includes(new URL(url).hostname);
+    } catch (_) {
+        return false;
+    }
+}
+
+function showProviderHints() {
+    const hints = PROVIDER_HINTS[providerFormType.value] || PROVIDER_HINTS[''];
+    providerFormModel.placeholder = hints.model;
+    providerFormUrl.placeholder = hints.url;
+    const editing = cachedProviders.find((p) => p.name === editingProviderName);
+    providerFormKey.placeholder = editing && hasKey(editing)
+        ? 'A key is saved; type a new one to replace it'
+        : hints.key;
 }
 
 function buildProviderItem(p, index) {
@@ -1031,13 +1084,14 @@ function openProviderForm(existing) {
     editingProviderName = existing ? existing.name : null;
     providerFormError.textContent = '';
     providerFormError.classList.remove('visible');
-    providerFormType.value = existing?.type || 'ollama';
+    providerFormType.value = existing?.type || '';
     providerFormModel.value = existing?.model || '';
     providerFormName.value = existing?.name || '';
     providerFormUrl.value = existing?.url || '';
     providerFormTemperature.value = existing?.temperature ?? '';
     providerFormKey.value = '';
     providerFormSaveBtn.textContent = existing ? 'Save' : 'Add';
+    showProviderHints();
     providerForm.classList.remove('hidden');
     settingsAddProviderBtn.classList.add('hidden');
 }
@@ -1058,9 +1112,14 @@ async function saveProviderForm() {
     if (!model) return showProviderFormError('Model is required.');
 
     const ptype = providerFormType.value;
+    if (!ptype) return showProviderFormError('Choose a type.');
     const apiKey = providerFormKey.value.trim();
-    if (ptype === 'api' && !apiKey && !editingProviderName) {
-        return showProviderFormError('API key is required for cloud providers.');
+    const typedUrl = providerFormUrl.value.trim();
+    if (ptype === 'api' && !typedUrl) {
+        return showProviderFormError(`An API provider needs its URL (${PROVIDER_HINTS.api.url}).`);
+    }
+    if (ptype === 'api' && !apiKey && !editingProviderName && !isLoopback(typedUrl)) {
+        return showProviderFormError('A cloud provider needs its API key.');
     }
 
     let temperature = null;
@@ -1309,6 +1368,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     sendBtn.addEventListener('click', sendMessage);
     micBtn.addEventListener('click', toggleListening);
+    // In a browser the button turns the laptop's wake word on or off.
+    if (!IS_DESKTOP) {
+        micBtn.title = 'Wake word on the laptop: on or off';
+        micBtn.setAttribute('aria-label', micBtn.title);
+    }
+    providerFormType.addEventListener('change', showProviderHints);
     stopBtn.addEventListener('click', stopReply);
     notice.addEventListener('click', () => showNotice(''));
     // On a phone a panel covers the screen, so each has its own way out.

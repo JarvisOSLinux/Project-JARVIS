@@ -22,9 +22,11 @@
         return;
     }
 
-    // Tauri command -> socket message. Desktop-only commands (settings,
-    // providers, widgets, voice, daemon shutdown) are absent: the page hides
-    // their controls in a browser, and the gateway refuses them anyway.
+    // Tauri command -> socket message. What belongs to the laptop itself
+    // (widgets, file pickers, daemon shutdown) is absent: the page hides those
+    // controls in a browser, and the gateway refuses them anyway. Settings,
+    // providers, approve all and voice listening are the owner's; the gateway
+    // refuses them to the other roles.
     const COMMANDS = {
         send_message:               (a) => ({ type: 'message', content: a.content }),
         stop_stream:                ()  => ({ type: 'stop_stream' }),
@@ -46,6 +48,27 @@
         // The daemon's health check; `get_status` below is the connection's.
         get_health:                 (a) => ({ type: 'get_status', full: !!a.full }),
         list_work:                  ()  => ({ type: 'list_work' }),
+        approve_all_confirmations:  ()  => ({ type: 'approve_all_confirmations' }),
+        get_settings:               ()  => ({ type: 'get_settings' }),
+        set_setting:                (a) => ({ type: 'set_setting', key: a.key, value: a.value }),
+        list_providers:             ()  => ({ type: 'list_providers' }),
+        add_provider:               (a) => ({
+            type: 'add_provider', ptype: a.ptype, model: a.model, name: a.name,
+            url: a.url, api_key: a.apiKey, temperature: a.temperature,
+        }),
+        edit_provider:              (a) => ({ type: 'edit_provider', name: a.name, fields: a.fields }),
+        remove_provider:            (a) => ({ type: 'remove_provider', name: a.name }),
+        move_provider:              (a) => ({ type: 'move_provider', name: a.name, position: a.position }),
+        // The laptop's wake-word listener, as the app's mic button toggles it.
+        toggle_listening:           ()  => ({ type: state === 'listening' ? 'stop_listening' : 'start_listening' }),
+    };
+
+    // Answered here, as the Tauri side answers them from the app's own state.
+    const LOCAL = {
+        get_status:                  () => ({ connected: connected(), state }),
+        get_connection_info:         () => location.host,
+        get_quit_on_daemon_shutdown: () => false,
+        list_widgets:                () => [],
     };
 
     const listeners = {};
@@ -68,8 +91,7 @@
     }
 
     async function invoke(command, args) {
-        // Answered here, as the Tauri side answers it from its own state.
-        if (command === 'get_status') return { connected: connected(), state };
+        if (LOCAL[command]) return LOCAL[command]();
         const build = COMMANDS[command];
         if (!build) throw new Error('Not available in the browser: ' + command);
         if (connected()) socket.send(JSON.stringify(build(args || {})));
@@ -95,6 +117,11 @@
         case 'session_switched':     return emit('ipc-session-switched', { session: msg.session, messages: msg.messages || [] });
         case 'session_error':        return emit('ipc-session-error', msg.message);
         case 'client_list':          return emit('ipc-client-list', msg.clients || []);
+        case 'settings':             return emit('ipc-settings', msg.settings || []);
+        case 'config_updated':       return emit('ipc-config-updated', { key: msg.key, value: msg.value });
+        case 'config_error':         return emit('ipc-config-error', { key: msg.key, message: msg.message || '' });
+        case 'provider_list':        return emit('ipc-provider-list', msg.providers || []);
+        case 'provider_error':       return emit('ipc-provider-error', msg.message || '');
         case 'error':                return emit('ipc-error', msg.message);
         case 'gateway':              return emit('ipc-gateway', msg);
         case 'DAEMON_SHUTDOWN':      return emit('ipc-daemon-shutdown', msg);

@@ -35,7 +35,7 @@
             <span id="permission-indicator"></span>
             <span id="permission-count"></span>
         </button>
-        <button class="icon-btn desktop-only" id="settings-btn" title="Settings" aria-label="Settings"><svg class="icon"><use href="#i-settings"/></svg></button>
+        <button class="icon-btn manage-only" id="settings-btn" title="Settings" aria-label="Settings"><svg class="icon"><use href="#i-settings"/></svg></button>
         <div id="status-indicator">
             <div id="status-dot"></div>
             <span id="status-label">Offline</span>
@@ -56,7 +56,7 @@
     <aside id="permission-panel">
         <div id="permission-panel-header">
             <span id="permission-panel-title">Permission Requests</span>
-            <button class="desktop-only" id="approve-all-btn" title="Approve all" disabled>Approve All</button>
+            <button class="manage-only" id="approve-all-btn" title="Approve all" disabled>Approve All</button>
             <button class="panel-close" id="permission-close" title="Close" aria-label="Close"><svg class="icon"><use href="#i-x"/></svg></button>
         </div>
         <div id="permission-list"></div>
@@ -83,7 +83,7 @@
         <div id="settings-tabs">
             <button class="settings-tab active" id="settings-tab-general-btn" data-tab="general">General</button>
             <button class="settings-tab" id="settings-tab-providers-btn" data-tab="providers">Providers</button>
-            <button class="settings-tab" id="settings-tab-widgets-btn" data-tab="widgets">Widgets</button>
+            <button class="settings-tab desktop-only" id="settings-tab-widgets-btn" data-tab="widgets">Widgets</button>
         </div>
 
         <div id="settings-tab-general" class="settings-tab-panel">
@@ -98,12 +98,12 @@
             <!-- JARVIS's own settings, drawn from its list (get_settings) -->
             <div id="settings-catalog"></div>
 
-            <div class="settings-section">
+            <div class="settings-section desktop-only">
                 <label class="settings-label">Connection</label>
                 <div id="settings-socket-path" class="settings-value settings-value-mono"></div>
             </div>
 
-            <div class="settings-section">
+            <div class="settings-section desktop-only">
                 <label class="settings-label">Daemon</label>
                 <div class="settings-row settings-row-spread">
                     <label class="settings-checkbox-label" for="settings-quit-on-shutdown">
@@ -120,29 +120,32 @@
         <div id="settings-tab-providers" class="settings-tab-panel">
             <div id="provider-list"></div>
             <button id="settings-add-provider-btn">Add Provider</button>
-            <div class="settings-hint">Provider changes take effect after restarting JARVIS.</div>
+            <div class="settings-hint">JARVIS tries providers from the top and moves to the next when one fails. A change applies from its next request.</div>
 
             <div id="provider-form" class="hidden">
                 <label class="settings-label" for="provider-form-type">Type</label>
                 <select id="provider-form-type">
-                    <option value="ollama">Ollama (local)</option>
-                    <option value="api">API (cloud)</option>
+                    <option value="">Choose a type&hellip;</option>
+                    <option value="api">API (cloud, or a local server)</option>
+                    <option value="llamacpp">Local model (llama.cpp)</option>
+                    <option value="ollama-cloud">Ollama Cloud</option>
+                    <option value="lmstudio">LM Studio</option>
                 </select>
 
                 <label class="settings-label" for="provider-form-model">Model</label>
-                <input id="provider-form-model" placeholder="e.g. qwen3:8b or gpt-4o">
+                <input id="provider-form-model" placeholder="e.g. nvidia/nemotron-3.5-lightning-30b-a3b">
 
                 <label class="settings-label" for="provider-form-name">Name (optional)</label>
                 <input id="provider-form-name" placeholder="auto-generated if blank">
 
                 <label class="settings-label" for="provider-form-url">URL</label>
-                <input id="provider-form-url" placeholder="http://localhost:11434">
+                <input id="provider-form-url" placeholder="Choose a type first">
 
                 <label class="settings-label" for="provider-form-temperature">Temperature (0.0&ndash;2.0)</label>
                 <input id="provider-form-temperature" placeholder="0.7">
 
                 <label class="settings-label" for="provider-form-key">API Key</label>
-                <input id="provider-form-key" type="password" placeholder="sk-&hellip; (leave blank for Ollama)">
+                <input id="provider-form-key" type="password" autocomplete="off" placeholder="Not needed for a local model">
 
                 <div id="provider-form-error" class="settings-error"></div>
 
@@ -203,7 +206,7 @@
                 disabled
             >
         </div>
-        <button class="icon-btn desktop-only" id="mic-btn" title="Toggle voice input" aria-label="Voice input"><svg class="icon"><use href="#i-mic"/></svg></button>
+        <button class="icon-btn manage-only" id="mic-btn" title="Toggle voice input" aria-label="Voice input"><svg class="icon"><use href="#i-mic"/></svg></button>
         <button class="icon-btn" id="stop-btn" title="Stop JARVIS (its running tasks keep running)" aria-label="Stop"><svg class="icon"><use href="#i-stop"/></svg></button>
         <button class="icon-btn" id="send-btn" title="Send message" aria-label="Send" disabled><svg class="icon"><use href="#i-arrow-up"/></svg></button>
     </div>

@@ -1,12 +1,12 @@
 {
   "repo": "JarvisOSLinux/jarvis-app",
   "path": "src",
-  "commit": "eaf69acc553482fbd1eacfef01b79cfd5a86c884",
+  "commit": "c82f8d35066836f0d80965c9f7808979a4b8570b",
   "files": {
-    "index.html": "bd547e52ced1543714ca551051859c0e3ac0469fdc729339c96bf762ca2cca39",
-    "main.js": "a7921fb3fb32f178a7b053bbebff41cb3184c1d97986f68337a66d6f8536a517",
+    "index.html": "fbc54e745fb556d4ddf24cfefc8f57d6da8cbab8d76496b558b845fc1696ca40",
+    "main.js": "f37ad22e91e2bc1b864a90a17d17e030f9be39a3b2a264ea638a411153ab700f",
     "markdown.js": "eab8a47cbeddf8e54581ff8f1e2c6218089652bc0db343ae893498726d3f33e5",
-    "styles.css": "8523a32f69cfa43438c54980fb9e070b6993b18370e53c4716703a8d6db6d38e",
-    "transport.js": "a988442926476c4a909ed6a28061179ccf7735c296660e6d128de03762059eef"
+    "styles.css": "120ca27f06644b80e37b182b722d5bb5fee285417cb966b2a9d3a1b1bcca79f7",
+    "transport.js": "61089ad269562df8b9d514adad04e6a7c5147103e4314d54391f940de0e23de9"
   }
 }

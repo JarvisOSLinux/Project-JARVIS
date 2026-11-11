@@ -9,7 +9,7 @@
 #                                    self-hosted Headscale server
 #
 # Local modes treat every request as one throwaway owner account and use a
-# temporary allowlist, so your real one is untouched. Never use them on a
+# temporary allowlist and audit file, so your real ones are untouched. Never use them on a
 # shared machine. --tailscale uses your real allowlist (jarvis web allow ...)
 # and adds your own Tailscale account as owner when the list is empty.
 #
@@ -147,6 +147,8 @@ fi
 if [ "$MODE" = local ]; then
     LOGIN="dev@localhost"
     export JARVIS_WEB_ALLOWLIST_FILE="$WORK/allowlist.json"
+    # The throwaway account's requests stay out of the real audit trail.
+    export JARVIS_WEB_AUDIT_FILE="$WORK/audit.jsonl"
     "$BIN/jarvis" web allow "$LOGIN" owner >/dev/null
     URL="http://localhost:$PORT"
     echo "==> $URL  (every request is $LOGIN, owner)"

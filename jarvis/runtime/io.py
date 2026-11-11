@@ -466,11 +466,13 @@ async def _process_gui_message(
         if app.voice_manager and hasattr(app.voice_manager, "activation"):
             app.voice_manager.activation.start_listening()
         await set_gui_state(app, "listening")
+        note_change_from_phone(app, writer, "Voice listening turned on")
 
     elif msg_type == "stop_listening":
         if app.voice_manager and hasattr(app.voice_manager, "activation"):
             app.voice_manager.activation.stop_listening()
         await set_gui_state(app, "idle")
+        note_change_from_phone(app, writer, "Voice listening turned off")
 
     elif msg_type == "stop_stream":
         await broadcast_to_gui_clients(
@@ -496,16 +498,38 @@ async def _process_gui_message(
         await _handle_pull_model(msg, writer)
 
     elif msg_type == "add_provider":
-        await _reply_or_broadcast_providers(app, writer, _handle_add_provider(msg))
+        await _reply_or_broadcast_providers(
+            app,
+            writer,
+            _handle_add_provider(msg),
+            f"Provider {msg.get('ptype')}/{msg.get('model')} added",
+        )
 
     elif msg_type == "edit_provider":
-        await _reply_or_broadcast_providers(app, writer, _handle_edit_provider(msg))
+        fields = msg.get("fields") if isinstance(msg.get("fields"), dict) else {}
+        await _reply_or_broadcast_providers(
+            app,
+            writer,
+            _handle_edit_provider(msg),
+            f"Provider {msg.get('name')} changed"
+            + (", with a new API key" if fields.get("key") else ""),
+        )
 
     elif msg_type == "remove_provider":
-        await _reply_or_broadcast_providers(app, writer, _handle_remove_provider(msg))
+        await _reply_or_broadcast_providers(
+            app,
+            writer,
+            _handle_remove_provider(msg),
+            f"Provider {msg.get('name')} removed",
+        )
 
     elif msg_type == "move_provider":
-        await _reply_or_broadcast_providers(app, writer, _handle_move_provider(msg))
+        await _reply_or_broadcast_providers(
+            app,
+            writer,
+            _handle_move_provider(msg),
+            f"Provider {msg.get('name')} moved to position {msg.get('position')}",
+        )
 
     elif msg_type in ("stop", "stop_all"):
         from .stop import handle_command
@@ -579,6 +603,35 @@ async def _handle_set_setting(
         await _gui_write(writer, {"type": "config_error", "key": key, "message": error})
         return
     await broadcast_setting(app, key, val)
+    note_change_from_phone(app, writer, _setting_change(key, val))
+
+
+def _setting_change(key: str, val: Any) -> str:
+    setting = settings.find(key)
+    if setting is None:
+        return f"{key} set to {val}"
+    if setting.kind == "select":
+        val = dict(setting.options).get(val, val).split(":")[0]
+    elif setting.kind == "bool":
+        val = "on" if val else "off"
+    elif setting.kind == "sound" and not val:
+        val = "the default"
+    return f"{setting.label} set to {val}"
+
+
+def note_change_from_phone(app: Any, writer: Any, what: str) -> None:
+    """A change made on a phone shows on every screen and stays with the session.
+
+    `jarvis web` labels each phone's connection ``web:<login>``. The laptop may
+    be left alone while a phone changes how it behaves, so the change is a
+    finished block, like any other thing done, rather than a passing line.
+    """
+    clients = getattr(app, "_gui_clients", None)
+    label = clients.get(writer, "") if isinstance(clients, dict) else ""
+    if not label.startswith("web:"):
+        return
+    action = action_events.start(app, "remote", f"{what} (from {label[4:]}'s phone)")
+    action_events.end(app, action, "ok")
 
 
 async def broadcast_setting(app: Any, key: str, val: Any) -> None:
@@ -715,7 +768,7 @@ async def _status_reply(app: Any, full: bool) -> dict:
 
 
 async def _reply_or_broadcast_providers(
-    app: Any, writer: asyncio.StreamWriter, response: dict
+    app: Any, writer: asyncio.StreamWriter, response: dict, change: str = ""
 ) -> None:
     """Provider config is shared daemon state (providers.json), so a
     successful mutation broadcasts the refreshed list to every GUI client,
@@ -725,6 +778,7 @@ async def _reply_or_broadcast_providers(
         await _gui_write(writer, response)
     else:
         await broadcast_to_gui_clients(app, response)
+        note_change_from_phone(app, writer, change)
 
 
 # ---------------------------------------------------------------------------
