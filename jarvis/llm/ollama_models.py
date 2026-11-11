@@ -7,12 +7,47 @@ Cloud-hosted models are used where they are listed and cannot be pulled.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional
+import json
+from typing import Any, Callable, Dict, Iterator, List, Optional
 
-from .providers.ollama import _get_shared_client
+import httpx
 
 DEFAULT_URL = "http://localhost:11434"
 CLOUD_URL = "https://ollama.com"
+
+
+class _OllamaHttp:
+    """The two Ollama endpoints the picker needs (``/api/tags``, ``/api/pull``).
+
+    JARVIS runs its own models and no longer depends on the ``ollama`` package,
+    but the picker still lists and pulls from an Ollama server the user runs.
+    """
+
+    def __init__(self, url: str, api_key: Optional[str]) -> None:
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        self._http = httpx.Client(base_url=url, headers=headers, timeout=None)
+
+    def list(self) -> Dict[str, Any]:
+        resp = self._http.get("/api/tags", timeout=30)
+        resp.raise_for_status()
+        return resp.json()
+
+    def pull(self, model: str, stream: bool = True) -> Iterator[Dict[str, Any]]:
+        with self._http.stream(
+            "POST", "/api/pull", json={"model": model, "stream": stream}
+        ) as resp:
+            resp.raise_for_status()
+            for line in resp.iter_lines():
+                if not line:
+                    continue
+                chunk = json.loads(line)
+                if chunk.get("error"):
+                    raise RuntimeError(chunk["error"])
+                yield chunk
+
+
+def _get_shared_client(url: str, api_key: Optional[str]) -> _OllamaHttp:
+    return _OllamaHttp(url, api_key)
 
 
 def is_cloud(url: Optional[str]) -> bool:
