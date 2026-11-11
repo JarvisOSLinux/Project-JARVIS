@@ -619,7 +619,7 @@ function renderWork(work) {
             return row;
         }
         const head = el('div', 'work-item-head');
-        head.append(el('div', 'work-item-title', `⋯ ${t.title}`));
+        head.append(el('div', 'work-item-title', `${t.awaiting_password ? '⏳' : '⋯'} ${t.title}`));
         // Kills this task only; a package manager asks for a second press (#270).
         const stopTask = el('button', 'task-stop-btn', 'Stop');
         stopTask.title = 'End this task';
@@ -629,6 +629,9 @@ function renderWork(work) {
         });
         head.append(stopTask);
         row.append(head);
+        if (t.awaiting_password) {
+            row.append(el('div', 'work-item-alert', 'Waiting for the administrator password on the host computer'));
+        }
         const meta = [t.running_for != null ? `running ${duration(t.running_for)}` : '', t.request ? `for: ${t.request}` : '']
             .filter(Boolean).join(' · ');
         if (meta) row.append(el('div', 'work-item-meta', meta));
