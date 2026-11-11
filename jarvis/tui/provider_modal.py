@@ -24,6 +24,14 @@ class ProviderModalResult:
 
 
 _OLLAMA_DEFAULT_URL = "http://localhost:11434"
+_URL_HINT = {
+    "ollama": f"blank = {_OLLAMA_DEFAULT_URL}",
+    "api": "e.g. https://integrate.api.nvidia.com or https://openrouter.ai/api",
+}
+
+
+def _is_local_ollama(url: str) -> bool:
+    return not url or url.rstrip("/") in (_OLLAMA_DEFAULT_URL, "http://127.0.0.1:11434")
 
 
 class ProviderModal(ModalScreen[ProviderModalResult]):
@@ -120,8 +128,12 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
         super().__init__()
         self._mode = mode
         self._existing = existing or {}
-        self._ptype = self._existing.get("type", "ollama")
+        # A new provider starts with no type chosen: the old Ollama default
+        # (with its localhost URL filled in) quietly saved an NVIDIA model and
+        # key as an Ollama provider pointing at the laptop (#316).
+        self._ptype = self._existing.get("type", "ollama" if existing else "")
         self._key_revealed = False
+        self._warned = False
 
     def compose(self) -> ComposeResult:
         ex = self._existing
@@ -130,9 +142,7 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
             if self._mode == "add"
             else f"Edit Provider: {ex.get('name', '')}"
         )
-        default_url = ex.get(
-            "url", _OLLAMA_DEFAULT_URL if self._ptype == "ollama" else ""
-        )
+        default_url = ex.get("url", "")
 
         with Vertical(id="provider-dialog"):
             with VerticalScroll(id="form-scroll"):
@@ -142,9 +152,10 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
                 with Horizontal(id="type-row"):
                     yield Select(
                         [("Ollama (local)", "ollama"), ("API (cloud)", "api")],
-                        value=self._ptype,
+                        value=self._ptype or Select.NULL,
+                        prompt="Choose a type",
                         id="input-type",
-                        allow_blank=False,
+                        allow_blank=not self._ptype,
                     )
 
                 yield Label("Model", classes="field-label")
@@ -166,7 +177,7 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
                 yield Label("URL", classes="field-label")
                 yield Input(
                     value=default_url,
-                    placeholder=_OLLAMA_DEFAULT_URL,
+                    placeholder=_URL_HINT.get(self._ptype, "choose a type first"),
                     id="input-url",
                 )
 
@@ -199,18 +210,42 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
                 with Horizontal(id="footer"):
                     yield Button("Cancel", id="btn-cancel", variant="default")
                     yield Button(
-                        "Add" if self._mode == "add" else "Save",
+                        self._confirm_label(),
                         id="btn-confirm",
                         variant="primary",
                     )
 
+    def _confirm_label(self) -> str:
+        return "Add" if self._mode == "add" else "Save"
+
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id != "input-type":
             return
-        self._ptype = str(event.value)
+        self._warned = False
+        self._ptype = "" if event.value is Select.NULL else str(event.value)
         url_input = self.query_one("#input-url", Input)
-        if not url_input.value or url_input.value == _OLLAMA_DEFAULT_URL:
-            url_input.value = _OLLAMA_DEFAULT_URL if self._ptype == "ollama" else ""
+        url_input.placeholder = _URL_HINT.get(self._ptype, "choose a type first")
+        if url_input.value == _OLLAMA_DEFAULT_URL and self._ptype != "ollama":
+            url_input.value = ""
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        self._warned = False
+
+    def _mix_up(self, ptype: str, url: str, api_key: str) -> str:
+        """A likely wrong combination, worth one look before it is saved."""
+        if ptype == "ollama" and api_key and _is_local_ollama(url):
+            return (
+                "This is a local Ollama provider with an API key. For a cloud "
+                "service (NVIDIA, OpenRouter, …) choose API (cloud) and give its URL."
+            )
+        if ptype == "api" and url and _is_local_ollama(url):
+            return "That is Ollama's address on this computer; Ollama (local) may be what you want."
+        return ""
+
+    def _show_error(self, text: str) -> None:
+        err = self.query_one("#error-label", Static)
+        err.update(text)
+        err.add_class("visible")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-cancel":
@@ -238,14 +273,26 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
             err.add_class("visible")
             return
 
-        ptype = str(self.query_one("#input-type", Select).value)
+        chosen = self.query_one("#input-type", Select).value
+        if chosen is Select.NULL:
+            self._show_error("Choose a type: Ollama (local) or API (cloud).")
+            return
+        ptype = str(chosen)
         url = self.query_one("#input-url", Input).value.strip()
         api_key = self.query_one("#input-key", Input).value.strip()
 
+        if ptype == "api" and not url:
+            self._show_error(f"A cloud provider needs its URL ({_URL_HINT['api']}).")
+            return
         if ptype == "api" and not api_key:
-            err = self.query_one("#error-label", Static)
-            err.update("API key is required for cloud providers.")
-            err.add_class("visible")
+            self._show_error("API key is required for cloud providers.")
+            return
+        warning = self._mix_up(ptype, url, api_key)
+        if warning and not self._warned:
+            self._warned = True
+            self._show_error(
+                f"{warning} Press {self._confirm_label()} again to keep it."
+            )
             return
 
         temperature: Optional[float] = None
