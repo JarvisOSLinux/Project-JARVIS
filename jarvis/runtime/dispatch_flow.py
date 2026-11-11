@@ -163,8 +163,28 @@ async def run_dispatch_subchain(
 _STATEFUL_BY_SERVER: dict[str, bool] = {}
 
 
+async def _dispatch_manifest(
+    app: Any, logger: Logger, server_id: str, seen: dict
+) -> Optional[dict]:
+    """A server's local manifest, read once per dispatch (``seen``), or None.
+
+    The stateful stamp and the root check both need it; a failed or empty
+    read is remembered for this dispatch only, so the next one tries again.
+    """
+    if server_id not in seen:
+        try:
+            manifest = await app.dispatch.get_server_manifest(server_id)
+        except Exception as e:
+            logger.warning(f"JARVIS: manifest lookup failed for '{server_id}' ({e})")
+            manifest = None
+        if not isinstance(manifest, dict) or not manifest or "error" in manifest:
+            manifest = None
+        seen[server_id] = manifest
+    return seen[server_id]
+
+
 async def _stamp_stateful_tasks(
-    app: Any, logger: Logger, tasks: list[dict[str, Any]]
+    app: Any, logger: Logger, tasks: list[dict[str, Any]], seen: dict
 ) -> None:
     """Set stateful=True on tasks whose server manifest declares it (#206)."""
     for task in tasks:
@@ -172,15 +192,8 @@ async def _stamp_stateful_tasks(
         if not isinstance(server_id, str) or not server_id or "stateful" in task:
             continue
         if server_id not in _STATEFUL_BY_SERVER:
-            try:
-                manifest = await app.dispatch.get_server_manifest(server_id)
-            except Exception as e:
-                logger.warning(
-                    f"JARVIS: stateful lookup failed for '{server_id}' ({e}); "
-                    f"dispatching one-shot this time"
-                )
-                continue
-            if not isinstance(manifest, dict) or not manifest or "error" in manifest:
+            manifest = await _dispatch_manifest(app, logger, server_id, seen)
+            if manifest is None:
                 logger.debug(
                     f"JARVIS: no readable manifest for '{server_id}'; "
                     f"stateful undetermined, dispatching one-shot this time"
@@ -306,6 +319,13 @@ async def dispatch_send(
                     params["args"] = parts[1:]
 
     _no_timeouts(tasks)
+    # Each server's manifest is read at most once in this dispatch.
+    manifests: dict = {}
+    one_at_a_time = await _guard_shell_tasks(app, logger, tasks, manifests)
+    if one_at_a_time:
+        logger.warning(f"JARVIS: {one_at_a_time}")
+        emit_activity(app, "Sent back: two root commands at once", kind="dispatch")
+        return {"error": one_at_a_time}
 
     # Standing constraints — path-prefix deny rules from constraints.json (#214).
     # Checked before revocation and before the confirmation gate so allow_all
@@ -351,7 +371,7 @@ async def dispatch_send(
     # confirmation. The LLM is deliberately not responsible for this: a
     # forgotten flag silently degrades a stateful server (browser, REPL) to
     # the one-shot lifecycle that loses its state between calls.
-    await _stamp_stateful_tasks(app, logger, tasks)
+    await _stamp_stateful_tasks(app, logger, tasks, manifests)
 
     approved_tasks: list[dict[str, Any]] = []
     tools_needing_confirmation: list[dict[str, Any]] = []
@@ -825,6 +845,247 @@ def _no_timeouts(tasks: list) -> None:
             quoted = [shlex.quote(str(a)) for a in args]
             params["command"] = " ".join([params["command"], *quoted])
             del params["args"]
+
+
+# --- root commands and package transactions (#317) ---------------------------
+
+# Servers whose manifest scope is "system": dmcp runs every call to them as
+# root, behind its own polkit password prompt. Cached like _STATEFUL_BY_SERVER.
+_ROOT_BY_SERVER: dict[str, bool] = {}
+_ELEVATORS = ("sudo", "pkexec", "doas")
+# Prefix flags that take no value. With any other flag (sudo -u alice, …) the
+# prefix means something and is left alone.
+_BARE_ELEVATOR_FLAGS = {
+    "-E",
+    "-S",
+    "-n",
+    "-H",
+    "-k",
+    "-A",
+    "--preserve-env",
+    "--non-interactive",
+    "--",
+}
+_ELEVATOR_PREFIX = re.compile(
+    r"^\s*(?:sudo|pkexec|doas)(?:\s+(?:-[ESnHkA]+|--preserve-env|--non-interactive|--))*\s+"
+)
+
+
+async def _runs_as_root(app: Any, logger: Logger, server_id: Any, seen: dict) -> bool:
+    if not isinstance(server_id, str) or not server_id:
+        return False
+    if server_id not in _ROOT_BY_SERVER:
+        manifest = await _dispatch_manifest(app, logger, server_id, seen)
+        if manifest is None:
+            return False
+        _ROOT_BY_SERVER[server_id] = manifest.get("scope") == "system"
+    return _ROOT_BY_SERVER[server_id]
+
+
+def _drop_elevator(task: dict) -> None:
+    """Remove a sudo/pkexec/doas in front of a command for a server that is root.
+
+    It adds nothing there, and with execute_command, which runs argv with no
+    shell, `sudo` given the one argument "pacman -Syu" looked for a program
+    of that name ("command not found"; Yakup's run, 2026-11-10).
+    """
+    params = task.get("params")
+    if not isinstance(params, dict):
+        return
+    if task.get("tool") == "execute_command":
+        if params.get("command") not in _ELEVATORS:
+            return
+        args = [str(a) for a in params.get("args") or []]
+        while args and args[0] in _BARE_ELEVATOR_FLAGS:
+            args.pop(0)
+        if not args or args[0].startswith("-"):
+            return
+        try:
+            head = shlex.split(args[0])
+        except ValueError:
+            return
+        if head:
+            params["command"] = head[0]
+            params["args"] = head[1:] + args[1:]
+        return
+    key = "script" if task.get("tool") == "execute_script" else "command"
+    if isinstance(params.get(key), str):
+        params[key] = _ELEVATOR_PREFIX.sub("", params[key], count=1)
+
+
+def _root_label(task: dict) -> str:
+    params = task.get("params") or {}
+    if task.get("tool") == "execute_command":
+        return " ".join(
+            [str(params.get("command", ""))]
+            + [str(a) for a in params.get("args") or []]
+        )
+    return str(params.get("command") or params.get("script") or task.get("tool"))
+
+
+async def _guard_shell_tasks(app: Any, logger: Logger, tasks: list, seen: dict) -> str:
+    """Make a batch's shell calls runnable; refuse two root calls at once.
+
+    In order: a sudo in front of a root server's command goes, identical root
+    calls merge (`pacman -Syu` and `sudo pacman -Syu` were sent together),
+    package transactions become jobs (after the merge, since a job gets a
+    fresh name), and then more than one root call is refused. Each call to a
+    root server raises its own polkit password prompt, and polkit refuses a
+    second while one is open ("Not authorized … This incident has been
+    reported" within 0.4 s). Returns the refusal, or "".
+    """
+    root = [t for t in tasks if await _runs_as_root(app, logger, t.get("server"), seen)]
+    for task in root:
+        if task.get("tool") in _SHELL_TOOLS:
+            _drop_elevator(task)
+    seen: set = set()
+    kept: list = []
+    for task in tasks:
+        if any(task is r for r in root):
+            key = json.dumps(
+                [task.get("server"), task.get("tool"), task.get("params")],
+                sort_keys=True,
+                default=str,
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+        kept.append(task)
+    tasks[:] = kept
+    _package_jobs(tasks)
+    root = [t for t in tasks if any(t is r for r in root)]
+    if len(root) < 2:
+        return ""
+    listing = "; ".join(f"{t.get('tool')}: {_root_label(t)}" for t in root)
+    return (
+        f"Dispatch refused: this batch held {len(root)} calls to servers that run "
+        "as root. Each one asks for the administrator password on the user's "
+        "computer, and polkit refuses a second request while one is open, so "
+        "they cannot run together. Nothing in this batch was sent. Send one, and "
+        f"the next after its result comes back: {listing}."
+    )
+
+
+# Package managers that ask before a transaction, the subcommands that make
+# one, and the flags that answer the question in advance.
+_ASKS_BEFORE = {
+    "pacman": {"--noconfirm"},
+    "yay": {"--noconfirm"},
+    "paru": {"--noconfirm"},
+    "pamac": {"--no-confirm"},
+    "apt": {"-y", "--yes", "--assume-yes"},
+    "apt-get": {"-y", "--yes", "--assume-yes"},
+    "dnf": {"-y", "--assumeyes"},
+    "yum": {"-y", "--assumeyes"},
+    "zypper": {"-y", "-n", "--non-interactive", "--no-confirm"},
+}
+_TRANSACTIONS = {
+    "pamac": {"install", "upgrade", "update", "remove", "build"},
+    "apt": {
+        "install",
+        "upgrade",
+        "full-upgrade",
+        "dist-upgrade",
+        "remove",
+        "purge",
+        "autoremove",
+        "reinstall",
+    },
+    "dnf": {
+        "install",
+        "upgrade",
+        "update",
+        "remove",
+        "erase",
+        "reinstall",
+        "downgrade",
+        "autoremove",
+        "distro-sync",
+    },
+    "zypper": {
+        "in",
+        "install",
+        "up",
+        "update",
+        "dup",
+        "dist-upgrade",
+        "rm",
+        "remove",
+        "patch",
+    },
+}
+_TRANSACTIONS["apt-get"] = _TRANSACTIONS["apt"]
+_TRANSACTIONS["yum"] = _TRANSACTIONS["dnf"]
+
+
+def _asks_to_confirm(command: str, args: list) -> bool:
+    """Whether this package-manager command will stop at a "[Y/n]"."""
+    name = os.path.basename(command)
+    answered = _ASKS_BEFORE.get(name)
+    if answered is None or any(a in answered for a in args):
+        return False
+    if name in ("apt", "apt-get", "dnf", "yum", "zypper") and any(
+        re.fullmatch(r"-[a-zA-Z]*y[a-zA-Z]*", a) for a in args
+    ):
+        return False
+    if name in ("pacman", "yay", "paru"):
+        op = next((a for a in args if a.startswith("-") and not a.startswith("--")), "")
+        if not op:
+            return name != "pacman" and not args
+        if op.startswith("-S"):
+            return not any(c in op[2:] for c in "silgp")
+        return op.startswith(("-U", "-R"))
+    sub = next((a for a in args if not a.startswith("-")), "")
+    return sub in _TRANSACTIONS[name]
+
+
+def _package_jobs(tasks: list) -> None:
+    """Run a package transaction as a job, so its "[Y/n]" can be answered.
+
+    execute_command gives a command no stdin: pacman synced, listed 141
+    packages and died at "Proceed with installation? [Y/n]" (2026-11-10).
+    As a run_job its question reaches the model in a reminder and the user
+    through send_input's confirmation, the path designed on 2026-10-23.
+    """
+    for task in tasks:
+        params = task.get("params")
+        if task.get("tool") != "execute_command" or not isinstance(params, dict):
+            continue
+        command = params.get("command")
+        args = [str(a) for a in params.get("args") or []]
+        if not isinstance(command, str) or not _asks_to_confirm(command, args):
+            continue
+        op = next((a.lstrip("-") for a in args if not a.startswith("--")), "")
+        stem = re.sub(
+            r"[^A-Za-z0-9._-]", "", f"{os.path.basename(command)}-{op}".strip("-")
+        )
+        task["tool"] = "run_job"
+        task["params"] = {
+            "job": f"{stem[:50] or 'package'}-{uuid.uuid4().hex[:4]}",
+            "command": shlex.join([command, *args]),
+        }
+
+
+def job_note(app: Any, signals: list) -> str:
+    """Name the job behind each reminder, so a question in it can be answered.
+
+    The model names a run_job itself, except one _package_jobs made from an
+    execute_command, whose name it never saw.
+    """
+    by_pid = {info["pid"]: (name, info["server"]) for name, info in _jobs(app).items()}
+    notes = []
+    for signal in signals:
+        if str(signal.get("type") or "").upper() != "REMIND":
+            continue
+        found = by_pid.get(signal.get("pid"))
+        if found:
+            name, server = found
+            notes.append(
+                f'\nJOB: pid {signal.get("pid")} is job "{name}" on {server}. To '
+                f'answer a question in its output, dispatch send_input with "job": '
+                f'"{name}" to that server.'
+            )
+    return "".join(notes)
 
 
 def note_dispatched_tools(app: Any, pids: list, tasks: list) -> None:
