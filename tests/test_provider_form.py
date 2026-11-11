@@ -1,4 +1,4 @@
-"""The provider form and the API provider's addresses (#316).
+"""The provider form (#316).
 
 Adding NVIDIA in the TUI saved an Ollama provider pointing at the laptop: the
 form started on "Ollama (local)" with the localhost URL filled in. And the API
@@ -7,45 +7,13 @@ Gemini's (…/v1beta/openai) could not work.
 """
 
 import pytest
-from textual.app import App
-from textual.widgets import Input, Select, Static
 
-from jarvis.llm.providers.api import APIProvider
-from jarvis.tui.provider_modal import ProviderModal
+textual = pytest.importorskip("textual")
 
+from textual.app import App  # noqa: E402
+from textual.widgets import Input, Select, Static  # noqa: E402
 
-@pytest.mark.parametrize(
-    "url, endpoint",
-    [
-        (
-            "https://integrate.api.nvidia.com",
-            "https://integrate.api.nvidia.com/v1/chat/completions",
-        ),
-        (
-            "https://integrate.api.nvidia.com/v1/",
-            "https://integrate.api.nvidia.com/v1/chat/completions",
-        ),
-        ("http://localhost:1234/v1", "http://localhost:1234/v1/chat/completions"),
-        (
-            "https://generativelanguage.googleapis.com/v1beta/openai",
-            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-        ),
-        (
-            "https://api.groq.com/openai",
-            "https://api.groq.com/openai/v1/chat/completions",
-        ),
-        ("https://openrouter.ai/api", "https://openrouter.ai/api/v1/chat/completions"),
-        ("http://localhost:11434", "http://localhost:11434/v1/chat/completions"),
-    ],
-)
-def test_an_address_with_its_version_is_used_as_the_base(url, endpoint):
-    assert APIProvider("m", api_url=url)._endpoint("chat/completions") == endpoint
-
-
-def test_models_and_embeddings_follow_the_same_rule():
-    provider = APIProvider("m", api_url="http://localhost:1234/v1")
-    assert provider._endpoint("models") == "http://localhost:1234/v1/models"
-    assert provider._endpoint("embeddings") == "http://localhost:1234/v1/embeddings"
+from jarvis.tui.provider_modal import ProviderModal  # noqa: E402
 
 
 class _Host(App):
