@@ -99,6 +99,19 @@ An unknown id answers `error`.
 | `edit_provider` | `name`, `fields` (a dict of the fields to change) | as above |
 | `remove_provider` | `name` | as above |
 | `move_provider` | `name`, `position` (1 = tried first) | as above (#267) |
+| `list_models` | optional `url`, `api_key` | `model_list` (to the sender) |
+| `pull_model` | `model`, optional `url`, `api_key` | `model_pull` messages, the last with `done: true` |
+
+`list_models` asks the Ollama server at `url` (default `http://localhost:11434`)
+what it offers; for Ollama Cloud use `https://ollama.com` with an API key. The
+reply is `{"type": "model_list", "url", "models": [{"name", "size",
+"modified"}]}`, or the same with `models: []` and an `error` message when the
+server cannot be reached or refuses the key. `pull_model` downloads a model
+and streams `{"type": "model_pull", "model", "status", "completed", "total",
+"done": false}`, ending with `done: true` and, on failure, an `error`. Models on
+Ollama Cloud are not downloaded: `pull_model` against it ends with an `error`.
+Both carry the API key, so like `provider_list` they stay on this machine and
+`jarvis web` does not relay them.
 
 `settings` lists what JARVIS can change while it runs, the same list the
 TUI's settings window draws (`jarvis/core/settings.py`), with each one's

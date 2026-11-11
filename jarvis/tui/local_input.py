@@ -147,7 +147,7 @@ def _show_providers(app: Any) -> None:
     if not providers:
         app._append_log(
             "[dim]No providers configured. "
-            "Use /providers add or: jarvis providers add --type ollama --model qwen3:4b[/dim]"
+            "Use /providers add or: jarvis providers add --type llamacpp --model Qwen/Qwen3-4B-GGUF:Q4_K_M[/dim]"
         )
         return
 

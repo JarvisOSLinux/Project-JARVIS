@@ -7,7 +7,7 @@ stdio and provides methods to send task batches, kill tasks, and receive
 signals.
 
 The adapter also handles semantic tool discovery:
-- Embeds sub-task intents via Ollama (when embedding search is enabled)
+- Embeds sub-task intents via llama-server (when embedding search is enabled)
 - Passes vectors to dispatch → dmcp for cosine similarity search
 - Falls back to keyword search when vector search is unavailable or
   returns no results

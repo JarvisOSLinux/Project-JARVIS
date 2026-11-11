@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional
+from urllib.parse import urlparse
 
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -23,15 +24,15 @@ class ProviderModalResult:
     temperature: Optional[float] = None
 
 
-_OLLAMA_DEFAULT_URL = "http://localhost:11434"
 _URL_HINT = {
-    "ollama": f"blank = {_OLLAMA_DEFAULT_URL}",
-    "api": "e.g. https://integrate.api.nvidia.com or https://openrouter.ai/api",
+    "llamacpp": "blank = the local runner's default",
+    "ollama-cloud": "blank = https://ollama.com",
+    "api": "e.g. https://integrate.api.nvidia.com or http://localhost:11434 (Ollama)",
 }
 
 
-def _is_local_ollama(url: str) -> bool:
-    return not url or url.rstrip("/") in (_OLLAMA_DEFAULT_URL, "http://127.0.0.1:11434")
+def _is_loopback(url: str) -> bool:
+    return urlparse(url).hostname in ("localhost", "127.0.0.1", "::1")
 
 
 class ProviderModal(ModalScreen[ProviderModalResult]):
@@ -128,12 +129,10 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
         super().__init__()
         self._mode = mode
         self._existing = existing or {}
-        # A new provider starts with no type chosen: the old Ollama default
-        # (with its localhost URL filled in) quietly saved an NVIDIA model and
-        # key as an Ollama provider pointing at the laptop (#316).
-        self._ptype = self._existing.get("type", "ollama" if existing else "")
+        # A new provider starts with no type chosen, so a cloud model and key
+        # cannot be saved under a local default by accident (#316).
+        self._ptype = self._existing.get("type", "")
         self._key_revealed = False
-        self._warned = False
 
     def compose(self) -> ComposeResult:
         ex = self._existing
@@ -151,7 +150,11 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
                 yield Label("Type", classes="field-label")
                 with Horizontal(id="type-row"):
                     yield Select(
-                        [("Ollama (local)", "ollama"), ("API (cloud)", "api")],
+                        [
+                            ("Local (llama.cpp)", "llamacpp"),
+                            ("Ollama Cloud", "ollama-cloud"),
+                            ("API (cloud, or Ollama/LM Studio server)", "api"),
+                        ],
                         value=self._ptype or Select.NULL,
                         prompt="Choose a type",
                         id="input-type",
@@ -161,7 +164,7 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
                 yield Label("Model", classes="field-label")
                 yield Input(
                     value=ex.get("model", ""),
-                    placeholder="e.g. qwen3:8b or gpt-4o",
+                    placeholder="e.g. Qwen/Qwen3-8B-GGUF:Q4_K_M or gpt-4o",
                     id="input-model",
                 )
 
@@ -170,11 +173,14 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
                 )
                 yield Input(
                     value=ex.get("name", ""),
-                    placeholder="e.g. my-ollama",
+                    placeholder="e.g. my-local",
                     id="input-name",
                 )
 
-                yield Label("URL", classes="field-label")
+                yield Label(
+                    "URL  (blank = JARVIS runs the model itself)",
+                    classes="field-label",
+                )
                 yield Input(
                     value=default_url,
                     placeholder=_URL_HINT.get(self._ptype, "choose a type first"),
@@ -199,7 +205,7 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
                 with Horizontal(id="key-row"):
                     yield Input(
                         value=ex.get("api_key", ""),
-                        placeholder="sk-… (leave blank for Ollama)",
+                        placeholder="sk-… (leave blank for local models)",
                         password=True,
                         id="input-key",
                     )
@@ -221,26 +227,10 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id != "input-type":
             return
-        self._warned = False
         self._ptype = "" if event.value is Select.NULL else str(event.value)
-        url_input = self.query_one("#input-url", Input)
-        url_input.placeholder = _URL_HINT.get(self._ptype, "choose a type first")
-        if url_input.value == _OLLAMA_DEFAULT_URL and self._ptype != "ollama":
-            url_input.value = ""
-
-    def on_input_changed(self, event: Input.Changed) -> None:
-        self._warned = False
-
-    def _mix_up(self, ptype: str, url: str, api_key: str) -> str:
-        """A likely wrong combination, worth one look before it is saved."""
-        if ptype == "ollama" and api_key and _is_local_ollama(url):
-            return (
-                "This is a local Ollama provider with an API key. For a cloud "
-                "service (NVIDIA, OpenRouter, …) choose API (cloud) and give its URL."
-            )
-        if ptype == "api" and url and _is_local_ollama(url):
-            return "That is Ollama's address on this computer; Ollama (local) may be what you want."
-        return ""
+        self.query_one("#input-url", Input).placeholder = _URL_HINT.get(
+            self._ptype, "choose a type first"
+        )
 
     def _show_error(self, text: str) -> None:
         err = self.query_one("#error-label", Static)
@@ -275,24 +265,17 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
 
         chosen = self.query_one("#input-type", Select).value
         if chosen is Select.NULL:
-            self._show_error("Choose a type: Ollama (local) or API (cloud).")
+            self._show_error("Choose a type.")
             return
         ptype = str(chosen)
         url = self.query_one("#input-url", Input).value.strip()
         api_key = self.query_one("#input-key", Input).value.strip()
 
         if ptype == "api" and not url:
-            self._show_error(f"A cloud provider needs its URL ({_URL_HINT['api']}).")
+            self._show_error(f"An API provider needs its URL ({_URL_HINT['api']}).")
             return
-        if ptype == "api" and not api_key:
+        if ptype == "api" and not api_key and not _is_loopback(url):
             self._show_error("API key is required for cloud providers.")
-            return
-        warning = self._mix_up(ptype, url, api_key)
-        if warning and not self._warned:
-            self._warned = True
-            self._show_error(
-                f"{warning} Press {self._confirm_label()} again to keep it."
-            )
             return
 
         temperature: Optional[float] = None

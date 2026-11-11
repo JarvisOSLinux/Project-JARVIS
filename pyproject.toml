@@ -14,7 +14,7 @@ authors = [
 maintainers = [
     {name = "YakupAtahanov", email = "yakup.atahanow.b@gmail.com"},
 ]
-keywords = ["ai", "voice", "assistant", "mcp", "dispatch", "llm", "ollama"]
+keywords = ["ai", "voice", "assistant", "mcp", "dispatch", "llm", "llama.cpp"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -35,7 +35,6 @@ classifiers = [
 requires-python = ">=3.10"
 dependencies = [
     # Core dependencies - required for basic functionality
-    "ollama>=0.5.3",
     "python-dotenv>=1.1.1",
     "mcp[cli]>=1.13.1",
     "httpx>=0.28.1",

@@ -7,6 +7,8 @@ import json
 from logging import Logger
 from typing import Any, Dict, List, Optional
 
+from ..llm import models
+
 
 def normalize_count(content: Any) -> Dict[str, int]:
     """Coerce a server-count response into {total, local, registry}."""
@@ -338,10 +340,19 @@ async def ensure_embedding_model(
         return
 
     registry_model = spec.get("model", "")
-    if registry_model and registry_model != embeddings.model:
+    if not registry_model or models.same_embed_model(registry_model, embeddings.model):
+        return
+    target = models.registry_embed_spec(registry_model)
+    if target is None:
         logger.warning(
-            f"Dispatch: Registry embedding model '{registry_model}' differs from "
-            f"local model '{embeddings.model}'. Updating local model."
+            f"Dispatch: the registry's tool vectors come from '{registry_model}', "
+            f"which JARVIS has no GGUF for, and this JARVIS embeds with "
+            f"'{embeddings.model}'; tool search will rank poorly until EMBED_MODEL "
+            f"names the same model."
         )
-        embeddings.model = registry_model
-        embeddings.ensure_model()
+        return
+    logger.warning(
+        f"Dispatch: the registry's tool vectors come from '{registry_model}'; "
+        f"switching the embedding model from '{embeddings.model}' to '{target}'."
+    )
+    embeddings.use_model(target)

@@ -489,6 +489,12 @@ async def _process_gui_message(
             writer, {"type": "provider_list", "providers": list_providers()}
         )
 
+    elif msg_type == "list_models":
+        await _gui_write(writer, await _handle_list_models(msg))
+
+    elif msg_type == "pull_model":
+        await _handle_pull_model(msg, writer)
+
     elif msg_type == "add_provider":
         await _reply_or_broadcast_providers(app, writer, _handle_add_provider(msg))
 
@@ -640,6 +646,61 @@ def _handle_move_provider(msg: dict) -> dict:
     except ValueError as e:
         return _provider_error(str(e))
     return {"type": "provider_list", "providers": list_providers()}
+
+
+def _error_text(e: Exception, api_key: Optional[str]) -> str:
+    """An error for the GUI with the request's own API key and known secrets removed."""
+    text = str(e)
+    if api_key:
+        text = text.replace(api_key, "[redacted]")
+    return redact_secrets(text)[0]
+
+
+async def _handle_list_models(msg: dict) -> dict:
+    """The models an Ollama server (local, or Ollama Cloud with a key) offers."""
+    from ..llm.ollama_models import list_models
+
+    url = msg.get("url") or None
+    try:
+        models = await asyncio.to_thread(list_models, url, msg.get("api_key") or None)
+    except Exception as e:
+        return {
+            "type": "model_list",
+            "url": url,
+            "models": [],
+            "error": _error_text(e, msg.get("api_key")),
+        }
+    return {"type": "model_list", "url": url, "models": models}
+
+
+async def _handle_pull_model(msg: dict, writer: asyncio.StreamWriter) -> None:
+    """Download a model, streaming ``model_pull`` progress to the requester."""
+    from ..llm.ollama_models import pull_model
+
+    model = str(msg.get("model") or "").strip()
+    loop = asyncio.get_running_loop()
+    sent = {"model": model, "type": "model_pull"}
+
+    def progress(chunk: dict) -> None:
+        asyncio.run_coroutine_threadsafe(
+            _gui_write(writer, {**sent, **chunk, "done": False}), loop
+        ).result(timeout=30)
+
+    try:
+        await asyncio.to_thread(
+            pull_model,
+            model,
+            msg.get("url") or None,
+            msg.get("api_key") or None,
+            progress,
+        )
+    except Exception as e:
+        await _gui_write(
+            writer,
+            {**sent, "done": True, "error": _error_text(e, msg.get("api_key"))},
+        )
+        return
+    await _gui_write(writer, {**sent, "done": True})
 
 
 async def _status_reply(app: Any, full: bool) -> dict:

@@ -62,6 +62,7 @@ class APIProvider(BaseLLMProvider):
         api_url: str = "",
         api_key: str = "",
         headers: Optional[Dict[str, str]] = None,
+        temperature: Optional[float] = None,
     ):
         if not api_url:
             raise ValueError("api_url is required for the API provider")
@@ -69,6 +70,7 @@ class APIProvider(BaseLLMProvider):
         super().__init__(model)
         self.api_url = api_url.rstrip("/")
         self.api_key = api_key
+        self.temperature = temperature
 
         self.headers = {"Content-Type": "application/json"}
         if api_key:
@@ -112,6 +114,8 @@ class APIProvider(BaseLLMProvider):
             "messages": _convert_image_messages(messages),
             "stream": False,
         }
+        if self.temperature is not None:
+            payload["temperature"] = self.temperature
 
         try:
             with self._httpx.Client(timeout=60.0) as client:
@@ -146,6 +150,8 @@ class APIProvider(BaseLLMProvider):
             "messages": _convert_image_messages(messages),
             "stream": True,
         }
+        if self.temperature is not None:
+            payload["temperature"] = self.temperature
 
         try:
             with self._httpx.Client(timeout=60.0) as client:

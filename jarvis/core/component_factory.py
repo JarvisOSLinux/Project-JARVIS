@@ -21,6 +21,7 @@ from .command_parser import TaskParser
 from .confirmation_manager import STORE_FILENAME, ConfirmationManager
 from .logger import get_logger
 from .output_manager import OutputManager
+from .providers import load_providers
 from .setup_queue import SetupQueue
 from .setup_queue import store_path as setup_store_path
 from .system_info import SystemInfo
@@ -59,8 +60,7 @@ class _ProvidersFile:
             self._stamp = None
             return None
         try:
-            with open(self.path) as f:
-                data = json.load(f)
+            data = load_providers()
         except (OSError, ValueError) as e:
             logger.warning(f"Could not read {self.path}: {e}")
             return None
@@ -88,32 +88,32 @@ class ComponentFactory:
         entries = []
         for spec in data.get("providers", []):
             name = spec.get("name", f"provider-{len(entries)}")
-            ptype = spec.get("type", "ollama")
+            ptype = spec.get("type", "llamacpp")
             model = spec.get("model", "")
+            if spec.get("inactive"):
+                logger.warning(f"Provider '{name}' is inactive: {spec['inactive']}")
+                continue
             if not model:
                 logger.warning(f"Provider '{name}' has no model, skipping")
                 continue
 
             kwargs = {}
-            if ptype == "ollama":
-                kwargs["base_url"] = spec.get("url", "http://localhost:11434")
-                if spec.get("api_key"):
-                    kwargs["api_key"] = spec["api_key"]
-                kwargs["auto_pull"] = spec.get("auto_pull", False)
+            if ptype == "llamacpp":
+                if spec.get("url"):
+                    kwargs["base_url"] = spec["url"]
                 kwargs["temperature"] = spec.get(
                     "temperature",
                     getattr(Config, "LLM_TEMPERATURE", 0.7),
                 )
-                kwargs["strict_json"] = spec.get("strict_json", False)
-                llm_think = getattr(Config, "LLM_THINK", None)
-                if spec.get("think") is not None:
-                    kwargs["think"] = spec["think"]
-                elif llm_think is not None:
-                    kwargs["think"] = llm_think
-            elif ptype in ("api", "lmstudio"):
-                default_url = "http://localhost:1234/v1" if ptype == "lmstudio" else ""
+            elif ptype in ("api", "lmstudio", "ollama-cloud"):
+                default_url = {
+                    "lmstudio": "http://localhost:1234/v1",
+                    "ollama-cloud": Config.OLLAMA_CLOUD_URL,
+                }.get(ptype, "")
                 kwargs["api_url"] = spec.get("url") or default_url
                 kwargs["api_key"] = spec.get("api_key", "")
+                if ptype == "ollama-cloud" and not kwargs["api_key"]:
+                    kwargs["api_key"] = os.environ.get("OLLAMA_API_KEY", "")
                 if spec.get("headers"):
                     kwargs["headers"] = spec["headers"]
 
@@ -470,9 +470,9 @@ class ComponentFactory:
         embeddings = None
         if Config.RAG_ENABLED or Config.ALLOW_EMBEDDING_SEARCH:
             try:
-                from ..contextor.embeddings import OllamaEmbeddings
+                from ..contextor.embeddings import LlamaEmbeddings
 
-                embeddings = OllamaEmbeddings(model=Config.EMBED_MODEL)
+                embeddings = LlamaEmbeddings(model=Config.EMBED_MODEL)
                 if not embeddings.ensure_model():
                     logger.warning(
                         f"Embedding model '{Config.EMBED_MODEL}' not available. "

@@ -78,42 +78,37 @@ async def test_an_api_provider_needs_its_url_and_the_hint_says_what_kind():
 
 
 @pytest.mark.asyncio
-async def test_a_key_on_a_local_ollama_provider_is_questioned_once():
+async def test_ollama_is_an_api_provider_and_needs_no_key_on_this_computer():
     async with _Host(ProviderModal(mode="add")).run_test() as pilot:
         await pilot.pause()
-        await _fill(
-            pilot,
-            type="ollama",
-            model="nvidia/nemotron-3-super-120b-a12b",
-            key="nvapi-x",
+        await _fill(pilot, type="api", model="qwen3:4b", url="http://localhost:11434")
+        await _confirm(pilot)
+        result = pilot.app.results[0]
+        assert (result.ptype, result.url, result.api_key) == (
+            "api",
+            "http://localhost:11434",
+            "",
         )
-        await _confirm(pilot)
-        assert "choose API (cloud)" in _error(pilot)
-        assert pilot.app.results == []
-        await _confirm(pilot)
-        assert pilot.app.results[0].ptype == "ollama"
 
 
 @pytest.mark.asyncio
-async def test_an_api_provider_at_ollamas_local_address_is_questioned():
+async def test_a_remote_api_provider_still_needs_a_key():
     async with _Host(ProviderModal(mode="add")).run_test() as pilot:
         await pilot.pause()
         await _fill(
-            pilot, type="api", model="qwen3:4b", key="k", url="http://localhost:11434"
+            pilot, type="api", model="m", url="https://integrate.api.nvidia.com"
         )
         await _confirm(pilot)
-        assert "Ollama's address on this computer" in _error(pilot)
-        await _fill(pilot, url="http://localhost:11434/")
-        await _confirm(pilot)
-        assert pilot.app.results == [], "an edit asks again"
+        assert "API key is required" in _error(pilot)
+        assert pilot.app.results == []
 
 
 @pytest.mark.asyncio
 async def test_editing_keeps_the_saved_type_and_url():
-    existing = {"name": "general", "type": "ollama", "model": "nemotron-3-ultra:cloud"}
+    existing = {"name": "general", "type": "ollama-cloud", "model": "nemotron-3-ultra"}
     async with _Host(ProviderModal(mode="edit", existing=existing)).run_test() as pilot:
         await pilot.pause()
         screen = pilot.app.screen
-        assert screen.query_one("#input-type", Select).value == "ollama"
+        assert screen.query_one("#input-type", Select).value == "ollama-cloud"
         await _confirm(pilot)
-        assert pilot.app.results[0].ptype == "ollama"
+        assert pilot.app.results[0].ptype == "ollama-cloud"
