@@ -167,3 +167,19 @@ def test_a_pool_error_with_continuation_lines_keeps_them_with_their_provider():
     assert "nvidia: the model is not available there (404)" in told
     assert "retrying it in 16 s" in told and "retrying it in 60 min" in told
     assert "(s;" not in told and "mozilla" not in told
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        "[Errno -3] Temporary failure in name resolution",
+        "[Errno -2] Name or service not known",
+    ],
+)
+def test_a_python_dns_failure_reads_as_one(error):
+    told = describe_provider_error(
+        RuntimeError(
+            f"All LLM providers are unavailable:\n  nvidia: cooldown (retry in 30s) — {error}"
+        )
+    )
+    assert told == "nvidia: a DNS or network problem; retrying it in 30 s"

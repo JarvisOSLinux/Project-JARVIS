@@ -62,7 +62,13 @@ def _reason(text: str) -> str:
     """A short, plain reason one call failed."""
     lowered = text.lower()
     host = re.search(r"lookup ([\w.-]+)", text)
-    if "no such host" in lowered or host:
+    dns = (
+        "no such host",
+        "name resolution",
+        "name or service not known",
+        "nodename nor servname",
+    )
+    if host or any(k in lowered for k in dns):
         return (
             f"could not look up {host.group(1)}: a DNS or network problem"
             if host
