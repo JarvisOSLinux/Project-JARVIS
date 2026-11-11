@@ -25,9 +25,18 @@ from .root_context import (
 from .session_commands import handle_slash_command, session_reply
 
 _NO_LLM_MSG = (
-    "No LLM provider configured. "
-    "Add one with `/providers add` or through settings, then restart."
+    "No LLM provider configured. Add one with `/providers add` or in Settings "
+    "(F2); JARVIS uses it from your next message."
 )
+
+
+def _ensure_llm(app: Any) -> Any:
+    """The model, built now if a provider was added after JARVIS started (#315)."""
+    if app.llm is None:
+        from ..core.component_factory import ComponentFactory
+
+        app.llm = ComponentFactory.create_llm()
+    return app.llm
 
 
 async def on_user_input(app: Any, logger: Logger, text: str) -> None:
@@ -63,7 +72,7 @@ async def on_user_input(app: Any, logger: Logger, text: str) -> None:
         if handled:
             return
 
-    if app.llm is None:
+    if _ensure_llm(app) is None:
         app.output_manager.handle_response({"output": _NO_LLM_MSG})
         return
 
