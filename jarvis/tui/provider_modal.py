@@ -23,9 +23,6 @@ class ProviderModalResult:
     temperature: Optional[float] = None
 
 
-_OLLAMA_DEFAULT_URL = "http://localhost:11434"
-
-
 class ProviderModal(ModalScreen[ProviderModalResult]):
     """Modal form for adding or editing a provider.
 
@@ -120,7 +117,7 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
         super().__init__()
         self._mode = mode
         self._existing = existing or {}
-        self._ptype = self._existing.get("type", "ollama")
+        self._ptype = self._existing.get("type", "llamacpp")
         self._key_revealed = False
 
     def compose(self) -> ComposeResult:
@@ -130,9 +127,7 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
             if self._mode == "add"
             else f"Edit Provider: {ex.get('name', '')}"
         )
-        default_url = ex.get(
-            "url", _OLLAMA_DEFAULT_URL if self._ptype == "ollama" else ""
-        )
+        default_url = ex.get("url", "")
 
         with Vertical(id="provider-dialog"):
             with VerticalScroll(id="form-scroll"):
@@ -141,7 +136,11 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
                 yield Label("Type", classes="field-label")
                 with Horizontal(id="type-row"):
                     yield Select(
-                        [("Ollama (local)", "ollama"), ("API (cloud)", "api")],
+                        [
+                            ("Local (llama.cpp)", "llamacpp"),
+                            ("Ollama Cloud", "ollama-cloud"),
+                            ("API (cloud)", "api"),
+                        ],
                         value=self._ptype,
                         id="input-type",
                         allow_blank=False,
@@ -150,7 +149,7 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
                 yield Label("Model", classes="field-label")
                 yield Input(
                     value=ex.get("model", ""),
-                    placeholder="e.g. qwen3:8b or gpt-4o",
+                    placeholder="e.g. Qwen/Qwen3-8B-GGUF:Q4_K_M or gpt-4o",
                     id="input-model",
                 )
 
@@ -159,14 +158,17 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
                 )
                 yield Input(
                     value=ex.get("name", ""),
-                    placeholder="e.g. my-ollama",
+                    placeholder="e.g. my-local",
                     id="input-name",
                 )
 
-                yield Label("URL", classes="field-label")
+                yield Label(
+                    "URL  (blank = JARVIS runs the model itself)",
+                    classes="field-label",
+                )
                 yield Input(
                     value=default_url,
-                    placeholder=_OLLAMA_DEFAULT_URL,
+                    placeholder="http://localhost:11445",
                     id="input-url",
                 )
 
@@ -188,7 +190,7 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
                 with Horizontal(id="key-row"):
                     yield Input(
                         value=ex.get("api_key", ""),
-                        placeholder="sk-… (leave blank for Ollama)",
+                        placeholder="sk-… (leave blank for local models)",
                         password=True,
                         id="input-key",
                     )
@@ -208,9 +210,6 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
         if event.select.id != "input-type":
             return
         self._ptype = str(event.value)
-        url_input = self.query_one("#input-url", Input)
-        if not url_input.value or url_input.value == _OLLAMA_DEFAULT_URL:
-            url_input.value = _OLLAMA_DEFAULT_URL if self._ptype == "ollama" else ""
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-cancel":

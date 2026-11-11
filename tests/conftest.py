@@ -22,6 +22,14 @@ os.environ["JARVIS_DISABLE_NOTIFICATIONS"] = "1"
 # data-dir-relative) off the user's machine.
 os.environ["JARVIS_DATA_DIR"] = tempfile.mkdtemp(prefix="jarvis-test-data-")
 
+# And the config dir. providers.json holds the user's API keys, and since the
+# version-2 migration (#291) reading an old one rewrites it: four TUI tests open
+# the settings window, which lists providers, and converted a real file that
+# way while the daemon in use still expected the old format.
+_test_config_dir = tempfile.mkdtemp(prefix="jarvis-test-config-")
+os.environ["JARVIS_CONFIG_DIR"] = _test_config_dir
+os.environ["PROVIDERS_FILE"] = os.path.join(_test_config_dir, "providers.json")
+
 
 @pytest.fixture
 def temp_env_file():

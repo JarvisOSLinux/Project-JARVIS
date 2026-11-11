@@ -5,9 +5,9 @@ The Rust binary handles all storage, vector indexing, and cosine
 similarity search.  This adapter spawns it as a child process and
 communicates over stdin/stdout with JSON lines.
 
-JARVIS owns embedding computation (via OllamaEmbeddings).  The adapter
+JARVIS owns embedding computation (via LlamaEmbeddings).  The adapter
 embeds text locally and passes pre-computed vectors to the binary.
-The binary never calls Ollama or any ML runtime.
+The binary never calls an ML runtime.
 
 Protocol:
   JARVIS  -->  {"cmd": "store", ...}\n   -->  contextor (stdin)
@@ -195,7 +195,7 @@ class ContextorAdapter:
             )
 
     def _embed(self, text: str) -> Optional[list]:
-        """Embed text via OllamaEmbeddings, or None if unavailable."""
+        """Embed text via LlamaEmbeddings, or None if unavailable."""
         if not self._embeddings:
             return None
         try:

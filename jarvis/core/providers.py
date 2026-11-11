@@ -5,27 +5,176 @@ from __future__ import annotations
 import json
 import os
 import re
-from typing import List, Optional, Tuple
+import shutil
+import tempfile
+import urllib.request
+from typing import Callable, Iterable, List, Optional, Tuple
 
 from ..config import Config
+from .logger import get_logger
+
+logger = get_logger(__name__)
+
+# Version 2 dropped the "ollama" type (JARVIS runs llama-server itself).
+PROVIDERS_VERSION = 2
+
+OLLAMA_LOCAL_URL = "http://localhost:11434"
+_OLLAMA_CLOUD_MODELS = "https://ollama.com/api/tags"
 
 
 def load_providers() -> dict:
-    """Load providers.json, returning empty structure if absent."""
+    """Load providers.json, returning empty structure if absent.
+
+    A file from before version 2 is migrated here, the one door every reader
+    uses, so no caller can save it back unmigrated.
+    """
     providers_file = Config.PROVIDERS_FILE
-    if os.path.isfile(providers_file):
-        with open(providers_file) as f:
-            return json.load(f)
-    return {"providers": []}
+    if not os.path.isfile(providers_file):
+        return {"version": PROVIDERS_VERSION, "providers": []}
+    with open(providers_file) as f:
+        data = json.load(f)
+    if data.get("version", 1) < PROVIDERS_VERSION:
+        data = _migrate_file(providers_file, data)
+    return data
 
 
 def save_providers(data: dict) -> None:
-    """Write providers.json, creating parent dirs if needed."""
-    providers_file = Config.PROVIDERS_FILE
-    os.makedirs(os.path.dirname(providers_file), exist_ok=True)
-    with open(providers_file, "w") as f:
-        json.dump(data, f, indent=2)
-        f.write("\n")
+    """Write providers.json owner-only and atomically: it holds API keys."""
+    data.setdefault("version", PROVIDERS_VERSION)
+    _write_private(Config.PROVIDERS_FILE, data)
+
+
+def _write_private(path: str, data: dict) -> None:
+    folder = os.path.dirname(path) or "."
+    os.makedirs(folder, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=folder, prefix=".providers-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, indent=2)
+            f.write("\n")
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _ollama_cloud_names() -> List[str]:
+    """The model names ollama.com serves; empty when it cannot be asked."""
+    try:
+        with urllib.request.urlopen(_OLLAMA_CLOUD_MODELS, timeout=5) as response:
+            listing = json.loads(response.read())
+        return [m.get("name") or m.get("model") for m in listing.get("models", [])]
+    except Exception:
+        return []
+
+
+def _cloud_model(model: str, cloud_names: Iterable[str]) -> str:
+    """The name ollama.com's API wants for a model Ollama's app called X:cloud.
+
+    The app tags cloud models (``nemotron-3-ultra:cloud``, ``gpt-oss:120b-cloud``)
+    and the API does not; and ``gemma4:cloud`` is ``gemma4:31b`` there, so a
+    bare name is looked up in ollama.com's own list.
+    """
+    base = re.sub(r"(:cloud|-cloud)$", "", model)
+    names = [n for n in cloud_names if n]
+    if not names or base in names:
+        return base
+    tagged = [n for n in names if n.startswith(base + ":")]
+    return tagged[0] if len(tagged) == 1 else base
+
+
+def _is_ollama_cloud(spec: dict) -> bool:
+    model = spec.get("model", "")
+    return model.endswith((":cloud", "-cloud")) or "ollama.com" in spec.get("url", "")
+
+
+def migrate(
+    data: dict, cloud_names: Optional[Callable[[], List[str]]] = None
+) -> Tuple[dict, List[str]]:
+    """Version 1 -> 2: every "ollama" entry becomes one that still works.
+
+    A cloud model becomes ``ollama-cloud`` with its key unchanged; any other
+    keeps using the user's own Ollama through its OpenAI-compatible API. An
+    entry with no "type" was an Ollama one in version 1. Nothing is dropped:
+    an entry that cannot be converted stays, marked inactive with the reason.
+    Returns the new data and one line per change, for the user.
+    """
+    names: Optional[List[str]] = None
+    notes = []
+    for spec in data.get("providers", []):
+        if spec.get("type", "ollama") != "ollama":
+            continue
+        name = spec.get("name", "?")
+        model = spec.get("model", "")
+        spec["type"] = "ollama"
+        if not model:
+            spec["inactive"] = (
+                "an Ollama provider with no model; set its model or remove it"
+            )
+            notes.append(
+                f"'{name}' is inactive: it is an Ollama provider with no model."
+            )
+        elif _is_ollama_cloud(spec):
+            if names is None:
+                names = (cloud_names or _ollama_cloud_names)()
+            spec["type"] = "ollama-cloud"
+            spec["model"] = _cloud_model(model, names)
+            spec.pop("url", None)
+            keyed = (
+                "its API key kept"
+                if spec.get("api_key")
+                else "set OLLAMA_API_KEY or add a key"
+            )
+            notes.append(
+                f"'{name}' now talks to ollama.com directly (ollama-cloud, model "
+                f"'{spec['model']}', {keyed})."
+            )
+        else:
+            spec["type"] = "api"
+            spec["url"] = (spec.get("url") or OLLAMA_LOCAL_URL).rstrip("/")
+            notes.append(
+                f"'{name}' now uses your Ollama through its OpenAI-compatible API "
+                f"(api, {spec['url']}); change it to llamacpp to have JARVIS run "
+                f"'{model}' itself."
+            )
+    data["version"] = PROVIDERS_VERSION
+    return data, notes
+
+
+def _migrate_file(path: str, data: dict) -> dict:
+    """Migrate, and rewrite the file only when an entry changed.
+
+    A system install keeps the file in /etc/jarvis, which the daemon cannot
+    write: there the converted entries are used for this run and the admin
+    is told, instead of JARVIS failing to start.
+    """
+    data, notes = migrate(data)
+    if not notes:
+        return data
+    backup = f"{path}.v1.bak"
+    try:
+        if not os.path.exists(backup):
+            shutil.copy2(path, backup)
+            os.chmod(backup, 0o600)
+        _write_private(path, data)
+    except OSError as exc:
+        logger.warning(
+            f"providers.json needs updating (Ollama is no longer built in) but "
+            f"could not be rewritten ({exc}); using the converted entries for "
+            f"this run. Rewrite {path} as below, or run JARVIS once as its owner."
+        )
+    else:
+        logger.warning(
+            f"providers.json updated for this JARVIS (Ollama is no longer built "
+            f"in); the old file is kept as {backup}"
+        )
+    for note in notes:
+        logger.warning(f"  {note}")
+    return data
 
 
 def generate_name(ptype: str, model: str, existing: List[str]) -> str:
@@ -56,13 +205,16 @@ def add_provider(
 ) -> Tuple[str, int]:
     """Add a provider. Returns (name, position) or raises ValueError."""
     ptype = ptype.lower()
-    if ptype not in ("ollama", "api", "lmstudio"):
+    if ptype not in ("llamacpp", "api", "lmstudio", "ollama-cloud"):
         raise ValueError(
-            f"Unknown provider type '{ptype}'. Use 'ollama', 'api', or 'lmstudio'."
+            f"Unknown provider type '{ptype}'. Use 'llamacpp', 'api', 'lmstudio', or 'ollama-cloud'."
         )
 
     if ptype == "lmstudio" and not url:
         url = "http://localhost:1234/v1"
+
+    if ptype == "ollama-cloud" and not url:
+        url = Config.OLLAMA_CLOUD_URL
 
     if ptype in ("api", "lmstudio") and not url:
         raise ValueError("API/LM Studio providers require a url.")
