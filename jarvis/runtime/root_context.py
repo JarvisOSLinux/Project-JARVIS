@@ -242,6 +242,12 @@ def configure_call_hint(server_id: str, props: Any) -> List[str]:
     return lines
 
 
+def server_not_installed(error: Optional[str]) -> bool:
+    """Whether dmcp's error means the server is not installed (yet)."""
+    err = (error or "").lower()
+    return "server not found" in err or "not installed" in err
+
+
 def format_server_docs(
     server_id: str,
     tools: List[Dict[str, Any]],
@@ -254,6 +260,11 @@ def format_server_docs(
     can output a concrete dispatch action.
     """
     if not tools:
+        if server_not_installed(error):
+            return (
+                f"SERVER_DOCS: {server_id} — not installed yet. Install it with "
+                "install_server, then call get_server_docs for its tools."
+            )
         if error:
             err_lower = error.lower()
             if any(hint in err_lower for hint in _CONFIG_ERROR_HINTS):

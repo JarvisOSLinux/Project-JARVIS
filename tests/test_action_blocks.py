@@ -262,6 +262,29 @@ class TestRootActions:
         _run(root_actions._handle_get_server_docs, app, {"server_id": "x"})
         assert events[1]["output"] == "2 tools: a, b"
 
+    def test_asking_for_a_server_not_installed_yet_is_not_a_failure(self):
+        app, events = _acting_app(
+            list_server_tools=AsyncMock(
+                return_value={"error": "Error: Server not found: x", "tools": []}
+            ),
+            check_updates=AsyncMock(return_value=[]),
+            get_server_manifest=AsyncMock(return_value={}),
+        )
+        _run(root_actions._handle_get_server_docs, app, {"server_id": "x"})
+        assert events[1]["status"] == "ok"
+        assert "Not installed yet" in events[1]["output"]
+
+    def test_a_server_that_fails_to_start_still_fails(self):
+        app, events = _acting_app(
+            list_server_tools=AsyncMock(
+                return_value={"error": "spawn failed: no such file", "tools": []}
+            ),
+            check_updates=AsyncMock(return_value=[]),
+            get_server_manifest=AsyncMock(return_value={}),
+        )
+        _run(root_actions._handle_get_server_docs, app, {"server_id": "x"})
+        assert events[1]["status"] == "failed"
+
     def _install(self, manifest, install=None):
         return _acting_app(
             install_server=AsyncMock(return_value=install or {}),

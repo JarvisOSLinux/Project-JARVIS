@@ -54,6 +54,13 @@ SETTINGS: Tuple[Setting, ...] = (
         minimum=0,
     ),
     Setting(
+        "NOTIFICATION_SILENT",
+        "No approval pop-ups on this computer's desktop",
+        "Safety",
+        "bool",
+        hint="Requests still wait in jarvis-app, on phones and in jarvis confirm",
+    ),
+    Setting(
         "SUDO_PASSWORD_POPUP",
         "Ask for the sudo password in jarvis-app and on phones",
         "Safety",

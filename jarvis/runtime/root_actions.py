@@ -24,6 +24,7 @@ from .root_context import (
     compact_payload_for_llm,
     format_search_results,
     format_server_docs,
+    server_not_installed,
 )
 
 
@@ -138,12 +139,14 @@ async def _handle_get_server_docs(
     tools = tools_result.get("tools", []) if isinstance(tools_result, dict) else []
     tools_error = tools_result.get("error") if isinstance(tools_result, dict) else None
     logger.info(f"JARVIS: get_server_docs '{server_id}' → {len(tools)} tool(s)")
-    action_events.end(
-        app,
-        action,
-        "failed" if tools_error and not tools else "ok",
-        _tool_names(tools) if tools else str(tools_error or "No tools."),
-    )
+    # Asking before installing is a normal step, not a failure.
+    if not tools and server_not_installed(tools_error):
+        status, output = "ok", "Not installed yet; it needs installing first."
+    elif tools_error and not tools:
+        status, output = "failed", str(tools_error)
+    else:
+        status, output = "ok", _tool_names(tools) if tools else "No tools."
+    action_events.end(app, action, status, output)
 
     # When the server fails to start due to missing config, surface the exact
     # env-var key names from configurableProperties so the LLM doesn't guess.
