@@ -1,9 +1,13 @@
 # import multiprocessing
 import os
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 
-# Load config: JARVIS_CONFIG_DIR (system install) or jarvis/.env (dev)
+# Load config: JARVIS_CONFIG_DIR (system install), else the user's
+# jarvis.conf and then jarvis/.env (dev). A setting changed while JARVIS runs
+# (TUI, jarvis-app, a phone) is saved to jarvis.conf in the config dir
+# (`cli.ENV_FILE`); read first, it wins over jarvis/.env, and the process
+# environment wins over both.
 _config_dir = os.getenv("JARVIS_CONFIG_DIR")
 if _config_dir:
     _env_path = os.path.join(_config_dir, "jarvis.conf")
@@ -12,6 +16,21 @@ if _config_dir:
     else:
         load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 else:
+    from .platform import current as _conf_platform
+
+    _user_conf = _conf_platform.config_dir() / "jarvis.conf"
+    if _user_conf.is_file():
+        _template_path = os.path.join(os.path.dirname(__file__), ".env.example")
+        _template = (
+            dotenv_values(_template_path) if os.path.isfile(_template_path) else {}
+        )
+        for _key, _value in dotenv_values(_user_conf).items():
+            # Until 2026-11-11 the first saved setting copied .env.example
+            # into this file whole. A value equal to the template's was not
+            # chosen by anyone, so it must not override jarvis/.env (an
+            # `ask_all` there would have dropped back to the template's smart).
+            if _value is not None and _template.get(_key) != _value:
+                os.environ.setdefault(_key, _value)
     load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 

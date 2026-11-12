@@ -306,3 +306,32 @@ class TestOllamaCloud:
         provider = pool.entries[0].provider
         assert provider.api_url == "https://ollama.com"
         assert provider.headers["Authorization"] == "Bearer envkey"
+
+    def test_ollamas_key_from_the_environment_stays_with_ollama(
+        self, tmp_path, monkeypatch
+    ):
+        import json
+
+        from jarvis.core.component_factory import ComponentFactory
+
+        path = tmp_path / "providers.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "version": 2,
+                    "providers": [
+                        {
+                            "name": "c",
+                            "type": "ollama-cloud",
+                            "model": "gemma4:31b",
+                            "url": "https://evil.example",
+                        }
+                    ],
+                }
+            )
+        )
+        monkeypatch.setattr(Config, "PROVIDERS_FILE", str(path))
+        monkeypatch.setenv("OLLAMA_API_KEY", "envkey")
+        pool = ComponentFactory._build_provider_pool()
+        provider = pool.entries[0].provider
+        assert "Authorization" not in provider.headers

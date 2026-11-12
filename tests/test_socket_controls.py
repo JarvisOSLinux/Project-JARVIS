@@ -56,6 +56,47 @@ def _ask(app, writer, msg):
     return writer.sent[-1]
 
 
+def _start_listening(voice_manager):
+    app, writer = _app()
+    app.voice_manager = voice_manager
+    app._gui_state = "processing"
+    asyncio.run(
+        io._process_gui_message(
+            app, logging.getLogger("test"), {"type": "start_listening"}, writer
+        )
+    )
+    return app, writer
+
+
+def _voice(started, loop_running=True):
+    return SimpleNamespace(
+        wake_loop_running=loop_running,
+        activation=SimpleNamespace(start_listening=lambda: started),
+    )
+
+
+@pytest.mark.unit
+class TestStartListening:
+    @pytest.mark.parametrize(
+        "voice_manager",
+        [None, _voice(False), _voice(True, loop_running=False)],
+        ids=["no voice", "listener failed", "wake loop gone"],
+    )
+    def test_refused_without_a_working_listener(self, voice_manager):
+        app, writer = _start_listening(voice_manager)
+
+        assert writer.sent[0]["type"] == "error"
+        assert "wake word" in writer.sent[0]["message"]
+        assert writer.sent[1] == {"type": "state", "state": "processing"}
+        assert app._gui_state == "processing"
+
+    def test_turns_the_listener_on(self):
+        app, writer = _start_listening(_voice(True))
+
+        assert writer.sent[-1] == {"type": "state", "state": "listening"}
+        assert app._gui_state == "listening"
+
+
 @pytest.mark.unit
 class TestRequests:
     def test_get_status(self):

@@ -788,7 +788,12 @@ function buildPermissionItem(item) {
     return el;
 }
 
+// What the panel shows: Approve All approves these and no request that came in
+// after the list was drawn.
+let shownConfirmationIds = [];
+
 function renderPermissionList(items) {
+    shownConfirmationIds = items.map((item) => item.id);
     permissionList.innerHTML = '';
     permissionPanelTitle.textContent = items.length
         ? `Permission Requests (${items.length})`
@@ -818,11 +823,25 @@ async function partialApproveConfirmation(id, approvedIndices) {
 }
 
 async function approveAllConfirmations() {
-    await invoke('approve_all_confirmations');
+    await invoke('approve_all_confirmations', { ids: shownConfirmationIds });
     await invoke('list_confirmations');
 }
 
 // ── Settings ───────────────────────────────────────────────────────────────
+const OFFLINE_CHANGE = 'Not connected to JARVIS, so nothing changed. Try again once it reconnects.';
+const LOST_CHANGE = 'The connection dropped before JARVIS answered. Check this change once it reconnects.';
+const ENDED_CHANGE = 'This session has ended. Reload the page to connect again, then check this change.';
+
+// What is waiting on JARVIS's answer, so a refusal or a dropped connection can
+// be shown where the change was made.
+let pendingSetting = null;  // the setting's key
+let pendingProvider = null; // 'form', or 'list' for the list's own buttons
+let sessionEnded = false;   // the gateway closed it on purpose; no reconnect follows
+
+function settingsOpen() {
+    return settingsModal.classList.contains('visible');
+}
+
 function clearSettingsError() {
     settingsError.textContent = '';
     settingsError.classList.remove('visible');
@@ -831,6 +850,37 @@ function clearSettingsError() {
 function showSettingsError(message) {
     settingsError.textContent = message;
     settingsError.classList.add('visible');
+}
+
+/// The Settings window covers the notice on a phone, so while it is open an
+/// error goes in the window.
+function showChangeError(message) {
+    if (settingsOpen()) showSettingsError(message);
+    else showNotice(message);
+}
+
+function offlineChange() {
+    return sessionEnded ? ENDED_CHANGE : OFFLINE_CHANGE;
+}
+
+function restorePendingSetting() {
+    if (pendingSetting !== null) putBackSetting(pendingSetting);
+    pendingSetting = null;
+}
+
+function onError(message) {
+    if (pendingProvider === 'form') showProviderFormError(message);
+    else showChangeError(message);
+    pendingProvider = null;
+    restorePendingSetting();
+}
+
+function loseChangesInFlight() {
+    const message = sessionEnded ? ENDED_CHANGE : LOST_CHANGE;
+    if (pendingProvider === 'form') showProviderFormError(message);
+    else if (pendingProvider !== null || pendingSetting !== null) showChangeError(message);
+    pendingProvider = null;
+    restorePendingSetting();
 }
 
 function switchSettingsTab(tab) {
@@ -874,13 +924,24 @@ function toggleSettingsModal() {
 // window draws). Each control sets its value in place, so a reply to one
 // change does not rebuild the panel under the user.
 const settingControls = new Map(); // key -> function that shows a value
+const settingValues = new Map();   // key -> what JARVIS last said it runs with
 let settingsDrawn = '';
+
+function showSetting(key, value) {
+    settingValues.set(key, value);
+    settingControls.get(key)?.(value);
+}
+
+/// Back to what JARVIS runs with, even in a field still being typed in.
+function putBackSetting(key) {
+    settingControls.get(key)?.(settingValues.get(key), true);
+}
 
 function renderSettings(list) {
     const keys = list.map((s) => s.key).join(' ');
     if (keys !== settingsDrawn) drawSettings(list);
     settingsDrawn = keys;
-    for (const s of list) settingControls.get(s.key)?.(s.value);
+    for (const s of list) showSetting(s.key, s.value);
 }
 
 function drawSettings(list) {
@@ -951,8 +1012,8 @@ function settingField(s) {
         if (s.min != null) control.min = s.min;
         if (s.max != null) control.max = s.max;
         control.addEventListener('change', () => changeSetting(s.key, control.value));
-        // Not while the user is typing in it.
-        show = (v) => { if (document.activeElement !== control) control.value = v; };
+        // Not while the user is typing in it, unless the value was refused.
+        show = (v, force) => { if (force || document.activeElement !== control) control.value = v; };
         field.append(label, control);
     }
     control.id = 'setting-' + s.key;
@@ -963,6 +1024,12 @@ function settingField(s) {
 
 function changeSetting(key, value) {
     clearSettingsError();
+    if (!isConnected) {
+        showSettingsError(offlineChange());
+        putBackSetting(key);
+        return;
+    }
+    pendingSetting = key;
     invoke('set_setting', { key, value });
 }
 
@@ -1014,13 +1081,22 @@ function isLoopback(url) {
     }
 }
 
+function isHttpUrl(url) {
+    if (!/^https?:\/\//i.test(url)) return false;
+    try {
+        return !!new URL(url).hostname;
+    } catch (_) {
+        return false;
+    }
+}
+
 function showProviderHints() {
     const hints = PROVIDER_HINTS[providerFormType.value] || PROVIDER_HINTS[''];
     providerFormModel.placeholder = hints.model;
     providerFormUrl.placeholder = hints.url;
     const editing = cachedProviders.find((p) => p.name === editingProviderName);
     providerFormKey.placeholder = editing && hasKey(editing)
-        ? 'A key is saved; type a new one to replace it'
+        ? 'A key is saved; type a new one to replace it (another host needs its own)'
         : hints.key;
 }
 
@@ -1058,7 +1134,7 @@ function buildProviderItem(p, index) {
         upBtn.className = 'provider-item-action';
         upBtn.title = 'Try earlier';
         upBtn.append(icon('arrow-up'));
-        upBtn.addEventListener('click', () => invoke('move_provider', { name: p.name, position: index }));
+        upBtn.addEventListener('click', () => sendProviderChange('list', 'move_provider', { name: p.name, position: index }));
         actions.append(upBtn);
     }
     actions.append(editBtn, removeBtn);
@@ -1082,8 +1158,7 @@ function renderProviderList(providers) {
 
 function openProviderForm(existing) {
     editingProviderName = existing ? existing.name : null;
-    providerFormError.textContent = '';
-    providerFormError.classList.remove('visible');
+    clearProviderFormError();
     providerFormType.value = existing?.type || '';
     providerFormModel.value = existing?.model || '';
     providerFormName.value = existing?.name || '';
@@ -1098,13 +1173,34 @@ function openProviderForm(existing) {
 
 function closeProviderForm() {
     editingProviderName = null;
+    providerFormKey.value = '';
+    if (pendingProvider === 'form') pendingProvider = 'list'; // its error has nowhere to show now
     providerForm.classList.add('hidden');
     settingsAddProviderBtn.classList.remove('hidden');
+}
+
+function clearProviderFormError() {
+    providerFormError.textContent = '';
+    providerFormError.classList.remove('visible');
 }
 
 function showProviderFormError(message) {
     providerFormError.textContent = message;
     providerFormError.classList.add('visible');
+}
+
+function sendProviderChange(from, command, args) {
+    // One at a time: a reply does not say which request it answers.
+    if (pendingProvider !== null) return false;
+    clearSettingsError();
+    clearProviderFormError();
+    if (!isConnected) {
+        (from === 'form' ? showProviderFormError : showSettingsError)(offlineChange());
+        return false;
+    }
+    pendingProvider = from;
+    invoke(command, args);
+    return true;
 }
 
 async function saveProviderForm() {
@@ -1117,6 +1213,9 @@ async function saveProviderForm() {
     const typedUrl = providerFormUrl.value.trim();
     if (ptype === 'api' && !typedUrl) {
         return showProviderFormError(`An API provider needs its URL (${PROVIDER_HINTS.api.url}).`);
+    }
+    if (typedUrl && !isHttpUrl(typedUrl)) {
+        return showProviderFormError('The URL must start with http:// or https:// and name a host.');
     }
     if (ptype === 'api' && !apiKey && !editingProviderName && !isLoopback(typedUrl)) {
         return showProviderFormError('A cloud provider needs its API key.');
@@ -1139,9 +1238,9 @@ async function saveProviderForm() {
         if (url) fields.url = url;
         if (apiKey) fields.key = apiKey;
         if (temperature !== null) fields.temperature = temperature;
-        await invoke('edit_provider', { name: editingProviderName, fields });
+        sendProviderChange('form', 'edit_provider', { name: editingProviderName, fields });
     } else {
-        await invoke('add_provider', {
+        sendProviderChange('form', 'add_provider', {
             ptype,
             model,
             name: name || null,
@@ -1152,8 +1251,10 @@ async function saveProviderForm() {
     }
 }
 
-async function removeProvider(name) {
-    await invoke('remove_provider', { name });
+function removeProvider(name) {
+    if (sendProviderChange('list', 'remove_provider', { name }) && editingProviderName === name) {
+        closeProviderForm();
+    }
 }
 
 // ── Widgets (jarvisos-app#18, #16) ──────────────────────────────────────────
@@ -1321,6 +1422,9 @@ function applyGateway(info) {
 }
 
 function handleDisconnect(info) {
+    sessionEnded = !!info && info.code >= 4000 && info.code < 5000;
+    loseChangesInFlight();
+    if (sessionEnded && settingsOpen()) showSettingsError(ENDED_CHANGE);
     setConnected(false);
     setStatus('offline');
     closeWorkPanel();
@@ -1349,6 +1453,7 @@ async function sendMessage() {
 }
 
 async function toggleListening() {
+    if (!isConnected) return showChangeError(offlineChange());
     await invoke('toggle_listening');
 }
 
@@ -1426,6 +1531,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         showNotice('');
         invoke('list_sessions');
         invoke('list_confirmations');
+        sessionEnded = false;
+        if (settingsOpen()) {
+            if (settingsError.textContent === OFFLINE_CHANGE) clearSettingsError();
+            if (providerFormError.textContent === OFFLINE_CHANGE) clearProviderFormError();
+            invoke('get_settings');
+            invoke('list_providers');
+        }
     });
     await listen('ipc-disconnected', (e)     => handleDisconnect(e.payload));
     await listen('ipc-gateway',      (e)     => applyGateway(e.payload));
@@ -1461,21 +1573,31 @@ document.addEventListener('DOMContentLoaded', async () => {
         invoke('list_sessions');
     });
     await listen('ipc-session-error', (e) => showNotice('Session error: ' + e.payload));
-    await listen('ipc-error', (e) => showNotice(e.payload));
+    await listen('ipc-error', (e) => onError(e.payload));
     await listen('ipc-settings', (e) => renderSettings(e.payload || []));
     await listen('ipc-provider-list', (e) => {
         renderProviderList(e.payload);
-        closeProviderForm(); // a refreshed list means the pending add/edit/remove succeeded
+        // Only the form's own save closes it: a list also comes from a
+        // reconnect or another screen, and the user may be typing.
+        if (pendingProvider === 'form') closeProviderForm();
+        pendingProvider = null;
     });
-    await listen('ipc-provider-error', (e) => showProviderFormError(e.payload));
+    await listen('ipc-provider-error', (e) => {
+        if (pendingProvider === 'form') showProviderFormError(e.payload);
+        else showChangeError(e.payload);
+        pendingProvider = null;
+    });
     await listen('ipc-client-list', (e) => renderShutdownClientList(e.payload));
     await listen('ipc-daemon-shutdown', (e) => handleDaemonShutdown(e.payload));
     await listen('ipc-open-shutdown-modal', openShutdownModal); // tray menu entry point
     await listen('ipc-config-updated', (e) => {
-        settingControls.get(e.payload.key)?.(e.payload.value);
+        if (e.payload.key === pendingSetting) pendingSetting = null;
+        showSetting(e.payload.key, e.payload.value);
     });
     await listen('ipc-config-error', (e) => {
+        if (e.payload.key === pendingSetting) pendingSetting = null;
         showSettingsError(e.payload.message);
+        putBackSetting(e.payload.key);
         invoke('get_settings'); // put the refused control back to what JARVIS runs with
     });
 

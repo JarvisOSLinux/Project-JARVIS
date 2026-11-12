@@ -12,6 +12,7 @@ from typing import Any, Optional
 from ..config import Config
 from ..core import settings
 from ..core.providers import (
+    KEY_REMOVED,
     add_provider,
     edit_provider,
     list_providers,
@@ -221,6 +222,11 @@ def apply_confirmation_decision(app: Any, msg: dict) -> str | None:
 
     if msg_type == "approve_all_confirmations":
         ids = [c["id"] for c in app.confirmation.list_pending()]
+        shown = msg.get("ids")
+        if isinstance(shown, list):
+            # Only what the client showed: a request that came in after it
+            # drew its list was never seen by whoever pressed the button.
+            ids = [cid for cid in ids if cid in shown]
         for cid in ids:
             app.events.inject_confirmation_response(
                 {"type": "confirmation_response", "id": cid, "approved": True}
@@ -463,8 +469,24 @@ async def _process_gui_message(
         # separate, orthogonal concept from the WOKEN/CAPTURING/PROCESSING/
         # SPEAKING session lifecycle in VoiceState, so it keeps its own
         # plain-string state rather than reusing VoiceState.IDLE.
-        if app.voice_manager and hasattr(app.voice_manager, "activation"):
-            app.voice_manager.activation.start_listening()
+        vm = app.voice_manager
+        if not (
+            vm
+            and hasattr(vm, "activation")
+            and getattr(vm, "wake_loop_running", False)
+            and vm.activation.start_listening()
+        ):
+            await _gui_write(
+                writer,
+                {
+                    "type": "error",
+                    "message": "The wake word can't start: voice isn't working "
+                    "on the computer JARVIS runs on.",
+                },
+            )
+            # jarvis-app shows "listening" as soon as it asks; put it back.
+            await _gui_write(writer, {"type": "state", "state": app._gui_state})
+            return
         await set_gui_state(app, "listening")
         note_change_from_phone(app, writer, "Voice listening turned on")
 
@@ -507,13 +529,17 @@ async def _process_gui_message(
 
     elif msg_type == "edit_provider":
         fields = msg.get("fields") if isinstance(msg.get("fields"), dict) else {}
+        response, notice = _handle_edit_provider(msg)
         await _reply_or_broadcast_providers(
             app,
             writer,
-            _handle_edit_provider(msg),
+            response,
             f"Provider {msg.get('name')} changed"
-            + (", with a new API key" if fields.get("key") else ""),
+            + (", with a new API key" if fields.get("key") else "")
+            + (", its old key removed" if notice else ""),
         )
+        if notice:
+            await _gui_write(writer, {"type": "provider_error", "message": notice})
 
     elif msg_type == "remove_provider":
         await _reply_or_broadcast_providers(
@@ -665,16 +691,23 @@ def _handle_add_provider(msg: dict) -> dict:
     return {"type": "provider_list", "providers": list_providers()}
 
 
-def _handle_edit_provider(msg: dict) -> dict:
+def _handle_edit_provider(msg: dict) -> tuple[dict, str]:
+    """The reply, and what the editor must hear besides (a key removed)."""
     name = msg.get("name", "")
     fields = msg.get("fields") or {}
-    if not name or not fields:
-        return _provider_error("edit_provider requires 'name' and 'fields'")
+    if not name or not isinstance(fields, dict) or not fields:
+        return _provider_error("edit_provider requires 'name' and 'fields'"), ""
     try:
-        edit_provider(name, **fields)
-    except ValueError as e:
-        return _provider_error(str(e))
-    return {"type": "provider_list", "providers": list_providers()}
+        updated = edit_provider(name, **fields)
+    except (TypeError, ValueError) as e:
+        return _provider_error(str(e)), ""
+    notice = (
+        f"Saved. {name} now points at another host, so its old key was removed; "
+        "edit it again to add the key for the new host."
+        if KEY_REMOVED in updated
+        else ""
+    )
+    return {"type": "provider_list", "providers": list_providers()}, notice
 
 
 def _handle_remove_provider(msg: dict) -> dict:

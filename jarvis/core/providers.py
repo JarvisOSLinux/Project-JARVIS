@@ -8,7 +8,8 @@ import re
 import shutil
 import tempfile
 import urllib.request
-from typing import Callable, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Iterable, List, Optional, Tuple
+from urllib.parse import urlsplit
 
 from ..config import Config
 from .logger import get_logger
@@ -19,6 +20,8 @@ logger = get_logger(__name__)
 PROVIDERS_VERSION = 2
 
 OLLAMA_LOCAL_URL = "http://localhost:11434"
+TYPES = ("llamacpp", "api", "lmstudio", "ollama-cloud")
+KEY_REMOVED = "key removed: the address changed to another host, so add the key again"
 _OLLAMA_CLOUD_MODELS = "https://ollama.com/api/tags"
 
 
@@ -205,16 +208,16 @@ def add_provider(
 ) -> Tuple[str, int]:
     """Add a provider. Returns (name, position) or raises ValueError."""
     ptype = ptype.lower()
-    if ptype not in ("llamacpp", "api", "lmstudio", "ollama-cloud"):
+    if ptype not in TYPES:
         raise ValueError(
             f"Unknown provider type '{ptype}'. Use 'llamacpp', 'api', 'lmstudio', or 'ollama-cloud'."
         )
 
-    if ptype == "lmstudio" and not url:
-        url = "http://localhost:1234/v1"
+    if url and url_error(url):
+        raise ValueError(url_error(url))
 
-    if ptype == "ollama-cloud" and not url:
-        url = Config.OLLAMA_CLOUD_URL
+    if ptype in ("lmstudio", "ollama-cloud") and not url:
+        url = default_url(ptype)
 
     if ptype in ("api", "lmstudio") and not url:
         raise ValueError("API/LM Studio providers require a url.")
@@ -277,8 +280,64 @@ def move_provider(name: str, position: int) -> None:
     save_providers(data)
 
 
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+_DEFAULT_URLS = {"lmstudio": "http://localhost:1234/v1"}
+
+
+def default_url(ptype: str) -> str:
+    """Where a provider of `ptype` with no url of its own sends requests."""
+    if ptype == "ollama-cloud":
+        return Config.OLLAMA_CLOUD_URL
+    return _DEFAULT_URLS.get(ptype, "")
+
+
+def effective_url(entry: dict) -> str:
+    return entry.get("url") or default_url(str(entry.get("type", "")))
+
+
+def origin(url: Any) -> Tuple[str, str, Optional[int]]:
+    """Scheme, host and port: where a request to `url` goes.
+
+    Total: an address that does not parse is ("", "", None), never an error,
+    since providers.json is read where a raise would stop JARVIS starting.
+    """
+    if not isinstance(url, str):
+        return "", "", None
+    try:
+        parts = urlsplit(url.strip())
+        port = parts.port
+    except ValueError:
+        return "", "", None
+    scheme = parts.scheme.lower()
+    if port == _DEFAULT_PORTS.get(scheme):
+        port = None
+    return scheme, (parts.hostname or "").lower(), port
+
+
+def url_error(url: Any) -> Optional[str]:
+    """Why `url` cannot be a provider's address, or None."""
+    scheme, host, _ = origin(url)
+    if scheme not in _DEFAULT_PORTS or not host:
+        return f"'{url}' is not an address: it must start with http:// or https:// and name a host."
+    return None
+
+
 def edit_provider(name: str, **fields) -> List[str]:
-    """Update fields on an existing provider. Returns list of updated field names."""
+    """Update fields on an existing provider. Returns list of updated field names.
+
+    A key belongs to the address it was saved for. Moving a provider to
+    another host without giving a key removes its stored one, so an edit
+    (from a phone, say) cannot send the key to a server of its choosing.
+    """
+    if fields.get("type") is not None:
+        ptype = str(fields["type"]).lower()
+        if ptype not in TYPES:
+            raise ValueError(
+                f"Unknown provider type '{fields['type']}'. Use "
+                + ", ".join(f"'{t}'" for t in TYPES)
+                + "."
+            )
+        fields = {**fields, "type": ptype}
     field_map = {
         "model": "model",
         "url": "url",
@@ -298,6 +357,10 @@ def edit_provider(name: str, **fields) -> List[str]:
     if target is None:
         raise ValueError(f"Provider '{name}' not found.")
 
+    if fields.get("url") is not None and url_error(fields["url"]):
+        raise ValueError(url_error(fields["url"]))
+
+    was = origin(effective_url(target))
     updated = []
     for flag_key, json_key in field_map.items():
         if flag_key in fields and fields[flag_key] is not None:
@@ -311,6 +374,14 @@ def edit_provider(name: str, **fields) -> List[str]:
         raise ValueError(
             "No recognized fields. Use model, url, key, temperature, type, or vision."
         )
+
+    if origin(effective_url(target)) != was:
+        # Hand-written headers go even with a new key: they may hold one too.
+        dropped = target.pop("headers", None) is not None
+        if "key" not in updated:
+            dropped = target.pop("api_key", None) is not None or dropped
+        if dropped:
+            updated.append(KEY_REMOVED)
 
     save_providers(data)
     return updated

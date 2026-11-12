@@ -885,22 +885,13 @@ def _legacy_redirect(old_cmd: str) -> None:
 
 
 def _update_env_setting(key: str, value: str) -> None:
-    """
-    Update a setting in .env file.
+    """Save one setting to ENV_FILE, which JARVIS reads at startup.
 
-    Args:
-        key: Environment variable name
-        value: New value
+    A new file holds only what was saved. Seeded from .env.example it would
+    also pin every default there (``LOG_FILE=`` turns the log file off) over
+    the values in jarvis/.env.
     """
-    if ENV_FILE.exists():
-        lines = ENV_FILE.read_text().splitlines()
-    else:
-        template_file = Path(__file__).parent / ".env.example"
-        if template_file.exists():
-            logger.info("Creating .env from template...")
-            lines = template_file.read_text().splitlines()
-        else:
-            lines = []
+    lines = ENV_FILE.read_text().splitlines() if ENV_FILE.exists() else []
 
     found = False
     for i, line in enumerate(lines):

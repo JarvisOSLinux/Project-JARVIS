@@ -21,7 +21,7 @@ from .command_parser import TaskParser
 from .confirmation_manager import STORE_FILENAME, ConfirmationManager
 from .logger import get_logger
 from .output_manager import OutputManager
-from .providers import load_providers
+from .providers import effective_url, load_providers, origin
 from .setup_queue import SetupQueue
 from .setup_queue import store_path as setup_store_path
 from .system_info import SystemInfo
@@ -106,13 +106,15 @@ class ComponentFactory:
                     getattr(Config, "LLM_TEMPERATURE", 0.7),
                 )
             elif ptype in ("api", "lmstudio", "ollama-cloud"):
-                default_url = {
-                    "lmstudio": "http://localhost:1234/v1",
-                    "ollama-cloud": Config.OLLAMA_CLOUD_URL,
-                }.get(ptype, "")
-                kwargs["api_url"] = spec.get("url") or default_url
+                kwargs["api_url"] = effective_url(spec)
                 kwargs["api_key"] = spec.get("api_key", "")
-                if ptype == "ollama-cloud" and not kwargs["api_key"]:
+                # OLLAMA_API_KEY is ollama.com's key: an entry pointed at
+                # another address (host, scheme or port) does not get it.
+                if (
+                    ptype == "ollama-cloud"
+                    and not kwargs["api_key"]
+                    and origin(kwargs["api_url"]) == origin(Config.OLLAMA_CLOUD_URL)
+                ):
                     kwargs["api_key"] = os.environ.get("OLLAMA_API_KEY", "")
                 if spec.get("headers"):
                     kwargs["headers"] = spec["headers"]

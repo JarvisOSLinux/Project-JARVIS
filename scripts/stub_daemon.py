@@ -337,7 +337,10 @@ async def handle(msg: dict, writer: asyncio.StreamWriter) -> None:
         await broadcast({"type": "state", "state": "listening" if on else "idle"})
         await changed(writer, f"Voice listening turned {'on' if on else 'off'}")
     elif kind == "approve_all_confirmations":
-        pending.clear()
+        shown = msg.get("ids")
+        pending[:] = [
+            c for c in pending if isinstance(shown, list) and c["id"] not in shown
+        ]
         await broadcast({"type": "confirmation_list", "confirmations": pending})
     elif kind == "list_sessions":
         await broadcast({"type": "session_list", "sessions": [SESSION]})
@@ -394,7 +397,7 @@ async def handle(msg: dict, writer: asyncio.StreamWriter) -> None:
         if text.strip().lower() == "confirm":
             pending.append(
                 {
-                    "id": f"c{int(time.time())}",
+                    "id": f"c{time.time_ns()}",
                     "created_at": time.time(),
                     "tool_names": ["delete_file"],
                     "tool_lines": ["delete_file path=/tmp/demo"],

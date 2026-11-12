@@ -125,6 +125,9 @@ def run_voice_activation(app: Any, logger: Logger) -> None:
         if not app.voice_manager.activation.start_listening():
             logger.error("JARVIS: Failed to start voice activation")
             return
+        # Without this loop a wake word is heard and nothing acts on it, so
+        # the mic button asks whether it is alive.
+        vm.wake_loop_running = True
         while app._running:
             if getattr(app.voice_manager, "_wake_word_detected", False):
                 app.voice_manager._wake_word_detected = False
@@ -147,5 +150,6 @@ def run_voice_activation(app: Any, logger: Logger) -> None:
     except Exception as e:
         logger.error(f"JARVIS: Voice thread error: {e}", exc_info=True)
     finally:
+        vm.wake_loop_running = False
         if hasattr(app.voice_manager, "activation"):
             app.voice_manager.activation.cleanup()

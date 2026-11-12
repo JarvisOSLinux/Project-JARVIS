@@ -20,13 +20,17 @@ gateway. This module is one, so the same threats are closed another way:
    That closes cross-site WebSocket hijacking and DNS rebinding.
 5. **Remote mode always asks.** A session is refused while the daemon runs in
    ``allow_all`` and ended if it switches to it, and no phone may switch it
-   there.
-6. **A written trail.** Every state-changing request is appended to the audit
+   there. Approve all names the requests the phone shows.
+6. **The role table covers the chat.** A chat line the daemon runs as a slash
+   command needs the role that command's own message needs (``acts_as``).
+7. **A written trail.** Every state-changing request is appended to the audit
    file with the account that sent it, never with an API key.
-7. **The owner's phone is jarvis-app** (Yakup, 2026-11-10): settings,
-   providers with their keys, approve all, voice listening. Keys the daemon
-   lists are removed before they reach a phone; a key typed on the phone goes
-   to the daemon over Tailscale's encrypted link. What belongs to the laptop
+8. **The owner's phone is jarvis-app** (Yakup, 2026-11-10): settings,
+   providers with their keys, approve all, voice listening. Keys (and
+   ``headers``) the daemon lists are removed before they reach a phone; a key
+   typed on the phone goes to the daemon over Tailscale's encrypted link, and
+   a provider moved to another host loses its stored key
+   (``core/providers.edit_provider``). What belongs to the laptop
    stays there: shutting JARVIS down (nothing could start it again from a
    phone), the wake sound's file, and server setups.
 
@@ -46,6 +50,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ..config import Config
+from ..core import settings
 from ..core.logger import get_logger
 from ..core.secret_scrubber import redact_secrets
 from ..platform import current as platform
@@ -88,7 +93,7 @@ _TRUSTED_SENDS = _GUEST_SENDS | {
 _PROVIDER_CHANGES = frozenset(
     {"add_provider", "edit_provider", "remove_provider", "move_provider"}
 )
-# The owner's phone is jarvis-app (docstring, point 7).
+# The owner's phone is jarvis-app (docstring, point 8).
 _OWNER_SENDS = (
     _TRUSTED_SENDS
     | _PROVIDER_CHANGES
@@ -178,26 +183,79 @@ MAX_FRAME = 64 * 1024
 UPSTREAM_LINE_LIMIT = 8 * 1024 * 1024
 
 
+# The daemon runs a chat line that starts with one of these as the command
+# (`root_handlers.on_user_input`), which does what this socket message does.
+_SLASH_SENDS = {
+    "/new": "create_session",
+    "/sessions": "list_sessions",
+    "/switch": "switch_session",
+    "/rename": "rename_session",
+    "/delete": "delete_session",
+}
+
+
+def acts_as(msg: dict) -> str:
+    """The socket message `msg` amounts to once the daemon has read it.
+
+    A guest may chat but not delete a session, and the daemon reads
+    "/delete 5bd5" typed into the chat as the delete itself. The words are
+    split as `stop.handle_command` and `session_commands.handle_slash_command`
+    split them, so the gateway and the daemon read one line the same way.
+    """
+    kind = msg["type"]
+    content = msg.get("content")
+    if kind != "message" or not isinstance(content, str):
+        return kind
+    words = content.strip().split()
+    if not words or not words[0].startswith("/"):
+        return kind
+    command = words[0].lower()
+    if command == "/stop":
+        rest = [w.lower() for w in words[1:]]
+        if rest == ["all"]:
+            return "stop_all"
+        if len(rest) == 1 and rest[0].isdigit():
+            return "stop_task"
+        return "stop"
+    return _SLASH_SENDS.get(command, kind)
+
+
 def sendable(role: str, msg: Any) -> bool:
     """True when `role` may relay `msg` to the daemon."""
-    return (
-        isinstance(msg, dict)
-        and isinstance(msg.get("type"), str)
-        and msg["type"] in ROLE_SENDS.get(role, frozenset())
-    )
+    if not (isinstance(msg, dict) and isinstance(msg.get("type"), str)):
+        return False
+    if msg["type"] == "message" and not isinstance(msg.get("content"), str):
+        return False
+    allowed = ROLE_SENDS.get(role, frozenset())
+    return msg["type"] in allowed and acts_as(msg) in allowed
 
 
 def refused(msg: dict) -> Optional[str]:
     """Why a phone may not send `msg` although its role may send the type."""
-    if msg.get("type") != "set_setting":
+    kind = msg.get("type")
+    if kind == "approve_all_confirmations":
+        ids = msg.get("ids")
+        if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+            # Without them the daemon approves whatever waits when it reads
+            # the message, a request that came in after the phone drew its
+            # list included.
+            return (
+                "Approve all must name the requests it approves. Reload the "
+                "page and try again."
+            )
+        return None
+    if kind != "set_setting":
         return None
     key, value = msg.get("key"), msg.get("value")
-    if key == "CONFIRMATION_MODE" and value == "allow_all":
-        return (
-            "Approvals can't be turned off from a phone: remote access needs "
-            "them on. Change it at the laptop."
-        )
-    if key == "WAKE_CHIME_PATH" and value not in ("", None):
+    if key == "CONFIRMATION_MODE":
+        # Read as the daemon reads it: "allow_all " is allow_all to it.
+        mode, _ = settings.parse(settings.find(key), value)
+        if mode == "allow_all":
+            return (
+                "Approvals can't be turned off from a phone: remote access "
+                "needs them on. Change it at the laptop."
+            )
+    if key == "WAKE_CHIME_PATH" and ("" if value is None else str(value).strip()):
         return (
             "The wake sound is a file on the laptop; from a phone it can only "
             "be restored to the default."
@@ -205,15 +263,34 @@ def refused(msg: dict) -> Optional[str]:
     return None
 
 
+# Credentials a providers.json entry may hold. `headers` is written by hand
+# and may carry one (an `x-api-key`, an `Authorization`).
+_PROVIDER_SECRETS = ("api_key", "headers")
+
+
 def without_keys(providers: Any) -> list:
     """A provider list as a phone gets it: whether each has a key, not the key."""
     shown = []
     for p in providers if isinstance(providers, list) else []:
         if isinstance(p, dict):
-            kept = {k: v for k, v in p.items() if k != "api_key"}
+            kept = {k: v for k, v in p.items() if k not in _PROVIDER_SECRETS}
             p = {**kept, "api_key_set": bool(p.get("api_key"))}
         shown.append(p)
     return shown
+
+
+def _without_commands(item: Any) -> Any:
+    """A pending confirmation as a guest sees it: which tools, not the commands."""
+    if not isinstance(item, dict):
+        return item
+    return {k: item[k] for k in ("id", "tool_names", "created_at") if k in item}
+
+
+def _without_digest(session: Any) -> Any:
+    """A session as a guest sees it: no LLM-written summary of its turns."""
+    if not isinstance(session, dict):
+        return session
+    return {k: v for k, v in session.items() if k not in ("summary", "metadata")}
 
 
 def relayable(msg: Any, role: str = "guest") -> bool:
@@ -236,14 +313,33 @@ def shown_to(msg: Any, role: str) -> Optional[dict]:
         return shutdown_notice(msg)
     if not relayable(msg, role):
         return None
-    # A session's history carries its action blocks, as the action events do.
-    if msg.get("type") == "session_switched" and "action" not in RELAYED_FOR[role]:
-        kept = [
-            m
-            for m in msg.get("messages") or []
-            if isinstance(m, dict) and m.get("role") != "action"
-        ]
-        msg = {**msg, "messages": kept}
+    # What JARVIS ran, with its parameters and output, is for the roles that
+    # approve it (the action events): not in a session's history, a pending
+    # request's details, or the summary of every session's older turns.
+    if "action" not in RELAYED_FOR[role]:
+        kind = msg.get("type")
+        if kind == "session_switched":
+            kept = [
+                m
+                for m in msg.get("messages") or []
+                if isinstance(m, dict) and m.get("role") != "action"
+            ]
+            msg = {
+                **msg,
+                "session": _without_digest(msg.get("session")),
+                "messages": kept,
+            }
+        elif kind == "session_list":
+            sessions = msg.get("sessions")
+            if isinstance(sessions, list):
+                msg = {**msg, "sessions": [_without_digest(x) for x in sessions]}
+        elif kind == "confirmation_request":
+            msg = {k: msg[k] for k in ("type", "id", "tools", "timeout") if k in msg}
+        elif kind == "confirmation_list":
+            # Each pending item's tool_lines are its rendered commands.
+            items = msg.get("confirmations")
+            if isinstance(items, list):
+                msg = {**msg, "confirmations": [_without_commands(c) for c in items]}
     if msg.get("type") == "provider_list":
         msg = {**msg, "providers": without_keys(msg.get("providers"))}
     return msg
@@ -344,6 +440,8 @@ class AuditLog:
             }
             if given.get("api_key") or given.get("key"):
                 entry["key_changed"] = True
+        elif kind == "approve_all_confirmations":
+            entry["ids"] = [str(i)[:64] for i in msg.get("ids") or []][:100]
         elif "id" in msg:
             entry["id"] = str(msg["id"])[:64]
         if "approved_indices" in msg:
@@ -377,6 +475,12 @@ def request_login(headers: Any, dev_login: Optional[str]) -> tuple[Optional[str]
     if headers.get("Tailscale-Funnel-Request"):
         return None, "Funnel requests are refused"
     if dev_login:
+        # A request `tailscale serve` (or any proxy) passed on carries these;
+        # one left pointing at this port would otherwise make every tailnet
+        # peer the dev owner. Serve sends no identity for a tagged node, but
+        # always X-Forwarded-For.
+        if any(_proxied(name) for name in headers.keys()):
+            return None, "The dev login is for this computer only"
         return dev_login, ""
     login = (headers.get("Tailscale-User-Login") or "").strip()
     if not login:
@@ -384,12 +488,17 @@ def request_login(headers: Any, dev_login: Optional[str]) -> tuple[Optional[str]
     return login, ""
 
 
+def _proxied(header: str) -> bool:
+    name = header.lower()
+    return name.startswith(("tailscale-", "x-forwarded-")) or name == "forwarded"
+
+
 def host_ok(headers: Any, dev_login: Optional[str]) -> bool:
     host = (headers.get("Host") or "").split(":")[0].lower()
     if not host:
         return False
-    if dev_login and host in ("localhost", "127.0.0.1"):
-        return True
+    if dev_login:
+        return host in ("localhost", "127.0.0.1")
     return host.endswith(Config.WEB_HOST_SUFFIX)
 
 
@@ -491,9 +600,11 @@ class Gateway:
 
         logger.info(f"web: {login} connected as {role}")
         try:
-            if not await self._handshake(ws, reader, writer, login, role, label):
+            # The daemon's latest `state`, as this phone was shown it.
+            state: dict = {}
+            if not await self._handshake(ws, reader, writer, login, role, label, state):
                 return
-            await self._relay(ws, reader, writer, login, role)
+            await self._relay(ws, reader, writer, login, role, state)
         finally:
             writer.close()
             try:
@@ -510,6 +621,7 @@ class Gateway:
         login: str,
         role: Optional[str],
         label: str,
+        state: dict,
     ) -> bool:
         """Label this client, and refuse to run while confirmations are off.
 
@@ -553,6 +665,8 @@ class Gateway:
         for msg in early:
             shown = shown_to(msg, role)
             if shown is not None:
+                if shown.get("type") == "state":
+                    state["last"] = shown
                 await ws.send(json.dumps(shown, ensure_ascii=False))
         return True
 
@@ -563,9 +677,18 @@ class Gateway:
         writer: asyncio.StreamWriter,
         login: str,
         role: Optional[str],
+        state: dict,
     ) -> None:
         last_active = time.monotonic()
         limiter = RateLimit()
+
+        async def refuse(msg: Any, reply: dict) -> None:
+            await ws.send(json.dumps(reply))
+            # The page shows "working" once it sends a chat line; the daemon
+            # never saw this one, so no state of its own will follow.
+            if isinstance(msg, dict) and msg.get("type") == "message":
+                if state.get("last"):
+                    await ws.send(json.dumps(state["last"]))
 
         async def phone_to_daemon() -> None:
             nonlocal last_active, role
@@ -582,33 +705,31 @@ class Gateway:
                 except json.JSONDecodeError:
                     continue
                 if not sendable(role, msg):
-                    kind = msg.get("type") if isinstance(msg, dict) else None
-                    await ws.send(
-                        json.dumps(
-                            {
-                                "type": "error",
-                                "message": f"'{kind}' is not available to a {role}",
-                            }
-                        )
+                    kind = (
+                        acts_as(msg)
+                        if isinstance(msg, dict) and isinstance(msg.get("type"), str)
+                        else None
+                    )
+                    await refuse(
+                        msg,
+                        {
+                            "type": "error",
+                            "message": f"'{kind}' is not available to a {role}",
+                        },
                     )
                     continue
                 why = refused(msg)
                 if why is not None:
-                    await ws.send(
-                        json.dumps(
-                            {
-                                "type": "config_error",
-                                "key": msg.get("key"),
-                                "message": why,
-                            }
-                        )
+                    reply = (
+                        {"type": "config_error", "key": msg.get("key")}
+                        if msg["type"] == "set_setting"
+                        else {"type": "error"}
                     )
+                    await refuse(msg, {**reply, "message": why})
                     continue
                 if msg["type"] != "ping":
                     if not limiter.allow():
-                        await ws.send(
-                            json.dumps({"type": "error", "message": "Slow down"})
-                        )
+                        await refuse(msg, {"type": "error", "message": "Slow down"})
                         continue
                     last_active = time.monotonic()
                 if msg["type"] in _AUDITED:
@@ -634,6 +755,8 @@ class Gateway:
                 shown = shown_to(msg, role)
                 if shown is None:
                     continue
+                if shown.get("type") == "state":
+                    state["last"] = shown
                 await ws.send(json.dumps(shown, ensure_ascii=False))
 
         async def watch_idle() -> None:

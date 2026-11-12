@@ -48,7 +48,7 @@
         // The daemon's health check; `get_status` below is the connection's.
         get_health:                 (a) => ({ type: 'get_status', full: !!a.full }),
         list_work:                  ()  => ({ type: 'list_work' }),
-        approve_all_confirmations:  ()  => ({ type: 'approve_all_confirmations' }),
+        approve_all_confirmations:  (a) => ({ type: 'approve_all_confirmations', ids: a.ids }),
         get_settings:               ()  => ({ type: 'get_settings' }),
         set_setting:                (a) => ({ type: 'set_setting', key: a.key, value: a.value }),
         list_providers:             ()  => ({ type: 'list_providers' }),

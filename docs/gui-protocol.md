@@ -59,7 +59,7 @@ Activity, action and user-message events are pushed to the clients that subscrib
 | `approve_confirmation` | `id` | `ack` "Approved <id>" |
 | `deny_confirmation` | `id` | `ack` "Denied <id>" |
 | `partial_approve_confirmation` | `id`, `approved_indices` (indices into the request's `details`) | `ack` "Resolved <id> (n approved)" |
-| `approve_all_confirmations` | | `ack` "Approved n confirmation(s)" |
+| `approve_all_confirmations` | `ids` (optional: the ones the client shows) | `ack` "Approved n confirmation(s)": with `ids`, those still pending; without, every pending one |
 | `confirmation_response` | `id`, `approved` (bool) or `approved_indices` | none; the older form of the above |
 
 Whichever way a confirmation is resolved (this socket, the TUI, a desktop
@@ -96,7 +96,7 @@ An unknown id answers `error`.
 | `set_setting` | `key`, `value` | `config_updated` (to everyone) or `config_error` |
 | `list_providers` | | `provider_list` |
 | `add_provider` | `ptype`, `model`, and optional `name`, `url`, `api_key`, `temperature` | `provider_list` (to everyone) or `provider_error` |
-| `edit_provider` | `name`, `fields` (a dict of the fields to change) | as above |
+| `edit_provider` | `name`, `fields` (a dict of the fields to change) | as above. Moving a provider to another address (scheme, host or port) removes its stored key and `headers` unless `fields` has a new `key` (headers go regardless); the editor then also gets a `provider_error` saying so. A `url` must start with `http://` or `https://` and name a host. |
 | `remove_provider` | `name` | as above |
 | `move_provider` | `name`, `position` (1 = tried first) | as above (#267) |
 | `list_models` | optional `url`, `api_key` | `model_list` (to the sender) |
@@ -323,9 +323,18 @@ The gateway relays this protocol over a WebSocket, narrowed by role
   and a `DAEMON_SHUTDOWN` cut down to its state.
 - **Trusted and owner** also see `action`, `status` and `work`, and may send
   `get_status` and `list_work`. Action blocks carry tool parameters and raw
-  output, so they go to the roles trusted to approve what JARVIS runs.
-- **Never relayed:** settings, providers, setups. No role may change them,
-  shut JARVIS down, or `approve_all_confirmations`.
+  output, so they go to the roles trusted to approve what JARVIS runs. A guest
+  gets a `confirmation_request` cut to its id and tools, `confirmation_list`
+  items without their rendered commands (`tool_lines`) and goal, and sessions
+  without their `summary` and `metadata`.
+- **The owner** also gets settings and providers (each provider without its
+  `api_key` or `headers`, with `api_key_set`), and may change them, approve
+  all (naming the `ids` it shows) and turn the wake word on or off.
+- **Never relayed:** setups. No role may shut JARVIS down or send a raw
+  `confirmation_response`. A chat line the daemon would read as a slash
+  command (`/delete`, `/stop all`, ...) needs the role its socket message
+  needs (`web_gateway.acts_as`); a refused one is answered with `error` and
+  the last `state`, since the page shows "working" once it sends a line.
 
 ## Not in the protocol yet
 

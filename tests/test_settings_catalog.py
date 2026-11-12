@@ -180,3 +180,77 @@ def test_the_tui_saves_through_the_list(conf_file, monkeypatch):
     assert open_screens == 1
     assert Config.RAG_TOP_K == 8
     assert "RAG_TOP_K=8" in conf_file.read_text().splitlines()
+
+
+@pytest.mark.unit
+def test_a_new_config_file_holds_only_what_was_saved(conf_file):
+    import jarvis.cli as cli
+
+    cli._update_env_setting("OUTPUT_MODE", "text")
+    assert conf_file.read_text() == "OUTPUT_MODE=text\n"
+
+
+@pytest.mark.unit
+def test_a_saved_setting_is_read_at_the_next_start(tmp_path):
+    """Without JARVIS_CONFIG_DIR (no systemd), settings are saved to the
+    user's jarvis.conf; JARVIS read only jarvis/.env and dropped them."""
+    import os
+    import subprocess
+    import sys
+
+    conf = tmp_path / "jarvis" / "jarvis.conf"
+    conf.parent.mkdir()
+    conf.write_text("CONFIRMATION_MODE=ask_all\nOUTPUT_MODE=text\n")
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("JARVIS_CONFIG_DIR", "CONFIRMATION_MODE", "OUTPUT_MODE")
+    }
+    env["XDG_CONFIG_HOME"] = str(tmp_path)
+    out = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from jarvis.config import Config;"
+            "print(Config.CONFIRMATION_MODE, Config.OUTPUT_MODE)",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert out.stdout.split() == ["ask_all", "text"]
+
+
+@pytest.mark.unit
+def test_a_config_file_copied_from_the_template_pins_nothing(tmp_path):
+    """Files seeded whole from .env.example before 2026-11-11: their template
+    values were never chosen and must not override jarvis/.env or defaults."""
+    import os
+    import subprocess
+    import sys
+
+    conf = tmp_path / "jarvis" / "jarvis.conf"
+    conf.parent.mkdir()
+    conf.write_text("CONFIRMATION_MODE=smart\nLOG_FILE=\nOUTPUT_MODE=text\n")
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k
+        not in ("JARVIS_CONFIG_DIR", "CONFIRMATION_MODE", "OUTPUT_MODE", "LOG_FILE")
+    }
+    env["XDG_CONFIG_HOME"] = str(tmp_path)
+    out = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import os; from jarvis.config import Config;"
+            "print(os.environ.get('CONFIRMATION_MODE'), os.environ.get('LOG_FILE'),"
+            " bool(Config.LOG_FILE), Config.OUTPUT_MODE)",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert out.stdout.split() == ["None", "None", "True", "text"]

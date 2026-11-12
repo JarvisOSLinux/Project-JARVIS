@@ -66,11 +66,32 @@ laptop itself. No role may shut JARVIS down (nothing could start it again from
 a phone), fill in a server's setup, send a raw `confirmation_response`, or
 choose a wake-sound file; a phone may restore the default sound. Approvals
 cannot be turned off from a phone: `set_setting` of `CONFIRMATION_MODE` to
-`allow_all` is refused before it reaches JARVIS.
+`allow_all` is refused before it reaches JARVIS, read as JARVIS reads it
+(`"allow_all "` included).
 
-API keys: the daemon's provider lists reach the owner with each key removed
-and `api_key_set` in its place. A key typed on the phone goes to JARVIS over
-Tailscale's encrypted link and is written only to `providers.json`.
+The role table covers the chat too: JARVIS runs a chat line that starts with
+`/delete`, `/rename`, `/switch`, `/new`, `/sessions` or `/stop` as that
+command, so the gateway treats the line as the command's own message
+(`acts_as`). A guest typing `/delete 5bd5` or `/stop all` gets the same
+refusal as sending `delete_session` or `stop_all`.
+
+Approve All names the requests it approves (`ids`, the ones the page shows);
+without them the gateway refuses it, and JARVIS approves only those of them
+still pending. A request that came in after the page drew its list waits.
+
+What JARVIS ran (tool parameters and output) is for trusted and owner: a
+guest's `confirmation_request` is cut to its id and tools, its
+`confirmation_list` items to their tool names, and its sessions come without
+the LLM-written `summary` of their older turns.
+
+API keys: the daemon's provider lists reach the owner with each `api_key`
+and `headers` removed and `api_key_set` in its place. A key typed on the phone
+goes to JARVIS over Tailscale's encrypted link and is written only to
+`providers.json`. A key belongs to the address it was saved for: moving a
+provider to another host (scheme, host or port) without typing a key removes
+its stored key and headers, and `OLLAMA_API_KEY` from the environment is sent
+only to ollama.com. So an edit from a phone cannot send a key to a server of
+its choosing.
 
 Every request that changes something is appended to
 `$JARVIS_DATA_DIR/web_audit.jsonl` with the account and role: a setting with
@@ -106,8 +127,13 @@ publishes it on your tailnet and adds your own account as owner when the
 allowlist is empty.
 
 `jarvis web start --insecure-dev-login <login>` treats every request as that
-account, for trying the page on `localhost` without Tailscale. It prints a
-warning; never leave it running or publish it.
+account, for trying the page on `localhost` without Tailscale. It answers only
+a `localhost`/`127.0.0.1` `Host` and refuses any request that came through a proxy
+(`Tailscale-*`, `X-Forwarded-*` or `Forwarded` headers; `tailscale serve`
+sends no identity for a tagged node but always `X-Forwarded-For`), so a
+`tailscale serve` left pointing at the port does not make every tailnet peer
+that account. It prints
+a warning; never leave it running or publish it.
 
 ## Verify before relying on it (#266)
 

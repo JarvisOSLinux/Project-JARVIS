@@ -87,6 +87,153 @@ class TestPolicy:
             is None
         )
 
+    @pytest.mark.parametrize(
+        "value", ["allow_all ", " allow_all", "allow_all\n", "\tallow_all\t"]
+    )
+    def test_allow_all_is_refused_as_the_daemon_reads_it(self, value):
+        from jarvis.core import settings
+
+        mode = settings.find("CONFIRMATION_MODE")
+        assert settings.parse(mode, value) == ("allow_all", None), "the daemon's view"
+        msg = {"type": "set_setting", "key": "CONFIRMATION_MODE", "value": value}
+        assert "laptop" in wg.refused(msg)
+
+    def test_a_mode_the_daemon_refuses_is_left_to_it(self):
+        msg = {"type": "set_setting", "key": "CONFIRMATION_MODE", "value": "ALLOW_ALL"}
+        assert wg.refused(msg) is None
+        from jarvis.core import settings
+
+        _, error = settings.parse(settings.find("CONFIRMATION_MODE"), "ALLOW_ALL")
+        assert error, "the daemon answers config_error itself"
+
+    def test_a_blank_wake_sound_restores_the_default(self):
+        chime = {"type": "set_setting", "key": "WAKE_CHIME_PATH"}
+        assert wg.refused({**chime, "value": "  "}) is None
+        assert wg.refused({**chime, "value": None}) is None
+        assert wg.refused({**chime, "value": " /home/x/beep.wav"})
+
+    @pytest.mark.parametrize(
+        "content, acts_as",
+        [
+            ("/delete 5bd5", "delete_session"),
+            ("  /DELETE 5bd5", "delete_session"),
+            ("/rename 5bd5 New name", "rename_session"),
+            ("/switch 5bd5", "switch_session"),
+            ("/new Groceries", "create_session"),
+            ("/sessions", "list_sessions"),
+            ("/stop", "stop"),
+            ("/stop now please", "stop"),
+            ("/stop all", "stop_all"),
+            ("/STOP   ALL", "stop_all"),
+            ("/stop 7", "stop_task"),
+            ("/context", "message"),
+            ("/whatever", "message"),
+            ("hello /delete 5bd5", "message"),
+            ("", "message"),
+        ],
+    )
+    def test_a_slash_command_in_the_chat_is_what_it_does(self, content, acts_as):
+        assert wg.acts_as({"type": "message", "content": content}) == acts_as
+
+    def test_a_guest_cannot_type_what_it_may_not_send(self):
+        for line in ("/delete 5bd5", "/rename 5bd5 x", "/stop all", "/stop 7", "/new"):
+            msg = {"type": "message", "content": line}
+            assert not wg.sendable("guest", msg), line
+            assert wg.sendable("owner", msg), line
+        assert wg.sendable("guest", {"type": "message", "content": "/stop"})
+        assert wg.sendable("guest", {"type": "message", "content": "/sessions"})
+        assert wg.sendable("trusted", {"type": "message", "content": "/stop all"})
+        assert not wg.sendable("trusted", {"type": "message", "content": "/delete x"})
+
+    def test_the_daemons_parsers_read_a_line_as_acts_as_does(self):
+        """acts_as stands in for stop.handle_command and handle_slash_command:
+        a line the daemon would run as a command must map to that command."""
+        from unittest.mock import MagicMock
+
+        from jarvis.runtime import session_commands, stop
+
+        for line in ("/delete x", "/rename x y", "/switch x", "/new", "/sessions"):
+            app = MagicMock()
+            app.sessions.find.return_value = (None, "no such session")
+            assert session_commands.handle_slash_command(app, line), line
+            assert wg.acts_as({"type": "message", "content": line}) != "message"
+        app = MagicMock()
+        assert not session_commands.handle_slash_command(app, "/whatever")
+        assert wg.acts_as({"type": "message", "content": "/whatever"}) == "message"
+        assert asyncio.run(stop.handle_command(None, None, "/stopx")) is None
+        assert wg.acts_as({"type": "message", "content": "/stopx"}) == "message"
+
+    def test_a_message_must_be_text(self):
+        for content in (5, None, ["/delete"], {"a": 1}):
+            assert not wg.sendable("owner", {"type": "message", "content": content})
+
+    def test_approve_all_names_what_it_approves(self):
+        bare = {"type": "approve_all_confirmations"}
+        assert wg.refused(bare)
+        assert wg.refused({**bare, "ids": "c1"})
+        assert wg.refused({**bare, "ids": ["c1", 2]})
+        assert wg.refused({**bare, "ids": ["c1", "c2"]}) is None
+        assert wg.refused({**bare, "ids": []}) is None
+
+    def test_a_phone_never_sees_a_providers_headers(self):
+        listed = {
+            "type": "provider_list",
+            "providers": [
+                {
+                    "name": "x",
+                    "type": "api",
+                    "model": "m",
+                    "headers": {"x-api-key": "hidden-secret"},
+                }
+            ],
+        }
+        shown = wg.shown_to(listed, "owner")
+        assert "hidden-secret" not in json.dumps(shown)
+        assert "headers" not in shown["providers"][0]
+
+    def test_a_guest_gets_a_request_without_its_parameters(self):
+        request = {
+            "type": "confirmation_request",
+            "id": "c1",
+            "tools": ["shell.write_file"],
+            "details": [{"index": 0, "params": {"content": "secret body"}}],
+            "timeout": 0,
+        }
+        assert wg.shown_to(request, "guest") == {
+            "type": "confirmation_request",
+            "id": "c1",
+            "tools": ["shell.write_file"],
+            "timeout": 0,
+        }
+        assert wg.shown_to(request, "trusted") == request
+
+    def test_a_guest_sees_which_tools_wait_not_their_commands(self):
+        listed = {
+            "type": "confirmation_list",
+            "confirmations": [
+                {
+                    "id": "c1",
+                    "tool_names": ["shell.write_file"],
+                    "tool_lines": ["shell.write_file: path=~/.aws/credentials"],
+                    "goal_description": "rotate keys",
+                    "created_at": 1.0,
+                }
+            ],
+        }
+        assert wg.shown_to(listed, "guest")["confirmations"] == [
+            {"id": "c1", "tool_names": ["shell.write_file"], "created_at": 1.0}
+        ]
+        assert wg.shown_to(listed, "trusted") == listed
+
+    def test_a_guest_gets_sessions_without_their_summaries(self):
+        session = {"id": "s1", "title": "t", "summary": "AWS keys", "metadata": {}}
+        listed = {"type": "session_list", "sessions": [session]}
+        assert wg.shown_to(listed, "guest")["sessions"] == [{"id": "s1", "title": "t"}]
+        assert wg.shown_to(listed, "owner") == listed
+        switched = {"type": "session_switched", "session": session, "messages": []}
+        assert "summary" not in wg.shown_to(switched, "guest")["session"]
+        assert wg.shown_to(switched, "trusted")["session"] == session
+
     def test_a_phone_never_sees_a_providers_key(self):
         listed = {
             "type": "provider_list",
@@ -199,6 +346,27 @@ class TestRequestChecks:
         assert not wg.host_ok({"Host": "evil.example.com"}, None)
         assert not wg.host_ok({"Host": "localhost:8318"}, None)
         assert wg.host_ok({"Host": "localhost:8318"}, "dev@example.com")
+
+    def test_the_dev_login_is_for_this_computer_only(self, monkeypatch):
+        monkeypatch.setattr(wg.Config, "WEB_HOST_SUFFIX", ".ts.net")
+        dev = "dev@localhost"
+        assert wg.host_ok({"Host": "127.0.0.1:8318"}, dev)
+        assert not wg.host_ok({"Host": HOST_HEADER}, dev)
+        assert wg.request_login({"Host": "localhost"}, dev) == (dev, "")
+        assert wg.request_login(_headers(), dev)[0] is None
+        # A tagged tailnet node gets no identity headers from serve, but serve
+        # always says it forwarded the request.
+        for proxy in ("X-Forwarded-For", "x-forwarded-proto", "Forwarded"):
+            assert (
+                wg.request_login({"Host": "localhost", proxy: "100.1.2.3"}, dev)[0]
+                is None
+            )
+        assert (
+            wg.request_login(_headers(login=None, **{"Tailscale-User-Name": "T"}), dev)[
+                0
+            ]
+            is None
+        )
 
     def test_origin_must_equal_host(self):
         assert wg.origin_ok({"Host": HOST_HEADER, "Origin": ORIGIN})
@@ -416,6 +584,70 @@ class TestRelay:
             assert not [
                 m for m in daemon.received if m["type"] == "approve_confirmation"
             ]
+        finally:
+            server.close()
+            await daemon.stop()
+
+    async def test_a_guests_slash_command_never_reaches_the_daemon(self, tmp_path):
+        daemon, server, url, _ = await _boot(tmp_path, {"g@example.com": "guest"})
+        try:
+            async with connect(
+                url, additional_headers=_wire(url, "g@example.com")
+            ) as ws:
+                await ws.recv()
+                for line in ("/delete 5bd5", "/stop all"):
+                    await ws.send(json.dumps({"type": "message", "content": line}))
+                    seen = await _recv_types(ws, "error")
+                    assert "is not available to a guest" in seen[-1]["message"]
+                await ws.send(json.dumps({"type": "message", "content": "hi"}))
+                await asyncio.sleep(0.2)
+            sent = [m.get("content") for m in daemon.received if m["type"] == "message"]
+            assert sent == ["hi"]
+        finally:
+            server.close()
+            await daemon.stop()
+
+    async def test_a_refused_chat_line_puts_the_phone_back_to_the_last_state(
+        self, tmp_path
+    ):
+        daemon, server, url, _ = await _boot(tmp_path, {"g@example.com": "guest"})
+        try:
+            async with connect(
+                url, additional_headers=_wire(url, "g@example.com")
+            ) as ws:
+                await ws.recv()
+                await daemon.push({"type": "state", "state": "idle"})
+                await _recv_types(ws, "state")
+                await ws.send(json.dumps({"type": "message", "content": "/new x"}))
+                seen = await _recv_types(ws, "error")
+                assert "not available to a guest" in seen[-1]["message"]
+                after = json.loads(await asyncio.wait_for(ws.recv(), 3))
+                assert after == {"type": "state", "state": "idle"}
+        finally:
+            server.close()
+            await daemon.stop()
+
+    async def test_approve_all_without_ids_never_reaches_the_daemon(self, tmp_path):
+        daemon, server, url, _ = await _boot(tmp_path, {"o@example.com": "owner"})
+        try:
+            async with connect(
+                url, additional_headers=_wire(url, "o@example.com")
+            ) as ws:
+                await ws.recv()
+                await ws.send(json.dumps({"type": "approve_all_confirmations"}))
+                seen = await _recv_types(ws, "error")
+                assert "must name" in seen[-1]["message"]
+                ok = {"type": "approve_all_confirmations", "ids": ["c1"]}
+                await ws.send(json.dumps(ok))
+                await asyncio.sleep(0.2)
+            alls = [m for m in daemon.received if m["type"] == ok["type"]]
+            assert alls == [ok]
+            audited = [
+                json.loads(line)
+                for line in open(tmp_path / "audit.jsonl")
+                if '"approve_all_confirmations"' in line
+            ]
+            assert [a["ids"] for a in audited] == [["c1"]]
         finally:
             server.close()
             await daemon.stop()

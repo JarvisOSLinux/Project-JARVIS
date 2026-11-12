@@ -669,7 +669,20 @@ class ConfirmationManager:
         notification_silent: bool,
         timeout: float,
     ) -> None:
-        """Fire notification on the best available channel."""
+        """Fire notification on the best available channel.
+
+        Socket clients (jarvis-app, phones through `jarvis web`) hear of every
+        request, whichever channel also asks: their permission panels list
+        what waits, and with only the TUI or a desktop toast told, a phone
+        never saw a new request and Approve All was pressed on a stale list.
+        """
+        socket = bool(
+            self._output_callback
+            and self._has_socket_clients
+            and self._has_socket_clients()
+        )
+        if socket:
+            self._notify_socket(request_id, tool_names, tools_detail, timeout)
 
         # 1. TUI modal — highest priority when Textual is running.
         if self._tui_callback is not None:
@@ -681,16 +694,11 @@ class ConfirmationManager:
             asyncio.create_task(self._notify_desktop(request_id, tool_lines, timeout))
             return
 
-        # 2. Socket — if clients are connected.
-        if (
-            self._output_callback
-            and self._has_socket_clients
-            and self._has_socket_clients()
-        ):
-            self._notify_socket(request_id, tool_names, tools_detail, timeout)
+        # 3. A socket client answers it; no terminal prompt besides.
+        if socket:
             return
 
-        # 3. CLI / TTY fallback.
+        # 4. CLI / TTY fallback.
         if self._has_tty():
             asyncio.create_task(self._notify_cli(request_id, tool_lines, timeout))
             return

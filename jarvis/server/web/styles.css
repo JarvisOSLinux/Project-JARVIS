@@ -42,7 +42,7 @@ body {
     gap: 12px;
 }
 
-.header-info { flex: 1; min-width: 0; }
+.header-info { flex: 1; min-width: 0; overflow: hidden; }
 
 .header-title {
     font-size: 20px;
@@ -706,6 +706,10 @@ details.settings-group[open] > summary::before { content: '▾ '; }
 }
 
 .settings-error.visible { display: block; }
+
+/* Above the panels, which scroll: a refusal at the bottom of one was out of
+   sight when the control that caused it was at the top. */
+#settings-error { padding: 10px 18px 0; font-size: 12px; flex-shrink: 0; }
 
 #provider-list { display: flex; flex-direction: column; gap: 6px; }
 
@@ -1538,7 +1542,12 @@ body:not(.can-approve) #new-session-btn { display: none; }
     #work-panel { width: 100%; max-width: 100%; }
     details.action-block { margin-left: 0; max-width: 100%; }
     #input-bar { padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); height: auto; gap: 8px; }
-    .input-wrapper input { font-size: 16px; } /* 16px stops iOS zooming on focus */
+    .input-wrapper input,
+    .session-item-title-input,
+    #settings-modal select,
+    #settings-modal input,
+    #provider-form select,
+    #provider-form input { font-size: 16px; } /* 16px stops iOS zooming on focus */
     .icon-btn { min-width: 44px; min-height: 44px; }
     .permission-action { min-height: 48px; font-size: 15px; }
     #chat-view { padding: 12px; }
@@ -1560,6 +1569,22 @@ body:not(.can-approve) #new-session-btn { display: none; }
     .action-brief { order: 1; flex: 1 0 100%; padding-left: 18px; }
     .action-brief:empty,
     details.action-block[open] .action-brief { display: none; }
+}
+
+/* The owner's gear leaves no room for the word beside the status dot; the dot
+   keeps its colour and the word stays for screen readers. */
+@media (max-width: 430px) {
+    body.can-manage #status-indicator { gap: 0; }
+    body.can-manage #status-label {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+    }
+}
+@media (max-width: 360px) {
+    #header { gap: 2px; }
 }
 
 /* ── Icons: one line set (the sprite in index.html), sized by the button ── */

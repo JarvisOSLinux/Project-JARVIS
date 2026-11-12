@@ -97,6 +97,27 @@ class TestHandleConfirmationQuery:
         assert {"type": "confirmation_response", "id": "b", "approved": True} in calls
 
     @pytest.mark.asyncio
+    async def test_approve_all_with_ids_approves_only_those_still_pending(self):
+        app = _make_app(
+            confirmations=[
+                {"id": "a", "tool_names": [], "created_at": 1.0},
+                {"id": "new", "tool_names": [], "created_at": 2.0},
+            ]
+        )
+        writer = Mock()
+        with patch.object(runtime_io, "_gui_write", new=AsyncMock()) as gui_write:
+            await runtime_io._handle_confirmation_query(
+                app,
+                {"type": "approve_all_confirmations", "ids": ["a", "gone"]},
+                writer,
+            )
+        calls = [
+            c.args[0] for c in app.events.inject_confirmation_response.call_args_list
+        ]
+        assert calls == [{"type": "confirmation_response", "id": "a", "approved": True}]
+        assert gui_write.await_args.args[1]["message"] == "Approved 1 confirmation(s)"
+
+    @pytest.mark.asyncio
     async def test_non_confirmation_message_is_not_handled(self):
         app = _make_app()
         writer = Mock()

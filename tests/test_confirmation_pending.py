@@ -118,3 +118,68 @@ class TestNoChannelAvailable:
             )
         injector.assert_not_called()
         assert mgr.has_pending("abc")
+
+
+@pytest.mark.unit
+class TestSocketClientsHearOfEveryRequest:
+    """jarvis-app and phones list what waits; a TUI or desktop toast asking
+    too must not keep a new request from them."""
+
+    async def _request(self, mgr, desktop, tty=False):
+        with (
+            patch.object(ConfirmationManager, "_has_tty", return_value=tty),
+            patch.object(
+                ConfirmationManager, "_has_desktop_notifications", return_value=desktop
+            ),
+            patch.object(ConfirmationManager, "_notify_desktop") as toast,
+            patch.object(ConfirmationManager, "_notify_cli") as cli,
+        ):
+            await mgr.request_confirmation(
+                request_id="abc",
+                tasks=[{"server": "s", "tool": "t"}],
+                tools_needing_confirmation=_tools_needing_confirmation(["s.t"]),
+                approved_tasks=[],
+                denied_tools=[],
+                timeout=0,
+            )
+            await asyncio.sleep(0)
+        return toast, cli
+
+    def _manager(self, clients=True):
+        mgr = ConfirmationManager()
+        mgr.set_event_injector(Mock())
+        sent = []
+        mgr.set_output_callback(sent.append, has_clients=lambda: clients)
+        return mgr, sent
+
+    @pytest.mark.asyncio
+    async def test_beside_a_desktop_toast(self):
+        mgr, sent = self._manager()
+        toast, _ = await self._request(mgr, desktop=True)
+        assert [m["id"] for m in sent] == ["abc"]
+        assert sent[0]["type"] == "confirmation_request"
+        toast.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_beside_the_tui(self):
+        mgr, sent = self._manager()
+        tui = Mock()
+        mgr.set_tui_callback(tui)
+        with patch.object(ConfirmationManager, "_notify_tui") as modal:
+            await self._request(mgr, desktop=False)
+        assert [m["id"] for m in sent] == ["abc"]
+        modal.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_a_socket_client_still_spares_the_terminal_prompt(self):
+        mgr, sent = self._manager()
+        _, cli = await self._request(mgr, desktop=False, tty=True)
+        assert len(sent) == 1
+        cli.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_nothing_sent_without_clients(self):
+        mgr, sent = self._manager(clients=False)
+        _, cli = await self._request(mgr, desktop=False, tty=True)
+        assert sent == []
+        cli.assert_called_once()

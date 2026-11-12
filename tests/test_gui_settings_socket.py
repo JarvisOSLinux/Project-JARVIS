@@ -148,9 +148,10 @@ class TestProviderCrudHandlers:
         assert "bogus" in result["message"]
 
     def test_edit_provider_requires_name_and_fields(self):
-        assert runtime_io._handle_edit_provider({})["type"] == "provider_error"
+        assert runtime_io._handle_edit_provider({})[0]["type"] == "provider_error"
         assert (
-            runtime_io._handle_edit_provider({"name": "x"})["type"] == "provider_error"
+            runtime_io._handle_edit_provider({"name": "x"})[0]["type"]
+            == "provider_error"
         )
 
     def test_edit_provider_success_updates_and_returns_list(self, tmp_path):
@@ -159,19 +160,54 @@ class TestProviderCrudHandlers:
             runtime_io._handle_add_provider(
                 {"ptype": "llamacpp", "model": "qwen3:8b", "name": "my-local"}
             )
-            result = runtime_io._handle_edit_provider(
+            result, notice = runtime_io._handle_edit_provider(
                 {"name": "my-local", "fields": {"model": "qwen3:14b"}}
             )
+        assert notice == ""
         assert result["type"] == "provider_list"
         assert result["providers"][0]["model"] == "qwen3:14b"
 
     def test_edit_provider_not_found_returns_provider_error(self, tmp_path):
         providers_file = str(tmp_path / "providers.json")
         with patch.object(Config, "PROVIDERS_FILE", providers_file):
-            result = runtime_io._handle_edit_provider(
+            result, _ = runtime_io._handle_edit_provider(
                 {"name": "nope", "fields": {"model": "x"}}
             )
         assert result["type"] == "provider_error"
+
+    def test_moving_a_provider_to_another_host_says_its_key_went(self, tmp_path):
+        providers_file = str(tmp_path / "providers.json")
+        with patch.object(Config, "PROVIDERS_FILE", providers_file):
+            runtime_io._handle_add_provider(
+                {
+                    "ptype": "api",
+                    "model": "m",
+                    "name": "cloud",
+                    "url": "https://ollama.com/v1",
+                    "api_key": "secret",
+                }
+            )
+            result, notice = runtime_io._handle_edit_provider(
+                {"name": "cloud", "fields": {"url": "https://evil.example/v1"}}
+            )
+        assert "key was removed" in notice
+        assert "api_key" not in result["providers"][0]
+
+    def test_a_bad_address_is_refused(self, tmp_path):
+        providers_file = str(tmp_path / "providers.json")
+        with patch.object(Config, "PROVIDERS_FILE", providers_file):
+            bad = runtime_io._handle_add_provider(
+                {"ptype": "ollama-cloud", "model": "m", "url": "http://[x"}
+            )
+            assert bad["type"] == "provider_error"
+            runtime_io._handle_add_provider(
+                {"ptype": "llamacpp", "model": "q", "name": "l"}
+            )
+            result, _ = runtime_io._handle_edit_provider(
+                {"name": "l", "fields": {"url": "localhost:11434"}}
+            )
+        assert result["type"] == "provider_error"
+        assert "http://" in result["message"]
 
     def test_remove_provider_requires_name(self):
         assert runtime_io._handle_remove_provider({})["type"] == "provider_error"

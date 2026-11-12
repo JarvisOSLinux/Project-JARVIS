@@ -117,7 +117,9 @@ the loopback port itself (see the module docstring of
 `jarvis/server/web_gateway.py`); do not enable it on a shared host. Since
 2026-11-10 the owner's phone may change settings and providers, keys
 included; that adds nothing such a local process lacks, since the same user
-can already edit `jarvis.conf` and `providers.json`. Whether
+can already edit `jarvis.conf` and `providers.json`. A phone never receives a
+stored key, and moving a provider to another host without typing a key
+removes it (2026-11-11), so the phone cannot send one elsewhere either. Whether
 `tailscale serve` really strips a forged header is checked by V2 in
 `docs/web-gateway.md`, and has not yet been run.
 
