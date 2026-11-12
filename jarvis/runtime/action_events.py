@@ -196,6 +196,58 @@ def tool_title(task: Any) -> str:
     return f"{task.get('tool', '?')} ({short_server(task.get('server'))})"
 
 
+def _shell_result(text: str) -> tuple:
+    """(prefix, payload) of a shell server's JSON answer in `text`, else None."""
+    stripped = text.strip()
+    # A failed call arrives as "Error: dmcp invocation failed: {…}".
+    start = stripped.find("{")
+    if start == -1:
+        return None
+    try:
+        data, _ = json.JSONDecoder().raw_decode(stripped[start:])
+    except ValueError:
+        return None
+    if not isinstance(data, dict) or not {"stdout", "stderr", "transcript"} & (
+        data.keys()
+    ):
+        return None
+    return stripped[:start].strip(), data
+
+
+def silent_exit(text: str) -> Optional[int]:
+    """The exit code of a command that ran, printed nothing and exited
+    non-zero, else None. Its code is its answer: `pacman -Qu` and `grep` exit
+    1 when they find nothing, `checkupdates` 2 when nothing needs updating
+    (2026-11-12: "pacman -Qu" read as a failure, the model retried it)."""
+    found = _shell_result(text)
+    if found is None:
+        return None
+    data = found[1]
+    code = data.get("exit_code")
+    if not isinstance(code, int) or isinstance(code, bool) or code <= 0:
+        return None
+    printed = any(
+        str(data.get(k) or "").strip() for k in ("stdout", "stderr", "transcript")
+    )
+    return None if printed or data.get("needs_input") else code
+
+
+def command_note(signal: Dict[str, Any]) -> str:
+    """A line for the model when a finished command exited non-zero silently."""
+    if str(signal.get("type") or "").upper() != "EXIT":
+        return ""
+    code = silent_exit(signal_output(signal)[1])
+    if code is None:
+        return ""
+    return (
+        f"COMMAND_RESULT: the command ran, printed nothing and exited {code}. "
+        "That exit code is the command's own answer, not a broken tool: "
+        "pacman -Qu and grep exit 1 when they find nothing, checkupdates exits 2 "
+        "when there are no updates. Tell the user what it means; do not run the "
+        "same command again."
+    )
+
+
 def readable(text: str) -> tuple:
     """(text, failed) for a tool's output: a shell result as what it printed.
 
@@ -204,22 +256,13 @@ def readable(text: str) -> tuple:
     newlines. A non-zero exit or `success: false` is a failure even though
     the call itself succeeded.
     """
-    stripped = text.strip()
-    # A failed call arrives as "Error: dmcp invocation failed: {…}".
-    start = stripped.find("{")
-    if start == -1:
+    found = _shell_result(text)
+    if found is None:
         return text, False
-    try:
-        data, _ = json.JSONDecoder().raw_decode(stripped[start:])
-    except ValueError:
-        return text, False
-    if not isinstance(data, dict) or not {"stdout", "stderr", "transcript"} & (
-        data.keys()
-    ):
-        return text, False
+    prefix, data = found
     code = data.get("exit_code")
     parts = [
-        stripped[:start].strip(),
+        prefix,
         str(data.get("stdout") or "").rstrip(),
         str(data.get("stderr") or "").rstrip(),
         str(data.get("transcript") or "").rstrip(),
@@ -335,6 +378,9 @@ def outcome(signal: Dict[str, Any]) -> tuple:
     """(status, readable output) of a task's EXIT, KILL or TIMEOUT."""
     kind = str(signal.get("type") or "").upper()
     code, text = signal_output(signal)
+    silent = silent_exit(text) if kind == "EXIT" else None
+    if silent is not None:
+        return "exited", f"Printed nothing; exit code {silent}."
     text, failed = readable(text)
     status = _STATUS_OF_SIGNAL.get(kind) or (
         "ok" if code == "200" and not failed else "failed"

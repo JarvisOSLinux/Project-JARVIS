@@ -128,6 +128,33 @@ def test_queued_reminders_are_dropped_once_the_task_finishes():
 
 
 @pytest.mark.unit
+def test_a_silent_non_zero_exit_reaches_the_model_as_an_answer():
+    # "pacman -Qu" with nothing to update (2026-11-12): the model saw "dmcp
+    # invocation failed" and ran the same command again.
+    app = _app()
+    body = (
+        'Error: dmcp invocation failed: {"success": false, "exit_code": 1, '
+        '"stdout": "", "stderr": ""}'
+    )
+    signal = {"type": "EXIT", "pid": 3, "data": f"[hash=ab] 500 <ab>{body}</ab>"}
+    with (
+        patch.object(
+            root_handlers,
+            "build_root_context",
+            side_effect=lambda app, logger, signal=None: str(signal),
+        ),
+        patch.object(
+            root_handlers, "_config_hint_for_signals", AsyncMock(return_value="")
+        ),
+        patch.object(root_handlers, "emit_activity"),
+        patch.object(llm_bridge, "emit_activity"),
+    ):
+        asyncio.run(root_handlers.on_dispatch_signal(app, Mock(), signal))
+    context = app.llm.ask.call_args.args[0]
+    assert "COMMAND_RESULT: the command ran, printed nothing and exited 1" in context
+
+
+@pytest.mark.unit
 def test_blocking_work_runs_in_daemon_threads():
     seen = {}
 

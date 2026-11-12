@@ -411,6 +411,9 @@ async def _answer_signals(
         context = build_root_context(app, logger)
         context += f"\nSIGNALS: {json.dumps(outcomes)}"
 
+    note = action_events.command_note(one.exit_data or one.signal) if one else ""
+    if note:
+        context += "\n" + note
     if one and one.exit_data:
         context += (
             f"\nREMIND_COMPLETED: Reminder fired for pid={one.signal.get('pid')}, "

@@ -31,6 +31,7 @@ _MARKS = {
     "ok": "[green]✓[/green]",
     "failed": "[red]✗ failed[/red]",
     "stopped": "[yellow]■ stopped[/yellow]",
+    "exited": "[yellow]■ exited[/yellow]",
     "waiting": "[cyan]… waiting for you[/cyan]",
     "approved": "[green]✓ approved[/green]",
     "denied": "[red]✗ denied[/red]",

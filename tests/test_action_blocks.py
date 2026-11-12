@@ -181,6 +181,56 @@ class TestSignals:
         assert events[-1]["status"] == "failed"
         assert events[-1]["output"] == "error: lock\n(exit code 1)"
 
+    def test_a_command_that_printed_nothing_and_exited_1_answered(self):
+        # "pacman -Qu" with nothing to update (Toufic, 2026-11-12): a red
+        # "failed" block, and the model ran it again.
+        app, events = self._tool()
+        result = (
+            'Error: dmcp invocation failed: {\n  "success": false,\n'
+            '  "exit_code": 1,\n  "stdout": "",\n  "stderr": ""\n}'
+        )
+        signal = {"type": "EXIT", "pid": 4, "data": f"[hash=ab] 500 <ab>{result}</ab>"}
+        action_events.on_signal(app, signal)
+        assert (events[-1]["status"], events[-1]["output"]) == (
+            "exited",
+            "Printed nothing; exit code 1.",
+        )
+        note = action_events.command_note(signal)
+        assert note.startswith("COMMAND_RESULT: the command ran, printed nothing")
+        assert "exited 1" in note and "do not run the same command again" in note
+
+    def test_only_a_silent_non_zero_exit_is_an_answer(self):
+        silent = action_events.silent_exit
+        assert (
+            silent('{"success": true, "exit_code": 0, "stdout": "", "stderr": ""}')
+            is None
+        )
+        assert (
+            silent(
+                '{"success": false, "exit_code": 1, "stdout": "", "stderr": "error: lock"}'
+            )
+            is None
+        )
+        assert (
+            silent('{"success": false, "exit_code": 2, "stdout": "", "stderr": " "}')
+            == 2
+        )
+        assert (
+            silent('{"success": false, "exit_code": -1, "stdout": "", "stderr": ""}')
+            is None
+        )
+        assert silent('{"success": false, "error": "spawn failed"}') is None
+        assert (
+            silent(
+                '{"success": false, "exit_code": 1, "stdout": "", "stderr": "", "needs_input": {"kind": "confirm"}}'
+            )
+            is None
+        )
+        assert silent("500 boom") is None
+        body = '[hash=ab] 500 <ab>{"exit_code": 1, "stdout": "", "stderr": ""}</ab>'
+        assert action_events.command_note({"type": "REMIND", "data": body}) == ""
+        assert action_events.command_note({"type": "EXIT", "data": body})
+
     def test_a_failed_call_reads_as_what_it_printed(self):
         # pacman asked "continue? [Y/n]" with nobody to answer (2026-10-23).
         result = (

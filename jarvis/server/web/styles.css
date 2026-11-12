@@ -1499,7 +1499,7 @@ details.action-block[open] .action-brief { visibility: hidden; }
 .action-mark.running { color: #ffaa00; }
 .action-mark.ok, .action-mark.approved { color: var(--listening); }
 .action-mark.failed, .action-mark.denied { color: #ff4455; }
-.action-mark.stopped { color: #ffaa00; }
+.action-mark.stopped, .action-mark.exited { color: #ffaa00; }
 .action-mark.waiting { color: var(--primary); }
 
 .action-detail {

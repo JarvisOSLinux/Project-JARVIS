@@ -524,6 +524,7 @@ const ACTION_MARK = {
     ok:       '✓',
     failed:   '✗ failed',
     stopped:  '■ stopped',
+    exited:   '■ exited',  // ran, printed nothing, exit code ≠ 0: its answer
     waiting:  '… waiting for you',
     approved: '✓ approved',
     denied:   '✗ denied',
