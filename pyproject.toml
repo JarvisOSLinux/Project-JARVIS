@@ -163,6 +163,8 @@ extend-exclude = '''
   | buck-out
   | build
   | dist
+  # the Rust submodules' own files (dmcp's Python test fixtures)
+  | deps
 )/
 '''
 
