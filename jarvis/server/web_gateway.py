@@ -42,6 +42,15 @@ gateway. This module is one, so the same threats are closed another way:
    stays at home): it changes where sudo asks, not whether a password is
    needed.
 
+Listening on all addresses (``JARVIS_WEB_HOST=0.0.0.0``; Toufic, 2026-11-11:
+the hosts sit on his Headscale tailnet, nothing else reaches them, and who may
+reach a host is the tailnet's ACLs' business, not this gateway's): no proxy adds
+an identity header, so every request counts as ``JARVIS_WEB_LOGIN``, with that
+account's role from the allowlist. Without it, a request from another machine is
+refused, since its identity header could be forged. The Host and Origin checks
+still hold, so a web page a phone has open cannot reach the gateway through
+that phone's browser.
+
 Residual risk: any local process can connect to the loopback port and send the
 identity header itself. On a single-user host that is no more than the same
 user already has through ``jarvis.sock``; on a shared host, do not enable this.
@@ -50,6 +59,7 @@ user already has through ``jarvis.sock``; on a shared host, do not enable this.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import os
 import time
@@ -511,18 +521,44 @@ def request_login(headers: Any, dev_login: Optional[str]) -> tuple[Optional[str]
     return login, ""
 
 
+def peer_ip(remote: Any) -> Optional[ipaddress._BaseAddress]:
+    """The connecting address (a socket's remote_address), or None."""
+    host = remote[0] if isinstance(remote, (tuple, list)) and remote else remote
+    try:
+        ip = ipaddress.ip_address(str(host).split("%")[0])
+    except ValueError:
+        return None
+    mapped = getattr(ip, "ipv4_mapped", None)
+    return mapped or ip
+
+
 def _proxied(header: str) -> bool:
     name = header.lower()
     return name.startswith(("tailscale-", "x-forwarded-")) or name == "forwarded"
 
 
-def host_ok(headers: Any, dev_login: Optional[str]) -> bool:
-    host = (headers.get("Host") or "").split(":")[0].lower()
+def host_ok(headers: Any, dev_login: Optional[str], direct: bool = False) -> bool:
+    """The Host names this gateway, not a page's own domain (DNS rebinding).
+
+    `direct` (JARVIS_WEB_LOGIN, a phone connecting straight to the host) also
+    takes the host's IP or a one-label name (MagicDNS short name, localhost);
+    neither can be rebound by a page.
+    """
+    raw = (headers.get("Host") or "").strip().lower()
+    host = raw[1 : raw.find("]")] if raw.startswith("[") else raw.split(":")[0]
     if not host:
         return False
     if dev_login:
         return host in ("localhost", "127.0.0.1")
-    return host.endswith(Config.WEB_HOST_SUFFIX)
+    if host.endswith(Config.WEB_HOST_SUFFIX):
+        return True
+    if not direct:
+        return False
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return "." not in host
 
 
 def origin_ok(headers: Any) -> bool:
@@ -554,27 +590,47 @@ class Gateway:
         gui_socket: str,
         idle_timeout: int,
         dev_login: Optional[str] = None,
+        login: Optional[str] = None,
     ):
         self.allowlist = allowlist
         self.audit = audit
         self.gui_socket = gui_socket
         self.idle_timeout = idle_timeout
         self.dev_login = dev_login
+        self.login = login
+
+    async def identify(self, headers: Any, remote: Any) -> tuple[Optional[str], str]:
+        """The account behind a request: JARVIS_WEB_LOGIN when set, else a
+        header from loopback (`tailscale serve`, the dev login)."""
+        if headers.get("Tailscale-Funnel-Request"):
+            return None, "Funnel requests are refused"
+        if self.login:
+            return self.login, ""
+        ip = peer_ip(remote)
+        if ip is None or not ip.is_loopback:
+            return None, (
+                "Requests from other machines need JARVIS_WEB_LOGIN "
+                "(or tailscale serve in front)"
+            )
+        return request_login(headers, self.dev_login)
 
     # -- HTTP -----------------------------------------------------------
 
-    def process_request(self, connection: Any, request: Any):
+    async def process_request(self, connection: Any, request: Any):
         """Serve the page, or vet the WebSocket upgrade. None lets it through."""
         path = request.path.split("?")[0]
         headers = request.headers
+        remote = connection.remote_address
+        ip = peer_ip(remote)
+        direct = bool(self.login)
 
         def refuse(status: HTTPStatus, why: str):
-            logger.warning(f"web: refused {path}: {why}")
+            logger.warning(f"web: refused {path} from {ip}: {why}")
             return connection.respond(status, why + "\n")
 
-        if not host_ok(headers, self.dev_login):
+        if not host_ok(headers, self.dev_login, direct):
             return refuse(HTTPStatus.FORBIDDEN, "Unexpected Host")
-        login, why = request_login(headers, self.dev_login)
+        login, why = await self.identify(headers, remote)
         if login is None:
             return refuse(HTTPStatus.FORBIDDEN, why)
         if self.allowlist.role_for(login) is None:
@@ -608,7 +664,7 @@ class Gateway:
     # -- WebSocket ------------------------------------------------------
 
     async def handle(self, ws: Any) -> None:
-        login, _ = request_login(ws.request.headers, self.dev_login)
+        login, _ = await self.identify(ws.request.headers, ws.remote_address)
         role = self.allowlist.role_for(login or "")
         if login is None or role is None:
             await ws.close(CLOSE_REFUSED, "Not allowed")
@@ -820,10 +876,11 @@ def build_gateway(dev_login: Optional[str] = None) -> Gateway:
         Config.JARVIS_GUI_SOCKET,
         Config.WEB_IDLE_TIMEOUT,
         dev_login,
+        None if dev_login else (Config.WEB_LOGIN or None),
     )
 
 
-async def serve_forever(gateway: Gateway, port: int) -> None:
+async def serve_forever(gateway: Gateway, port: int, host: str = "") -> None:
     from websockets.asyncio.server import serve
 
     if not platform.ipc_verify_owner(gateway.gui_socket) and os.path.exists(
@@ -832,7 +889,7 @@ async def serve_forever(gateway: Gateway, port: int) -> None:
         raise RuntimeError("jarvis.sock is not owned by this user; refusing to relay")
     async with serve(
         gateway.handle,
-        HOST,
+        host or HOST,
         port,
         process_request=gateway.process_request,
         max_size=MAX_FRAME,

@@ -129,10 +129,29 @@ you@example.com's phone)"), kept with the session.
 |---|---|
 | `JARVIS_WEB_ENABLED` | `false` |
 | `JARVIS_WEB_PORT` | `8318` |
+| `JARVIS_WEB_HOST` | `127.0.0.1` (`0.0.0.0` for direct tailnet access) |
+| `JARVIS_WEB_LOGIN` | unset; on `0.0.0.0`, the account every request counts as |
 | `JARVIS_WEB_ALLOWLIST_FILE` | `<config dir>/web_allowlist.json` |
 | `JARVIS_WEB_AUDIT_FILE` | `<data dir>/web_audit.jsonl` |
 | `JARVIS_WEB_IDLE_TIMEOUT` | `900` |
 | `JARVIS_WEB_HOST_SUFFIX` | `.ts.net` |
+
+### As a service, on 0.0.0.0
+
+`scripts/install-web-service.sh` installs two user services (`jarvis`, the
+daemon, and `jarvis-web`, the page) that start at boot (lingering on) and run
+as you, so the sudo password popup asks for your password. The page listens
+on `0.0.0.0` (`JARVIS_WEB_HOST`) and devices on the tailnet open
+`http://<host's tailnet IP>:8318`. Who can reach the host is the tailnet's
+business (Headscale or Tailscale ACLs); no proxy adds an identity header, so
+every request counts as `JARVIS_WEB_LOGIN` (your tailnet account, owner). Without
+`JARVIS_WEB_LOGIN`, a request from another machine is refused, since its
+identity header could be forged. The Host and Origin checks still hold: the
+Host must be the host's IP, its MagicDNS name (`JARVIS_WEB_HOST_SUFFIX`, set
+from the node's own name) or a one-label name, so a web page a phone has open
+cannot reach JARVIS through that phone's browser. Only use it where nothing
+but the tailnet reaches the host. `--uninstall` removes both services; logs are
+in `journalctl --user -u jarvis -u jarvis-web`.
 
 `scripts/run-web.sh` starts the daemon and the gateway for you: `--stub` uses a
 fake daemon so no LLM is needed (type `confirm` for a permission request, `run`

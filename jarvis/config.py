@@ -356,6 +356,12 @@ class Config:
     # any of these defaults.
     WEB_ENABLED = os.getenv("JARVIS_WEB_ENABLED", "false").lower() == "true"
     WEB_PORT = int(os.getenv("JARVIS_WEB_PORT", "8318"))
+    # Where `jarvis web` listens. Loopback is reached through `tailscale
+    # serve`, which names each phone's account. On 0.0.0.0 phones connect
+    # straight to the host, the tailnet's ACLs decide who can, and every
+    # request counts as WEB_LOGIN (its role from the allowlist).
+    WEB_HOST = os.getenv("JARVIS_WEB_HOST", "127.0.0.1")
+    WEB_LOGIN = os.getenv("JARVIS_WEB_LOGIN", "").strip()
     WEB_ALLOWLIST_FILE = os.getenv(
         "JARVIS_WEB_ALLOWLIST_FILE",
         os.path.join(_DEFAULT_CONFIG_DIR, "web_allowlist.json"),

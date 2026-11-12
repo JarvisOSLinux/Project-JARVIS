@@ -1270,24 +1270,41 @@ def _cmd_web() -> None:
         print("Nobody is on the allowlist, so every request would be refused.")
         print("  jarvis web allow <your-tailscale-login> owner")
         sys.exit(1)
+    if not dev_login and Config.WEB_LOGIN and not allowlist.role_for(Config.WEB_LOGIN):
+        print(f"JARVIS_WEB_LOGIN={Config.WEB_LOGIN} is not on the allowlist.")
+        print(f"  jarvis web allow {Config.WEB_LOGIN} owner")
+        sys.exit(1)
 
-    port = Config.WEB_PORT
-    print(f"jarvis web listening on 127.0.0.1:{port} (loopback only)")
+    port, host = Config.WEB_PORT, Config.WEB_HOST
+    loopback = host in ("127.0.0.1", "::1", "localhost")
+    if dev_login and not loopback:
+        print("Error: --insecure-dev-login only listens on 127.0.0.1.")
+        sys.exit(1)
+    print(f"jarvis web listening on {host}:{port}")
     if dev_login:
         print(
             f"WARNING: --insecure-dev-login: every request is treated as {dev_login}."
         )
-    else:
+    elif Config.WEB_LOGIN:
+        role = allowlist.role_for(Config.WEB_LOGIN)
+        print(f"  Every request counts as {Config.WEB_LOGIN} ({role}).")
+    elif loopback:
         print(
             f"  Publish it inside your tailnet:  tailscale serve --bg --https=443 {port}"
         )
+    else:
+        print(
+            "  Only this computer gets in: set JARVIS_WEB_LOGIN for phones that "
+            "connect straight to it."
+        )
+    if not dev_login:
         print("  Never use `tailscale funnel`; the gateway refuses Funnel requests.")
     try:
-        asyncio.run(serve_forever(build_gateway(dev_login), port))
+        asyncio.run(serve_forever(build_gateway(dev_login), port, host))
     except KeyboardInterrupt:
         print("\nStopped.")
     except OSError as e:
-        print(f"Error: could not listen on 127.0.0.1:{port}: {e}")
+        print(f"Error: could not listen on {host}:{port}: {e}")
         sys.exit(1)
     except RuntimeError as e:
         print(f"Error: {e}")

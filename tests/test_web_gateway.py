@@ -955,3 +955,63 @@ class TestHandshakeRefusals:
         finally:
             server.close()
             await daemon.stop()
+
+
+@pytest.mark.unit
+class TestFixedLogin:
+    """JARVIS_WEB_HOST=0.0.0.0: phones connect straight to the host; who can
+    is the tailnet's business, and every request counts as JARVIS_WEB_LOGIN."""
+
+    def _gateway(self, login=None, dev_login=None):
+        return wg.Gateway(
+            wg.Allowlist("/nonexistent"), None, "/x", 900, dev_login, login
+        )
+
+    def test_every_request_is_the_configured_account(self):
+        g = self._gateway(login="toufic@example.com")
+        forged = {"Tailscale-User-Login": "someone@else.example"}
+        for peer in (("100.64.0.17", 1), ("127.0.0.1", 1)):
+            assert asyncio.run(g.identify(forged, peer)) == ("toufic@example.com", "")
+
+    def test_without_it_another_machine_is_refused(self):
+        g = self._gateway()
+        forged = {"Tailscale-User-Login": "toufic@example.com"}
+        login, why = asyncio.run(g.identify(forged, ("100.64.0.17", 1)))
+        assert login is None and "JARVIS_WEB_LOGIN" in why
+        assert (
+            asyncio.run(g.identify(forged, ("127.0.0.1", 1)))[0] == "toufic@example.com"
+        )
+
+    def test_funnel_is_refused_either_way(self):
+        g = self._gateway(login="toufic@example.com")
+        assert (
+            asyncio.run(g.identify({"Tailscale-Funnel-Request": "?1"}, ("1.2.3.4", 1)))[
+                0
+            ]
+            is None
+        )
+
+    def test_the_dev_login_stays_on_this_computer(self):
+        g = self._gateway(dev_login="dev@localhost")
+        assert asyncio.run(g.identify({}, ("100.64.0.17", 1)))[0] is None
+        assert (
+            asyncio.run(g.identify({"Host": "localhost"}, ("127.0.0.1", 1)))[0]
+            == "dev@localhost"
+        )
+
+    def test_peer_ip(self):
+        assert str(wg.peer_ip(("::ffff:100.64.0.5", 1, 0, 0))) == "100.64.0.5"
+        assert wg.peer_ip(("bogus", 1)) is None
+
+    def test_a_direct_phone_may_name_the_host_by_ip_or_short_name(self, monkeypatch):
+        monkeypatch.setattr(wg.Config, "WEB_HOST_SUFFIX", ".hs.th.net")
+        for host in (
+            "100.64.0.11:8318",
+            "[fd7a:115c:a1e0::b]:8318",
+            "laptop:8318",
+            "laptop.hs.th.net",
+        ):
+            assert wg.host_ok({"Host": host}, None, direct=True), host
+        # A web page the phone has open cannot reach JARVIS by rebinding its name.
+        assert not wg.host_ok({"Host": "evil.example.com:8318"}, None, direct=True)
+        assert not wg.host_ok({"Host": "100.64.0.11:8318"}, None, direct=False)
