@@ -12,10 +12,21 @@ from __future__ import annotations
 WAITING = "waiting for the administrator password"
 GRANTED = "administrator password accepted"
 
+# dmcp's AUTH_WAITING_NOTICE_SUDO ends so: sudo asks through JARVIS's popup.
+BY_POPUP = "(sudo askpass)"
+
 WAITING_NOTE = (
     "The command is parked on the administrator password prompt on the user's "
     "computer; nobody has answered it yet. It is not stuck and not asking for "
     "input: tell the user to approve the password prompt on their computer. "
+    "Do not dispatch it again and do not send input."
+)
+
+WAITING_NOTE_POPUP = (
+    "The command is waiting for the user's sudo password, which JARVIS asks "
+    "for in a popup in jarvis-app and on their phone; nobody has answered it "
+    "yet. It is not stuck and not asking for input: tell the user to enter "
+    "the password in that popup. Never ask for the password in the chat. "
     "Do not dispatch it again and do not send input."
 )
 
@@ -25,3 +36,9 @@ def awaiting_password(tail: object) -> bool:
     if not isinstance(tail, str):
         return False
     return tail.rfind(WAITING) > tail.rfind(GRANTED)
+
+
+def waiting_note(tail: str) -> str:
+    """What to tell the model about a tail `awaiting_password` holds."""
+    last = tail[tail.rfind(WAITING) :]
+    return WAITING_NOTE_POPUP if BY_POPUP in last.split("\n", 1)[0] else WAITING_NOTE

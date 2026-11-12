@@ -4,7 +4,10 @@ Speaks just enough of the socket protocol for `jarvis web`: settings, sessions,
 streamed replies and confirmations. Send "confirm" in the chat to get a pending
 permission request, and "run" to watch a turn with a comment, the activity
 line and action blocks (docs/gui-protocol.md); any other text is echoed back in
-two chunks. `get_status` and `list_work` answer with sample data. The session
+two chunks. "sudo" asks for the sudo password as the popup relay does
+(runtime/askpass.py): the password "wrong" gets a second try, any other one
+"runs", and the password itself is never echoed. `get_status` and `list_work`
+answer with sample data. The session
 keeps what was said and the blocks, so a reload shows them as a daemon would.
 Settings and providers are kept in memory (a sample key included, so a page can
 be checked for showing it), and a change from a `web:` client becomes a block,
@@ -21,6 +24,11 @@ import time
 
 SESSION = {"id": "demo", "title": "Demo session", "entry_count": 0}
 pending: list[dict] = []
+# The sudo password requests waiting, as runtime/askpass.py keeps them.
+password_requests: dict[str, dict] = {}
+SUDO_COMMAND = (
+    "/usr/bin/dmcp call shell execute_command --args " '\'{"command": "pacman -Syu"}\''
+)
 writers: list[asyncio.StreamWriter] = []
 history: list[dict] = []
 blocks: dict[str, dict] = {}
@@ -263,10 +271,55 @@ SAMPLE_STATUS = [
 ]
 
 
+async def ask_password(attempt: int) -> None:
+    request = {
+        "type": "password_request",
+        "id": f"p{time.time_ns()}",
+        "command": SUDO_COMMAND,
+        "attempt": attempt,
+        "at": time.time(),
+    }
+    password_requests[request["id"]] = request
+    await broadcast(request)
+
+
 async def handle(msg: dict, writer: asyncio.StreamWriter) -> None:
     kind = msg.get("type")
     if kind == "hello":
         labels[writer] = str(msg.get("label", ""))
+        if "password_request" in (msg.get("subscribe") or []):
+            for request in password_requests.values():
+                writer.write((json.dumps(request) + "\n").encode())
+            await writer.drain()
+    elif kind in ("password_response", "password_cancel"):
+        request = password_requests.pop(str(msg.get("id")), None)
+        if request is None:
+            error = {
+                "type": "error",
+                "message": "That password request has already ended.",
+            }
+            writer.write((json.dumps(error) + "\n").encode())
+            await writer.drain()
+            return
+        cancelled = kind == "password_cancel"
+        outcome = "cancelled" if cancelled else "answered"
+        await broadcast(
+            {"type": "password_request_done", "id": request["id"], "outcome": outcome}
+        )
+        if not cancelled and msg.get("password") == "wrong":
+            await ask_password(request["attempt"] + 1)
+        else:
+            await broadcast(
+                {
+                    "type": "response",
+                    "content": (
+                        "Cancelled: no password was given."
+                        if cancelled
+                        else "Ran as root (stub)."
+                    ),
+                    "done": True,
+                }
+            )
     elif kind == "get_settings":
         writer.write(
             (json.dumps({"type": "settings", "settings": SETTINGS}) + "\n").encode()
@@ -404,6 +457,8 @@ async def handle(msg: dict, writer: asyncio.StreamWriter) -> None:
                 }
             )
             await broadcast({"type": "confirmation_request", "id": pending[-1]["id"]})
+        elif text.strip().lower() == "sudo":
+            await ask_password(1)
         elif text.strip().lower() == "run":
             asyncio.create_task(run_turn())
         else:

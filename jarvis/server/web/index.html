@@ -177,6 +177,26 @@
         </div>
     </div>
 
+    <!-- The sudo password, when JARVIS asks for it (Project-JARVIS#310). -->
+    <div id="password-backdrop"></div>
+    <div id="password-modal" role="dialog" aria-modal="true" aria-labelledby="password-modal-title">
+        <div id="password-modal-header">
+            <span id="password-modal-title">Administrator password</span>
+        </div>
+        <form id="password-form" autocomplete="off">
+            <p class="password-why">A command JARVIS is about to run needs root on the computer it runs on. sudo asks for the password of the account JARVIS runs as; it goes to that sudo only.</p>
+            <label class="settings-label" for="password-command">Command</label>
+            <pre id="password-command"></pre>
+            <div id="password-attempt" class="settings-error"></div>
+            <input id="password-input" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Password" aria-label="Password">
+            <div id="password-error" class="settings-error" role="alert"></div>
+            <div class="settings-row">
+                <button type="button" id="password-cancel-btn">Cancel</button>
+                <button type="submit" id="password-submit-btn" class="settings-primary-btn">Run as root</button>
+            </div>
+        </form>
+    </div>
+
     <div id="chat-view">
         <div id="empty-state">
             <div class="empty-logo">

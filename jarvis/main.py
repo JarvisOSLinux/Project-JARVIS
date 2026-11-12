@@ -39,6 +39,7 @@ from .runtime.lifecycle import (
     make_interrupt_handler,
     request_stop,
     shutdown,
+    start_askpass_relay,
     start_runtime_services,
     stdin_is_tty,
     stop_http_server_if_running,
@@ -156,6 +157,7 @@ class Jarvis:
         # the TUI during boot) must still reach shutdown(), which closes the
         # dispatch connection opened here.
         try:
+            self.askpass = await start_askpass_relay(self, logger)
             await connect_dispatch_nonfatal(self.dispatch, logger)
             await bootstrap_tool_index_nonfatal(self.dispatch, self._embeddings, logger)
             runtime_tasks = await start_runtime_services(self, logger)
@@ -174,6 +176,8 @@ class Jarvis:
             cancel_task_if_running(runtime_tasks.get("input_socket"))
             cancel_task_if_running(runtime_tasks.get("output_socket"))
             cancel_task_if_running(runtime_tasks.get("gui_socket"))
+            if getattr(self, "askpass", None) is not None:
+                await self.askpass.stop()
             cancel_task_if_running(runtime_tasks.get("update_sweep"))
             join_voice_thread_if_running(runtime_tasks.get("voice_thread"))
             stop_http_server_if_running(runtime_tasks.get("openai_server"))

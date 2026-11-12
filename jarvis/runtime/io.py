@@ -349,7 +349,16 @@ DEFAULT_CLIENT_LABEL = "unlabeled"
 # Pushed events a client receives only when its `hello` asks for them. A
 # client that predates them would choke on an unknown type: jarvis-app shows
 # every unknown message as an alert.
-SUBSCRIBABLE = frozenset({"activity", "action", "user_message"})
+SUBSCRIBABLE = frozenset(
+    {
+        "activity",
+        "action",
+        "user_message",
+        # The sudo password popup (runtime/askpass.py, #310).
+        "password_request",
+        "password_request_done",
+    }
+)
 
 
 def _subscriptions(app: Any) -> dict:
@@ -453,6 +462,23 @@ async def _process_gui_message(
         wanted = msg.get("subscribe")
         if isinstance(wanted, list):
             _subscriptions(app)[writer] = SUBSCRIBABLE & {str(w) for w in wanted}
+            relay = getattr(app, "askpass", None)
+            if relay is not None and "password_request" in _subscriptions(app)[writer]:
+                # A request made before this client connected still waits.
+                for request in relay.pending():
+                    await _gui_write(writer, request)
+
+    elif msg_type in ("password_response", "password_cancel"):
+        # Never logged: the message carries the password.
+        relay = getattr(app, "askpass", None)
+        if relay is None:
+            why: Optional[str] = "JARVIS is not asking for a password."
+        elif msg_type == "password_response":
+            why = relay.answer(msg.get("id"), msg.get("password"))
+        else:
+            why = relay.cancel(msg.get("id"))
+        if why:
+            await _gui_write(writer, {"type": "error", "message": why})
 
     elif msg_type == "list_clients":
         await _gui_write(

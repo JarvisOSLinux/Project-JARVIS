@@ -948,6 +948,108 @@ details.settings-group[open] > summary::before { content: '▾ '; }
 
 #shutdown-modal button:not(.icon-btn):hover { background: rgba(0, 200, 255, 0.20); }
 
+/* ── sudo password (Project-JARVIS#310) ── */
+#password-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.18s ease;
+    z-index: 50;
+}
+
+#password-backdrop.visible { opacity: 1; pointer-events: auto; }
+
+#password-modal {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0.96);
+    width: 420px;
+    max-width: calc(100vw - 32px);
+    max-height: calc(100dvh - 32px);
+    overflow-y: auto;
+    background: var(--surface);
+    border: 1px solid var(--primary-dim);
+    border-radius: 14px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.18s ease, transform 0.18s ease;
+    z-index: 51;
+}
+
+#password-modal.visible {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translate(-50%, -50%) scale(1);
+}
+
+#password-modal-header {
+    height: 52px;
+    display: flex;
+    align-items: center;
+    padding: 0 18px;
+    border-bottom: 1px solid var(--border);
+    color: var(--primary);
+    font-size: 14px;
+    letter-spacing: 0.5px;
+}
+
+#password-form {
+    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.password-why {
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
+
+#password-command {
+    margin: 0;
+    max-height: 160px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+    padding: 8px 10px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-primary);
+}
+
+#password-input {
+    padding: 9px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--text-primary);
+    font-size: 14px;
+}
+
+#password-input:focus { outline: none; border-color: var(--primary-dim); }
+
+#password-form .settings-row { gap: 8px; }
+
+#password-form button {
+    flex: 1;
+    padding: 9px 0;
+    border-radius: 8px;
+    border: 1px solid var(--primary-dim);
+    background: rgba(0, 200, 255, 0.10);
+    color: var(--primary);
+    font-size: 13px;
+    cursor: pointer;
+}
+
+#password-form button:disabled { opacity: 0.5; cursor: default; }
+
 /* ── System messages (e.g. daemon shutdown notice) ── */
 .system-message {
     text-align: center;
@@ -1543,6 +1645,7 @@ body:not(.can-approve) #new-session-btn { display: none; }
     details.action-block { margin-left: 0; max-width: 100%; }
     #input-bar { padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); height: auto; gap: 8px; }
     .input-wrapper input,
+    #password-input,
     .session-item-title-input,
     #settings-modal select,
     #settings-modal input,

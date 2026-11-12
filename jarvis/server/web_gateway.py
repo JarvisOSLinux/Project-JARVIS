@@ -24,7 +24,7 @@ gateway. This module is one, so the same threats are closed another way:
 6. **The role table covers the chat.** A chat line the daemon runs as a slash
    command needs the role that command's own message needs (``acts_as``).
 7. **A written trail.** Every state-changing request is appended to the audit
-   file with the account that sent it, never with an API key.
+   file with the account that sent it, never with an API key or a password.
 8. **The owner's phone is jarvis-app** (Yakup, 2026-11-10): settings,
    providers with their keys, approve all, voice listening. Keys (and
    ``headers``) the daemon lists are removed before they reach a phone; a key
@@ -33,6 +33,12 @@ gateway. This module is one, so the same threats are closed another way:
    (``core/providers.edit_provider``). What belongs to the laptop
    stays there: shutting JARVIS down (nothing could start it again from a
    phone), the wake sound's file, and server setups.
+9. **The sudo password** (#310, ``runtime/askpass.py``): with
+   ``SUDO_PASSWORD_POPUP`` on, a root command's ``password_request`` reaches
+   the trusted and owner phones, and they may answer it
+   (``password_response``) or cancel it. The password goes to the daemon,
+   which hands it to that sudo alone; the audit file gets the request's id.
+   No phone may turn the popup on.
 
 Residual risk: any local process can connect to the loopback port and send the
 identity header itself. On a single-user host that is no more than the same
@@ -82,6 +88,9 @@ _TRUSTED_SENDS = _GUEST_SENDS | {
     "approve_confirmation",
     "deny_confirmation",
     "partial_approve_confirmation",
+    # The host's sudo password, when JARVIS asks for it (#310, point 9).
+    "password_response",
+    "password_cancel",
     "create_session",
     "switch_session",
     "get_status",
@@ -140,7 +149,13 @@ RELAYED = frozenset(
 # Action blocks carry tool parameters and raw output, status names paths and
 # providers, and work lists every running task (#267): for the roles trusted to
 # approve what JARVIS runs, not for a guest.
-_TRUSTED_RELAYED = RELAYED | {"action", "status", "work"}
+_TRUSTED_RELAYED = RELAYED | {
+    "action",
+    "status",
+    "work",
+    "password_request",
+    "password_request_done",
+}
 # Provider lists reach the owner without their keys (`shown_to`).
 _OWNER_RELAYED = _TRUSTED_RELAYED | {
     "settings",
@@ -173,6 +188,9 @@ _AUDITED = frozenset(
         "set_setting",
         "start_listening",
         "stop_listening",
+        # With the request's id only: AuditLog.record never writes a password.
+        "password_response",
+        "password_cancel",
     }
     | _PROVIDER_CHANGES
 )
@@ -254,6 +272,13 @@ def refused(msg: dict) -> Optional[str]:
             return (
                 "Approvals can't be turned off from a phone: remote access "
                 "needs them on. Change it at the laptop."
+            )
+    if key == "SUDO_PASSWORD_POPUP":
+        on, _ = settings.parse(settings.find(key), value)
+        if on is True:
+            return (
+                "The sudo password popup can only be turned on at the laptop; "
+                "a phone may turn it off."
             )
     if key == "WAKE_CHIME_PATH" and ("" if value is None else str(value).strip()):
         return (
@@ -440,6 +465,8 @@ class AuditLog:
             }
             if given.get("api_key") or given.get("key"):
                 entry["key_changed"] = True
+        elif kind in ("password_response", "password_cancel"):
+            entry["id"] = str(msg.get("id"))[:64]
         elif kind == "approve_all_confirmations":
             entry["ids"] = [str(i)[:64] for i in msg.get("ids") or []][:100]
         elif "id" in msg:
@@ -634,7 +661,13 @@ class Gateway:
             {
                 "type": "hello",
                 "label": label,
-                "subscribe": ["activity", "action", "user_message"],
+                "subscribe": [
+                    "activity",
+                    "action",
+                    "user_message",
+                    "password_request",
+                    "password_request_done",
+                ],
             },
         )
         await self._upstream_send(writer, {"type": "get_settings"})

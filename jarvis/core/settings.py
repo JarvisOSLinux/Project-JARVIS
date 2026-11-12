@@ -54,6 +54,13 @@ SETTINGS: Tuple[Setting, ...] = (
         minimum=0,
     ),
     Setting(
+        "SUDO_PASSWORD_POPUP",
+        "Ask for the sudo password in jarvis-app and on phones",
+        "Safety",
+        "bool",
+        hint="Linux. Off: root commands ask with polkit's dialog on this computer",
+    ),
+    Setting(
         "OUTPUT_MODE",
         "Replies",
         "Voice",

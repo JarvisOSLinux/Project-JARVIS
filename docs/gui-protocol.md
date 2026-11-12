@@ -38,7 +38,7 @@ client keeps its view in step by listening, not by polling.
 | `stop_all` | | `stop`, and the session's running tasks are killed too. When one runs a package manager the first `stop_all` only warns (`ack`); a second within 15 s kills it. |
 | `stop_task` | `pid` | Kills one running task (the `pid` from `work`); the model hears nothing from it. Its request is closed when nothing else of it is under way; otherwise the request's next turn is told the user stopped it. A package manager is only warned about at first (`ack`); a second `stop_task` for it within 15 s kills it. → `ack` with what was stopped. |
 | `stop_stream` | | Ends the reply being shown (`response` with `done: true`) and sets the state to `idle`; JARVIS's work goes on. |
-| `hello` | `label`, `subscribe` (optional list: `activity`, `action`, `user_message`) | Names this client in `list_clients`, and asks for the pushed events it can show. |
+| `hello` | `label`, `subscribe` (optional list: `activity`, `action`, `user_message`, `password_request`, `password_request_done`) | Names this client in `list_clients`, and asks for the pushed events it can show. Subscribing to `password_request` also sends the requests already waiting. |
 | `list_clients` | | → `client_list` |
 | `ping` | | → `pong` |
 
@@ -194,6 +194,30 @@ not part of the conversation.
 
 `kind` is `llm`, `dispatch`, `memory` or `activity`.
 
+### The sudo password (#310)
+
+With `SUDO_PASSWORD_POPUP` on (Linux), a root command elevates through `sudo -A`
+and JARVIS asks the clients for the password (`runtime/askpass.py`). Only to
+clients that subscribed to them:
+
+```json
+{"type": "password_request", "id": "9f2c1a07b3d4e5f6", "attempt": 1, "at": 1792732504.1,
+ "command": "/usr/bin/dmcp call shell execute_command --args '{\"command\": \"pacman -Syu\"}'"}
+{"type": "password_request_done", "id": "9f2c1a07b3d4e5f6", "outcome": "answered"}
+```
+
+`command` is sudo's own command line, read from `/proc`. A wrong password makes
+sudo ask again: a new request with `attempt` 2. `outcome` is `answered`,
+`cancelled`, or `gone` (sudo stopped waiting). Answer with:
+
+| `type` | Fields | Reply |
+|---|---|---|
+| `password_response` | `id`, `password` | nothing; `password_request_done` to everyone. `error` if the request has ended or the password cannot be one (empty, a line break, over 4096 characters). Never logged. |
+| `password_cancel` | `id` | as above |
+
+The first answer wins. The password goes to that sudo only: it is not logged,
+stored, put in the session, or sent to any other client.
+
 ### Actions (#271)
 
 Only to clients that subscribed to `action`. What JARVIS did, as blocks: the
@@ -315,8 +339,8 @@ comes live, with the same `id`. A comment has `comment: true`.
 ## Through `jarvis web`
 
 The gateway relays this protocol over a WebSocket, narrowed by role
-(`docs/web-gateway.md`). It subscribes to `activity`, `action` and
-`user_message` for the phone:
+(`docs/web-gateway.md`). It subscribes to `activity`, `action`,
+`user_message`, `password_request` and `password_request_done` for the phone:
 
 - **Every role** sees `state`, `response`, `user_message`, `activity`, confirmations, sessions
   (a guest's history without its action blocks), `client_list`, `ack`, `error`,
@@ -326,7 +350,8 @@ The gateway relays this protocol over a WebSocket, narrowed by role
   output, so they go to the roles trusted to approve what JARVIS runs. A guest
   gets a `confirmation_request` cut to its id and tools, `confirmation_list`
   items without their rendered commands (`tool_lines`) and goal, and sessions
-  without their `summary` and `metadata`.
+  without their `summary` and `metadata`. Trusted and owner also get the sudo
+  password popup and may answer it.
 - **The owner** also gets settings and providers (each provider without its
   `api_key` or `headers`, with `api_key_set`), and may change them, approve
   all (naming the `ids` it shows) and turn the wake word on or off.
@@ -334,7 +359,8 @@ The gateway relays this protocol over a WebSocket, narrowed by role
   `confirmation_response`. A chat line the daemon would read as a slash
   command (`/delete`, `/stop all`, ...) needs the role its socket message
   needs (`web_gateway.acts_as`); a refused one is answered with `error` and
-  the last `state`, since the page shows "working" once it sends a line.
+  the last `state`, since the page shows "working" once it sends a line. No
+  phone may turn `SUDO_PASSWORD_POPUP` on.
 
 ## Not in the protocol yet
 

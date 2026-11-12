@@ -36,6 +36,27 @@ def install_signal_handlers(
     platform.install_signal_handlers(loop, stop_callback, interrupt_callback)
 
 
+async def start_askpass_relay(app: Any, logger: Logger) -> Optional[Any]:
+    """The sudo password popup's relay (#310), on Linux with a GUI socket.
+
+    Started before dispatch, whose environment carries the relay's helper and
+    socket to dmcp. It runs whatever the setting says: dmcp asks it before
+    each elevation, so turning SUDO_PASSWORD_POPUP on or off needs no restart.
+    """
+    if not Config.JARVIS_GUI_SOCKET or not sys.platform.startswith("linux"):
+        return None
+    from .askpass import AskpassRelay
+    from .io import _broadcast_soon
+
+    relay = AskpassRelay(lambda message: _broadcast_soon(app, message))
+    try:
+        await relay.start()
+    except OSError as e:
+        logger.warning(f"JARVIS: the sudo password popup is unavailable: {e}")
+        return None
+    return relay
+
+
 async def connect_dispatch_nonfatal(dispatch: Any, logger: Logger) -> None:
     """Connect to dispatch, but continue in conversation-only mode on failure."""
     try:

@@ -226,6 +226,20 @@ only the current user’s permissions.
 
 - Status: ✅ Mitigated by default
 
+**The sudo password popup** (`SUDO_PASSWORD_POPUP`, off by default, #310):
+when on, a system-scope (root) call elevates through `sudo -A` and the host
+account's password is typed in jarvis-app or on a trusted or owner phone
+instead of polkit's dialog. The password passes through the page, the
+gateway (over Tailscale's encrypted link) and the daemon, which hands it to
+that one sudo and nowhere else (no log, store or audit). The daemon shows a
+request only when it comes from its own helper under a real sudo started by
+dmcp below the daemon, with the command read from `/proc`, so an MCP server
+cannot phish the password through the socket by asking for it. It cannot stop
+code that already runs as the user from reading a process's memory, the same
+exposure polkit's desktop dialog has. Anyone allowed to answer can make the
+host run that command as root: `trusted` is for people who would be given the
+password anyway.
+
 ---
 
 ## Remaining Attack Surfaces
@@ -353,6 +367,7 @@ into future LLM contexts through RAG retrieval.
 | `CONFIRMATION_MODE` | `smart` | `allow_all` disables tool confirmation for every tier except FORBIDDEN, which is always refused |
 | `CONFIRMATION_TIMEOUT` | `0` (never auto-deny; confirmations stay pending until answered, #185) | a positive value auto-denies unanswered confirmations after N seconds — safer for unattended/headless hosts, at the cost of killing unattended legitimate work |
 | `JARVIS_SUDO_ENABLED` | `false` | `true` grants shell access to privileged commands |
+| `SUDO_PASSWORD_POPUP` | `false` | `true` lets jarvis-app and trusted/owner phones answer sudo's password prompt for root calls; only the laptop may turn it on |
 | `providers.json` | (empty) | API providers store keys in this file |
 | `NOTIFICATION_SILENT` | `false` | `true` suppresses desktop confirmation UI |
 | `DATA_CONSENT` | `true` | Controls proactive vs explicit memory only |

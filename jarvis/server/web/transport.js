@@ -45,6 +45,9 @@
             type: 'partial_approve_confirmation', id: a.id, approved_indices: a.approvedIndices,
         }),
         list_clients:               ()  => ({ type: 'list_clients' }),
+        // The host's sudo password, when JARVIS asks for it (trusted, owner).
+        answer_password:            (a) => ({ type: 'password_response', id: a.id, password: a.password }),
+        cancel_password:            (a) => ({ type: 'password_cancel', id: a.id }),
         // The daemon's health check; `get_status` below is the connection's.
         get_health:                 (a) => ({ type: 'get_status', full: !!a.full }),
         list_work:                  ()  => ({ type: 'list_work' }),
@@ -117,6 +120,8 @@
         case 'session_switched':     return emit('ipc-session-switched', { session: msg.session, messages: msg.messages || [] });
         case 'session_error':        return emit('ipc-session-error', msg.message);
         case 'client_list':          return emit('ipc-client-list', msg.clients || []);
+        case 'password_request':     return emit('ipc-password-request', msg);
+        case 'password_request_done': return emit('ipc-password-done', msg);
         case 'settings':             return emit('ipc-settings', msg.settings || []);
         case 'config_updated':       return emit('ipc-config-updated', { key: msg.key, value: msg.value });
         case 'config_error':         return emit('ipc-config-error', { key: msg.key, message: msg.message || '' });

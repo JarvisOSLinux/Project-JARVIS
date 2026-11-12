@@ -111,6 +111,9 @@ _DMCP_VARS = (
     "DMCP_ELEVATION_TIMEOUT_SECS",
     "DMCP_SESSION_TTL_SECS",
     "DMCP_ELICIT_MAX_PROMPTS",
+    # The sudo password popup (runtime/askpass.py sets them in the daemon).
+    "DMCP_SUDO_ASKPASS",
+    "JARVIS_ASKPASS_SOCKET",
 )
 
 

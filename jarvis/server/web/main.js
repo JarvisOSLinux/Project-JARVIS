@@ -63,6 +63,15 @@ const settingsQuitOnShutdown  = document.getElementById('settings-quit-on-shutdo
 const settingsShutdownBtn     = document.getElementById('settings-shutdown-btn');
 const settingsError           = document.getElementById('settings-error');
 
+const passwordBackdrop  = document.getElementById('password-backdrop');
+const passwordModal     = document.getElementById('password-modal');
+const passwordForm      = document.getElementById('password-form');
+const passwordCommand   = document.getElementById('password-command');
+const passwordAttempt   = document.getElementById('password-attempt');
+const passwordInput     = document.getElementById('password-input');
+const passwordError     = document.getElementById('password-error');
+const passwordSubmitBtn = document.getElementById('password-submit-btn');
+const passwordCancelBtn = document.getElementById('password-cancel-btn');
 const shutdownBackdrop  = document.getElementById('shutdown-backdrop');
 const shutdownModal     = document.getElementById('shutdown-modal');
 const shutdownClientList = document.getElementById('shutdown-client-list');
@@ -869,6 +878,7 @@ function restorePendingSetting() {
 }
 
 function onError(message) {
+    if (passwordSent) return showPasswordError(message);
     if (pendingProvider === 'form') showProviderFormError(message);
     else showChangeError(message);
     pendingProvider = null;
@@ -1421,9 +1431,90 @@ function applyGateway(info) {
     document.body.classList.toggle('can-manage', role === 'owner');
 }
 
+// ── sudo password (Project-JARVIS#310) ─────────────────────────────────────
+// JARVIS asks when a root command needs the host's sudo password and its
+// popup setting is on. Requests wait in arrival order; one shows at a time.
+// The typed password is sent and cleared at once: it is kept nowhere here.
+const passwordRequests = new Map(); // id -> request
+let passwordShownId = null;
+let passwordSent = false; // an answer for the shown request is on its way
+
+function showNextPasswordRequest() {
+    const next = passwordRequests.values().next().value;
+    passwordShownId = next ? next.id : null;
+    passwordSent = false;
+    passwordInput.value = '';
+    passwordError.textContent = '';
+    passwordError.classList.remove('visible');
+    if (!next) {
+        passwordModal.classList.remove('visible');
+        passwordBackdrop.classList.remove('visible');
+        return;
+    }
+    passwordCommand.textContent = next.command || '';
+    const again = (next.attempt || 1) > 1;
+    passwordAttempt.textContent = again
+        ? `Wrong password; sudo asks again (try ${next.attempt}). Several wrong passwords in a row can lock the account for a few minutes.`
+        : '';
+    passwordAttempt.classList.toggle('visible', again);
+    passwordSubmitBtn.disabled = false;
+    passwordCancelBtn.disabled = false;
+    passwordModal.classList.add('visible');
+    passwordBackdrop.classList.add('visible');
+    passwordInput.focus();
+}
+
+function onPasswordRequest(request) {
+    if (!request || !request.id || !document.body.classList.contains('can-approve')) return;
+    passwordRequests.set(request.id, request);
+    if (passwordShownId === null) showNextPasswordRequest();
+}
+
+function onPasswordDone(done) {
+    if (!done || !passwordRequests.delete(done.id)) return;
+    if (done.id === passwordShownId) showNextPasswordRequest();
+}
+
+function showPasswordError(message) {
+    passwordError.textContent = message;
+    passwordError.classList.add('visible');
+    passwordSubmitBtn.disabled = false;
+    passwordCancelBtn.disabled = false;
+    passwordSent = false;
+}
+
+function submitPassword(event) {
+    event.preventDefault();
+    if (passwordShownId === null || passwordSent) return;
+    const password = passwordInput.value;
+    if (!password) return showPasswordError('Type the password first.');
+    if (!isConnected) return showPasswordError(offlineChange());
+    passwordInput.value = '';
+    passwordSent = true;
+    passwordSubmitBtn.disabled = true;
+    passwordCancelBtn.disabled = true;
+    invoke('answer_password', { id: passwordShownId, password });
+}
+
+function cancelPassword() {
+    if (passwordShownId === null || passwordSent) return;
+    if (!isConnected) return showPasswordError(offlineChange());
+    passwordSent = true;
+    passwordSubmitBtn.disabled = true;
+    passwordCancelBtn.disabled = true;
+    invoke('cancel_password', { id: passwordShownId });
+}
+
+/// The connection went: JARVIS sends what still waits once it is back.
+function forgetPasswordRequests() {
+    passwordRequests.clear();
+    showNextPasswordRequest();
+}
+
 function handleDisconnect(info) {
     sessionEnded = !!info && info.code >= 4000 && info.code < 5000;
     loseChangesInFlight();
+    forgetPasswordRequests();
     if (sessionEnded && settingsOpen()) showSettingsError(ENDED_CHANGE);
     setConnected(false);
     setStatus('offline');
@@ -1497,6 +1588,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     permissionsBtn.addEventListener('click', togglePermissionPanel);
     permissionBackdrop.addEventListener('click', closePermissionPanel);
     approveAllBtn.addEventListener('click', approveAllConfirmations);
+    passwordForm.addEventListener('submit', submitPassword);
+    passwordCancelBtn.addEventListener('click', cancelPassword);
 
     settingsBtn.addEventListener('click', toggleSettingsModal);
     settingsBackdrop.addEventListener('click', closeSettingsModal);
@@ -1588,6 +1681,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         pendingProvider = null;
     });
     await listen('ipc-client-list', (e) => renderShutdownClientList(e.payload));
+    await listen('ipc-password-request', (e) => onPasswordRequest(e.payload));
+    await listen('ipc-password-done', (e) => onPasswordDone(e.payload));
     await listen('ipc-daemon-shutdown', (e) => handleDaemonShutdown(e.payload));
     await listen('ipc-open-shutdown-modal', openShutdownModal); // tray menu entry point
     await listen('ipc-config-updated', (e) => {

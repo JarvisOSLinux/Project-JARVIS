@@ -225,6 +225,24 @@ class TestPolicy:
         ]
         assert wg.shown_to(listed, "trusted") == listed
 
+    def test_the_sudo_password_popup_is_for_those_who_approve(self):
+        request = {"type": "password_request", "id": "r1", "command": "c"}
+        done = {"type": "password_request_done", "id": "r1", "outcome": "answered"}
+        for role in ("trusted", "owner"):
+            assert wg.shown_to(request, role) == request
+            assert wg.shown_to(done, role) == done
+            for kind in ("password_response", "password_cancel"):
+                assert wg.sendable(role, {"type": kind, "id": "r1"})
+        assert wg.shown_to(request, "guest") is None
+        assert not wg.sendable("guest", {"type": "password_response", "id": "r1"})
+
+    def test_no_phone_turns_the_popup_on(self):
+        msg = {"type": "set_setting", "key": "SUDO_PASSWORD_POPUP"}
+        for on in (True, "true", " on ", "yes"):
+            assert "laptop" in wg.refused({**msg, "value": on})
+        for off in (False, "false", "off"):
+            assert wg.refused({**msg, "value": off}) is None
+
     def test_a_guest_gets_sessions_without_their_summaries(self):
         session = {"id": "s1", "title": "t", "summary": "AWS keys", "metadata": {}}
         listed = {"type": "session_list", "sessions": [session]}
@@ -546,7 +564,13 @@ class TestRelay:
             assert {
                 "type": "hello",
                 "label": "web:toufic@example.com",
-                "subscribe": ["activity", "action", "user_message"],
+                "subscribe": [
+                    "activity",
+                    "action",
+                    "user_message",
+                    "password_request",
+                    "password_request_done",
+                ],
             } in daemon.received
             assert {"type": "message", "content": "hello"} in daemon.received
             audit = [json.loads(x) for x in open(tmp_path / "audit.jsonl")]
@@ -623,6 +647,24 @@ class TestRelay:
                 assert "not available to a guest" in seen[-1]["message"]
                 after = json.loads(await asyncio.wait_for(ws.recv(), 3))
                 assert after == {"type": "state", "state": "idle"}
+        finally:
+            server.close()
+            await daemon.stop()
+
+    async def test_a_password_answer_is_audited_without_the_password(self, tmp_path):
+        daemon, server, url, _ = await _boot(tmp_path, {"t@example.com": "trusted"})
+        answer = {"type": "password_response", "id": "r1", "password": "hunter2"}
+        try:
+            async with connect(
+                url, additional_headers=_wire(url, "t@example.com")
+            ) as ws:
+                await ws.recv()
+                await ws.send(json.dumps(answer))
+                await asyncio.sleep(0.2)
+            assert answer in daemon.received, "the password reaches the daemon"
+            audit = open(tmp_path / "audit.jsonl").read()
+            assert "hunter2" not in audit
+            assert json.loads(audit.splitlines()[-1])["id"] == "r1"
         finally:
             server.close()
             await daemon.stop()

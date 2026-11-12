@@ -84,6 +84,18 @@ guest's `confirmation_request` is cut to its id and tools, its
 `confirmation_list` items to their tool names, and its sessions come without
 the LLM-written `summary` of their older turns.
 
+The sudo password (#310): with `SUDO_PASSWORD_POPUP` on (Linux, off by
+default), a root command asks for the host account's sudo password in a popup
+on jarvis-app and on the trusted and owner phones, instead of polkit's dialog
+on the host. The password goes from the phone to JARVIS, which hands it to
+that one sudo (`runtime/askpass.py`); it is not logged, stored or audited (the
+audit file gets the request's id). JARVIS shows a request only when it comes
+from its own askpass helper under a real sudo started by dmcp below the
+daemon, with sudo's command line as read from `/proc`. No phone may turn the
+popup on; a phone may turn it off. Anyone allowed to answer can make the host
+run that one command as root, so allow `trusted` only to people you would
+give the password to.
+
 API keys: the daemon's provider lists reach the owner with each `api_key`
 and `headers` removed and `api_key_set` in its place. A key typed on the phone
 goes to JARVIS over Tailscale's encrypted link and is written only to

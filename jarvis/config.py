@@ -374,6 +374,13 @@ class Config:
     # unattended/headless setups.
     CONFIRMATION_TIMEOUT = int(os.getenv("CONFIRMATION_TIMEOUT", "0"))
 
+    # Root commands ask for the sudo password in jarvis-app and on the phones
+    # allowed to approve, instead of polkit's dialog on this computer (#310,
+    # runtime/askpass.py). Linux; off by default, and no phone may turn it on.
+    SUDO_PASSWORD_POPUP = (
+        os.getenv("SUDO_PASSWORD_POPUP", "false").strip().lower() == "true"
+    )
+
     # Logging Configuration
     LOG_LEVEL = os.getenv(
         "LOG_LEVEL", "INFO"
