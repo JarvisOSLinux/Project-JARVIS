@@ -177,6 +177,20 @@
         </div>
     </div>
 
+    <!-- A permission request as it arrives; it also stays in the panel. -->
+    <div id="approval-backdrop"></div>
+    <div id="approval-modal" role="dialog" aria-modal="true" aria-labelledby="approval-title">
+        <div id="approval-header">
+            <span id="approval-title">JARVIS asks to run</span>
+            <span id="approval-count"></span>
+        </div>
+        <div id="approval-goal"></div>
+        <div id="approval-body"></div>
+        <div class="settings-row" id="approval-later-row">
+            <button type="button" id="approval-later-btn" title="Keep it in Permission Requests">Later</button>
+        </div>
+    </div>
+
     <!-- The sudo password, when JARVIS asks for it (Project-JARVIS#310). -->
     <div id="password-backdrop"></div>
     <div id="password-modal" role="dialog" aria-modal="true" aria-labelledby="password-modal-title">

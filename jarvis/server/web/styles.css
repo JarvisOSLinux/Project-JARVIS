@@ -948,6 +948,83 @@ details.settings-group[open] > summary::before { content: '▾ '; }
 
 #shutdown-modal button:not(.icon-btn):hover { background: rgba(0, 200, 255, 0.20); }
 
+/* ── A permission request as it arrives ── */
+#approval-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.18s ease;
+    z-index: 45;
+}
+
+#approval-backdrop.visible { opacity: 1; pointer-events: auto; }
+
+#approval-modal {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0.96);
+    width: 440px;
+    max-width: calc(100vw - 32px);
+    max-height: calc(100dvh - 32px);
+    overflow-y: auto;
+    background: var(--surface);
+    border: 1px solid #b58a1a;
+    border-radius: 14px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.18s ease, transform 0.18s ease;
+    z-index: 46;
+}
+
+#approval-modal.visible {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translate(-50%, -50%) scale(1);
+}
+
+#approval-header {
+    height: 52px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 18px;
+    border-bottom: 1px solid var(--border);
+    color: #ffb84d;
+    font-size: 14px;
+    letter-spacing: 0.5px;
+}
+
+#approval-count { color: var(--text-secondary); font-size: 12px; }
+
+#approval-goal {
+    padding: 12px 18px 0;
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
+
+#approval-goal:empty { display: none; }
+
+#approval-body { padding: 12px 18px 4px; }
+
+#approval-body .permission-item { margin: 0; border: none; padding: 0; background: none; }
+
+#approval-later-row { padding: 0 18px 16px; }
+
+#approval-later-row button {
+    flex: 1;
+    padding: 8px 0;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 13px;
+    cursor: pointer;
+}
+
 /* ── sudo password (Project-JARVIS#310) ── */
 #password-backdrop {
     position: fixed;

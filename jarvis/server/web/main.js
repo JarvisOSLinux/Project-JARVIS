@@ -63,6 +63,12 @@ const settingsQuitOnShutdown  = document.getElementById('settings-quit-on-shutdo
 const settingsShutdownBtn     = document.getElementById('settings-shutdown-btn');
 const settingsError           = document.getElementById('settings-error');
 
+const approvalBackdrop  = document.getElementById('approval-backdrop');
+const approvalModal     = document.getElementById('approval-modal');
+const approvalBody      = document.getElementById('approval-body');
+const approvalGoal      = document.getElementById('approval-goal');
+const approvalCount     = document.getElementById('approval-count');
+const approvalLaterBtn  = document.getElementById('approval-later-btn');
 const passwordBackdrop  = document.getElementById('password-backdrop');
 const passwordModal     = document.getElementById('password-modal');
 const passwordForm      = document.getElementById('password-form');
@@ -802,8 +808,54 @@ function buildPermissionItem(item) {
 // after the list was drawn.
 let shownConfirmationIds = [];
 
+// ── A permission request as it arrives ──────────────────────────────────────
+// Each request the page has not shown yet opens as a pop-up for those who may
+// approve: the same card as the panel, plus Later, which leaves it waiting in
+// the panel. It takes no focus, so Enter typed in the chat never approves.
+const approvalSeen = new Set(); // ids popped up on this page
+let approvalShownId = null;
+let pendingConfirmations = [];
+
+function syncApprovalPopup(items) {
+    if (approvalShownId !== null && !items.some((i) => i.id === approvalShownId)) {
+        closeApprovalPopup(); // answered here or on another screen
+    }
+    if (approvalShownId !== null || !document.body.classList.contains('can-approve')) return;
+    const next = items.find((i) => !approvalSeen.has(i.id));
+    if (next) openApprovalPopup(next, items);
+}
+
+function openApprovalPopup(item, items) {
+    approvalSeen.add(item.id);
+    approvalShownId = item.id;
+    approvalGoal.textContent = item.goal_description ? `For: ${item.goal_description}` : '';
+    const waiting = items.length - 1;
+    approvalCount.textContent = waiting > 0 ? `${waiting} more waiting` : '';
+    approvalBody.replaceChildren(buildPermissionItem(item));
+    approvalModal.classList.add('visible');
+    approvalBackdrop.classList.add('visible');
+    if (navigator.vibrate) {
+        try { navigator.vibrate(150); } catch (_) { /* not allowed before a tap */ }
+    }
+}
+
+function closeApprovalPopup() {
+    approvalShownId = null;
+    approvalModal.classList.remove('visible');
+    approvalBackdrop.classList.remove('visible');
+    approvalBody.replaceChildren();
+}
+
+/// Leave it in the panel and show the next one not seen yet.
+function laterApproval() {
+    closeApprovalPopup();
+    syncApprovalPopup(pendingConfirmations);
+}
+
 function renderPermissionList(items) {
     shownConfirmationIds = items.map((item) => item.id);
+    pendingConfirmations = items;
+    syncApprovalPopup(items);
     permissionList.innerHTML = '';
     permissionPanelTitle.textContent = items.length
         ? `Permission Requests (${items.length})`
@@ -1521,6 +1573,11 @@ function forgetPasswordRequests() {
 function handleDisconnect(info) {
     sessionEnded = !!info && info.code >= 4000 && info.code < 5000;
     loseChangesInFlight();
+    // Not answerable while offline; it opens again once the list returns.
+    if (approvalShownId !== null) {
+        approvalSeen.delete(approvalShownId);
+        closeApprovalPopup();
+    }
     forgetPasswordRequests();
     if (sessionEnded && settingsOpen()) showSettingsError(ENDED_CHANGE);
     setConnected(false);
@@ -1532,6 +1589,7 @@ function handleDisconnect(info) {
 }
 
 function closePanels() {
+    if (approvalShownId !== null) laterApproval();
     closeWorkPanel();
     closePermissionPanel();
     closeSidebar();
@@ -1596,6 +1654,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     permissionBackdrop.addEventListener('click', closePermissionPanel);
     approveAllBtn.addEventListener('click', approveAllConfirmations);
     passwordForm.addEventListener('submit', submitPassword);
+    approvalLaterBtn.addEventListener('click', laterApproval);
+    approvalBackdrop.addEventListener('click', laterApproval);
+    // A decision made in the pop-up closes it at once; the refreshed list
+    // then shows the next request.
+    approvalBody.addEventListener('click', (e) => {
+        const button = e.target.closest('.permission-action');
+        if (button && !button.disabled) closeApprovalPopup();
+    });
     passwordCancelBtn.addEventListener('click', cancelPassword);
 
     settingsBtn.addEventListener('click', toggleSettingsModal);
@@ -1654,8 +1720,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     await listen('ipc-health',       (e)     => renderStatus(e.payload));
     await listen('ipc-wake',         ()      => setStatus('listening'));
     await listen('ipc-confirm', () => {
-        // Non-blocking by design: no window.confirm(), no toast. Just a
-        // subtle cue that the Permission Requests panel has something new.
+        // The refreshed list opens the pop-up (syncApprovalPopup); never a
+        // blocking window.confirm(), which would freeze the page.
         flashPermissionIndicator();
         invoke('list_confirmations');
     });
