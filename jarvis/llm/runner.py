@@ -31,6 +31,10 @@ POLL_INTERVAL = 1.0
 DEFAULT_CONTEXT = 16384
 
 
+# Tokens one embedding may take (nomic-embed-text's training window).
+EMBED_CONTEXT = 2048
+
+
 class RunnerError(RuntimeError):
     """llama-server is missing or did not come up."""
 
@@ -88,7 +92,12 @@ class LlamaServer:
         ]
         cmd += ["-m", str(model_path)]
         if self.embedding:
-            cmd.append("--embedding")
+            # llama-server's batch is 512 tokens by default and an embedding
+            # takes its whole input in one batch, so a longer memory or a
+            # server's tool docs failed ("input is too large"). Ollama, which
+            # this replaced, gave nomic-embed-text a 2048-token window.
+            n = str(EMBED_CONTEXT)
+            cmd += ["--embedding", "-c", n, "-b", n, "-ub", n]
         else:
             cmd.append("--jinja")
             cmd += ["-c", str(Config.LLM_CONTEXT_WINDOW or DEFAULT_CONTEXT)]

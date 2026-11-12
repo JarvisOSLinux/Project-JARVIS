@@ -51,7 +51,16 @@ class TestCommand:
         cmd = runner.LlamaServer("e", 11446, embedding=True)._command(
             "llama-server", tmp_path / "e"
         )
-        assert "-c" not in cmd
+        assert cmd[cmd.index("-c") + 1] == "2048", "not the chat window"
+
+    def test_an_embedding_takes_a_whole_window_in_one_batch(self, tmp_path):
+        """llama-server's 512-token default batch refused longer texts ("input
+        is too large"); nomic-embed-text reads 2048."""
+        cmd = runner.LlamaServer("e", 11446, embedding=True)._command(
+            "llama-server", tmp_path / "e"
+        )
+        for flag in ("-c", "-b", "-ub"):
+            assert cmd[cmd.index(flag) + 1] == str(runner.EMBED_CONTEXT) == "2048"
 
     def test_binds_loopback_on_requested_port(self, tmp_path):
         cmd = runner.LlamaServer("m", 11445)._command("llama-server", tmp_path / "m")
