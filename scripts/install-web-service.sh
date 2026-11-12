@@ -7,12 +7,21 @@
 #                                                        account (repeatable;
 #                                                        role defaults to trusted)
 #   scripts/install-web-service.sh --port N              (default 8318)
+#   scripts/install-web-service.sh --domain NAME         also served on NAME by
+#                                                        your reverse proxy
+#                                                        (repeatable; kept on
+#                                                        later runs)
+#   scripts/install-web-service.sh --no-domain           drop those domains
 #   scripts/install-web-service.sh --uninstall
 #
 # Phones and laptops on the tailnet open http://<this host's tailnet IP>:<port>.
 # Who can reach the host is the tailnet's business (Headscale ACLs); every
 # request counts as your tailnet account (JARVIS_WEB_LOGIN), added to the
 # allowlist as owner when missing (jarvis web allow / list / revoke).
+#
+# A domain: your reverse proxy terminates HTTPS for it and forwards to
+# http://<this host's tailnet IP>:<port>, WebSockets included (/ws). Keep it
+# inside the tailnet: every request counts as your account.
 #
 # The services run as you, so the sudo password popup asks for your password.
 # Logs: journalctl --user -u jarvis -u jarvis-web -f
@@ -24,13 +33,17 @@ cd "$ROOT"
 
 PORT="${JARVIS_WEB_PORT:-8318}"
 ALLOW=()
+DOMAINS=()
+NO_DOMAIN=0
 UNINSTALL=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --port) PORT="$2"; shift ;;
         --allow) ALLOW+=("$2"); shift ;;  # for `tailscale serve` use
+        --domain) DOMAINS+=("$2"); shift ;;
+        --no-domain) NO_DOMAIN=1 ;;
         --uninstall) UNINSTALL=1 ;;
-        -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,27p' "$0"; exit 0 ;;
         *) echo "Unknown option: $1" >&2; exit 1 ;;
     esac
     shift
@@ -82,6 +95,14 @@ for entry in "${ALLOW[@]}"; do
     "$BIN/jarvis" web allow "$login" "$role"
 done
 
+# Domains: those given now, else the ones the installed unit already has.
+WEB_DOMAINS=""
+if [ "${#DOMAINS[@]}" -gt 0 ]; then
+    WEB_DOMAINS="$(IFS=,; echo "${DOMAINS[*]}")"
+elif [ "$NO_DOMAIN" = 0 ] && [ -f "$UNITS/jarvis-web.service" ]; then
+    WEB_DOMAINS="$(sed -n 's/^Environment=JARVIS_WEB_DOMAINS=//p' "$UNITS/jarvis-web.service")"
+fi
+
 # A user service gets a bare PATH; dispatch, dmcp and contextor live in these.
 SVC_PATH="$BIN:$HOME/.local/bin:$HOME/.cargo/bin:/usr/local/bin:/usr/bin:/bin"
 
@@ -117,7 +138,8 @@ Environment=JARVIS_WEB_HOST=0.0.0.0
 Environment=JARVIS_WEB_LOGIN=$ME
 Environment=JARVIS_WEB_PORT=$PORT
 Environment=JARVIS_WEB_HOST_SUFFIX=$SUFFIX
-ExecStart=$BIN/jarvis web start
+${WEB_DOMAINS:+Environment=JARVIS_WEB_DOMAINS=$WEB_DOMAINS
+}ExecStart=$BIN/jarvis web start
 Restart=on-failure
 RestartSec=5
 
@@ -138,5 +160,11 @@ fi
 echo "==> running. On a device in your tailnet open:"
 echo "    http://$IP:$PORT"
 [ -n "$NAME" ] && echo "    http://$NAME:$PORT"
+IFS=, read -r -a SHOWN <<<"$WEB_DOMAINS"
+for domain in "${SHOWN[@]}"; do
+    # The gateway takes names or URLs; show each as its https address.
+    domain="${domain#*://}"
+    echo "    https://${domain%%/*}  (through your reverse proxy)"
+done
 echo "    Allowed: $("$BIN/jarvis" web list | tr -s ' ' | paste -sd ';')"
 echo "    Logs: journalctl --user -u jarvis -u jarvis-web -f"

@@ -1297,6 +1297,8 @@ def _cmd_web() -> None:
             "  Only this computer gets in: set JARVIS_WEB_LOGIN for phones that "
             "connect straight to it."
         )
+    for domain in Config.WEB_DOMAINS if not dev_login else ():
+        print(f"  Through your reverse proxy:  https://{domain}")
     if not dev_login:
         print("  Never use `tailscale funnel`; the gateway refuses Funnel requests.")
     try:

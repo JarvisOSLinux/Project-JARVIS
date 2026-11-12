@@ -1,5 +1,6 @@
 # import multiprocessing
 import os
+from urllib.parse import urlsplit
 
 from dotenv import dotenv_values, load_dotenv
 
@@ -14,6 +15,24 @@ TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), ".env.example")
 
 def template_values() -> dict:
     return dotenv_values(TEMPLATE_PATH) if os.path.isfile(TEMPLATE_PATH) else {}
+
+
+def web_domains(value: str) -> tuple[str, ...]:
+    """Host names from JARVIS_WEB_DOMAINS: comma-separated names or URLs
+    ("jarvis.example.org", "https://jarvis.example.org/"), lowercased, no
+    scheme, port or path."""
+    names = []
+    for entry in value.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        try:
+            name = urlsplit(entry if "://" in entry else "//" + entry).hostname
+        except ValueError:
+            name = None
+        if name and name not in names:
+            names.append(name)
+    return tuple(names)
 
 
 # Load config: JARVIS_CONFIG_DIR (system install), else the user's
@@ -372,6 +391,10 @@ class Config:
     )
     WEB_IDLE_TIMEOUT = int(os.getenv("JARVIS_WEB_IDLE_TIMEOUT", "900"))
     WEB_HOST_SUFFIX = os.getenv("JARVIS_WEB_HOST_SUFFIX", ".ts.net")
+    # Domains your own reverse proxy serves the page on (it terminates HTTPS
+    # and forwards to WEB_HOST:WEB_PORT). Each is taken as the Host, and as
+    # the WebSocket's Origin when the proxy rewrites the Host to this machine.
+    WEB_DOMAINS = web_domains(os.getenv("JARVIS_WEB_DOMAINS", ""))
 
     # Threat Level Access (TLA) Confirmation
     # - "allow_all": never ask, run everything (power users / trusted environments)

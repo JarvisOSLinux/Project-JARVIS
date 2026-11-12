@@ -135,6 +135,7 @@ you@example.com's phone)"), kept with the session.
 | `JARVIS_WEB_AUDIT_FILE` | `<data dir>/web_audit.jsonl` |
 | `JARVIS_WEB_IDLE_TIMEOUT` | `900` |
 | `JARVIS_WEB_HOST_SUFFIX` | `.ts.net` |
+| `JARVIS_WEB_DOMAINS` | unset; domains your reverse proxy serves the page on (comma-separated names or URLs) |
 
 ### As a service, on 0.0.0.0
 
@@ -152,6 +153,22 @@ from the node's own name) or a one-label name, so a web page a phone has open
 cannot reach JARVIS through that phone's browser. Only use it where nothing
 but the tailnet reaches the host. `--uninstall` removes both services; logs are
 in `journalctl --user -u jarvis -u jarvis-web`.
+
+### On your own domain, behind your reverse proxy
+
+Your proxy terminates HTTPS for the domain and forwards everything, the
+WebSocket at `/ws` included, to `http://<host's tailnet IP>:8318`. Tell the
+gateway the domain:
+
+    scripts/install-web-service.sh --domain jarvis.example.org
+
+`--domain` is repeatable and kept when the script runs again; `--no-domain`
+drops it. It sets `JARVIS_WEB_DOMAINS`, which the gateway takes as a Host (a
+proxy that passes the Host through, as Caddy and Traefik do) and as the
+WebSocket's Origin (one that rewrites the Host to the upstream address, as
+nginx does by default). Pages on any other origin are still refused. Every
+request still counts as `JARVIS_WEB_LOGIN`, so the domain must only resolve
+and route inside your tailnet, never to the public internet.
 
 `scripts/run-web.sh` starts the daemon and the gateway for you: `--stub` uses a
 fake daemon so no LLM is needed (type `confirm` for a permission request, `run`

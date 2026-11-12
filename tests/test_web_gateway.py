@@ -943,6 +943,11 @@ class TestHandshakeRefusals:
             body = (await reader.read()).decode()
             assert "200 OK" in body and "<title>JARVIS</title>" in body
             assert "default-src 'self'" in body
+            # One Content-Type: a second, text/plain one ahead of it made a
+            # reverse proxy show the page's source (2026-11-12).
+            head = body.split("\r\n\r\n")[0].lower()
+            assert head.count("content-type:") == 1
+            assert "content-type: text/html; charset=utf-8" in head
             writer.close()
             reader, writer = await asyncio.open_connection(
                 *base.removeprefix("http://").split(":")
@@ -952,6 +957,71 @@ class TestHandshakeRefusals:
             )
             assert "403" in (await reader.read()).decode()
             writer.close()
+        finally:
+            server.close()
+            await daemon.stop()
+
+
+@pytest.mark.unit
+class TestDomains:
+    """JARVIS_WEB_DOMAINS: the owner's own reverse proxy serves the page on a
+    domain (Toufic, 2026-11-12), passing the Host through or rewriting it."""
+
+    def test_names_or_urls(self):
+        from jarvis.config import web_domains
+
+        assert web_domains(
+            " https://J.Example.org/ ,k.example.org:8443,,j.example.org"
+        ) == (
+            "j.example.org",
+            "k.example.org",
+        )
+        assert web_domains("") == ()
+
+    def test_the_domain_is_a_host(self, monkeypatch):
+        monkeypatch.setattr(wg.Config, "WEB_HOST_SUFFIX", ".hs.th.net")
+        monkeypatch.setattr(wg.Config, "WEB_DOMAINS", ("j.example.org",))
+        for direct in (False, True):
+            assert wg.host_ok({"Host": "j.example.org"}, None, direct)
+            assert wg.host_ok({"Host": "J.Example.Org:443"}, None, direct)
+            assert not wg.host_ok({"Host": "k.example.org"}, None, direct)
+        assert not wg.host_ok({"Host": "j.example.org"}, "dev@localhost")
+        monkeypatch.setattr(wg.Config, "WEB_DOMAINS", ())
+        assert not wg.host_ok({"Host": "j.example.org"}, None, True)
+
+    def test_the_domain_is_an_origin_whatever_the_host(self, monkeypatch):
+        monkeypatch.setattr(wg.Config, "WEB_DOMAINS", ("j.example.org",))
+        for origin in ("https://j.example.org", "https://j.example.org:8443"):
+            assert wg.origin_ok({"Host": "100.64.0.11:8318", "Origin": origin})
+        for origin in (
+            "https://evil.example.com",
+            "https://j.example.org.evil.example.com",
+            "https://user@j.example.org",
+            "https://j.example.org/x",
+            "https://j.example.org#x",
+            "https://j.example.org:bad",
+            "null",
+        ):
+            assert not wg.origin_ok({"Host": "100.64.0.11:8318", "Origin": origin})
+        monkeypatch.setattr(wg.Config, "WEB_DOMAINS", ())
+        assert not wg.origin_ok(
+            {"Host": "100.64.0.11:8318", "Origin": "https://j.example.org"}
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_proxy_that_rewrites_the_host_gets_the_websocket(
+        self, tmp_path, monkeypatch
+    ):
+        daemon, server, url, _ = await _boot(tmp_path, {"toufic@example.com": "owner"})
+        proxied = _wire(url, Origin="https://j.example.org")
+        try:
+            with pytest.raises(InvalidStatus) as err:
+                async with connect(url, additional_headers=proxied):
+                    pass
+            assert err.value.response.status_code == 403
+            monkeypatch.setattr(wg.Config, "WEB_DOMAINS", ("j.example.org",))
+            async with connect(url, additional_headers=proxied) as ws:
+                assert json.loads(await ws.recv())["role"] == "owner"
         finally:
             server.close()
             await daemon.stop()

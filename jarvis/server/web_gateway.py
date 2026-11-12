@@ -17,7 +17,10 @@ gateway. This module is one, so the same threats are closed another way:
    the login must be on the allowlist, each with a role.
 4. **Its own origin.** The page is served by this process; the WebSocket's
    ``Origin`` must equal ``Host`` and ``Host`` must end in the tailnet suffix.
-   That closes cross-site WebSocket hijacking and DNS rebinding.
+   That closes cross-site WebSocket hijacking and DNS rebinding. Behind the
+   owner's own reverse proxy on a domain (``JARVIS_WEB_DOMAINS``), that domain
+   is also taken as the Host and as the Origin: the proxy may pass the Host
+   through or rewrite it to this machine. Pages on other origins stay out.
 5. **Remote mode always asks.** A session is refused while the daemon runs in
    ``allow_all`` and ended if it switches to it, and no phone may switch it
    there. Approve all names the requests the phone shows.
@@ -66,6 +69,7 @@ import time
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlsplit
 
 from ..config import Config
 from ..core import settings
@@ -550,7 +554,7 @@ def host_ok(headers: Any, dev_login: Optional[str], direct: bool = False) -> boo
         return False
     if dev_login:
         return host in ("localhost", "127.0.0.1")
-    if host.endswith(Config.WEB_HOST_SUFFIX):
+    if host.endswith(Config.WEB_HOST_SUFFIX) or host in Config.WEB_DOMAINS:
         return True
     if not direct:
         return False
@@ -562,15 +566,30 @@ def host_ok(headers: Any, dev_login: Optional[str], direct: bool = False) -> boo
 
 
 def origin_ok(headers: Any) -> bool:
-    """Same-origin only: Origin's host must be exactly the Host header."""
+    """Same-origin only: Origin's host must be exactly the Host header, or
+    one of JARVIS_WEB_DOMAINS (a reverse proxy may rewrite the Host)."""
     origin = headers.get("Origin") or ""
     host = headers.get("Host") or ""
-    if not origin or not host:
+    if not origin:
         return False
     for scheme in ("https://", "http://"):
         if origin.startswith(scheme):
-            return origin[len(scheme) :].lower() == host.lower()
+            if host and origin[len(scheme) :].lower() == host.lower():
+                return True
+            return _origin_host(origin) in Config.WEB_DOMAINS
     return False
+
+
+def _origin_host(origin: str) -> Optional[str]:
+    """The host name of an Origin header (scheme://host[:port]), else None."""
+    try:
+        parts = urlsplit(origin)
+        parts.port  # raises on a malformed port
+    except ValueError:
+        return None
+    if parts.username or parts.password or parts.path or parts.query or parts.fragment:
+        return None
+    return parts.hostname
 
 
 async def open_upstream(path: str) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
@@ -629,6 +648,10 @@ class Gateway:
             return connection.respond(status, why + "\n")
 
         if not host_ok(headers, self.dev_login, direct):
+            logger.warning(
+                f"web: Host {headers.get('Host')!r} is not this gateway's; a "
+                "domain your reverse proxy serves goes in JARVIS_WEB_DOMAINS"
+            )
             return refuse(HTTPStatus.FORBIDDEN, "Unexpected Host")
         login, why = await self.identify(headers, remote)
         if login is None:
@@ -651,6 +674,10 @@ class Gateway:
             ".js": "text/javascript",
             ".css": "text/css",
         }.get(asset.suffix, "text/plain")
+        # respond() already set text/plain, and assigning to these headers
+        # adds a second value: a reverse proxy passed the first one on and the
+        # browser showed the page's source (Toufic, 2026-11-12).
+        del response.headers["Content-Type"]
         response.headers["Content-Type"] = f"{kind}; charset=utf-8"
         response.headers["Cache-Control"] = "no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
