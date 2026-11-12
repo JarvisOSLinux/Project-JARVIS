@@ -108,18 +108,73 @@ class TestCommands:
 
 
 @pytest.mark.unit
-def test_a_session_started_by_the_first_message_is_named_after_it():
-    from jarvis.tui.output import _maybe_autoname_session
+class TestNaming:
+    """The daemon names a new chat after its first message, for every screen
+    (2026-11-12, Toufic: the phone page and jarvis-app kept "New chat")."""
 
-    session = SimpleNamespace(title="")
-    renamed = []
-    app = SimpleNamespace(
-        _pending_autoname_text="Hey Jarvis, can you run the system update for me?",
-        jarvis=SimpleNamespace(
-            sessions=SimpleNamespace(current=session, rename=renamed.append)
-        ),
-        schedule_sidebar_refresh=lambda: None,
-    )
-    _maybe_autoname_session(app)
-    assert renamed == ["Hey Jarvis, can you run the"]
-    assert app._pending_autoname_text is None
+    def test_the_lead_in_said_to_jarvis_is_dropped(self):
+        from jarvis.sessions.naming import title_from
+
+        assert (
+            title_from("Hey Jarvis, can you run the system update for me?")
+            == "Run the system update for me"
+        )
+        assert title_from("what's on my calendar") == "What's on my calendar"
+        assert title_from("Jarvis please check disk space") == "Check disk space"
+        assert title_from("I want you to   find\nmy notes") == "Find my notes"
+
+    def test_long_and_empty_titles(self):
+        from jarvis.sessions.naming import title_from
+
+        long = title_from(
+            "summarize supercalifragilisticexpialidocious documentation thoroughly"
+        )
+        assert len(long) <= 40 and long.endswith("…")
+        assert title_from("Hey Jarvis!") == ""
+        assert title_from("/status") == ""
+        assert title_from("   ") == ""
+
+    def test_a_new_session_is_named_once(self):
+        sessions, ctx = _sessions()
+        sessions.ensure_session()
+        sid = sessions.current_id
+        assert sessions.name_after("Hey Jarvis, can you run the system update for me?")
+        assert ctx.sessions[sid]["title"] == "Run the system update for me"
+        assert not sessions.name_after("and then reboot")
+        assert ctx.sessions[sid]["title"] == "Run the system update for me"
+
+    def test_a_greeting_or_a_command_leaves_the_name_for_later(self):
+        sessions, ctx = _sessions()
+        sessions.ensure_session()
+        sid = sessions.current_id
+        assert not sessions.name_after("hey jarvis")
+        assert not sessions.name_after("/switch 110")
+        assert sessions.name_after("what's on my calendar")
+        assert ctx.sessions[sid]["title"] == "What's on my calendar"
+
+    def test_a_named_session_keeps_its_name(self):
+        sessions, ctx = _sessions()
+        sessions.switch("5bd5f76e-1111")
+        assert not sessions.name_after("something else entirely")
+        assert ctx.sessions["5bd5f76e-1111"]["title"] == "Update"
+
+    def test_every_screen_gets_the_new_name(self):
+        from jarvis.runtime import root_handlers
+
+        sessions, _ = _sessions()
+        sessions.ensure_session()
+        sent = []
+
+        async def broadcast(app, message, writers=None):
+            sent.append(message)
+
+        app = SimpleNamespace(sessions=sessions)
+        original = root_handlers.broadcast_to_gui_clients
+        root_handlers.broadcast_to_gui_clients = broadcast
+        try:
+            asyncio.run(root_handlers.name_session(app, "find my notes"))
+            asyncio.run(root_handlers.name_session(app, "and the other ones"))
+        finally:
+            root_handlers.broadcast_to_gui_clients = original
+        assert len(sent) == 1 and sent[0]["type"] == "session_list"
+        assert "Find my notes" in [s["title"] for s in sent[0]["sessions"]]

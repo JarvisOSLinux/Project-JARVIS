@@ -21,6 +21,7 @@ def sync_ask(app: Any, logger: Logger, prompt: str) -> Dict[str, Any]:
         app.output_manager.handle_response({"output": redaction_notice(redacted)})
 
     app.sessions.ensure_session()
+    app.sessions.name_after(prompt)
     if app.contextor:
         app.contextor.auto_store_prompt(
             prompt,

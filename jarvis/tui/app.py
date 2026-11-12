@@ -244,8 +244,6 @@ class JarvisTUI(App):
         self._sidebar_refresh_lock = asyncio.Lock()
         # Ctrl+D is a two-step confirmation keyed by session id.
         self._pending_delete_session_id: Optional[str] = None
-        # First user message in a session — used to auto-name default titles.
-        self._pending_autoname_text: Optional[str] = None
 
     # ------------------------------------------------------------------
     # Layout
@@ -317,10 +315,6 @@ class JarvisTUI(App):
             )
             return
 
-        # A session is named after the first thing said in it, never after a
-        # command: "/switch 110" became the title of the session it switched to.
-        if not text.startswith("/"):
-            self._pending_autoname_text = text
         # Inject via the same path voice and sockets use.  Slash
         # commands still work — main.py's handler catches them.
         self.jarvis.events.inject_user_input(text)

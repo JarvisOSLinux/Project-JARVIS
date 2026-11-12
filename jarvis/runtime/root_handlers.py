@@ -39,6 +39,15 @@ def _ensure_llm(app: Any) -> Any:
     return app.llm
 
 
+async def name_session(app: Any, text: str) -> None:
+    """Name a new chat after its first message, on every screen's list."""
+    if app.sessions.name_after(text):
+        sessions = app.sessions.list(limit=50)
+        await broadcast_to_gui_clients(
+            app, {"type": "session_list", "sessions": [s.to_dict() for s in sessions]}
+        )
+
+
 async def on_user_input(app: Any, logger: Logger, text: str) -> None:
     # Scrubbed before anything below can keep it: the goal tree is archived to
     # disk, contextor's memory is searched on every later prompt, and the model
@@ -81,6 +90,7 @@ async def on_user_input(app: Any, logger: Logger, text: str) -> None:
     text = clean
 
     app.sessions.ensure_session()
+    await name_session(app, text)
     goal = app.goals.add_goal(text, chat_session=app.sessions.current_id)
     stop.claim_turn(app, goal.id)
 

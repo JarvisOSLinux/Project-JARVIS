@@ -148,7 +148,7 @@ def _chat_app():
         llm=Mock(),
         output_manager=Mock(spec=OutputManager),
         goals=Mock(get_active_goals=Mock(return_value=[])),
-        sessions=Mock(current_id="s1"),
+        sessions=Mock(current_id="s1", name_after=Mock(return_value=False)),
         contextor=Mock(),
         _act_on_root_response=AsyncMock(),
     )
@@ -176,8 +176,12 @@ class TestInputFunnel:
             ("the goal tree", app.goals),
             ("contextor's memory", app.contextor),
             ("the model's context", build),
+            ("the chat's name", app.sessions),
         ):
             assert not _leaked(obj, GITHUB), f"the token reached {where}"
+        app.sessions.name_after.assert_called_once_with(
+            "Here is your key: [redacted GitHub token]"
+        )
         app.goals.add_goal.assert_called_once_with(
             "Here is your key: [redacted GitHub token]", chat_session="s1"
         )

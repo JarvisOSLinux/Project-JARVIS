@@ -221,7 +221,7 @@ class TestTui:
         _, lines = _real_tui(jarvis, drive)
         assert lines == ["— no session; your next message starts a new one —"]
 
-    def test_typed_commands_are_echoed_and_never_name_a_session(self):
+    def test_typed_commands_are_echoed(self):
         jarvis = _jarvis()
 
         async def drive(app, pilot):
@@ -230,25 +230,13 @@ class TestTui:
             box.value = "/status"
             await pilot.press("enter")
             await pilot.pause()
-            after_status = app._pending_autoname_text
             box.value = "/switch 110"
             await pilot.press("enter")
             await pilot.pause()
-            after_switch = app._pending_autoname_text
-            box.value = "what's on my calendar"
-            await pilot.press("enter")
-            await pilot.pause()
-            return (
-                list(app._export_lines),
-                after_status,
-                after_switch,
-                app._pending_autoname_text,
-            )
+            return list(app._export_lines)
 
-        _, (lines, after_status, after_switch, after_text) = _real_tui(jarvis, drive)
+        _, lines = _real_tui(jarvis, drive)
         assert "you > /status" in lines
-        assert after_status is None and after_switch is None
-        assert after_text == "what's on my calendar"
 
     def test_the_settings_buttons_fit_inside_the_window(self):
         from textual.app import App

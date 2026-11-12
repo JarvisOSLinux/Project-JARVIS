@@ -17,6 +17,7 @@ from typing import Callable, List, Optional, Tuple
 from ..core.logger import get_logger
 from .block_log import BlockLog
 from .model import Session
+from .naming import is_default_title, title_from
 
 logger = get_logger(__name__)
 
@@ -186,6 +187,14 @@ class SessionManager:
                 # Contextor didn't echo back the full session; patch locally.
                 self._current.title = title
         return True
+
+    def name_after(self, text: str) -> bool:
+        """Name the current session after `text`, its first message, when it
+        still has the name it started with. True when it was renamed."""
+        if self._current is None or not is_default_title(self._current.title):
+            return False
+        title = title_from(text)
+        return bool(title) and self.rename(title)
 
     def delete(self, session_id: str, delete_entries: bool = True) -> bool:
         """Delete a session.  If it's the current one, clear the pointer."""

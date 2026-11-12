@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any, Optional
 
 from rich.text import Text
-
-_DEFAULT_TITLE_RE = re.compile(r"^(New chat|Chat \d{4}-\d{2}-\d{2})", re.IGNORECASE)
 
 
 def markup_to_plain(markup: str) -> str:
@@ -50,34 +47,7 @@ def on_jarvis_output(app: Any, response: dict[str, Any]) -> None:
         app._append_log(f"[bold magenta]jarvis[/bold magenta] > {escape(text)}")
     if not response.get("comment"):
         show_activity(app, None)
-    _maybe_autoname_session(app)
     # Session might have been auto-created on first message; refresh.
-    app.schedule_sidebar_refresh()
-
-
-def _maybe_autoname_session(app: Any) -> None:
-    """Rename session from timestamp default to first-message summary."""
-    pending = getattr(app, "_pending_autoname_text", None)
-    if not pending:
-        return
-    if app.jarvis is None:
-        return
-    session = app.jarvis.sessions.current
-    if session is None:
-        return
-    # A session the first message started has no title yet; it reads back
-    # as "New chat" later, so the name went to whatever was said next.
-    if session.title and not _DEFAULT_TITLE_RE.match(session.title):
-        app._pending_autoname_text = None
-        return
-    words = pending.strip().split()
-    new_title = " ".join(words[:6])
-    if len(new_title) > 40:
-        new_title = new_title[:37] + "…"
-    if not new_title:
-        return
-    app._pending_autoname_text = None
-    app.jarvis.sessions.rename(new_title)
     app.schedule_sidebar_refresh()
 
 
