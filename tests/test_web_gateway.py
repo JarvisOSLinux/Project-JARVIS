@@ -236,12 +236,19 @@ class TestPolicy:
         assert wg.shown_to(request, "guest") is None
         assert not wg.sendable("guest", {"type": "password_response", "id": "r1"})
 
-    def test_no_phone_turns_the_popup_on(self):
+    def test_the_owners_phone_may_turn_the_popup_on(self):
+        """Toufic, 2026-11-11: the laptop stays at home. The popup changes where
+        sudo asks, not whether a password is needed."""
         msg = {"type": "set_setting", "key": "SUDO_PASSWORD_POPUP"}
-        for on in (True, "true", " on ", "yes"):
-            assert "laptop" in wg.refused({**msg, "value": on})
-        for off in (False, "false", "off"):
-            assert wg.refused({**msg, "value": off}) is None
+        for value in (True, "on", False):
+            assert wg.refused({**msg, "value": value}) is None
+        assert wg.sendable("owner", {**msg, "value": True})
+        assert not wg.sendable("trusted", {**msg, "value": True})
+
+    def test_those_who_answer_may_ask_what_waits(self):
+        ask = {"type": "list_password_requests"}
+        assert wg.sendable("trusted", ask) and wg.sendable("owner", ask)
+        assert not wg.sendable("guest", ask)
 
     def test_a_guest_gets_sessions_without_their_summaries(self):
         session = {"id": "s1", "title": "t", "summary": "AWS keys", "metadata": {}}

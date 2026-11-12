@@ -276,7 +276,9 @@ async def ask_password(attempt: int) -> None:
         "type": "password_request",
         "id": f"p{time.time_ns()}",
         "command": SUDO_COMMAND,
+        "prompt": "[sudo] password for dev:",
         "attempt": attempt,
+        "retry": attempt > 1,
         "at": time.time(),
     }
     password_requests[request["id"]] = request
@@ -291,6 +293,10 @@ async def handle(msg: dict, writer: asyncio.StreamWriter) -> None:
             for request in password_requests.values():
                 writer.write((json.dumps(request) + "\n").encode())
             await writer.drain()
+    elif kind == "list_password_requests":
+        for request in password_requests.values():
+            writer.write((json.dumps(request) + "\n").encode())
+        await writer.drain()
     elif kind in ("password_response", "password_cancel"):
         request = password_requests.pop(str(msg.get("id")), None)
         if request is None:

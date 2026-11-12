@@ -15,6 +15,55 @@ from typing import Any, Dict, List, Optional
 from ..config import Config
 
 
+def _elevation_timeout() -> int:
+    """dmcp's own wait for an administrator password (DMCP_ELEVATION_TIMEOUT_SECS)."""
+    try:
+        return int(os.environ.get("DMCP_ELEVATION_TIMEOUT_SECS", "180"))
+    except ValueError:
+        return 180
+
+
+def _dmcp_timeout(base: int) -> int:
+    """How long a dmcp command may take; with the sudo popup on, a phone gets
+    as long to answer as dmcp gives polkit."""
+    if Config.SUDO_PASSWORD_POPUP:
+        return max(base, _elevation_timeout())
+    return base
+
+
+async def _dmcp(
+    *args: str, stdin: Optional[bytes] = None, timeout: int = 30
+) -> tuple[Any, bytes, bytes]:
+    """Run dmcp; (process, stdout, stderr). A system-scope command may
+    elevate, and with the sudo popup on JARVIS shows it only for a dmcp
+    command it ran itself (`askpass.expect_command`). On a timeout dmcp is
+    killed, so a password typed later cannot run what JARVIS already reported
+    as failed (the relay then ends that sudo too). Raises FileNotFoundError
+    and asyncio.TimeoutError."""
+    from ..runtime import askpass
+
+    expected = askpass.expect_command(args)
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            Config.DMCP_BINARY,
+            *args,
+            stdin=asyncio.subprocess.PIPE if stdin is not None else None,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(stdin), timeout=_dmcp_timeout(timeout)
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            raise
+        return proc, stdout, stderr
+    finally:
+        askpass.forget(expected)
+
+
 async def run_dmcp(
     logger: Logger, *args: str, stdin: Optional[str] = None
 ) -> Optional[str]:
@@ -25,16 +74,8 @@ async def run_dmcp(
     user from the process list, and a failure below logs the arguments.
     """
     try:
-        proc = await asyncio.create_subprocess_exec(
-            Config.DMCP_BINARY,
-            *args,
-            stdin=asyncio.subprocess.PIPE if stdin is not None else None,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(stdin.encode() if stdin is not None else None),
-            timeout=30,
+        proc, stdout, stderr = await _dmcp(
+            *args, stdin=stdin.encode() if stdin is not None else None
         )
     except FileNotFoundError:
         logger.warning("Dispatch: dmcp binary not found")
@@ -354,15 +395,7 @@ async def list_server_tools(logger: Logger, server_id: str) -> Dict[str, Any]:
     """List tools available on an installed MCP server."""
     logger.info(f"Dispatch: Listing tools for server '{server_id}'")
     try:
-        proc = await asyncio.create_subprocess_exec(
-            Config.DMCP_BINARY,
-            "tools",
-            server_id,
-            "--json",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+        proc, stdout, stderr = await _dmcp("tools", server_id, "--json")
     except FileNotFoundError:
         return {"error": "dmcp binary not found", "tools": []}
     except asyncio.TimeoutError:
@@ -519,14 +552,7 @@ async def run_server_setup(logger: Logger, server_id: str) -> Dict[str, Any]:
     """Run the setup script for an installed server via `dmcp setup <id>`."""
     logger.info(f"Dispatch: Running setup for '{server_id}'")
     try:
-        proc = await asyncio.create_subprocess_exec(
-            Config.DMCP_BINARY,
-            "setup",
-            server_id,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+        proc, stdout, stderr = await _dmcp("setup", server_id, timeout=120)
     except FileNotFoundError:
         return {"error": "dmcp binary not found"}
     except asyncio.TimeoutError:

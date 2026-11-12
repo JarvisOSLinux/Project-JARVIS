@@ -183,11 +183,75 @@ def test_the_tui_saves_through_the_list(conf_file, monkeypatch):
 
 
 @pytest.mark.unit
-def test_a_new_config_file_holds_only_what_was_saved(conf_file):
+def test_a_new_config_file_holds_only_what_was_saved(conf_file, monkeypatch):
+    import jarvis.cli as cli
+    from jarvis.config import SAVED_SETTINGS_HEADER
+
+    monkeypatch.setattr(cli, "_jarvis_config_dir", None)
+    cli._update_env_setting("OUTPUT_MODE", "text")
+    assert conf_file.read_text() == f"{SAVED_SETTINGS_HEADER}\nOUTPUT_MODE=text\n"
+
+
+@pytest.mark.unit
+def test_a_file_seeded_from_the_template_keeps_only_what_differs(
+    conf_file, monkeypatch
+):
+    import jarvis.cli as cli
+    from jarvis.config import SAVED_SETTINGS_HEADER
+
+    monkeypatch.setattr(cli, "_jarvis_config_dir", None)
+    conf_file.write_text(
+        "# a comment\nCONFIRMATION_MODE=smart\nOUTPUT_MODE=text\nLOG_FILE=\n"
+    )
+    cli._update_env_setting("RAG_TOP_K", "7")
+    assert conf_file.read_text() == (
+        f"{SAVED_SETTINGS_HEADER}\nOUTPUT_MODE=text\nRAG_TOP_K=7\n"
+    )
+
+
+@pytest.mark.unit
+def test_a_system_install_file_is_edited_in_place(conf_file, monkeypatch):
     import jarvis.cli as cli
 
+    monkeypatch.setattr(cli, "_jarvis_config_dir", "/etc/jarvis")
+    conf_file.write_text("# admin's note\nCONFIRMATION_MODE=smart\nLOG_FILE=\n")
     cli._update_env_setting("OUTPUT_MODE", "text")
-    assert conf_file.read_text() == "OUTPUT_MODE=text\n"
+    assert conf_file.read_text() == (
+        "# admin's note\nCONFIRMATION_MODE=smart\nLOG_FILE=\nOUTPUT_MODE=text\n"
+    )
+
+
+@pytest.mark.unit
+def test_a_saved_default_still_wins_over_jarvis_env(tmp_path):
+    """A value the user saved equal to the template's (smart, after an
+    allow_all in jarvis/.env) must hold at the next start."""
+    import os
+    import subprocess
+    import sys
+
+    from jarvis.config import SAVED_SETTINGS_HEADER
+
+    conf = tmp_path / "jarvis" / "jarvis.conf"
+    conf.parent.mkdir()
+    conf.write_text(f"{SAVED_SETTINGS_HEADER}\nCONFIRMATION_MODE=smart\n")
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("JARVIS_CONFIG_DIR", "CONFIRMATION_MODE")
+    }
+    env["XDG_CONFIG_HOME"] = str(tmp_path)
+    out = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import os, jarvis.config; print(os.environ['CONFIRMATION_MODE'])",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert out.stdout.strip() == "smart"
 
 
 @pytest.mark.unit

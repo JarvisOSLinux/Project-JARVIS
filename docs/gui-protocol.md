@@ -201,19 +201,25 @@ and JARVIS asks the clients for the password (`runtime/askpass.py`). Only to
 clients that subscribed to them:
 
 ```json
-{"type": "password_request", "id": "9f2c1a07b3d4e5f6", "attempt": 1, "at": 1792732504.1,
+{"type": "password_request", "id": "9f2c1a07b3d4e5f6", "attempt": 1, "retry": false,
+ "prompt": "[sudo] password for toufic:", "at": 1792732504.1,
  "command": "/usr/bin/dmcp call shell execute_command --args '{\"command\": \"pacman -Syu\"}'"}
 {"type": "password_request_done", "id": "9f2c1a07b3d4e5f6", "outcome": "answered"}
 ```
 
-`command` is sudo's own command line, read from `/proc`. A wrong password makes
-sudo ask again: a new request with `attempt` 2. `outcome` is `answered`,
-`cancelled`, or `gone` (sudo stopped waiting). Answer with:
+`command` is sudo's own command line and `prompt` what it asks, both read from
+`/proc`. A wrong password makes sudo ask again: a new request with `attempt` 2
+and `retry: true`; a different prompt (a code, a new password) has `retry:
+false`. Only an elevation JARVIS started gets one: a task it dispatched or a
+dmcp command it ran. `outcome` is `answered`, `cancelled` (that sudo is killed,
+so a cancel is not a failed try), or `gone` (sudo, or the dmcp that ran it,
+stopped). Answer with:
 
 | `type` | Fields | Reply |
 |---|---|---|
 | `password_response` | `id`, `password` | nothing; `password_request_done` to everyone. `error` if the request has ended or the password cannot be one (empty, a line break, over 4096 characters). Never logged. |
 | `password_cancel` | `id` | as above |
+| `list_password_requests` | | a `password_request` for each one still waiting (for a client that subscribed after one went out) |
 
 The first answer wins. The password goes to that sudo only: it is not logged,
 stored, put in the session, or sent to any other client.
@@ -359,8 +365,7 @@ The gateway relays this protocol over a WebSocket, narrowed by role
   `confirmation_response`. A chat line the daemon would read as a slash
   command (`/delete`, `/stop all`, ...) needs the role its socket message
   needs (`web_gateway.acts_as`); a refused one is answered with `error` and
-  the last `state`, since the page shows "working" once it sends a line. No
-  phone may turn `SUDO_PASSWORD_POPUP` on.
+  the last `state`, since the page shows "working" once it sends a line.
 
 ## Not in the protocol yet
 

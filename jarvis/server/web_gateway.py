@@ -38,7 +38,9 @@ gateway. This module is one, so the same threats are closed another way:
    the trusted and owner phones, and they may answer it
    (``password_response``) or cancel it. The password goes to the daemon,
    which hands it to that sudo alone; the audit file gets the request's id.
-   No phone may turn the popup on.
+   The owner's phone may turn the popup on (Toufic, 2026-11-11: the laptop
+   stays at home): it changes where sudo asks, not whether a password is
+   needed.
 
 Residual risk: any local process can connect to the loopback port and send the
 identity header itself. On a single-user host that is no more than the same
@@ -89,6 +91,7 @@ _TRUSTED_SENDS = _GUEST_SENDS | {
     "deny_confirmation",
     "partial_approve_confirmation",
     # The host's sudo password, when JARVIS asks for it (#310, point 9).
+    "list_password_requests",
     "password_response",
     "password_cancel",
     "create_session",
@@ -272,13 +275,6 @@ def refused(msg: dict) -> Optional[str]:
             return (
                 "Approvals can't be turned off from a phone: remote access "
                 "needs them on. Change it at the laptop."
-            )
-    if key == "SUDO_PASSWORD_POPUP":
-        on, _ = settings.parse(settings.find(key), value)
-        if on is True:
-            return (
-                "The sudo password popup can only be turned on at the laptop; "
-                "a phone may turn it off."
             )
     if key == "WAKE_CHIME_PATH" and ("" if value is None else str(value).strip()):
         return (

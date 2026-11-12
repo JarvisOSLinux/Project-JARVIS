@@ -46,6 +46,7 @@
         }),
         list_clients:               ()  => ({ type: 'list_clients' }),
         // The host's sudo password, when JARVIS asks for it (trusted, owner).
+        list_password_requests:     ()  => ({ type: 'list_password_requests' }),
         answer_password:            (a) => ({ type: 'password_response', id: a.id, password: a.password }),
         cancel_password:            (a) => ({ type: 'password_cancel', id: a.id }),
         // The daemon's health check; `get_status` below is the connection's.

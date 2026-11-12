@@ -468,6 +468,13 @@ async def _process_gui_message(
                 for request in relay.pending():
                     await _gui_write(writer, request)
 
+    elif msg_type == "list_password_requests":
+        # A client that started after a request went out (jarvis-app's page
+        # listens only once it has loaded) asks for what still waits.
+        relay = getattr(app, "askpass", None)
+        for request in relay.pending() if relay is not None else []:
+            await _gui_write(writer, request)
+
     elif msg_type in ("password_response", "password_cancel"):
         # Never logged: the message carries the password.
         relay = getattr(app, "askpass", None)

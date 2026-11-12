@@ -69,6 +69,7 @@ const passwordForm      = document.getElementById('password-form');
 const passwordCommand   = document.getElementById('password-command');
 const passwordAttempt   = document.getElementById('password-attempt');
 const passwordInput     = document.getElementById('password-input');
+const passwordPrompt    = document.getElementById('password-prompt');
 const passwordError     = document.getElementById('password-error');
 const passwordSubmitBtn = document.getElementById('password-submit-btn');
 const passwordCancelBtn = document.getElementById('password-cancel-btn');
@@ -1452,16 +1453,22 @@ function showNextPasswordRequest() {
         return;
     }
     passwordCommand.textContent = next.command || '';
-    const again = (next.attempt || 1) > 1;
-    passwordAttempt.textContent = again
+    // sudo's own question: its password prompt, or a code or new password
+    // when PAM asks for one.
+    passwordPrompt.textContent = next.prompt || 'Password';
+    passwordAttempt.textContent = next.retry
         ? `Wrong password; sudo asks again (try ${next.attempt}). Several wrong passwords in a row can lock the account for a few minutes.`
         : '';
-    passwordAttempt.classList.toggle('visible', again);
+    passwordAttempt.classList.toggle('visible', !!next.retry);
     passwordSubmitBtn.disabled = false;
     passwordCancelBtn.disabled = false;
     passwordModal.classList.add('visible');
     passwordBackdrop.classList.add('visible');
-    passwordInput.focus();
+    // Not while the user is typing elsewhere: the rest of a chat line would
+    // go to sudo as a password, and a wrong one counts as a failed try.
+    const typing = document.activeElement && document.activeElement !== document.body
+        && document.activeElement.matches('input, textarea, select, [contenteditable]');
+    if (!typing) passwordInput.focus();
 }
 
 function onPasswordRequest(request) {
@@ -1624,6 +1631,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         showNotice('');
         invoke('list_sessions');
         invoke('list_confirmations');
+        // A browser gets what waits with the gateway's hello.
+        if (IS_DESKTOP) invoke('list_password_requests');
         sessionEnded = false;
         if (settingsOpen()) {
             if (settingsError.textContent === OFFLINE_CHANGE) clearSettingsError();
@@ -1711,5 +1720,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (status.connected) {
         await invoke('list_sessions');
         await invoke('list_confirmations');
+        // A request sent before this page listened was dropped by Tauri.
+        if (IS_DESKTOP) await invoke('list_password_requests');
     }
 });

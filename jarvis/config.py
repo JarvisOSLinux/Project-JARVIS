@@ -3,6 +3,19 @@ import os
 
 from dotenv import dotenv_values, load_dotenv
 
+# First line of a jarvis.conf JARVIS writes in the user's config dir: every
+# value in it was saved by someone (`cli._update_env_setting`).
+SAVED_SETTINGS_HEADER = (
+    "# Settings saved while JARVIS runs (TUI, jarvis-app, phones). "
+    "Read before jarvis/.env."
+)
+TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), ".env.example")
+
+
+def template_values() -> dict:
+    return dotenv_values(TEMPLATE_PATH) if os.path.isfile(TEMPLATE_PATH) else {}
+
+
 # Load config: JARVIS_CONFIG_DIR (system install), else the user's
 # jarvis.conf and then jarvis/.env (dev). A setting changed while JARVIS runs
 # (TUI, jarvis-app, a phone) is saved to jarvis.conf in the config dir
@@ -20,15 +33,15 @@ else:
 
     _user_conf = _conf_platform.config_dir() / "jarvis.conf"
     if _user_conf.is_file():
-        _template_path = os.path.join(os.path.dirname(__file__), ".env.example")
-        _template = (
-            dotenv_values(_template_path) if os.path.isfile(_template_path) else {}
-        )
+        with open(_user_conf, encoding="utf-8", errors="replace") as _f:
+            _saved = _f.readline().rstrip("\n") == SAVED_SETTINGS_HEADER
+        # Until 2026-11-11 the first saved setting copied .env.example into
+        # this file whole, with no header. In such a file a value equal to
+        # the template's was chosen by nobody and must not override
+        # jarvis/.env (an `ask_all` there would drop back to smart); the next
+        # save rewrites it with the header and only what differs.
+        _template = {} if _saved else template_values()
         for _key, _value in dotenv_values(_user_conf).items():
-            # Until 2026-11-11 the first saved setting copied .env.example
-            # into this file whole. A value equal to the template's was not
-            # chosen by anyone, so it must not override jarvis/.env (an
-            # `ask_all` there would have dropped back to the template's smart).
             if _value is not None and _template.get(_key) != _value:
                 os.environ.setdefault(_key, _value)
     load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
@@ -376,7 +389,8 @@ class Config:
 
     # Root commands ask for the sudo password in jarvis-app and on the phones
     # allowed to approve, instead of polkit's dialog on this computer (#310,
-    # runtime/askpass.py). Linux; off by default, and no phone may turn it on.
+    # runtime/askpass.py). Linux; off by default; the owner's phone may turn
+    # it on (it changes where sudo asks, not whether a password is needed).
     SUDO_PASSWORD_POPUP = (
         os.getenv("SUDO_PASSWORD_POPUP", "false").strip().lower() == "true"
     )

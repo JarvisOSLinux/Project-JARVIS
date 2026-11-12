@@ -14,13 +14,16 @@ Usage:
 """
 
 import asyncio
+import io
 import json
 import os
 import socket
 import sys
 from pathlib import Path
 
-from .config import Config
+from dotenv import dotenv_values
+
+from .config import SAVED_SETTINGS_HEADER, Config, template_values
 from .core.logger import JarvisLogger, get_logger
 from .core.providers import (
     add_provider,
@@ -887,11 +890,24 @@ def _legacy_redirect(old_cmd: str) -> None:
 def _update_env_setting(key: str, value: str) -> None:
     """Save one setting to ENV_FILE, which JARVIS reads at startup.
 
-    A new file holds only what was saved. Seeded from .env.example it would
-    also pin every default there (``LOG_FILE=`` turns the log file off) over
-    the values in jarvis/.env.
+    In the user's config dir the file starts with SAVED_SETTINGS_HEADER and
+    holds only what was saved, so `config.py` honours every value in it. One
+    from before the header (seeded from .env.example, which would pin every
+    default there over jarvis/.env) is rewritten with only the values that
+    differ from the template. A system install's file (JARVIS_CONFIG_DIR) is
+    the admin's and is only edited in place.
     """
     lines = ENV_FILE.read_text().splitlines() if ENV_FILE.exists() else []
+    if not _jarvis_config_dir and lines[:1] != [SAVED_SETTINGS_HEADER]:
+        template = template_values()
+        chosen = []
+        for line in lines:
+            parsed = dotenv_values(stream=io.StringIO(line))
+            if len(parsed) == 1:
+                name, val = next(iter(parsed.items()))
+                if val is not None and template.get(name) != val:
+                    chosen.append(line)
+        lines = [SAVED_SETTINGS_HEADER, *chosen]
 
     found = False
     for i, line in enumerate(lines):

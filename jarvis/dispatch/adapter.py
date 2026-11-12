@@ -120,6 +120,11 @@ class DispatchAdapter:
                 f"Dispatch:   task[{i}]: server={task.get('server')}, tool={task.get('tool')}, params={task.get('params')}"
             )
 
+        # The sudo password popup shows only for elevations JARVIS started.
+        from ..runtime.askpass import expect_tasks
+
+        expect_tasks(tasks)
+
         params: Dict[str, Any] = {"tasks": tasks}
         if session_id is not None:
             params["session_id"] = session_id
