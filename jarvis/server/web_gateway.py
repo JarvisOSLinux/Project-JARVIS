@@ -80,6 +80,7 @@ from ..core import settings
 from ..core.logger import get_logger
 from ..core.secret_scrubber import redact_secrets
 from ..platform import current as platform
+from ..platform.ownership import keep_owner, make_dirs
 
 logger = get_logger(__name__)
 
@@ -455,11 +456,12 @@ class Allowlist:
         return True
 
     def _save(self, entries: dict[str, str]) -> None:
-        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        make_dirs(os.path.dirname(self.path))
         tmp = self.path + ".tmp"
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w") as f:
             json.dump(entries, f, indent=2, sort_keys=True)
+        keep_owner(tmp)
         os.replace(tmp, self.path)
 
 
@@ -503,10 +505,11 @@ class AuditLog:
         if "approved_indices" in msg:
             entry["approved_indices"] = msg["approved_indices"]
         try:
-            os.makedirs(os.path.dirname(self.path), exist_ok=True)
+            make_dirs(os.path.dirname(self.path))
             fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
             with os.fdopen(fd, "a") as f:
                 f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            keep_owner(self.path)
         except OSError as exc:
             logger.warning(f"web: could not write audit log {self.path}: {exc}")
 

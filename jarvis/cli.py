@@ -33,6 +33,7 @@ from .core.providers import (
     parse_flags,
     remove_provider,
 )
+from .platform.ownership import keep_owner, make_dirs
 
 # Initialise logging from config before any get_logger() call so that the
 # file handler (LOG_FILE) and level (LOG_LEVEL) are applied from the start.
@@ -919,8 +920,9 @@ def _update_env_setting(key: str, value: str) -> None:
     if not found:
         lines.append(f"{key}={value}")
 
-    ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
+    make_dirs(ENV_FILE.parent)
     ENV_FILE.write_text("\n".join(lines) + "\n")
+    keep_owner(ENV_FILE)
 
     os.environ[key] = value
     setattr(Config, key, value)
