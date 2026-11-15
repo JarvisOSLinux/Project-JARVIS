@@ -270,3 +270,17 @@ def test_the_suite_never_reaches_the_real_config_dir():
 
     real = str(current.config_dir())
     assert not Config.PROVIDERS_FILE.startswith(real)
+
+
+def test_giving_an_inactive_entry_a_type_and_a_model_revives_it(file):
+    from jarvis.core.component_factory import ComponentFactory
+
+    _write(file, [{"name": "broken", "type": "ollama"}])
+    note = providers_mod.list_providers()[0]["inactive"]
+    assert "type" in note and "model" in note
+    providers_mod.edit_provider("broken", model="qwen3-8b")
+    assert providers_mod.list_providers()[0]["inactive"] == note
+    providers_mod.edit_provider("broken", type="lmstudio")
+    assert "inactive" not in providers_mod.list_providers()[0]
+    pool = ComponentFactory._build_provider_pool()
+    assert [e.name for e in pool.entries] == ["broken"]

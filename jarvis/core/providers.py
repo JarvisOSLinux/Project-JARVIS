@@ -116,7 +116,7 @@ def migrate(
         spec["type"] = "ollama"
         if not model:
             spec["inactive"] = (
-                "an Ollama provider with no model; set its model or remove it"
+                "an Ollama provider with no model; set its type and model, or remove it"
             )
             notes.append(
                 f"'{name}' is inactive: it is an Ollama provider with no model."
@@ -374,6 +374,9 @@ def edit_provider(name: str, **fields) -> List[str]:
         raise ValueError(
             "No recognized fields. Use model, url, key, temperature, type, or vision."
         )
+
+    if target.get("type") in TYPES and target.get("model"):
+        target.pop("inactive", None)
 
     if origin(effective_url(target)) != was:
         # Hand-written headers go even with a new key: they may hold one too.
