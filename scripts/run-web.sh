@@ -89,21 +89,6 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-pm_install() {
-    if command -v pacman >/dev/null; then
-        sudo pacman -S --needed --noconfirm "$@"
-    elif command -v apt-get >/dev/null; then
-        sudo apt-get install -y "$@"
-    elif command -v dnf >/dev/null; then
-        sudo dnf install -y "$@"
-    elif command -v zypper >/dev/null; then
-        sudo zypper install -y "$@"
-    else
-        echo "no supported package manager to install: $*" >&2
-        exit 1
-    fi
-}
-
 wait_for_socket() {
     local sock="$1" pid="$2" tries=60
     while [ ! -S "$sock" ]; do
@@ -167,14 +152,7 @@ if [ "$MODE" = local ]; then
 fi
 
 # -- tailscale mode -------------------------------------------------------
-if ! command -v tailscale >/dev/null; then
-    echo "==> installing tailscale"
-    pm_install tailscale
-fi
-# Only when it is not already up: otherwise every start asks for a password.
-if ! systemctl is-active --quiet tailscaled; then
-    sudo systemctl enable --now tailscaled
-fi
+ensure_tailscale
 
 # One read of the node's state: prints "<state>|<dns name>|<ip>|<login>|<certs>".
 node_info() {
