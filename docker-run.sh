@@ -30,27 +30,11 @@ if ! docker image inspect jarvis-ai:latest &> /dev/null; then
     exit 1
 fi
 
-# Check if Ollama is running
-echo -n "Checking Ollama connection... "
-if curl -s http://localhost:11434/api/version > /dev/null 2>&1; then
-    echo -e "${GREEN}✓${NC}"
-else
-    echo -e "${YELLOW}✗${NC}"
-    echo -e "${YELLOW}Warning: Cannot connect to Ollama at localhost:11434${NC}"
-    echo "Please make sure Ollama is running:"
-    echo "  ollama serve"
-    read -p "Continue anyway? (y/N) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        exit 1
-    fi
-fi
-
 # Parse mode argument
 MODE="${1:-voice}"
 
-# Build Docker command
-DOCKER_CMD="docker run -it --rm"
+# Build Docker command; providers.json lives in the jarvis-config volume (see DOCKER.md)
+DOCKER_CMD="docker run -it --rm -v jarvis-config:/home/jarvisuser/.config/jarvis"
 
 # Mount .env if it exists (for LLM config, API keys, etc.)
 if [ -f "jarvis/.env" ]; then
@@ -70,7 +54,6 @@ if [[ "$OSTYPE" == "linux-gnu"* ]]; then
         fi
     fi
 elif [[ "$OSTYPE" == "darwin"* ]] || [[ "$OSTYPE" == "msys"* ]] || [[ "$OSTYPE" == "cygwin"* ]]; then
-    DOCKER_CMD="$DOCKER_CMD -e OLLAMA_HOST=http://host.docker.internal:11434"
     if [ "$MODE" != "text" ] && [ "$MODE" != "chat" ]; then
         echo -e "${YELLOW}Note: Audio passthrough is limited on this OS${NC}"
         echo "For best voice experience, consider running natively"
