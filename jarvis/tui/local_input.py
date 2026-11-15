@@ -6,7 +6,7 @@ import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 from ..config import Config
 from ..core.providers import (
@@ -74,7 +74,79 @@ def handle_local_input(app: Any, text: str, bindings: Any) -> bool:
         app._open_tasks()
         return True
 
+    if low == "/attach" or low.startswith("/attach "):
+        _handle_attach(app, text)
+        return True
+
     return False
+
+
+def _handle_attach(app: Any, text: str) -> None:
+    """`/attach`: pick a file, attach one by path, or `clear` what is attached."""
+    from ..runtime import attachments
+
+    parts = text.strip().split(maxsplit=1)
+    arg = parts[1].strip() if len(parts) > 1 else ""
+    if not arg:
+        from .attach_picker import AttachPicker
+
+        def picked(path: Optional[Path]) -> None:
+            if path is not None:
+                attach_paths(app, [path])
+
+        app.push_screen(AttachPicker(), picked)
+        return
+    if arg.lower() == "clear":
+        pending, app._pending_attachments = app._pending_attachments, []
+        attachments.discard(pending)
+        show_attached(app)
+        app._append_log(
+            f"[dim]Dropped {len(pending)} attachment(s).[/dim]"
+            if pending
+            else "[dim]Nothing is attached.[/dim]"
+        )
+        return
+    attach_paths(app, [arg.strip("'\"")])
+
+
+def attach_paths(app: Any, paths: Sequence[str | os.PathLike]) -> None:
+    """Copy files into the pending attachments; a file that can't be attached
+    says why in the chat."""
+    from ..runtime import attachments
+
+    for path in paths:
+        if len(app._pending_attachments) >= attachments.MAX_PER_MESSAGE:
+            app._append_log(
+                f"[red]A message can carry at most {attachments.MAX_PER_MESSAGE} "
+                "attachments.[/red]"
+            )
+            break
+        try:
+            app._pending_attachments.append(attachments.store_file(path))
+        except attachments.AttachmentError as e:
+            app._append_log(f"[red]{escape(str(e))}[/red]")
+    show_attached(app)
+
+
+def show_attached(app: Any) -> None:
+    """The line above the input naming what goes with the next message."""
+    from rich.text import Text
+    from textual.widgets import Static
+
+    from ..runtime.attachments import display_line
+
+    line = display_line(app._pending_attachments)
+    try:
+        widget = app.query_one("#attached", Static)
+    except Exception:
+        return
+    # Text, not markup: a file name may hold "[".
+    widget.update(
+        Text(f"{line} — sent with your next message; /attach clear drops them")
+        if line
+        else ""
+    )
+    widget.set_class(not line, "-idle")
 
 
 def _handle_commands(app: Any, low: str) -> None:
@@ -132,48 +204,6 @@ def _show_status(app: Any, *, full: bool = False) -> None:
         app._append_log(status_markup(sections))
 
     app.run_worker(run(), exclusive=False)
-
-
-def _show_providers(app: Any) -> None:
-    """Display configured providers with live pool status if available."""
-    pool_status = {}
-    if app.jarvis is not None and hasattr(app.jarvis, "llm"):
-        pool = getattr(app.jarvis.llm, "provider", None)
-        if pool is not None and hasattr(pool, "get_status"):
-            for info in pool.get_status():
-                pool_status[info["name"]] = info
-
-    providers = list_providers()
-    if not providers:
-        app._append_log(
-            "[dim]No providers configured. "
-            "Use /providers add or: jarvis providers add --type llamacpp --model Qwen/Qwen3-4B-GGUF:Q4_K_M[/dim]"
-        )
-        return
-
-    lines = [f"[bold cyan]Provider pool[/bold cyan] ({len(providers)} providers)"]
-    for i, p in enumerate(providers):
-        name = p.get("name", f"provider-{i}")
-        ptype = p.get("type", "?")
-        model = p.get("model", "?")
-
-        status_str = ""
-        live = pool_status.get(name)
-        if live:
-            s = live["status"]
-            if s == "active":
-                status_str = " [green]active[/green]"
-            elif s in ("cooldown", "exhausted"):
-                remaining = live.get("cooldown_remaining", "?")
-                status_str = f" [yellow]{s} ({remaining}s)[/yellow]"
-            elif s == "error":
-                status_str = " [red]error[/red]"
-
-        temp = p.get("temperature")
-        temp_str = f" (temp={temp})" if temp is not None else ""
-        lines.append(f"  [{i + 1}] {name} — {ptype}/{model}{temp_str}{status_str}")
-
-    app._append_log("\n".join(lines))
 
 
 def _handle_providers(app: Any, text: str) -> None:
@@ -305,6 +335,11 @@ def _handle_providers(app: Any, text: str) -> None:
             app._append_log(
                 f"[green]Updated provider '{name}': {', '.join(updated)}[/green]"
             )
+        except TypeError:  # `--name`: the name is edit_provider's own argument
+            app._append_log(
+                "[red]Error: A provider's name can't be edited; remove it and "
+                "add it again under the new name.[/red]"
+            )
         except ValueError as e:
             app._append_log(f"[red]Error: {e}[/red]")
 
@@ -316,7 +351,7 @@ def _handle_providers(app: Any, text: str) -> None:
 
 
 def _handle_model(app: Any, text: str) -> None:
-    """Show or switch the current model."""
+    """Show the current model; changing one is `/providers edit`."""
     parts = text.strip().split(maxsplit=1)
     if len(parts) == 1:
         model = "(unset)"

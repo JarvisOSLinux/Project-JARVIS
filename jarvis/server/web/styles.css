@@ -1363,6 +1363,7 @@ details.settings-group[open] > summary::before { content: '▾ '; }
 
 /* ── Input bar ── */
 #input-bar {
+    position: relative;
     height: 72px;
     background: var(--surface);
     display: flex;
@@ -1447,6 +1448,140 @@ details.settings-group[open] > summary::before { content: '▾ '; }
 #send-btn:active:not(:disabled) { background: rgba(0, 200, 255, 0.35); }
 
 .icon-btn:disabled { opacity: 0.35; cursor: default; }
+
+#attach-btn {
+    border-color: var(--primary-dim);
+    background: none;
+    color: var(--primary-dim);
+}
+#attach-btn:hover { background: rgba(0, 200, 255, 0.10); }
+/* A guest chats but does not attach (the gateway refuses its uploads). */
+body:not(.can-approve) #attach-btn { display: none; }
+
+/* ── Slash command suggestions, over the chat above the input. Under the
+   panels (z-index 20 and up), so an opened panel covers them. ── */
+#command-popup {
+    position: absolute;
+    left: 16px;
+    right: 16px;
+    bottom: 100%;
+    z-index: 10;
+    max-height: calc(8 * 34px + 8px);
+    overflow-y: auto;
+    padding: 4px 0;
+    background: var(--surface);
+    border: 1px solid rgba(0, 200, 255, 0.35);
+    border-radius: 10px;
+    box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.45);
+}
+
+.command-option {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-height: 34px;
+    padding: 8px 12px;
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    cursor: pointer;
+}
+.command-option.active { background: rgba(0, 200, 255, 0.12); }
+.command-name { flex-shrink: 0; color: var(--primary); font-family: var(--font-mono); }
+.command-usage { flex-shrink: 0; color: var(--text-secondary); font-family: var(--font-mono); }
+.command-desc {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text-secondary);
+}
+
+/* A command's own reply: rows and tables as JARVIS wrote them, not markdown. */
+.command-reply {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    white-space: pre-wrap;
+}
+
+/* ── Attachments: chips above the input, and on a sent message ── */
+#attachments {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 16px 0;
+    background: var(--surface);
+    flex-shrink: 0;
+    /* Ten chips on a phone with its keyboard open would push the input off
+       the screen. */
+    max-height: 30vh;
+    overflow-y: auto;
+}
+
+.attachment-chip {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 100%;
+    padding: 4px 4px 4px 8px;
+    border: 1px solid rgba(0, 200, 255, 0.25);
+    border-radius: 10px;
+    background: var(--card);
+    font-size: 12px;
+    overflow: hidden;
+}
+.attachment-chip .icon { color: var(--primary); }
+.attachment-thumb { width: 32px; height: 32px; object-fit: cover; border-radius: 6px; flex-shrink: 0; }
+.attachment-name { min-width: 0; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachment-size { flex-shrink: 0; color: var(--text-secondary); }
+.attachment-progress {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    height: 2px;
+    background: var(--primary);
+    transition: width 0.15s;
+}
+.attachment-chip.uploading .attachment-name { color: var(--text-secondary); }
+.attachment-remove {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border: none;
+    border-radius: 8px;
+    background: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.attachment-remove:hover { background: rgba(0, 200, 255, 0.08); color: var(--primary); }
+.attachment-remove .icon { width: 16px; height: 16px; }
+
+.bubble-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; white-space: normal; }
+.bubble-files:first-child { margin-top: 0; }
+.bubble-files .attachment-chip { padding: 4px 8px; }
+.bubble-files .icon { width: 16px; height: 16px; }
+
+#drop-overlay {
+    position: fixed;
+    inset: 12px;
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    border: 2px dashed var(--primary);
+    border-radius: 16px;
+    background: rgba(10, 14, 26, 0.88);
+    color: var(--primary);
+    font-size: 16px;
+    pointer-events: none;
+}
+#drop-overlay .icon { width: 36px; height: 36px; }
 
 /* ── What JARVIS is doing: activity line, action blocks, work panel (Project-JARVIS#267, #271) ── */
 #activity {
@@ -1729,6 +1864,10 @@ body:not(.can-approve) #new-session-btn { display: none; }
     #provider-form select,
     #provider-form input { font-size: 16px; } /* 16px stops iOS zooming on focus */
     .icon-btn { min-width: 44px; min-height: 44px; }
+    #command-popup { left: 12px; right: 12px; max-height: min(calc(8 * 44px + 8px), 50vh); }
+    .command-option { min-height: 44px; align-items: center; }
+    #attachments { padding: 8px 12px 0; }
+    .attachment-remove { width: 44px; height: 44px; }
     .permission-action { min-height: 48px; font-size: 15px; }
     #chat-view { padding: 12px; }
     /* A reply gets the avatar's width back; otherwise it is a narrow column

@@ -78,13 +78,15 @@ from .chat_view import ChatView
 from .command_input import CommandDropdown, CommandInput
 from .config_modal import ConfigModal, ConfigModalResult
 from .confirm_modal import ConfirmModal
-from .local_input import export_transcript_to_disk, handle_local_input
+from .local_input import export_transcript_to_disk, handle_local_input, show_attached
 from .session_sidebar import on_session_selected as handle_session_selected
 from .session_sidebar import refresh_sidebar
 from .session_sidebar import schedule_sidebar_refresh as queue_sidebar_refresh
 from .session_sidebar import show_session
+from .slash_commands_doc import slash_command_catalog
 
 logger = get_logger(__name__)
+_COMMAND_NAMES = frozenset(name for name, _ in slash_command_catalog())
 
 
 class SessionItem(ListItem):
@@ -188,6 +190,18 @@ class JarvisTUI(App):
         display: none;
     }
 
+    #attached {
+        height: 1;
+        padding: 0 1;
+        color: $accent;
+        text-wrap: nowrap;
+        text-overflow: ellipsis;
+    }
+
+    #attached.-idle {
+        display: none;
+    }
+
     #input {
         dock: bottom;
         margin: 1 0 0 0;
@@ -244,6 +258,8 @@ class JarvisTUI(App):
         self._sidebar_refresh_lock = asyncio.Lock()
         # Ctrl+D is a two-step confirmation keyed by session id.
         self._pending_delete_session_id: Optional[str] = None
+        # runtime/attachments.Attachment, sent with the next message.
+        self._pending_attachments: list = []
 
     # ------------------------------------------------------------------
     # Layout
@@ -258,6 +274,7 @@ class JarvisTUI(App):
             with Vertical(id="chat-pane"):
                 yield ChatView(id="chat-log")
                 yield Static("", id="activity", classes="-idle")
+                yield Static("", id="attached", classes="-idle")
                 yield CommandDropdown(id="command-dropdown")
                 yield CommandInput(
                     placeholder="Message, /help, /export, /sessions, /new…",
@@ -289,24 +306,33 @@ class JarvisTUI(App):
 
     @on(Input.Submitted, "#input")
     async def on_input_submitted(self, event: Input.Submitted) -> None:
+        from ..runtime.attachments import display_line
+
         text = (event.value or "").strip()
         event.input.value = ""
-        if not text:
+        command = text.startswith("/")
+        # A command is not a message: what is attached waits for the next one.
+        # An unknown /x goes to the model as a message, files and all, as in
+        # jarvis-app.
+        known = command and text.split(maxsplit=1)[0].lower() in _COMMAND_NAMES
+        attached = [] if known else self._pending_attachments
+        if not text and not attached:
             return
 
         # Echoed first, TUI-only commands included, so every line typed stays
         # visible above whatever it produced. A command is the title of a block
         # that holds its output (#271).
         chat = self.query_one("#chat-log", ChatView)
-        echo = f"[bold cyan]you[/bold cyan] > {tui_output.escape(text)}"
+        shown = "\n".join(p for p in (text, display_line(attached)) if p)
+        echo = f"[bold cyan]you[/bold cyan] > {tui_output.escape(shown)}"
         chat.end_command()
-        if text.startswith("/"):
+        if command:
             chat.begin_command(echo)
             self._export_lines.append(tui_output.markup_to_plain(echo))
         else:
             self._append_log(echo)
 
-        if handle_local_input(self, text, JarvisTUI.BINDINGS):
+        if command and handle_local_input(self, text, JarvisTUI.BINDINGS):
             return
 
         if self.jarvis is None:
@@ -317,10 +343,13 @@ class JarvisTUI(App):
 
         # Inject via the same path voice and sockets use.  Slash
         # commands still work — main.py's handler catches them.
-        self.jarvis.events.inject_user_input(text)
+        self.jarvis.events.inject_user_input(text, attachments=attached)
         from ..runtime.io import on_user_message
 
-        on_user_message(self.jarvis, text)
+        on_user_message(self.jarvis, text, attachments=attached)
+        if attached:
+            self._pending_attachments = []
+            show_attached(self)
 
     @on(OptionList.OptionSelected, "#command-dropdown")
     def on_command_suggested(self, event: OptionList.OptionSelected) -> None:

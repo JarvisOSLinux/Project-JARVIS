@@ -245,6 +245,28 @@ class TestPolicy:
         assert wg.sendable("owner", {**msg, "value": True})
         assert not wg.sendable("trusted", {**msg, "value": True})
 
+    def test_attachments_are_for_those_who_approve(self):
+        """Owner decision: a guest may chat but not attach."""
+        chunk = {"type": "upload_chunk", "upload": "u1", "seq": 0, "data": ""}
+        done = {"type": "upload_done", "upload": "u1", "attachment": {"id": "a"}}
+        failed = {"type": "upload_error", "upload": "u1", "message": "no"}
+        attached = {"type": "message", "content": "", "attachments": ["a"]}
+        cancel = {"type": "upload_cancel", "upload": "u1"}
+        for role in ("trusted", "owner"):
+            assert wg.sendable(role, chunk) and wg.sendable(role, cancel)
+            assert wg.sendable(role, attached) and wg.refused(attached, role) is None
+            assert wg.shown_to(done, role) == done
+            assert wg.shown_to(failed, role) == failed
+        assert not wg.sendable("guest", chunk)
+        assert not wg.sendable("guest", cancel)
+        assert wg.sendable("guest", attached)
+        assert (
+            wg.refused(attached, "guest")
+            == "'attachments' are not available to a guest"
+        )
+        assert wg.refused({**attached, "attachments": []}, "guest") is None
+        assert wg.shown_to(done, "guest") is None
+
     def test_those_who_answer_may_ask_what_waits(self):
         ask = {"type": "list_password_requests"}
         assert wg.sendable("trusted", ask) and wg.sendable("owner", ask)
@@ -638,6 +660,59 @@ class TestRelay:
             server.close()
             await daemon.stop()
 
+    async def test_a_guests_attachments_never_reach_the_daemon(self, tmp_path):
+        daemon, server, url, _ = await _boot(tmp_path, {"g@example.com": "guest"})
+        try:
+            async with connect(
+                url, additional_headers=_wire(url, "g@example.com")
+            ) as ws:
+                await ws.recv()
+                await ws.send(
+                    json.dumps(
+                        {"type": "message", "content": "hi", "attachments": ["a"]}
+                    )
+                )
+                seen = await _recv_types(ws, "error")
+                assert seen[-1]["message"] == (
+                    "'attachments' are not available to a guest"
+                )
+                await ws.send(json.dumps({"type": "upload_chunk", "upload": "u"}))
+                seen = await _recv_types(ws, "error")
+                assert "not available to a guest" in seen[-1]["message"]
+                await asyncio.sleep(0.2)
+            assert not [
+                m for m in daemon.received if m["type"] in ("message", "upload_chunk")
+            ]
+        finally:
+            server.close()
+            await daemon.stop()
+
+    async def test_a_files_chunks_have_a_budget_of_their_own(
+        self, tmp_path, monkeypatch
+    ):
+        """Past the chat limit, but not without any: a trusted phone could
+        otherwise send the daemon chunk frames as fast as it can."""
+        monkeypatch.setattr(wg, "UPLOAD_RATE_MAX", wg.RATE_MAX + 10)
+        daemon, server, url, _ = await _boot(tmp_path, {"t@example.com": "trusted"})
+        try:
+            async with connect(
+                url, additional_headers=_wire(url, "t@example.com")
+            ) as ws:
+                await ws.recv()
+                for seq in range(wg.UPLOAD_RATE_MAX + 1):
+                    chunk = {"type": "upload_chunk", "upload": "u1", "seq": seq}
+                    await ws.send(json.dumps({**chunk, "data": "", "last": False}))
+                seen = await _recv_types(ws, "error")
+                assert seen[-1]["message"] == "Slow down"
+                await ws.send(json.dumps({"type": "message", "content": "hi"}))
+                await asyncio.sleep(0.3)
+            chunks = [m for m in daemon.received if m["type"] == "upload_chunk"]
+            assert len(chunks) == wg.UPLOAD_RATE_MAX
+            assert [m["content"] for m in daemon.received if m["type"] == "message"]
+        finally:
+            server.close()
+            await daemon.stop()
+
     async def test_a_refused_chat_line_puts_the_phone_back_to_the_last_state(
         self, tmp_path
     ):
@@ -943,6 +1018,7 @@ class TestHandshakeRefusals:
             body = (await reader.read()).decode()
             assert "200 OK" in body and "<title>JARVIS</title>" in body
             assert "default-src 'self'" in body
+            assert "img-src 'self' blob:;" in body
             # One Content-Type: a second, text/plain one ahead of it made a
             # reverse proxy show the page's source (2026-11-12).
             head = body.split("\r\n\r\n")[0].lower()

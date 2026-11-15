@@ -23,12 +23,23 @@
     }
 
     // Tauri command -> socket message. What belongs to the laptop itself
-    // (widgets, file pickers, daemon shutdown) is absent: the page hides those
-    // controls in a browser, and the gateway refuses them anyway. Settings,
+    // (widgets, file pickers, daemon shutdown, quitting the app, a transcript
+    // saved to its disk) is absent: the page hides those controls or does
+    // them its own way in a browser, and the gateway refuses them anyway. Settings,
     // providers, approve all and voice listening are the owner's; the gateway
     // refuses them to the other roles.
     const COMMANDS = {
-        send_message:               (a) => ({ type: 'message', content: a.content }),
+        send_message:               (a) => ({
+            type: 'message', content: a.content,
+            ...(a.attachments && a.attachments.length ? { attachments: a.attachments } : {}),
+        }),
+        // A file's bytes, 32 KiB at a time; name and size go with seq 0 only.
+        upload_chunk:               (a) => ({
+            type: 'upload_chunk', upload: a.upload, seq: a.seq, data: a.data, last: a.last,
+            name: a.name, size: a.size,
+        }),
+        // A file removed before it was sent; JARVIS drops its upload.
+        upload_cancel:              (a) => ({ type: 'upload_cancel', upload: a.upload }),
         stop_stream:                ()  => ({ type: 'stop_stream' }),
         stop:                       ()  => ({ type: 'stop' }),
         stop_all:                   ()  => ({ type: 'stop_all' }),
@@ -108,7 +119,11 @@
             state = msg.state;
             return emit('ipc-state', msg.state);
         case 'response':
-            return emit('ipc-chunk', { content: msg.content, done: msg.done, comment: !!msg.comment });
+            return emit('ipc-chunk', {
+                content: msg.content, done: msg.done, comment: !!msg.comment, command: !!msg.command,
+            });
+        case 'upload_done':          return emit('ipc-upload-done', msg);
+        case 'upload_error':         return emit('ipc-upload-error', msg);
         case 'activity':             return emit('ipc-activity', msg.text || '');
         case 'action':               return emit('ipc-action', msg);
         case 'user_message':         return emit('ipc-user-message', msg);

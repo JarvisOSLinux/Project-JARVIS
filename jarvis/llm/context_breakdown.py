@@ -52,6 +52,7 @@ _PART_OF_LABEL = {
     "JOB_OUTPUT": "Task results",
     "CONVERSATION_SUMMARY": "Conversation summary",
     "NEW INPUT": "Your message",
+    "ATTACHMENTS": "Your message",
 }
 # Other blocks JARVIS writes. Listed so each starts a block of its own instead
 # of swelling the block before it.

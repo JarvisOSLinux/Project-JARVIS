@@ -38,7 +38,7 @@ def _app():
             phone: {"activity", "action", "user_message"},
             laptop: {"activity", "action", "user_message"},
         },
-        events=SimpleNamespace(inject_user_input=lambda text: None),
+        events=SimpleNamespace(inject_user_input=lambda text, attachments=(): None),
     )
     return app, phone, laptop, old
 

@@ -6,9 +6,16 @@ directly; ``command_input.py`` is the thin widget layer that drives them.
 
 from __future__ import annotations
 
+import shlex
+from pathlib import Path
 from typing import Sequence
+from urllib.parse import unquote, urlparse
 
 CommandCatalog = Sequence[tuple[str, str]]
+
+# What runtime/attachments.py takes; it checks the bytes, this only picks
+# which files to offer.
+ATTACHABLE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".pdf"})
 
 
 def is_command_prefix(text: str) -> bool:
@@ -193,3 +200,33 @@ def delete_word_right(text: str, cursor: int) -> tuple[str, int]:
         while end < len(text) and _char_class(text[end]) == kind:
             end += 1
     return text[:cursor] + text[end:], cursor
+
+
+def is_attachable(path: Path) -> bool:
+    """True when *path*'s extension is one an attachment can have."""
+    return path.suffix.lower() in ATTACHABLE_SUFFIXES
+
+
+def parse_dropped_paths(text: str) -> list[Path] | None:
+    """The files a terminal pasted for a drop, or None when *text* is not that.
+
+    Terminals paste a dropped file as its path: quoted or with backslash-escaped
+    spaces, or as a ``file://`` URI. Only text that is nothing but existing
+    files of an attachable type counts, so a pasted sentence stays text.
+    """
+    try:
+        words = shlex.split(text)
+    except ValueError:  # an unclosed quote: not a path list
+        return None
+    paths = []
+    for word in words:
+        if word.startswith("file://"):
+            word = unquote(urlparse(word).path)
+        try:
+            path = Path(word).expanduser()
+        except RuntimeError:  # "~5 minutes ago": no user named "5 minutes ago"
+            return None
+        if not (is_attachable(path) and path.is_file()):
+            return None
+        paths.append(path)
+    return paths or None

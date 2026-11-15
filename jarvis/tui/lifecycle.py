@@ -79,6 +79,10 @@ async def run_engine(app: Any, logger: Any) -> None:
 
 
 async def on_unmount(app: Any) -> None:
+    from ..runtime.attachments import discard
+
+    # Attached and never sent: nothing else would delete them before a restart.
+    discard(app._pending_attachments)
     if app.jarvis is not None:
         try:
             if app._output_cb is not None:

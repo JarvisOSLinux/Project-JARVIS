@@ -5,6 +5,30 @@ from __future__ import annotations
 from typing import Any
 
 from ..config import Config
+from . import io
+
+
+def _redraw_screens(app: Any, switched_to: Any = None, new: bool = False) -> None:
+    """Broadcast what the matching GUI-socket request would, so every screen
+    redraws: a session moved to (`switched_to`), else the changed list. The TUI
+    hears of a move through `sessions.on_switch` instead."""
+    if not getattr(app, "_gui_clients", None):
+        return
+    io.broadcast_soon(
+        app,
+        (
+            io.session_switched(app, switched_to, new)
+            if switched_to is not None
+            else io.session_list(app)
+        ),
+    )
+
+
+def _leave_deleted(app: Any) -> None:
+    """The current session was deleted: every screen leaves it, as the
+    `delete_session` request makes them."""
+    if getattr(app, "_gui_clients", None):
+        io.broadcast_soon(app, io.session_switched(app, None))
 
 
 def session_reply(app: Any, message: str) -> None:
@@ -55,6 +79,7 @@ def handle_slash_command(app: Any, text: str) -> bool:
             return True
         session = app.sessions.new_session(title=arg or None)
         if session:
+            _redraw_screens(app, session, new=True)
             session_reply(
                 app,
                 f"Started new session {session.short_id()}"
@@ -88,6 +113,7 @@ def handle_slash_command(app: Any, text: str) -> bool:
         if session is None or app.sessions.switch(session.id) is None:
             session_reply(app, why or f"Could not switch to '{arg}'.")
             return True
+        _redraw_screens(app, session)
         session_reply(
             app,
             f"Switched to {session.short_id()} ('{session.display_label()}')",
@@ -107,6 +133,7 @@ def handle_slash_command(app: Any, text: str) -> bool:
             )
             return True
         if app.sessions.rename(title, session_id=target.id):
+            _redraw_screens(app)
             session_reply(app, f"Renamed {target.short_id()} to '{title}'.")
         else:
             session_reply(app, "Rename failed.")
@@ -120,7 +147,11 @@ def handle_slash_command(app: Any, text: str) -> bool:
         if session is None:
             session_reply(app, why)
             return True
+        was_current = session.id == app.sessions.current_id
         if app.sessions.delete(session.id):
+            if was_current:
+                _leave_deleted(app)
+            _redraw_screens(app)
             session_reply(app, f"Deleted session {session.short_id()}.")
         else:
             session_reply(app, "Delete failed.")
