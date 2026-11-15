@@ -16,6 +16,8 @@ from the helper this daemon wrote, run by a real sudo (effective uid 0) whose
 parent is the dmcp binary JARVIS uses, below this daemon in the process tree,
 and that dmcp is running something JARVIS itself started: a task it
 dispatched (`expect_tasks`) or a dmcp command it ran (`expect_command`). The
+first dmcp that asks uses that up, so another process running the same
+command gets no popup, and a task's expectation goes when the task ends. The
 popup shows sudo's own command line and prompt, read from ``/proc``, not
 anything the asker says. What it cannot stop is code that already runs as
 this user and reads a process's memory; that is the residual risk #310 named
@@ -23,7 +25,10 @@ for any password typed on a phone, and polkit's own desktop dialog has it too.
 
 Cancelling, or the dmcp that ran sudo going away (a stopped task, a timeout),
 kills that sudo instead of handing it an empty answer, which PAM would count
-as a failed try (pam_faillock locks the account after a few).
+as a failed try (pam_faillock locks the account after a few). sudo keeps the
+user's real uid while it asks, so the user may signal it; should a kill still
+fail, it is logged and the helper waits for that sudo rather than answer it
+with nothing.
 """
 
 from __future__ import annotations
@@ -93,29 +98,46 @@ def install_helper() -> str:
 
 # -- what JARVIS started ----------------------------------------------------
 
-# key -> monotonic expiry. A key is ("call", server, tool, params as canonical
-# JSON) for a dispatched task, or ("argv", *args) for a dmcp command.
-_expected: dict[tuple, float] = {}
+
+@dataclass(eq=False)
+class _Expected:
+    # ("call", server, tool, params as canonical JSON) for a dispatched task,
+    # or ("argv", *args) for a dmcp command.
+    key: tuple
+    until: float  # monotonic
+    # (pid, start) of the dmcp whose sudo first asked: the first popup uses
+    # the expectation up, and only that dmcp may ask again (a wrong password).
+    caller: Optional[tuple[int, int]] = None
+
+
+_expected: list[_Expected] = []
+# dispatch pid -> its task's expectation, dropped when the task ends.
+_tasks: dict[int, _Expected] = {}
+
+# `dmcp call`'s options (dmcp/src/main.rs `Commands::Call`, and the global
+# `--debug`), as clap reads them.
+_CALL_VALUE_OPTIONS = ("--args", "--session", "--approval")
+_CALL_FLAGS = ("--interactive", "-d", "--debug")
 
 
 def _canonical(params: Any) -> str:
     return json.dumps(params or {}, sort_keys=True, separators=(",", ":"))
 
 
-def _remember(key: tuple) -> tuple:
+def _remember(key: tuple) -> _Expected:
     now = time.monotonic()
-    for k in [k for k, until in _expected.items() if until <= now]:
-        del _expected[k]
-    while len(_expected) >= _MAX_EXPECTED:
-        del _expected[min(_expected, key=_expected.__getitem__)]
-    _expected[key] = now + EXPECT_TTL_S
-    return key
+    _expected[:] = [e for e in _expected if e.until > now][-(_MAX_EXPECTED - 1) :]
+    for pid in [p for p, e in _tasks.items() if e not in _expected]:
+        del _tasks[pid]
+    entry = _Expected(key, now + EXPECT_TTL_S)
+    _expected.append(entry)
+    return entry
 
 
-def expect_tasks(tasks: Iterable[Any]) -> None:
+def expect_tasks(tasks: Iterable[Any]) -> list[Optional[_Expected]]:
     """Tasks about to go to dispatch, each a `dmcp call` that may elevate."""
-    for task in tasks:
-        if isinstance(task, dict):
+    return [
+        (
             _remember(
                 (
                     "call",
@@ -124,33 +146,96 @@ def expect_tasks(tasks: Iterable[Any]) -> None:
                     _canonical(task.get("params")),
                 )
             )
+            if isinstance(task, dict)
+            else None
+        )
+        for task in tasks
+    ]
 
 
-def expect_command(args: Iterable[str]) -> tuple:
+def tasks_started(pids: list[int], expected: list[Optional[_Expected]]) -> None:
+    """Pair dispatch's pids with `expect_tasks`' expectations, in order; the
+    batch's INITs are the newest, so the trailing pids are these tasks."""
+    if not expected or len(pids) < len(expected):
+        return
+    for pid, entry in zip(pids[-len(expected) :], expected):
+        if entry is not None:
+            _tasks[pid] = entry
+
+
+def task_ended(pid: Any) -> None:
+    """A dispatched task ended (EXIT or KILL): its call may not ask again."""
+    forget(_tasks.pop(pid, None))
+
+
+def expect_command(args: Iterable[str]) -> _Expected:
     """A dmcp command JARVIS is about to run; `forget` it once it ends."""
     return _remember(("argv", *[str(a) for a in args]))
 
 
-def forget(key: tuple) -> None:
-    _expected.pop(key, None)
+def forget(entry: Optional[_Expected]) -> None:
+    if entry in _expected:
+        _expected.remove(entry)
 
 
-def started_by_jarvis(cmdline: list[str]) -> bool:
-    """Whether the dmcp running `cmdline` runs something JARVIS started."""
-    args = [a for a in cmdline[1:] if not a.startswith("--dmcp-internal-")]
+def _call_key(args: list[str]) -> Optional[tuple]:
+    """The key of `dmcp call <args>` read the way clap reads it; None for
+    anything else, which then matches nothing."""
+    positional: list[str] = []
+    values: dict[str, str] = {}
+    rest = iter(args)
+    for arg in rest:
+        if arg == "--":
+            positional.extend(rest)
+        elif arg in _CALL_FLAGS:
+            continue
+        elif arg.startswith("-"):
+            name, eq, value = arg.partition("=")
+            if name not in _CALL_VALUE_OPTIONS or name in values:
+                return None
+            if not eq:
+                following = next(rest, None)
+                if following is None:
+                    return None
+                value = following
+            values[name] = value
+        else:
+            positional.append(arg)
+    if len(positional) != 2:
+        return None
+    params: Any = {}
+    if "--args" in values:
+        try:
+            params = json.loads(values["--args"])
+        except ValueError:
+            return None
+        if not isinstance(params, dict):
+            return None
+    return ("call", *positional, _canonical(params))
+
+
+def started_by_jarvis(caller: ProcInfo) -> bool:
+    """Whether `caller`, the dmcp that ran sudo, runs something JARVIS started.
+
+    Matching uses the expectation up: from then on only that same dmcp
+    process matches it, so another one running the same command gets no popup.
+    """
+    args = [a for a in caller.cmdline[1:] if not a.startswith("--dmcp-internal-")]
+    key = _call_key(args[1:]) if args[:1] == ["call"] else ("argv", *args)
+    if key is None:
+        return False
     now = time.monotonic()
-    if args[:1] == ["call"] and len(args) >= 3:
-        params: Any = {}
-        if "--args" in args:
-            at = args.index("--args")
-            try:
-                params = json.loads(args[at + 1])
-            except (IndexError, ValueError):
-                return False
-        key: tuple = ("call", args[1], args[2], _canonical(params))
-    else:
-        key = ("argv", *args)
-    return _expected.get(key, 0) > now
+    me = (caller.pid, caller.start)
+    usable = [
+        e
+        for e in _expected
+        if e.key == key and e.until > now and e.caller in (None, me)
+    ]
+    if not usable:
+        return False
+    entry = next((e for e in usable if e.caller == me), usable[0])
+    entry.caller = me
+    return True
 
 
 # -- who is asking --------------------------------------------------------
@@ -289,8 +374,15 @@ def _kill(info: ProcInfo, proc: Callable[[int], Optional[ProcInfo]]) -> None:
         return
     try:
         os.kill(info.pid, signal.SIGKILL)
-    except (ProcessLookupError, PermissionError):
+    except ProcessLookupError:
         pass
+    except OSError as e:
+        # The helper then waits for this sudo rather than hand it an empty
+        # password, so the sudo stays until root kills it.
+        logger.error(
+            f"JARVIS: could not kill sudo (pid {info.pid}) waiting for a "
+            f"password: {e}. It stays waiting; nothing will answer it."
+        )
 
 
 # -- the relay --------------------------------------------------------------
@@ -312,7 +404,7 @@ class AskpassRelay:
         daemon_pid: Optional[int] = None,
         proc: Callable[[int], Optional[ProcInfo]] = read_proc,
         peer: Callable[[asyncio.StreamWriter], Optional[int]] = peer_pid,
-        started: Callable[[list[str]], bool] = started_by_jarvis,
+        started: Callable[[ProcInfo], bool] = started_by_jarvis,
         kill: Callable[[ProcInfo, Callable], None] = _kill,
         watch_s: float = 1.0,
     ):
@@ -432,7 +524,7 @@ class AskpassRelay:
             if pid is not None
             else (None, "unknown peer")
         )
-        if vetted is not None and not self._started(vetted.caller.cmdline):
+        if vetted is not None and not self._started(vetted.caller):
             why = f"JARVIS did not start {' '.join(vetted.caller.cmdline[1:])[:200]}"
             vetted = None
         if vetted is None:
