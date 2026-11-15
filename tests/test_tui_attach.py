@@ -14,9 +14,15 @@ import pytest
 from jarvis.config import Config
 from jarvis.runtime import attachments
 from jarvis.tui.input_helpers import parse_dropped_paths
-from jarvis.tui.local_input import handle_local_input
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\0" * 40
+
+
+def handle_local_input(*args):
+    pytest.importorskip("textual")  # local_input pulls in the TUI's screens
+    from jarvis.tui.local_input import handle_local_input as handle
+
+    return handle(*args)
 
 
 @pytest.fixture(autouse=True)

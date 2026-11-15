@@ -95,6 +95,7 @@ class TestCatalogSaysWhatHandlersDo:
         assert dict(CATALOG)["/attach"].startswith("[path|clear]")
 
     def test_editing_a_providers_name_is_refused_not_raised(self):
+        pytest.importorskip("textual")  # local_input imports the provider modal
         from jarvis.tui.local_input import handle_local_input
 
         log = []
