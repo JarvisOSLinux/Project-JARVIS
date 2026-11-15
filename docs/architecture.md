@@ -58,16 +58,16 @@ Concretely: goal A calls the LLM (brief, lock held), then spends most of its tim
 |------|------|
 | `provider_pool.py` | Priority-ordered pool with per-provider cooldown and automatic failover |
 | `base.py` | `BaseLLMProvider` ABC — `chat(messages) -> str`, token tracking |
-| `providers/ollama.py` | Ollama client; lazy init, auto-start, auto-pull |
-| `providers/api.py` | OpenAI-compatible API provider (OpenAI, Claude via compat layer, OpenRouter — any `/v1/chat/completions` endpoint); pooled alongside Ollama for failover |
+| `providers/llamacpp.py` | `LlamaCppProvider` — a local GGUF model on a `llama-server` JARVIS starts on first use (`LLM_PORT`), or one already running at the entry's `url` |
+| `providers/api.py` | OpenAI-compatible API provider (OpenAI, Claude via compat layer, OpenRouter, an Ollama server — any `/v1/chat/completions` endpoint); also serves the `lmstudio` and `ollama-cloud` types |
+| `runner.py` | Supervises one `llama-server` per model (chat on `LLM_PORT`, embeddings on `EMBED_PORT`) and stops them all on exit |
+| `models.py` | GGUF store for `jarvis model pull\|list\|rm`: Hugging Face `user/repo[:quant]` specs downloaded into `MODELS_DIR/llm` |
 | `chat.py` | Retry/JSON-extraction wrapper around the provider pool used by ROOT LLM calls (non-streaming) |
 | `context_manager.py` | Trims conversation history to stay within context window |
 
-**Provider configuration:** `~/.config/jarvis/providers.json` (managed by `jarvis providers add --type <ollama|api> --model <model>` in the CLI, or F2 → Providers tab / `/providers add` in the TUI). The legacy single-provider `.env` approach was removed in v1.0.0.
+**Provider configuration:** `~/.config/jarvis/providers.json` (managed by `jarvis providers add --type <llamacpp|api|lmstudio|ollama-cloud> --model <model>` in the CLI, or F2 → Providers tab / `/providers add` in the TUI). The legacy single-provider `.env` approach was removed in v1.0.0. A version-1 file's `ollama` entries are migrated once on load (`core/providers.migrate`): a cloud model becomes `ollama-cloud`, any other an `api` entry at `http://localhost:11434`.
 
-**Ollama auto-start:** When `OLLAMA_AUTO_START=true` (default), `ollama.py` attempts `systemctl --user start ollama` → `systemctl start ollama` → direct `Popen("ollama serve")` before the first request. Rate-limited to one attempt per 60 seconds per host. Skipped for remote Ollama instances.
-
-**Lazy init:** `OllamaProvider` defers `ollama.Client()` creation until the first `chat()` call. The pool constructs providers at config-load time without opening connections.
+**Model runner:** When `LLM_AUTO_START=true` (default), a `llamacpp` provider with no `url` starts its `llama-server` (`LLAMA_SERVER_BIN`) on its first request, downloading the model if it is not pulled yet, and waits up to `LLM_START_TIMEOUT` for it to load. The pool constructs providers at config-load time without starting anything.
 
 ---
 
@@ -322,7 +322,7 @@ Session records and messages persist in the Rust contextor binary's SQLite store
 | File | Role |
 |------|------|
 | `adapter.py` | `ContextorAdapter` — spawns/talks to the Rust contextor binary (store, recall, semantic_search, session CRUD over the child-process JSON protocol) |
-| `embeddings.py` | `OllamaEmbeddings` — computes vectors daemon-side (`nomic-embed-text`) before sending to contextor |
+| `embeddings.py` | `LlamaEmbeddings` — computes vectors daemon-side (`EMBED_MODEL`, nomic-embed-text by default, on its own `llama-server` at `EMBED_PORT`, or `EMBED_URL`) before sending to contextor |
 
 ---
 
@@ -338,7 +338,7 @@ Added in v1.0.0. Auto-detects OS at import time.
 | `macos.py` | `AF_UNIX` + `LOCAL_PEERCRED` peer check, `~/Library/Application Support/`, `osascript` (dialogs + an auto-installed askpass shim), `launchctl` |
 | `windows.py` | TCP `127.0.0.1` + port lockfile, per-startup `.token` file auth (`icacls`-restricted) checked accept-time, `%APPDATA%`/`%LOCALAPPDATA%`, `windows_toasts` WinRT toast with real Allow/Deny buttons (availability gated on the package importing), UAC-only elevation, direct spawn |
 
-All consumers (`runtime/io.py`, `cli.py`, `core/socket_security.py`, `core/confirmation_manager.py`, `llm/providers/ollama.py`, `config.py`, `runtime/lifecycle.py`) go through `from ..platform import current as platform`.
+All consumers (`runtime/io.py`, `cli.py`, `core/socket_security.py`, `core/confirmation_manager.py`, `config.py`, `runtime/lifecycle.py`) go through `from ..platform import current as platform`.
 
 ---
 
@@ -380,6 +380,8 @@ The LLM derives a **capability** (domain/service), not keywords or implementatio
 ---
 
 ## Changelog — corrected claims
+
+*2026-11-15:* LLM layer trued to #291: `providers/ollama.py`, `OLLAMA_AUTO_START` and `OllamaEmbeddings` are gone. Local models are `providers/llamacpp.py` on a `llama-server` that `runner.py` supervises (`LLM_AUTO_START`), pulled by `models.py`; embeddings are `LlamaEmbeddings`; the provider types are `llamacpp`, `api`, `lmstudio` and `ollama-cloud`.
 
 *2026-08-15:* the persistent constraint register is no longer "in progress" — it shipped (#214, `jarvis/core/constraint_store.py`): path-prefix deny rules enforced at the dispatch gate ahead of the confirmation mode and re-injected into every ROOT prompt. The security-layer summary now states it as shipped with its path-rule scope explicit; generalizing it is what remains in progress.
 
