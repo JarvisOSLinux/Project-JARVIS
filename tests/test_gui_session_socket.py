@@ -1,5 +1,8 @@
 """Unit tests for the GUI socket's session CRUD handlers (jarvis/runtime/io.py)."""
 
+import asyncio
+import json
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -242,3 +245,132 @@ class TestReplyOrBroadcast:
             await runtime_io._reply_or_broadcast(app, writer, response)
         broadcast.assert_awaited_once_with(app, response)
         gui_write.assert_not_awaited()
+
+
+class _Writer:
+    def __init__(self):
+        self.sent = []
+
+    def write(self, data):
+        self.sent.extend(json.loads(line) for line in data.decode().splitlines())
+
+    async def drain(self):
+        pass
+
+
+def _typed_app():
+    """A daemon with one GUI client, whose sessions all succeed."""
+    session = _sample_session("abc12345")
+    sessions = Mock(available=True, current_id="cur00000")
+    sessions.new_session.return_value = session
+    sessions.find.return_value = (session, "")
+    sessions.switch.return_value = session
+    sessions.rename.return_value = True
+    sessions.delete.return_value = True
+    sessions.list.return_value = [session]
+    contextor = Mock()
+    contextor.recall.return_value = {
+        "entries": [{"content": "hi", "metadata": {"type": "user_prompt"}}]
+    }
+    writer = _Writer()
+    app = _make_app(sessions=sessions, contextor=contextor)
+    app._gui_clients = {writer: "jarvis-app"}
+    app.output_manager = Mock()
+    return app, writer
+
+
+def _type(app, line):
+    from jarvis.runtime import session_commands
+
+    async def run():
+        assert session_commands.handle_slash_command(app, line)
+        await asyncio.sleep(0)
+
+    asyncio.run(run())
+
+
+@pytest.mark.unit
+class TestTypedSessionCommandsRedrawEveryScreen:
+    """A typed /new or /switch left jarvis-app and the phones on the old chat:
+    the text path answered with a reply alone, while the socket requests
+    broadcast the session."""
+
+    @pytest.mark.parametrize(
+        "line, kind, messages",
+        [
+            ("/new", "session_switched", []),
+            ("/switch abc", "session_switched", [{"role": "user", "content": "hi"}]),
+            ("/rename abc12345 Yakup", "session_list", None),
+            ("/delete abc", "session_list", None),
+        ],
+    )
+    def test_success_broadcasts_what_the_socket_request_does(
+        self, line, kind, messages
+    ):
+        app, writer = _typed_app()
+        _type(app, line)
+        [sent] = writer.sent
+        assert sent["type"] == kind
+        if kind == "session_switched":
+            assert sent["session"]["id"] == "abc12345"
+            assert [
+                {k: m[k] for k in ("role", "content")} for m in sent["messages"]
+            ] == messages
+        else:
+            assert [s["id"] for s in sent["sessions"]] == ["abc12345"]
+        app.output_manager.handle_response.assert_called_once()
+
+    @pytest.mark.parametrize("line", ["/switch", "/rename", "/delete", "/sessions"])
+    def test_nothing_is_broadcast_when_nothing_changed(self, line):
+        app, writer = _typed_app()
+        _type(app, line)
+        assert writer.sent == []
+
+    def test_a_failed_switch_broadcasts_nothing(self):
+        app, writer = _typed_app()
+        app.sessions.find.return_value = (None, "No session matches 'zz'")
+        _type(app, "/switch zz")
+        assert writer.sent == []
+
+    def test_deleting_the_current_session_leaves_it_on_every_screen(self):
+        """A5: jarvis-app kept showing a deleted current chat; the TUI hears
+        it through `on_switch`, the sockets now through `session_switched`."""
+        app, writer = _typed_app()
+        app.sessions.current_id = "abc12345"
+        _type(app, "/delete abc")
+        assert [m["type"] for m in writer.sent] == ["session_switched", "session_list"]
+        assert writer.sent[0] == {
+            "type": "session_switched",
+            "session": None,
+            "messages": [],
+        }
+
+    def test_the_socket_delete_of_the_current_session_leaves_it_too(self):
+        app, writer = _typed_app()
+        app.sessions.current_id = "abc12345"
+
+        async def run():
+            await runtime_io._process_gui_message(
+                app,
+                logging.getLogger("t"),
+                {"type": "delete_session", "id": "abc"},
+                writer,
+            )
+            await asyncio.sleep(0)
+
+        asyncio.run(run())
+        assert sorted(m["type"] for m in writer.sent) == [
+            "session_list",
+            "session_switched",
+        ]
+        [left] = [m for m in writer.sent if m["type"] == "session_switched"]
+        assert left["session"] is None and left["messages"] == []
+
+    def test_the_socket_request_is_still_broadcast_once(self):
+        app, writer = _typed_app()
+        asyncio.run(
+            runtime_io._process_gui_message(
+                app, logging.getLogger("t"), {"type": "create_session"}, writer
+            )
+        )
+        assert [m["type"] for m in writer.sent] == ["session_switched"]

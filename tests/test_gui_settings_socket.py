@@ -167,6 +167,23 @@ class TestProviderCrudHandlers:
         assert result["type"] == "provider_list"
         assert result["providers"][0]["model"] == "qwen3:14b"
 
+    def test_a_providers_name_is_not_edited_and_says_why(self, tmp_path):
+        """`/providers edit x --name y` from jarvis-app showed the raw TypeError
+        "edit_provider() got multiple values for argument 'name'"."""
+        providers_file = str(tmp_path / "providers.json")
+        with patch.object(Config, "PROVIDERS_FILE", providers_file):
+            runtime_io._handle_add_provider(
+                {"ptype": "llamacpp", "model": "q", "name": "x"}
+            )
+            result, _ = runtime_io._handle_edit_provider(
+                {"name": "x", "fields": {"name": "y"}}
+            )
+        assert result == {
+            "type": "provider_error",
+            "message": "A provider's name can't be edited; remove it and add it "
+            "again under the new name.",
+        }
+
     def test_edit_provider_not_found_returns_provider_error(self, tmp_path):
         providers_file = str(tmp_path / "providers.json")
         with patch.object(Config, "PROVIDERS_FILE", providers_file):

@@ -15,6 +15,7 @@ from the current-session pointer.
 from typing import Callable, List, Optional, Tuple
 
 from ..core.logger import get_logger
+from ..runtime import attachments
 from .block_log import BlockLog
 from .model import Session
 from .naming import is_default_title, title_from
@@ -197,7 +198,8 @@ class SessionManager:
         return bool(title) and self.rename(title)
 
     def delete(self, session_id: str, delete_entries: bool = True) -> bool:
-        """Delete a session.  If it's the current one, clear the pointer."""
+        """Delete a session, its blocks and its attachments.  If it's the
+        current one, clear the pointer."""
         if not self.available:
             return False
 
@@ -209,6 +211,7 @@ class SessionManager:
             logger.warning(f"Sessions: delete failed: {result['error']}")
             return False
         self.blocks.delete(session_id)
+        attachments.delete_session(session_id)
 
         if self._current and self._current.id == session_id:
             self._current = None

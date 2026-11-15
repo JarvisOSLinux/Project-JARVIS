@@ -73,6 +73,40 @@ class TestCommandCatalog:
 
 
 @pytest.mark.unit
+class TestCatalogSaysWhatHandlersDo:
+    """The rows say what local_input.py does with each command."""
+
+    def test_providers_opens_the_list(self):
+        catalog = dict(CATALOG)
+        assert catalog["/providers"] == (
+            "[add|remove|move|edit]  Open the providers list; add, remove, move "
+            "or edit one."
+        )
+        # The other /providers rows stay in the help table.
+        assert ("/providers remove <name>", "Remove a provider by name.") in (
+            TUI_LOCAL_SLASH_HELP
+        )
+
+    def test_model_only_shows(self):
+        assert "switch" not in dict(CATALOG)["/model"].lower()
+
+    def test_attach_comes_after_tasks(self):
+        assert COMMANDS.index("/attach") == COMMANDS.index("/tasks") + 1
+        assert dict(CATALOG)["/attach"].startswith("[path|clear]")
+
+    def test_editing_a_providers_name_is_refused_not_raised(self):
+        from jarvis.tui.local_input import handle_local_input
+
+        log = []
+        app = type("App", (), {"_append_log": lambda self, m: log.append(m)})()
+        assert handle_local_input(app, "/providers edit local --name other", ())
+        assert log == [
+            "[red]Error: A provider's name can't be edited; remove it and add it "
+            "again under the new name.[/red]"
+        ]
+
+
+@pytest.mark.unit
 class TestIsCommandPrefix:
     def test_bare_slash_token(self):
         assert is_command_prefix("/")

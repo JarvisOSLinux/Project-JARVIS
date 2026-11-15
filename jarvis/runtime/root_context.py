@@ -72,7 +72,10 @@ def build_root_context(
     logger: Logger,
     new_input: Optional[str] = None,
     signal: Optional[Dict[str, Any]] = None,
+    attached: str = "",
 ) -> str:
+    """This turn's message to ROOT. `attached` is attachments.describe() of the
+    files sent with `new_input`."""
     parts = []
 
     # Standing constraints — injected unconditionally (not gated on new_input) so
@@ -141,6 +144,8 @@ def build_root_context(
 
     if new_input:
         parts.append(f"NEW INPUT: {new_input}")
+    if attached:
+        parts.append(attached)
 
     logger.debug(
         "JARVIS: Built root context "

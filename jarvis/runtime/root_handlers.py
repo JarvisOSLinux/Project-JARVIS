@@ -7,12 +7,17 @@ import json
 import re
 from dataclasses import dataclass
 from logging import Logger
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 from ..core.secret_scrubber import redact_secrets, redaction_notice
 from ..core.voice_state import VoiceState
-from . import action_events, stop, turns
-from .io import broadcast_to_gui_clients, enrich_pending_with_goals, set_gui_state
+from . import action_events, attachments, stop, turns
+from .io import (
+    broadcast_to_gui_clients,
+    enrich_pending_with_goals,
+    session_list,
+    set_gui_state,
+)
 from .llm_bridge import ask_llm
 from .output_hooks import emit_activity
 from .root_context import (
@@ -42,13 +47,13 @@ def _ensure_llm(app: Any) -> Any:
 async def name_session(app: Any, text: str) -> None:
     """Name a new chat after its first message, on every screen's list."""
     if app.sessions.name_after(text):
-        sessions = app.sessions.list(limit=50)
-        await broadcast_to_gui_clients(
-            app, {"type": "session_list", "sessions": [s.to_dict() for s in sessions]}
-        )
+        await broadcast_to_gui_clients(app, session_list(app))
 
 
-async def on_user_input(app: Any, logger: Logger, text: str) -> None:
+async def on_user_input(
+    app: Any, logger: Logger, text: str, attached: Sequence[Any] = ()
+) -> None:
+    """One thing the user said, with the files (runtime/attachments) sent with it."""
     # Scrubbed before anything below can keep it: the goal tree is archived to
     # disk, contextor's memory is searched on every later prompt, and the model
     # may be hosted. Slash commands get the raw text -- they never reach memory
@@ -75,21 +80,29 @@ async def on_user_input(app: Any, logger: Logger, text: str) -> None:
     if text.startswith("/"):
         reply = await stop.handle_command(app, logger, text)
         if reply is not None:
+            attachments.discard(attached)
             session_reply(app, reply)
             return
         handled = handle_slash_command(app, text)
         if handled:
+            attachments.discard(attached)
             return
 
     if _ensure_llm(app) is None:
+        attachments.discard(attached)
         app.output_manager.handle_response({"output": _NO_LLM_MSG})
         return
 
     if redacted:
         app.output_manager.handle_response({"output": redaction_notice(redacted)})
-    text = clean
+    # What the session keeps: a restored chat shows "Attached: …". The model
+    # gets the names only inside describe(), quoted: whoever named a file
+    # chose its words, and NEW INPUT reads as the user's own.
+    text = "\n".join(p for p in (clean, attachments.display_line(attached)) if p)
+    said = clean or "(the user sent only the attached files)"
 
     app.sessions.ensure_session()
+    attached = attachments.adopt(attached, app.sessions.current_id)
     await name_session(app, text)
     goal = app.goals.add_goal(text, chat_session=app.sessions.current_id)
     stop.claim_turn(app, goal.id)
@@ -101,7 +114,11 @@ async def on_user_input(app: Any, logger: Logger, text: str) -> None:
         )
 
     async with turns.turn(app, goal.id):
-        context = build_root_context(app, logger, new_input=text)
+        # Off the event loop: reading a PDF's text can take a while.
+        about = (
+            await asyncio.to_thread(attachments.describe, attached) if attached else ""
+        )
+        context = build_root_context(app, logger, new_input=said, attached=about)
         emit_activity(app, "Thinking about your request…", kind="llm")
         response = await ask_llm(app, logger, context, tag="root", mode="root")
         await app._act_on_root_response(response)

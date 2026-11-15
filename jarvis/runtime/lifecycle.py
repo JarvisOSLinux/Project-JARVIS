@@ -14,7 +14,7 @@ from ..config import Config
 from ..core.voice_state import VoiceState
 from ..llm import runner as llm_runner
 from ..platform import current as platform
-from . import action_events
+from . import action_events, attachments
 from .io import (
     apply_confirmation_decision,
     broadcast_to_gui_clients,
@@ -307,6 +307,8 @@ async def start_runtime_services(app: Any, logger: Logger) -> dict[str, Any]:
     # the first turns of this run — whether or not any socket is enabled.
     apply_queued_confirmation_decisions(app, logger)
     apply_queued_setup_completions(app, logger)
+    # Files attached in an earlier run and never sent with a message.
+    attachments.sweep_pending()
 
     output_socket_task: Optional[asyncio.Task] = None
     if Config.JARVIS_OUTPUT_SOCKET:

@@ -41,7 +41,7 @@ import asyncio
 import threading
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
 
 from ..core.logger import get_logger
 from .boundary import verify_and_mark
@@ -72,10 +72,14 @@ class Event:
     type: EventType
     data: Any = None
     timestamp: float = field(default_factory=lambda: __import__("time").time())
+    # USER_INPUT only: the files sent with it (runtime/attachments.Attachment).
+    attachments: tuple = ()
 
     @staticmethod
-    def user_input(text: str) -> "Event":
-        return Event(type=EventType.USER_INPUT, data=text)
+    def user_input(text: str, attachments: Sequence[Any] = ()) -> "Event":
+        return Event(
+            type=EventType.USER_INPUT, data=text, attachments=tuple(attachments)
+        )
 
     @staticmethod
     def dispatch_signal(signal: Dict[str, Any]) -> "Event":
@@ -158,16 +162,21 @@ class EventMerger:
 
         loop.call_soon_threadsafe(_put)
 
-    def inject_user_input(self, text: str) -> None:
+    def inject_user_input(self, text: str, attachments: Sequence[Any] = ()) -> None:
         """
-        Inject user input from any thread (voice, socket, CLI).
-        Thread-safe. Drops empty or whitespace-only input.
+        Inject user input from any thread (voice, socket, CLI, TUI).
+        Thread-safe. `attachments` are runtime/attachments.Attachment, still
+        pending; the text may be empty when they are not. Drops input that has
+        neither.
         """
-        if not text or not str(text).strip():
+        t = str(text or "").strip()
+        if not t and not attachments:
             return
-        t = str(text).strip()
-        self._inject(Event.user_input(t), "user input")
-        logger.debug(f"EventMerger: Injected user input ({len(t)} chars)")
+        self._inject(Event.user_input(t, attachments), "user input")
+        logger.debug(
+            f"EventMerger: Injected user input ({len(t)} chars, "
+            f"{len(attachments)} attachment(s))"
+        )
 
     def inject_confirmation_response(self, data: Dict[str, Any]) -> None:
         """Thread-safe."""

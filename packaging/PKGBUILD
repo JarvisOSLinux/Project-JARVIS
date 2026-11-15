@@ -17,6 +17,7 @@ depends=(
     python-dotenv
     python-httpx
     python-pathspec
+    python-pypdf
     dmcp
     dispatch-mcp
     llama-cpp

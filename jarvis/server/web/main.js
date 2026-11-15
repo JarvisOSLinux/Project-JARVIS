@@ -23,6 +23,11 @@ const emptyState      = document.getElementById('empty-state');
 const messages        = document.getElementById('messages');
 const messageInput    = document.getElementById('message-input');
 const sendBtn         = document.getElementById('send-btn');
+const attachBtn       = document.getElementById('attach-btn');
+const attachInput     = document.getElementById('attach-input');
+const attachmentsRow  = document.getElementById('attachments');
+const commandPopup    = document.getElementById('command-popup');
+const dropOverlay     = document.getElementById('drop-overlay');
 const micBtn          = document.getElementById('mic-btn');
 const stopBtn         = document.getElementById('stop-btn');
 const who             = document.getElementById('who');
@@ -170,8 +175,11 @@ function setConnected(connected) {
     refreshSendBtn();
 }
 
+/// Send takes text or a finished attachment, and waits for every upload.
 function refreshSendBtn() {
-    sendBtn.disabled = !isConnected || messageInput.value.trim() === '';
+    const text = messageInput.value.trim();
+    sendBtn.disabled = !isConnected || (text === '' && !readyAttachments().length)
+        || (uploading() && !lineCommand(parseCommandLine(text)));
 }
 
 /// A line above the input for what went wrong; a click dismisses it.
@@ -211,18 +219,26 @@ function showMessages() {
     }
 }
 
-function addUserMessage(content, at) {
+/// `files`: what went with it, as `{name, kind, size}`.
+function addUserMessage(content, at, files = []) {
     showMessages();
     foldOlderBlocks(null);
     const el = document.createElement('div');
     el.className = 'message user-message';
+    el.dataset.text = content + (files.length ? `\nAttached: ${files.map((f) => f.name).join(', ')}` : '');
 
     const col = document.createElement('div');
     col.className = 'bubble-col align-right';
 
     const bubble = document.createElement('div');
     bubble.className = 'bubble user-bubble';
-    bubble.textContent = content;
+    if (content) bubble.append(content);
+    if (files.length) {
+        const row = document.createElement('div');
+        row.className = 'bubble-files';
+        for (const f of files) row.append(fileChip(f));
+        bubble.append(row);
+    }
 
     const ts = document.createElement('div');
     ts.className = 'timestamp right';
@@ -237,11 +253,54 @@ function addUserMessage(content, at) {
 
 const STREAM_CURSOR = ' <span class="stream-cursor">▌</span>';
 
-function appendJarvisChunk(content, done, comment, at) {
+/// A reply bubble around `textEl`, at the end of the chat.
+function addJarvisBubble(textEl, className, at) {
+    foldOlderBlocks(null);
+    const el = document.createElement('div');
+    el.className = 'message jarvis-message' + className;
+
+    const avatar = document.createElement('div');
+    avatar.className = 'avatar';
+    avatar.textContent = 'J';
+
+    const col = document.createElement('div');
+    col.className = 'bubble-col';
+
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble jarvis-bubble';
+
+    const ts = document.createElement('div');
+    ts.className   = 'timestamp';
+    ts.textContent = timestamp(at);
+
+    bubble.append(textEl);
+    col.append(bubble, ts);
+    el.append(avatar, col);
+    messages.append(el);
+    requestAnimationFrame(() => el.classList.add('visible'));
+}
+
+/// What a command answered, here or from JARVIS: its rows and tables as
+/// written, since markdown ran the /sessions rows into one line.
+function addCommandReply(text, at) {
+    showMessages();
+    const pre = document.createElement('pre');
+    pre.className = 'bubble-text command-reply';
+    pre.dataset.raw = text;
+    pre.textContent = text;
+    addJarvisBubble(pre, '', at);
+    scrollBottom();
+}
+
+function appendJarvisChunk(content, done, comment, at, command) {
     showMessages();
     const streaming = messages.querySelector('.jarvis-message.streaming');
     // An answer ends the turn; a comment only says what comes next.
     if (done && !comment) showActivity('');
+    if (command) {
+        if (content) addCommandReply(content, at);
+        return;
+    }
 
     if (streaming) {
         const textEl = streaming.querySelector('.bubble-text');
@@ -251,35 +310,11 @@ function appendJarvisChunk(content, done, comment, at) {
         if (done) streaming.classList.remove('streaming');
     } else if (content) {
         // An empty done chunk closes a stream; with none open it has nothing to close.
-        foldOlderBlocks(null);
-        const el = document.createElement('div');
-        el.className = 'message jarvis-message' + (done ? '' : ' streaming')
-            + (comment ? ' comment' : '');
-
-        const avatar = document.createElement('div');
-        avatar.className = 'avatar';
-        avatar.textContent = 'J';
-
-        const col = document.createElement('div');
-        col.className = 'bubble-col';
-
-        const bubble = document.createElement('div');
-        bubble.className = 'bubble jarvis-bubble';
-
         const textEl = document.createElement('div');
         textEl.className   = 'bubble-text markdown-content';
         textEl.dataset.raw = content;
         textEl.innerHTML   = renderMarkdown(content) + (done ? '' : STREAM_CURSOR);
-
-        const ts = document.createElement('div');
-        ts.className   = 'timestamp';
-        ts.textContent = timestamp(at);
-
-        bubble.append(textEl);
-        col.append(bubble, ts);
-        el.append(avatar, col);
-        messages.append(el);
-        requestAnimationFrame(() => el.classList.add('visible'));
+        addJarvisBubble(textEl, (done ? '' : ' streaming') + (comment ? ' comment' : ''), at);
     }
     scrollBottom();
 }
@@ -473,12 +508,18 @@ async function createNewSession() {
     closeSidebar();
 }
 
-function restoreSessionMessages(session, msgs) {
-    currentSessionId = session.id;
+/// The chat view only: JARVIS keeps the session, and running blocks still update.
+function clearChat() {
     messages.innerHTML = '';
-    actionBlocks.clear();
     hasMessages = false;
     emptyState.style.display = '';
+}
+
+/// `session` null: the chat shown was deleted, and JARVIS is in no session.
+function restoreSessionMessages(session, msgs) {
+    currentSessionId = session ? session.id : null;
+    clearChat();
+    actionBlocks.clear();
     for (const m of msgs) {
         if (m.role === 'user') addUserMessage(m.content, m.timestamp);
         else if (m.role === 'action') restoreActionBlock(m);
@@ -898,7 +939,9 @@ const ENDED_CHANGE = 'This session has ended. Reload the page to connect again, 
 // What is waiting on JARVIS's answer, so a refusal or a dropped connection can
 // be shown where the change was made.
 let pendingSetting = null;  // the setting's key
-let pendingProvider = null; // 'form', or 'list' for the list's own buttons
+let pendingProvider = null; // 'form', 'list' for the list's own buttons, or 'command' (/providers)
+let providerDone = null;    // what a /providers change says once JARVIS takes it
+let editAfterList = null;   // /providers edit <name>: open its form once the list is in
 let sessionEnded = false;   // the gateway closed it on purpose; no reconnect follows
 
 function settingsOpen() {
@@ -934,8 +977,10 @@ function restorePendingSetting() {
 function onError(message) {
     if (passwordSent) return showPasswordError(message);
     if (pendingProvider === 'form') showProviderFormError(message);
+    else if (pendingProvider === 'command') addCommandReply(`Error: ${message}`);
     else showChangeError(message);
     pendingProvider = null;
+    editAfterList = null;
     restorePendingSetting();
 }
 
@@ -1253,9 +1298,12 @@ function showProviderFormError(message) {
     providerFormError.classList.add('visible');
 }
 
-function sendProviderChange(from, command, args) {
+function sendProviderChange(from, command, args, done = null) {
     // One at a time: a reply does not say which request it answers.
-    if (pendingProvider !== null) return false;
+    if (pendingProvider !== null) {
+        if (from === 'command') addCommandReply('Another provider change is still waiting for JARVIS; try again in a moment.');
+        return false;
+    }
     clearSettingsError();
     clearProviderFormError();
     if (!isConnected) {
@@ -1263,6 +1311,7 @@ function sendProviderChange(from, command, args) {
         return false;
     }
     pendingProvider = from;
+    providerDone = done;
     invoke(command, args);
     return true;
 }
@@ -1581,12 +1630,16 @@ function handleDisconnect(info) {
     }
     forgetPasswordRequests();
     if (sessionEnded && settingsOpen()) showSettingsError(ENDED_CHANGE);
+    // Their ids were this connection's.
+    const dropped = attachments.length > 0;
+    dropAttachments();
     setConnected(false);
     setStatus('offline');
     closeWorkPanel();
     actionBlocks.clear();
     showActivity('');
     if (info && info.reason) showNotice(info.reason);
+    else if (dropped) showNotice('The connection dropped, and the attached files with it; attach them again.');
 }
 
 function closePanels() {
@@ -1598,15 +1651,543 @@ function closePanels() {
     closeShutdownModal();
 }
 
+// ── Slash commands (the TUI's, from commands.js) ───────────────────────────
+// A `where: 'app'` command runs here, in COMMAND_HANDLERS; a handler that
+// returns false passes the line on to JARVIS, as the TUI passes "/clear foo".
+// The others go to JARVIS as a message.
+function hasBodyClass(cls) {
+    return document.body.classList.contains(cls);
+}
+
+function canApprove() {
+    return hasBodyClass('can-approve');
+}
+
+/// The catalog command a parsed line names, or undefined: a message, or an
+/// unknown /x that goes to JARVIS as one.
+function lineCommand(line) {
+    return line ? JARVIS_COMMANDS.find((c) => c.name === line.name) : undefined;
+}
+
+function offeredCommands() {
+    return commandsFor(JARVIS_COMMANDS, hasBodyClass);
+}
+
+let completer = null;
+let completerNames = '';
+
+/// One completer while the offered commands stay the same, so Tab can cycle.
+function commandCompleter() {
+    const names = offeredCommands().map((c) => c.name);
+    if (names.join(' ') !== completerNames) {
+        completerNames = names.join(' ');
+        completer = new CommandCompleter(names);
+    }
+    return completer;
+}
+
+let popupRows = [];
+let popupIndex = 0;
+
+function popupOpen() {
+    return !commandPopup.classList.contains('hidden');
+}
+
+function closeCommandPopup() {
+    commandPopup.classList.add('hidden');
+    commandPopup.replaceChildren();
+    popupRows = [];
+    messageInput.setAttribute('aria-expanded', 'false');
+    messageInput.removeAttribute('aria-activedescendant');
+}
+
+/// The suggestions for the line, while it is a bare `/token`.
+function syncCommandPopup() {
+    popupRows = filterCommands(messageInput.value, offeredCommands());
+    if (!popupRows.length) return closeCommandPopup();
+    commandPopup.replaceChildren(...popupRows.map((c, i) => {
+        const row = el('div', 'command-option');
+        row.id = `command-option-${i}`;
+        row.title = `${c.name} ${c.usage} — ${c.description}`;
+        row.setAttribute('role', 'option');
+        row.append(el('span', 'command-name', c.name));
+        if (c.usage) row.append(el('span', 'command-usage', c.usage));
+        row.append(el('span', 'command-desc', c.description));
+        row.addEventListener('click', () => acceptCommand(c.name));
+        return row;
+    }));
+    commandPopup.classList.remove('hidden');
+    messageInput.setAttribute('aria-expanded', 'true');
+    highlightCommand(0);
+}
+
+function highlightCommand(index) {
+    popupIndex = (index + popupRows.length) % popupRows.length;
+    [...commandPopup.children].forEach((row, i) => {
+        row.classList.toggle('active', i === popupIndex);
+        row.setAttribute('aria-selected', String(i === popupIndex));
+    });
+    const active = commandPopup.children[popupIndex];
+    messageInput.setAttribute('aria-activedescendant', active.id);
+    active.scrollIntoView({ block: 'nearest' });
+}
+
+/// The page writing the line, not the user typing: a Tab cycle goes on.
+function writeInput(text) {
+    messageInput.value = text;
+    messageInput.setSelectionRange(text.length, text.length);
+    syncCommandPopup();
+    refreshSendBtn();
+}
+
+function acceptCommand(name) {
+    writeInput(name + ' ');
+}
+
+function onInputKeydown(e) {
+    if (e.key === 'Tab' && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
+        // Otherwise Tab moves the focus on, as it always did.
+        const completion = commandCompleter().complete(messageInput.value);
+        if (completion !== null) {
+            e.preventDefault();
+            writeInput(completion);
+        }
+    } else if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && popupOpen()) {
+        e.preventDefault();
+        highlightCommand(popupIndex + (e.key === 'ArrowDown' ? 1 : -1));
+    } else if (e.key === 'Escape' && popupOpen()) {
+        e.stopPropagation(); // closes the list, not the panels too
+        closeCommandPopup();
+    } else if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        const pick = popupOpen() ? popupRows[popupIndex].name : null;
+        // Only when it changes the line: a typed or completed command sends on the first Enter.
+        if (pick && pick !== messageInput.value.trim()) acceptCommand(pick);
+        else sendMessage();
+    }
+}
+
+function helpCommand(args) {
+    const found = searchCommands(offeredCommands(), args);
+    addCommandReply(found.length
+        ? found.map((c) => `${c.name}${c.usage ? ' ' + c.usage : ''} — ${c.description}`).join('\n')
+        : `Nothing mentions ${args}.`);
+}
+
+/// The chat as it is drawn: what was said, JARVIS's own text, and what it ran.
+function transcriptMarkdown() {
+    const lines = [];
+    for (const node of messages.children) {
+        if (node.classList.contains('user-message')) {
+            lines.push(`**You:** ${node.dataset.text}`);
+        } else if (node.classList.contains('jarvis-message')) {
+            lines.push(`**JARVIS:** ${node.querySelector('.bubble-text').dataset.raw || ''}`);
+        } else if (node.matches('details.action-block')) {
+            lines.push(`- ${node.querySelector('.action-title').textContent}`);
+        } else if (node.classList.contains('system-message')) {
+            lines.push(`_${node.textContent}_`);
+        }
+    }
+    return [
+        '# JARVIS transcript export',
+        '',
+        `- Exported (UTC): ${new Date().toISOString()}`,
+        `- Session id: \`${currentSessionId || 'none'}\``,
+        '',
+        '---',
+        '',
+        lines.length ? lines.join('\n\n') : '_(no transcript lines yet)_',
+        '',
+    ].join('\n');
+}
+
+function downloadText(file, text) {
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/markdown' }));
+    const link = el('a');
+    link.href = url;
+    link.download = file;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    // A phone may still be reading it when click() returns.
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+async function exportCommand(args) {
+    const name = args
+        || `${currentSessionId ? currentSessionId.slice(0, 8) : 'no-session'}_${Math.floor(Date.now() / 1000)}`;
+    const text = transcriptMarkdown();
+    if (!IS_DESKTOP) {
+        const base = name.split(/[\\/]/).pop() || 'transcript';
+        const file = /\.md$/i.test(base) ? base : `${base}.md`;
+        downloadText(file, text);
+        addCommandReply(`Saved the transcript as ${file} (your browser's downloads).`);
+        return;
+    }
+    try {
+        addCommandReply(`Exported transcript to ${await invoke('export_transcript', { name, text })}`);
+    } catch (e) {
+        addCommandReply(`Export failed: ${e}`);
+    }
+}
+
+function commandsCommand(args) {
+    const arg = args.toLowerCase();
+    if (!arg) {
+        addCommandReply("Click a block's title to fold it; /commands collapse or /commands expand folds them all.");
+    } else if (arg !== 'collapse' && arg !== 'expand') {
+        addCommandReply('Usage: /commands [collapse|expand]');
+    } else {
+        for (const block of messages.querySelectorAll('details.action-block')) {
+            block.open = arg === 'expand';
+            block.dataset.touched = '1'; // foldOlderBlocks leaves it as set
+        }
+    }
+}
+
+function quitCommand(args) {
+    if (args) return false;
+    if (IS_DESKTOP) invoke('quit_app');
+    else addCommandReply('Close this tab to leave; JARVIS keeps running on the host.');
+}
+
+function openProvidersTab() {
+    openSettingsModal(); // opens on General
+    switchSettingsTab('providers');
+}
+
+/// /providers as the TUI reads it (local_input.py); a key is sent, never shown.
+function providersCommand(args) {
+    const tokens = args.split(/\s+/).filter(Boolean);
+    if (!tokens.length) return openProvidersTab();
+    const sub = tokens[0].toLowerCase();
+    const name = tokens[1];
+    if (sub === 'add') {
+        const flags = parseFlags(tokens.slice(1));
+        if (!flags.type || !flags.model) {
+            openProvidersTab();
+            openProviderForm(null);
+            return;
+        }
+        sendProviderChange('command', 'add_provider', {
+            ptype: flags.type,
+            model: flags.model,
+            name: flags.name || null,
+            url: flags.url || null,
+            apiKey: flags.key || null,
+            temperature: null,
+        }, `Added provider ${flags.name ? `'${flags.name}' ` : ''}(${flags.type}/${flags.model})`);
+    } else if (sub === 'remove') {
+        if (!name) return addCommandReply('Usage: /providers remove <name>');
+        sendProviderChange('command', 'remove_provider', { name }, `Removed provider '${name}'`);
+    } else if (sub === 'move') {
+        if (tokens.length < 3) return addCommandReply('Usage: /providers move <name> <position>');
+        const position = /^\d+$/.test(tokens[2]) ? Number(tokens[2]) : 0;
+        if (position < 1) return addCommandReply('Position must be a number');
+        sendProviderChange('command', 'move_provider', { name, position },
+            `Moved provider '${name}' to position ${position}`);
+    } else if (sub === 'edit') {
+        if (!name) return addCommandReply('Usage: /providers edit <name> [--model <m>] [--url <u>] [--key <k>]');
+        const fields = parseFlags(tokens.slice(2));
+        if (!Object.keys(fields).length) {
+            editAfterList = name; // the form opens pre-filled from the list JARVIS sends
+            invoke('list_providers');
+            return;
+        }
+        if (Number.isFinite(Number(fields.temperature))) fields.temperature = Number(fields.temperature);
+        sendProviderChange('command', 'edit_provider', { name, fields },
+            `Updated provider '${name}': ${Object.keys(fields).join(', ')}`);
+    } else {
+        addCommandReply(`Unknown subcommand '${sub}'. Use: add, remove, move, edit`);
+    }
+}
+
+function openProviderEditor(name, providers) {
+    const existing = providers.find((p) => p.name === name);
+    if (!existing) return addCommandReply(`Provider '${name}' not found`);
+    openProvidersTab();
+    openProviderForm(existing);
+}
+
+// A /model or /setups waiting for the reply it reads its answer from.
+let modelAsked = false;
+let setupsAsked = false;
+
+function modelLine(sections) {
+    const llm = (sections || []).find((s) => s.title === 'Language model');
+    const inUse = llm && (llm.checks || []).find((c) => c.detail === 'in use');
+    return `Model: ${inUse ? inUse.name : '(unknown)'}`;
+}
+
+function setupsLine(work) {
+    const n = work.setups || 0;
+    if (!n) return 'No server setups are waiting.';
+    return `${n} server setup${n === 1 ? ' waits' : 's wait'} on the host. `
+        + 'Fill them in with /setups in jarvis tui, or run `jarvis setups fill`.';
+}
+
+function attachCommand(args) {
+    const arg = args.toLowerCase();
+    if (!arg) {
+        attachInput.click();
+    } else if (arg === 'clear') {
+        const n = attachments.length;
+        dropAttachments(true);
+        addCommandReply(n ? `Dropped ${n} attachment${n === 1 ? '' : 's'}.` : 'No attachments to drop.');
+    } else {
+        addCommandReply('Usage: /attach [clear]');
+    }
+}
+
+const COMMAND_HANDLERS = {
+    '/help': helpCommand,
+    '/?': helpCommand,
+    '/export': exportCommand,
+    '/clear': (args) => {
+        if (args) return false;
+        clearChat();
+    },
+    '/commands': commandsCommand,
+    '/quit': quitCommand,
+    '/exit': quitCommand,
+    '/status': (args) => {
+        const arg = args.toLowerCase();
+        if (arg && arg !== 'full') return false;
+        openWorkPanel(); // clears the status list, so first
+        statusList.textContent = 'Checking…';
+        invoke('get_health', { full: arg === 'full' });
+    },
+    '/providers': providersCommand,
+    '/model': (args) => {
+        if (args) return addCommandReply("Use /providers edit <name> --model <model> to change a provider's model.");
+        modelAsked = true;
+        invoke('get_health', { full: false });
+    },
+    '/settings': (args) => {
+        if (args) return false;
+        openSettingsModal();
+    },
+    // Setups never cross the gateway, and their values never the socket: this
+    // only says how many wait.
+    '/setups': (args) => {
+        if (args) return false;
+        setupsAsked = true;
+        openWorkPanel();
+    },
+    '/tasks': (args) => {
+        if (args) return false;
+        openWorkPanel();
+    },
+    '/attach': attachCommand,
+};
+
+// ── Attachments: images and PDFs ───────────────────────────────────────────
+// Each file goes up in 32 KiB pieces (upload_chunk); JARVIS answers once, with
+// upload_done and the file's id or with upload_error. The ids go with the next
+// message, and only on this connection: a dropped connection drops them.
+const ATTACH_MAX_BYTES = 20 * 1024 * 1024;
+const ATTACH_CHUNK = 32 * 1024;
+const ATTACH_MAX_FILES = 10;
+const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.gif'];
+
+const attachments = []; // {upload, file, name, size, kind, url, chip, bar, id, meta}
+let uploadQueue = Promise.resolve(); // one upload at a time: JARVIS caps those in flight
+
+function attachmentKind(file) {
+    const name = file.name.toLowerCase();
+    if (file.type === 'application/pdf' || name.endsWith('.pdf')) return 'pdf';
+    if (IMAGE_TYPES.includes(file.type) || IMAGE_EXTENSIONS.some((ext) => name.endsWith(ext))) return 'image';
+    return null;
+}
+
+function readyAttachments() {
+    return attachments.filter((a) => a.id);
+}
+
+function uploading() {
+    return attachments.some((a) => !a.id);
+}
+
+function formatSize(bytes) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/// A sent file, as its message shows it: `{name, kind, size}`.
+function fileChip(f) {
+    const chip = el('span', 'attachment-chip');
+    chip.title = f.name;
+    chip.append(icon(f.kind === 'pdf' ? 'file' : 'image'), el('span', 'attachment-name', f.name));
+    if (f.size != null) chip.append(el('span', 'attachment-size', formatSize(f.size)));
+    return chip;
+}
+
+function buildAttachmentChip(item) {
+    const chip = el('div', 'attachment-chip uploading');
+    chip.title = item.name;
+    if (item.url) {
+        const img = el('img', 'attachment-thumb');
+        img.alt = '';
+        // The page's Content-Security-Policy may refuse a blob: image.
+        img.addEventListener('error', () => img.replaceWith(icon('image')));
+        img.src = item.url;
+        chip.append(img);
+    } else {
+        chip.append(icon('file'));
+    }
+    const remove = el('button', 'attachment-remove');
+    remove.type = 'button';
+    remove.title = `Remove ${item.name}`;
+    remove.setAttribute('aria-label', remove.title);
+    remove.append(icon('x'));
+    remove.addEventListener('click', () => cancelAttachment(item));
+    item.bar = el('span', 'attachment-progress');
+    item.bar.style.width = '0%';
+    chip.append(el('span', 'attachment-name', item.name), el('span', 'attachment-size', formatSize(item.size)),
+        remove, item.bar);
+    return chip;
+}
+
+function uploadId() {
+    return Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function toBase64(bytes) {
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 0x2000) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x2000));
+    }
+    return btoa(binary);
+}
+
+function addFiles(files) {
+    if (!canApprove()) return;
+    if (!isConnected) return showNotice('Not connected to JARVIS; attach the files once it reconnects.');
+    for (const file of files) {
+        const kind = attachmentKind(file);
+        if (!kind) { showNotice(`${file.name} is not an image (PNG, JPEG, WebP, GIF) or a PDF.`); continue; }
+        if (!file.size) { showNotice(`${file.name} is empty.`); continue; }
+        if (file.size > ATTACH_MAX_BYTES) { showNotice(`${file.name} is larger than 20 MB.`); continue; }
+        if (attachments.length >= ATTACH_MAX_FILES) {
+            showNotice(`At most ${ATTACH_MAX_FILES} files go with one message.`);
+            break;
+        }
+        const item = {
+            upload: uploadId(), file, name: file.name, size: file.size, kind, id: null, meta: null,
+            url: kind === 'image' ? URL.createObjectURL(file) : null,
+        };
+        item.chip = buildAttachmentChip(item);
+        attachments.push(item);
+        attachmentsRow.append(item.chip);
+        uploadQueue = uploadQueue.then(() => uploadFile(item));
+    }
+    attachmentsRow.classList.toggle('hidden', !attachments.length);
+    refreshSendBtn();
+}
+
+// A file removed mid-upload stops sending; its upload_cancel frees it on JARVIS.
+async function uploadFile(item) {
+    try {
+        for (let seq = 0, offset = 0; offset < item.size; seq++, offset += ATTACH_CHUNK) {
+            const bytes = new Uint8Array(await item.file.slice(offset, offset + ATTACH_CHUNK).arrayBuffer());
+            if (!attachments.includes(item) || !isConnected) return;
+            const chunk = { upload: item.upload, seq, data: toBase64(bytes), last: offset + ATTACH_CHUNK >= item.size };
+            if (seq === 0) Object.assign(chunk, { name: item.name, size: item.size });
+            await invoke('upload_chunk', chunk);
+            item.bar.style.width = `${Math.round(100 * Math.min(1, (offset + ATTACH_CHUNK) / item.size))}%`;
+        }
+    } catch (e) {
+        if (!attachments.includes(item)) return;
+        cancelAttachment(item);
+        showNotice(`${item.name} could not be read: ${e}`);
+    }
+}
+
+function onUploadDone(done) {
+    const item = attachments.find((a) => a.upload === done.upload);
+    if (!item || !done.attachment) return;
+    item.id = done.attachment.id;
+    item.meta = done.attachment;
+    item.chip.classList.remove('uploading');
+    item.bar.remove();
+    refreshSendBtn();
+}
+
+function onUploadError(failed) {
+    const item = attachments.find((a) => a.upload === failed.upload);
+    if (!item) return;
+    removeAttachment(item);
+    showNotice(`${item.name}: ${failed.message || 'the upload failed'}`);
+}
+
+function removeAttachment(item) {
+    const index = attachments.indexOf(item);
+    if (index < 0) return;
+    attachments.splice(index, 1);
+    item.chip.remove();
+    if (item.url) URL.revokeObjectURL(item.url);
+    attachmentsRow.classList.toggle('hidden', !attachments.length);
+    refreshSendBtn();
+}
+
+/// The user took the file back: JARVIS drops its upload, finished or not.
+function cancelAttachment(item) {
+    if (isConnected) invoke('upload_cancel', { upload: item.upload });
+    removeAttachment(item);
+}
+
+/// `cancel`: the user dropped them; without, their connection is gone.
+function dropAttachments(cancel = false) {
+    for (const item of [...attachments]) (cancel ? cancelAttachment : removeAttachment)(item);
+}
+
+// Files dragged onto the window. The page takes the drop even when it does
+// not attach (a guest), so the browser does not open the file instead.
+let dragDepth = 0;
+
+function fileDrag(e) {
+    return !!e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
+}
+
+function showDropOverlay(shown) {
+    dropOverlay.classList.toggle('hidden', !(shown && canApprove()));
+}
+
 // ── Actions ────────────────────────────────────────────────────────────────
 async function sendMessage() {
     const text = messageInput.value.trim();
-    if (!text || !isConnected) return;
+    const ready = readyAttachments();
+    if (!isConnected || (!text && !ready.length)) return;
+    const line = parseCommandLine(text);
+    const command = lineCommand(line);
+    // A command takes no files, so it need not wait for an upload; they wait
+    // for the next message.
+    if (!command && uploading()) return;
     messageInput.value = '';
+    closeCommandPopup();
     refreshSendBtn();
-    addUserMessage(text);
+    const files = command ? [] : ready;
+    // Every line shows, as in the TUI; a typed API key does not.
+    addUserMessage(line ? maskKeys(text) : text, null, files.map((a) => a.meta));
+    if (command && command.where === 'app') {
+        // Typed though not offered; the gateway still checks. /quit answers a
+        // browser itself.
+        if (command.needs !== 'desktop' && !commandsFor([command], hasBodyClass).length) {
+            addCommandReply(`${command.name} is not available to a ${role}.`);
+            return;
+        }
+        if ((await COMMAND_HANDLERS[command.name](line.args)) !== false) return;
+    }
+    if (line && hasKeyFlag(text)) {
+        addCommandReply('Not sent: a line with --key stays on this screen, so the key never reaches the model.');
+        return;
+    }
+    const ids = files.map((a) => a.id);
+    for (const a of files) removeAttachment(a); // their ids are used up
     setStatus('processing');
-    await invoke('send_message', { content: text });
+    await invoke('send_message', { content: text, attachments: ids });
 }
 
 async function toggleListening() {
@@ -1619,13 +2200,44 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.body.classList.add(IS_DESKTOP ? 'desktop' : 'web');
     if (IS_DESKTOP) document.body.classList.add('can-approve', 'can-manage');
 
-    messageInput.addEventListener('input', refreshSendBtn);
+    messageInput.addEventListener('input', () => {
+        commandCompleter().reset(); // the user typed: a Tab cycle ends
+        syncCommandPopup();
+        refreshSendBtn();
+    });
+    messageInput.addEventListener('keydown', onInputKeydown);
+    messageInput.addEventListener('blur', closeCommandPopup);
+    // The input keeps the focus, so its blur does not close the list under a
+    // tap; a click (not pointerdown) picks, so a finger scrolling it does not.
+    commandPopup.addEventListener('mousedown', (e) => e.preventDefault());
 
-    messageInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            sendMessage();
-        }
+    attachBtn.addEventListener('click', () => attachInput.click());
+    attachInput.addEventListener('change', () => {
+        addFiles(attachInput.files);
+        attachInput.value = '';
+    });
+    document.addEventListener('dragenter', (e) => {
+        if (!fileDrag(e)) return;
+        e.preventDefault();
+        dragDepth++;
+        showDropOverlay(true);
+    });
+    document.addEventListener('dragover', (e) => {
+        if (!fileDrag(e)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = canApprove() ? 'copy' : 'none';
+    });
+    document.addEventListener('dragleave', (e) => {
+        if (!fileDrag(e)) return;
+        dragDepth = Math.max(0, dragDepth - 1);
+        if (!dragDepth) showDropOverlay(false);
+    });
+    document.addEventListener('drop', (e) => {
+        if (!fileDrag(e)) return;
+        e.preventDefault();
+        dragDepth = 0;
+        showDropOverlay(false);
+        addFiles(e.dataTransfer.files);
     });
 
     sendBtn.addEventListener('click', sendMessage);
@@ -1712,13 +2324,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     await listen('ipc-gateway',      (e)     => applyGateway(e.payload));
     await listen('ipc-ack',          (e)     => onAck(e.payload));
     await listen('ipc-state',        (e)     => setStatus(e.payload));
-    await listen('ipc-chunk',        (e)     => appendJarvisChunk(e.payload.content, e.payload.done, e.payload.comment));
+    await listen('ipc-chunk',        (e)     => appendJarvisChunk(e.payload.content, e.payload.done, e.payload.comment,
+                                                                   undefined, e.payload.command));
     await listen('ipc-activity',     (e)     => showActivity(e.payload));
     // Said on another screen, in the TUI or aloud; this one drew its own.
-    await listen('ipc-user-message', (e)     => addUserMessage(e.payload.content || '', e.payload.at));
+    await listen('ipc-user-message', (e)     => addUserMessage(e.payload.content || '', e.payload.at,
+                                                                e.payload.attachments || []));
+    await listen('ipc-upload-done',  (e)     => onUploadDone(e.payload));
+    await listen('ipc-upload-error', (e)     => onUploadError(e.payload));
     await listen('ipc-action',       (e)     => onAction(e.payload));
-    await listen('ipc-work',         (e)     => renderWork(e.payload || {}));
-    await listen('ipc-health',       (e)     => renderStatus(e.payload));
+    await listen('ipc-work', (e) => {
+        renderWork(e.payload || {});
+        if (setupsAsked) addCommandReply(setupsLine(e.payload || {}));
+        setupsAsked = false;
+    });
+    await listen('ipc-health', (e) => {
+        renderStatus(e.payload);
+        if (modelAsked) addCommandReply(modelLine(e.payload));
+        modelAsked = false;
+    });
     await listen('ipc-wake',         ()      => setStatus('listening'));
     await listen('ipc-confirm', () => {
         // The refreshed list opens the pop-up (syncApprovalPopup); never a
@@ -1729,7 +2353,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     await listen('ipc-confirmation-list', (e) => renderPermissionList(e.payload));
     await listen('ipc-session-list', (e) => {
         renderSessionList(e.payload);
-        // A guest may not switch sessions; it follows the host's current one.
+        // In no session (just connected, or the current one was deleted): go to
+        // the newest. A guest may not switch sessions; it follows the host's.
         if (currentSessionId === null && e.payload.length > 0 && role !== 'guest') {
             switchToSession(e.payload[0].id);
         }
@@ -1749,10 +2374,17 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Only the form's own save closes it: a list also comes from a
         // reconnect or another screen, and the user may be typing.
         if (pendingProvider === 'form') closeProviderForm();
+        if (pendingProvider === 'command') addCommandReply(providerDone);
         pendingProvider = null;
+        if (editAfterList !== null) {
+            const name = editAfterList;
+            editAfterList = null;
+            openProviderEditor(name, e.payload);
+        }
     });
     await listen('ipc-provider-error', (e) => {
         if (pendingProvider === 'form') showProviderFormError(e.payload);
+        else if (pendingProvider === 'command') addCommandReply(`Error: ${e.payload}`);
         else showChangeError(e.payload);
         pendingProvider = null;
     });

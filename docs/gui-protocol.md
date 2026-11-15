@@ -14,7 +14,8 @@ test pins each message added by #267.
 - **Who:** only the user who runs JARVIS. The socket is `0600` and the daemon
   checks the peer's credentials when it accepts the connection.
 - **Framing:** one JSON object per line, UTF-8, both ways. Every message has a
-  `type`. A line that is not JSON is ignored.
+  `type`. A line that is not JSON is ignored. A line to the daemon may be at
+  most 64 KiB.
 - **On connect** the daemon sends the current `state`. Send `hello` with a
   label so `list_clients` can name you, and with `subscribe` for the pushed
   events you can show: `{"type": "hello", "label": "jarvis-app", "subscribe":
@@ -33,7 +34,7 @@ client keeps its view in step by listening, not by polling.
 
 | `type` | Fields | What it does |
 |---|---|---|
-| `message` | `content` | Says something to JARVIS, as if typed. Slash commands (`/new`, `/switch 110`, `/context`) work too; their replies carry `command: true`. The state becomes `processing`. |
+| `message` | `content`, `attachments` (optional: ids from `upload_done`) | Says something to JARVIS, as if typed. Slash commands (`/new`, `/switch 110`, `/context`) work too; their replies carry `command: true`, and a typed `/new`, `/switch`, `/rename` or `/delete` broadcasts what its socket request below does, so every screen redraws. The state becomes `processing`. With `attachments`, `content` may be empty; see Attachments. |
 | `stop` | | Stops JARVIS's work in the current session (#270): the model's turn is cancelled, confirmations waiting are denied, reminders and timers cancelled, the requests closed. Tasks already running keep running and reach only the screen from then on, never the model. → `ack` with what was stopped and what still runs; the state becomes `idle`. |
 | `stop_all` | | `stop`, and the session's running tasks are killed too. When one runs a package manager the first `stop_all` only warns (`ack`); a second within 15 s kills it. |
 | `stop_task` | `pid` | Kills one running task (the `pid` from `work`); the model hears nothing from it. Its request is closed when nothing else of it is under way; otherwise the request's next turn is told the user stopped it. A package manager is only warned about at first (`ack`); a second `stop_task` for it within 15 s kills it. → `ack` with what was stopped. |
@@ -41,6 +42,39 @@ client keeps its view in step by listening, not by polling.
 | `hello` | `label`, `subscribe` (optional list: `activity`, `action`, `user_message`, `password_request`, `password_request_done`) | Names this client in `list_clients`, and asks for the pushed events it can show. Subscribing to `password_request` also sends the requests already waiting. |
 | `list_clients` | | → `client_list` |
 | `ping` | | → `pong` |
+
+### Attachments
+
+Images (PNG, JPEG, WebP, GIF) and PDFs, sent as bytes: the socket never takes
+a path. Send a file in `upload_chunk`s, then name it in a `message`.
+
+| `type` | Fields | Reply |
+|---|---|---|
+| `upload_chunk` | `upload` (your id for this file, `^[A-Za-z0-9_-]{1,64}$`), `seq` (0, 1, 2, …), `data` (base64 of at most 32 KiB), `last` (bool); on `seq` 0 also `name` and `size` (the file's total bytes) | Nothing until the file ends: then `upload_done` `{upload, attachment: {id, name, kind, mime, size}}`, or `upload_error` `{upload, message}` as soon as anything is wrong. |
+| `upload_cancel` | `upload` | No reply. The user removed the file before sending it: the daemon drops that upload, still uploading or finished, and deletes its file, so it no longer counts toward the limits below. An upload already sent or unknown is ignored. |
+
+- A file is at most 20 MiB; four may upload at once per connection, and
+  twenty may wait, uploading or finished and not sent yet ("Too many attached
+  files wait to be sent; send them or remove some first."). Its type
+  is read from its first bytes, not from its name, and `name` comes back
+  cleaned, ending in that type's extension. `kind` is `image` or `pdf`.
+- Chunks come in order from 0, and the bytes must add up to `size`. A gap, a
+  bad chunk or a file of another type ends the upload with `upload_error` and
+  the daemon deletes what it had.
+- An `attachment.id` works on the connection that uploaded it, once, in a
+  `message` with at most 10 of them. Any other id is answered with `error`
+  "Attachment … is not available; attach it again." and the current `state`;
+  nothing reaches the model.
+- What a connection uploaded and never sent is deleted when it is cancelled
+  or the connection closes. A sent file is kept with its session and deleted
+  with it.
+- The model is told about the files for that message: an image by its place
+  on the host, to look at with `analyze_image` (when `VISION_ENABLED`); a PDF
+  by its text (the first 12,000 characters of its first 50 pages, read in a
+  process of its own that is stopped after 20 s), fenced as data from a file
+  the user attached, not instructions. File names reach it quoted, as data. The session keeps the message's text with
+  an "Attached: a.png, report.pdf" line, so a reopened chat shows it. A slash
+  command sent with files runs, and the files are dropped.
 
 ### What JARVIS is doing (#267)
 
@@ -74,7 +108,7 @@ notification, `jarvis confirm`), every client gets a fresh
 | `create_session` | `title` (optional) | `session_switched` with no messages (to everyone) |
 | `switch_session` | `id` (a unique prefix is enough) | `session_switched` with the session's messages (to everyone) |
 | `rename_session` | `id`, `title` | `session_list` (to everyone) |
-| `delete_session` | `id` | `session_list` (to everyone) |
+| `delete_session` | `id` | `session_list` (to everyone); deleting the current session also sends `session_switched` with `session: null` and no messages, since JARVIS is then in no session |
 
 A failure answers `session_error` to the sender only.
 
@@ -180,7 +214,12 @@ session stores them. `at` is seconds since the epoch.
 
 ```json
 {"type": "user_message", "content": "Update my system", "at": 1762200000.5}
+{"type": "user_message", "content": "What does this say?", "at": 1762200009.1,
+ "attachments": [{"name": "report.pdf", "kind": "pdf", "size": 183204}]}
 ```
+
+`attachments` is there when files came with the message: their names, never
+where they are on the host.
 
 ### Activity (#267)
 
@@ -317,6 +356,7 @@ The `/status` health check, as data.
   {"role": "action", "id": "tool:4", "kind": "tool", "title": "run_job (shell)",
    "detail": "pacman -Syu  (job update)", "status": "ok", "output": "…",
    "started_at": 1761850003.6, "at": 1761850190.2, "timestamp": 1761850003.6}]}
+{"type": "session_switched", "session": null, "messages": []}
 {"type": "session_error", "message": "No session matches 'zz'"}
 ```
 
@@ -338,6 +378,8 @@ comes live, with the same `id`. A comment has `comment: true`.
 | `provider_error` | `message` |
 | `setup_list` | `setups` |
 | `client_list` | `clients` (labels) |
+| `upload_done` | `upload`, `attachment` (see Attachments) |
+| `upload_error` | `upload`, `message` |
 | `ack` | `message`, and `for`: the `type` of the request it answers (`stop`, `stop_task`, `approve_confirmation`, …), so a client can show a stop's reply without echoing every decision |
 | `error` | `message` |
 | `DAEMON_SHUTDOWN` | `state`, `goals`, `session_id`, `timestamp` |
@@ -357,7 +399,10 @@ The gateway relays this protocol over a WebSocket, narrowed by role
   gets a `confirmation_request` cut to its id and tools, `confirmation_list`
   items without their rendered commands (`tool_lines`) and goal, and sessions
   without their `summary` and `metadata`. Trusted and owner also get the sudo
-  password popup and may answer it.
+  password popup and may answer it, and may attach files (`upload_chunk`,
+  `upload_cancel`, `upload_done`, `upload_error`); a guest's `message` with
+  `attachments` is refused. File chunks and cancels have a rate limit of
+  their own (700 per 10 s), apart from the gateway's 20 per 10 s.
 - **The owner** also gets settings and providers (each provider without its
   `api_key` or `headers`, with `api_key_set`), and may change them, approve
   all (naming the `ids` it shows) and turn the wake word on or off.

@@ -22,6 +22,9 @@
         <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7M12 19V5"/></symbol>
         <symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3"/></symbol>
         <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></symbol>
+        <symbol id="i-paperclip" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></symbol>
+        <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></symbol>
+        <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21"/></symbol>
     </svg>
     <header id="header">
         <button class="icon-btn" id="sessions-btn" title="Sessions" aria-label="Sessions"><svg class="icon"><use href="#i-menu"/></svg></button>
@@ -229,7 +232,13 @@
 
     <div id="divider"></div>
 
+    <!-- Files waiting to go with the next message. -->
+    <div id="attachments" class="hidden"></div>
+
     <div id="input-bar">
+        <div id="command-popup" class="hidden" role="listbox" aria-label="Commands"></div>
+        <button class="icon-btn" id="attach-btn" title="Attach images or PDFs" aria-label="Attach images or PDFs"><svg class="icon"><use href="#i-paperclip"/></svg></button>
+        <input type="file" id="attach-input" class="hidden" multiple accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,.pdf">
         <div class="input-wrapper">
             <input
                 type="text"
@@ -237,6 +246,10 @@
                 placeholder="Connecting&hellip;"
                 autocomplete="off"
                 enterkeyhint="send"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-expanded="false"
+                aria-controls="command-popup"
                 disabled
             >
         </div>
@@ -245,8 +258,14 @@
         <button class="icon-btn" id="send-btn" title="Send message" aria-label="Send" disabled><svg class="icon"><use href="#i-arrow-up"/></svg></button>
     </div>
 
+    <div id="drop-overlay" class="hidden" aria-hidden="true">
+        <svg class="icon"><use href="#i-paperclip"/></svg>
+        <span>Drop images or PDFs to attach</span>
+    </div>
+
     <script src="markdown.js"></script>
     <script src="transport.js"></script>
+    <script src="commands.js"></script>
     <script src="main.js"></script>
 </body>
 </html>

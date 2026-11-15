@@ -69,7 +69,10 @@ TUI_LOCAL_SLASH_HELP: tuple[tuple[str, str], ...] = (
         "Check JARVIS's health: model providers, engines, voice, safety, work, "
         "session. `full` also checks for server updates (goes online).",
     ),
-    ("/providers", "List configured providers with live pool status."),
+    (
+        "/providers [add|remove|move|edit]",
+        "Open the providers list; add, remove, move or edit one.",
+    ),
     ("/providers add", "Open guided modal to add a provider."),
     (
         "/providers add --type ... --model ...",
@@ -82,13 +85,22 @@ TUI_LOCAL_SLASH_HELP: tuple[tuple[str, str], ...] = (
         "/providers edit <name> --field <val>",
         "Update a provider field directly (power-user flags).",
     ),
-    ("/model [name]", "Show or switch the current LLM model."),
+    (
+        "/model [name]",
+        "Show the current LLM model; /providers edit <name> --model <model> "
+        "changes it.",
+    ),
     ("/settings", "Open settings editor (runtime config)."),
     ("/setups", "List servers waiting for setup; fill one in or cancel it."),
     (
         "/tasks",
         "What JARVIS is doing now: requests, running tasks with their latest "
         "output, timers, and what waits on you.",
+    ),
+    (
+        "/attach [path|clear]",
+        "Attach an image or PDF to your next message: pick one, or give its "
+        "path. /attach clear drops what is attached.",
     ),
 )
 
@@ -100,6 +112,11 @@ EXTRA_KEYBOARD_HELP: tuple[tuple[str, str], ...] = (
     ("Ctrl+W", "Delete the word left of the cursor (Ctrl+Backspace where supported)."),
     ("Ctrl+Delete", "Delete the word right of the cursor."),
     ("Click / arrows", "Select a session in the sidebar."),
+    (
+        "Drop a file",
+        "Dropping images or PDFs on the terminal attaches them to your next "
+        "message (/attach clear drops them).",
+    ),
     (
         "In browse mode",
         "Up/Down move between blocks, Enter or Space folds or unfolds one, "

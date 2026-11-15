@@ -39,6 +39,8 @@ dependencies = [
     "mcp[cli]>=1.13.1",
     "httpx>=0.28.1",
     "pathspec>=0.12.1",
+    # The text of a PDF the user attaches (runtime/attachments.py).
+    "pypdf>=6.0.0",
 ]
 
 [project.optional-dependencies]

@@ -23,7 +23,7 @@ logger = get_logger(__name__)
 async def handle_event(app: Any, event: Event) -> None:
     """Route merged events to the appropriate app handler."""
     if event.type == EventType.USER_INPUT:
-        await on_user_input(app, logger, event.data)
+        await on_user_input(app, logger, event.data, event.attachments)
     elif event.type == EventType.DISPATCH_SIGNAL:
         await on_dispatch_signal(app, logger, event.data)
     elif event.type == EventType.DISPATCH_SIGNAL_BATCH:

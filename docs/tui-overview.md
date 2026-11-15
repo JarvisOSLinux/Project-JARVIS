@@ -39,6 +39,7 @@ JARVIS's TUI is built with **[Textual](https://textual.textualize.io/)** (Python
 | `Ctrl+D` | Delete selected session (press twice to confirm) |
 | `Ctrl+Q` | Quit |
 | `Esc` | Close modal / return focus to input (from the sidebar or the chat too); on an empty input while JARVIS works, stop it (`/stop`) |
+| Drop a file | The terminal pastes its path; a paste that is only existing images or PDFs attaches them instead of typing them |
 
 ---
 
@@ -52,13 +53,15 @@ TUI-only:
 | `/settings` | Open config modal → Settings tab |
 | `/providers` | Open config modal → Providers tab |
 | `/providers add` | Push provider add form |
-| `/model` | Show/set active model |
+| `/providers remove\|move\|edit …` | Remove, reorder or edit a provider (`edit <name>` alone opens the form) |
+| `/model` | Show the active model (`/providers edit <name> --model <m>` changes it) |
 | `/status` | Show daemon status |
 | `/export` | Export transcript |
 | `/clear` | Clear on-screen transcript |
 | `/commands [collapse\|expand]` | Browse the chat's blocks, or fold or unfold them all |
 | `/setups` | Servers waiting for setup |
 | `/tasks` | What JARVIS is doing now |
+| `/attach [path\|clear]` | Attach an image or PDF to the next message: no path opens a file picker (folders, images and PDFs under `~`); `clear` drops what is attached. Attached files show on a line above the input and go with the next message, not with a command |
 | `/quit` | Quit |
 
 Session commands (work in all modes — CLI/voice/socket/TUI, handled by

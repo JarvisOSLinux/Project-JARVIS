@@ -58,7 +58,7 @@ give `jarvis web allow` exactly what `tailscale whois <ip>` shows, or pass
 | Role | May do |
 |---|---|
 | guest | chat, stop JARVIS (its running tasks keep running), see what JARVIS is doing (the activity line), sessions (their history without action blocks), confirmations and clients |
-| trusted | guest + approve or deny requests, create and switch sessions, see action blocks (tool parameters and output), status and running work, stop all (ends the running tasks too), stop one running task |
+| trusted | guest + approve or deny requests, create and switch sessions, see action blocks (tool parameters and output), status and running work, stop all (ends the running tasks too), stop one running task, attach images and PDFs to a message |
 | owner | trusted + rename and delete sessions, and the rest of jarvis-app: every setting, providers (add, edit with their keys, remove, reorder), approve all, the laptop's wake word on or off |
 
 The owner's phone is jarvis-app (Yakup, 2026-11-10), less what belongs to the
@@ -74,6 +74,13 @@ The role table covers the chat too: JARVIS runs a chat line that starts with
 command, so the gateway treats the line as the command's own message
 (`acts_as`). A guest typing `/delete 5bd5` or `/stop all` gets the same
 refusal as sending `delete_session` or `stop_all`.
+
+Attachments (images and PDFs) are for trusted and owner: the phone sends a
+file's bytes (`upload_chunk`, and `upload_cancel` when the user removes it
+before sending), never a path, and JARVIS checks its size (20 MB at most) and
+its type by its first bytes (`runtime/attachments.py`). A guest's message that
+names attachments is refused ("'attachments' are not available to a guest")
+and a guest's `upload_chunk` like any message its role lacks.
 
 Approve All names the requests it approves (`ids`, the ones the page shows);
 without them the gateway refuses it, and JARVIS approves only those of them
@@ -120,6 +127,9 @@ you@example.com's phone)"), kept with the session.
 - Idle sessions close after `JARVIS_WEB_IDLE_TIMEOUT` seconds (default 900).
 - Revoking an account (`jarvis web revoke`) cuts its open sessions at their next message.
 - 20 requests per 10 seconds per connection; frames over 64 KB are refused.
+  A file's chunks (`upload_chunk`, `upload_cancel`) count apart, 700 per 10
+  seconds (about 2 MiB/s): a 20 MB file is 640 of them. JARVIS caps uploads
+  itself too (size, four at once, twenty unsent).
 - The daemon's provider and settings broadcasts reach only the owner, provider
   lists without their keys; setup broadcasts reach no one.
 

@@ -44,6 +44,10 @@ gateway. This module is one, so the same threats are closed another way:
    The owner's phone may turn the popup on (Toufic, 2026-11-11: the laptop
    stays at home): it changes where sudo asks, not whether a password is
    needed.
+10. **Attachments** (images and PDFs): trusted and owner phones send a file's
+   bytes (``upload_chunk``), never a path, and the daemon caps their size and
+   checks their type (``runtime/attachments.py``). A guest may chat but not
+   attach.
 
 Listening on all addresses (``JARVIS_WEB_HOST=0.0.0.0``; Toufic, 2026-11-11:
 the hosts sit on his Headscale tailnet, nothing else reaches them, and who may
@@ -115,6 +119,9 @@ _TRUSTED_SENDS = _GUEST_SENDS | {
     # Also kills the session's running tasks; stop_task kills one.
     "stop_all",
     "stop_task",
+    # A file's bytes for a message (runtime/attachments.py); never a path.
+    "upload_chunk",
+    "upload_cancel",
 }
 _PROVIDER_CHANGES = frozenset(
     {"add_provider", "edit_provider", "remove_provider", "move_provider"}
@@ -172,6 +179,8 @@ _TRUSTED_RELAYED = RELAYED | {
     "work",
     "password_request",
     "password_request_done",
+    "upload_done",
+    "upload_error",
 }
 # Provider lists reach the owner without their keys (`shown_to`).
 _OWNER_RELAYED = _TRUSTED_RELAYED | {
@@ -214,6 +223,10 @@ _AUDITED = frozenset(
 
 RATE_WINDOW_S = 10.0
 RATE_MAX = 20
+# A file arrives in many chunks, so uploads have a budget of their own: 700
+# chunks of 32 KiB a window is about 2 MiB/s.
+UPLOAD_RATE_MAX = 700
+_UPLOAD_SENDS = frozenset({"upload_chunk", "upload_cancel"})
 MAX_FRAME = 64 * 1024
 UPSTREAM_LINE_LIMIT = 8 * 1024 * 1024
 
@@ -265,9 +278,15 @@ def sendable(role: str, msg: Any) -> bool:
     return msg["type"] in allowed and acts_as(msg) in allowed
 
 
-def refused(msg: dict) -> Optional[str]:
+def refused(msg: dict, role: str = "guest") -> Optional[str]:
     """Why a phone may not send `msg` although its role may send the type."""
     kind = msg.get("type")
+    if (
+        kind == "message"
+        and msg.get("attachments")
+        and "upload_chunk" not in ROLE_SENDS.get(role, frozenset())
+    ):
+        return f"'attachments' are not available to a {role}"
     if kind == "approve_all_confirmations":
         ids = msg.get("ids")
         if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
@@ -682,9 +701,10 @@ class Gateway:
         response.headers["Cache-Control"] = "no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
+        # blob: images: the thumbnails of files the user is attaching.
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; connect-src 'self'; style-src 'self' 'unsafe-inline'; "
-            "frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+            "img-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
         )
         return response
 
@@ -792,7 +812,7 @@ class Gateway:
         state: dict,
     ) -> None:
         last_active = time.monotonic()
-        limiter = RateLimit()
+        limiter, upload_limiter = RateLimit(), RateLimit(UPLOAD_RATE_MAX)
 
         async def refuse(msg: Any, reply: dict) -> None:
             await ws.send(json.dumps(reply))
@@ -830,7 +850,7 @@ class Gateway:
                         },
                     )
                     continue
-                why = refused(msg)
+                why = refused(msg, role)
                 if why is not None:
                     reply = (
                         {"type": "config_error", "key": msg.get("key")}
@@ -840,7 +860,8 @@ class Gateway:
                     await refuse(msg, {**reply, "message": why})
                     continue
                 if msg["type"] != "ping":
-                    if not limiter.allow():
+                    bucket = upload_limiter if msg["type"] in _UPLOAD_SENDS else limiter
+                    if not bucket.allow():
                         await refuse(msg, {"type": "error", "message": "Slow down"})
                         continue
                     last_active = time.monotonic()

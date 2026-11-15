@@ -23,6 +23,7 @@ from .input_helpers import (
     delete_word_right,
     filter_commands,
     is_command_prefix,
+    parse_dropped_paths,
     suggestion_label,
 )
 from .slash_commands_doc import slash_command_catalog
@@ -175,6 +176,17 @@ class CommandInput(Input):
 
     def on_blur(self, event: events.Blur) -> None:
         self._close_dropdown()
+
+    def _on_paste(self, event: events.Paste) -> None:
+        """A dropped file arrives as a paste of its path: attach it instead."""
+        paths = parse_dropped_paths(event.text)
+        if paths is None:
+            return  # Input's own handler pastes the text
+        event.prevent_default()
+        event.stop()
+        from .local_input import attach_paths
+
+        attach_paths(self.app, paths)
 
     # ------------------------------------------------------------------
     # Actions

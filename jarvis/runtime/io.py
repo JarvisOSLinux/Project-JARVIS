@@ -7,7 +7,7 @@ import json
 import os
 import time
 from logging import Logger
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 from ..config import Config
 from ..core import settings
@@ -23,6 +23,7 @@ from ..core.secret_scrubber import redact_secrets
 from ..core.voice_state import VoiceState
 from ..platform import current as platform
 from . import action_events
+from .attachments import AttachmentError, Uploads
 
 
 async def run_socket_listener(app: Any, logger: Logger) -> None:
@@ -368,6 +369,14 @@ def _subscriptions(app: Any) -> dict:
     return subs
 
 
+def _uploads(app: Any, writer: Any) -> Uploads:
+    """The files this connection is uploading or has uploaded and not sent."""
+    uploads = getattr(app, "_gui_uploads", None)
+    if uploads is None:
+        uploads = app._gui_uploads = {}
+    return uploads.setdefault(writer, Uploads())
+
+
 async def handle_gui_connection(
     app: Any,
     logger: Logger,
@@ -421,6 +430,8 @@ async def handle_gui_connection(
     finally:
         app._gui_clients.pop(writer, None)
         _subscriptions(app).pop(writer, None)
+        _uploads(app, writer).close()
+        app._gui_uploads.pop(writer, None)
         try:
             writer.close()
             await writer.wait_closed()
@@ -445,11 +456,29 @@ async def _process_gui_message(
 
     if msg_type == "message":
         content = msg.get("content", "").strip()
-        if content:
+        ids = msg.get("attachments")
+        try:
+            attached = _uploads(app, writer).take(ids) if ids else []
+        except AttachmentError as e:
+            await _gui_write(writer, {"type": "error", "message": str(e)})
+            # The client shows "working" once it sends; nothing was started.
+            await _gui_write(writer, {"type": "state", "state": app._gui_state})
+            return
+        if content or attached:
             await set_gui_state(app, VoiceState.PROCESSING)
-            app.events.inject_user_input(content)
-            on_user_message(app, content, sender=writer)
-            logger.info(f"JARVIS: GUI input: {content[:80]}...")
+            app.events.inject_user_input(content, attachments=attached)
+            on_user_message(app, content, sender=writer, attachments=attached)
+            logger.info(
+                f"JARVIS: GUI input: {content[:80]}... ({len(attached)} attached)"
+            )
+
+    elif msg_type == "upload_chunk":
+        reply = _uploads(app, writer).chunk(msg)
+        if reply is not None:
+            await _gui_write(writer, reply)
+
+    elif msg_type == "upload_cancel":
+        _uploads(app, writer).cancel(msg.get("upload"))
 
     elif msg_type == "confirmation_response":
         app.events.inject_confirmation_response(msg)
@@ -730,6 +759,14 @@ def _handle_edit_provider(msg: dict) -> tuple[dict, str]:
     fields = msg.get("fields") or {}
     if not name or not isinstance(fields, dict) or not fields:
         return _provider_error("edit_provider requires 'name' and 'fields'"), ""
+    if "name" in fields:
+        return (
+            _provider_error(
+                "A provider's name can't be edited; remove it and add it again "
+                "under the new name."
+            ),
+            "",
+        )
     try:
         updated = edit_provider(name, **fields)
     except (TypeError, ValueError) as e:
@@ -911,13 +948,29 @@ def _handle_list_sessions(app: Any, msg: dict) -> dict:
     return {"type": "session_list", "sessions": [s.to_dict() for s in sessions]}
 
 
+def session_list(app: Any) -> dict:
+    """The `session_list` a change to the list broadcasts."""
+    sessions = app.sessions.list(limit=50)
+    return {"type": "session_list", "sessions": [s.to_dict() for s in sessions]}
+
+
+def session_switched(app: Any, session: Any, new: bool = False) -> dict:
+    """The `session_switched` a move to `session` broadcasts; a new one has
+    no history, and None (the current one deleted) is no session."""
+    return {
+        "type": "session_switched",
+        "session": session.to_dict() if session else None,
+        "messages": session_history(app, session.id) if session and not new else [],
+    }
+
+
 def _handle_create_session(app: Any, msg: dict) -> dict:
     if not app.sessions.available:
         return _session_error("Sessions unavailable (memory disabled)")
     session = app.sessions.new_session(title=msg.get("title") or None)
     if not session:
         return _session_error("Failed to create session")
-    return {"type": "session_switched", "session": session.to_dict(), "messages": []}
+    return session_switched(app, session, new=True)
 
 
 def _handle_switch_session(app: Any, msg: dict) -> dict:
@@ -930,11 +983,7 @@ def _handle_switch_session(app: Any, msg: dict) -> dict:
     session = app.sessions.switch(found.id) if found else None
     if not session:
         return _session_error(why or f"Could not switch to '{session_id}'")
-    return {
-        "type": "session_switched",
-        "session": session.to_dict(),
-        "messages": session_history(app, session.id),
-    }
+    return session_switched(app, session)
 
 
 def _handle_rename_session(app: Any, msg: dict) -> dict:
@@ -949,8 +998,7 @@ def _handle_rename_session(app: Any, msg: dict) -> dict:
         return _session_error(why)
     if not app.sessions.rename(title, session_id=session.id):
         return _session_error(f"Rename failed for '{session_id}'")
-    sessions = app.sessions.list(limit=50)
-    return {"type": "session_list", "sessions": [s.to_dict() for s in sessions]}
+    return session_list(app)
 
 
 def _handle_delete_session(app: Any, msg: dict) -> dict:
@@ -962,10 +1010,13 @@ def _handle_delete_session(app: Any, msg: dict) -> dict:
     session, why = app.sessions.find(session_id)
     if session is None:
         return _session_error(why)
+    was_current = session.id == app.sessions.current_id
     if not app.sessions.delete(session.id):
         return _session_error(f"Delete failed for '{session_id}'")
-    sessions = app.sessions.list(limit=50)
-    return {"type": "session_list", "sessions": [s.to_dict() for s in sessions]}
+    if was_current:
+        # Every screen leaves the deleted chat, as the TUI does (on_switch).
+        broadcast_soon(app, session_switched(app, None))
+    return session_list(app)
 
 
 async def _reply_or_broadcast(
@@ -997,6 +1048,14 @@ async def set_gui_state(
     if meta:
         message["meta"] = meta
     await broadcast_to_gui_clients(app, message)
+
+
+def broadcast_soon(app: Any, message: dict) -> None:
+    """Schedule a broadcast to every GUI client from code that cannot await."""
+    try:
+        asyncio.get_running_loop().create_task(broadcast_to_gui_clients(app, message))
+    except RuntimeError:
+        pass
 
 
 def on_gui_output(app: Any, response: dict[str, Any]) -> None:
@@ -1040,15 +1099,26 @@ def on_gui_action(app: Any, event: dict[str, Any]) -> None:
     _broadcast_soon(app, event)
 
 
-def on_user_message(app: Any, text: str, sender: Any = None) -> None:
+def on_user_message(
+    app: Any, text: str, sender: Any = None, attachments: Sequence[Any] = ()
+) -> None:
     """What the user said, typed on any screen or spoken, for the other
     clients' chats; the client it came from (`sender`) has drawn it already.
-    Redacted as the session stores it: a phone may be another account's."""
+    Redacted as the session stores it: a phone may be another account's.
+    `attachments` (runtime/attachments.Attachment) are named, never located."""
     text, _ = redact_secrets(text.strip())
-    if text:
-        _broadcast_soon(
-            app, {"type": "user_message", "content": text, "at": time.time()}, sender
-        )
+    if not text and not attachments:
+        return
+    message: dict[str, Any] = {
+        "type": "user_message",
+        "content": text,
+        "at": time.time(),
+    }
+    if attachments:
+        message["attachments"] = [
+            {"name": a.name, "kind": a.kind, "size": a.size} for a in attachments
+        ]
+    _broadcast_soon(app, message, sender)
 
 
 async def _gui_output_and_idle(app: Any, response: dict[str, Any]) -> None:
