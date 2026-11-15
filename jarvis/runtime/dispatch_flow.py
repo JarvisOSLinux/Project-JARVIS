@@ -321,11 +321,10 @@ async def dispatch_send(
     _no_timeouts(tasks)
     # Each server's manifest is read at most once in this dispatch.
     manifests: dict = {}
-    one_at_a_time = await _guard_shell_tasks(app, logger, tasks, manifests)
-    if one_at_a_time:
-        logger.warning(f"JARVIS: {one_at_a_time}")
-        emit_activity(app, "Sent back: two root commands at once", kind="dispatch")
-        return {"error": one_at_a_time}
+    refused = await _guard_shell_tasks(app, logger, tasks, manifests)
+    if refused:
+        logger.warning(f"JARVIS: {refused}")
+        return {"error": refused}
 
     # Standing constraints — path-prefix deny rules from constraints.json (#214).
     # Checked before revocation and before the confirmation gate so allow_all
@@ -923,10 +922,83 @@ def _root_label(task: dict) -> str:
     return str(params.get("command") or params.get("script") or task.get("tool"))
 
 
-async def _guard_shell_tasks(app: Any, logger: Logger, tasks: list, seen: dict) -> str:
-    """Make a batch's shell calls runnable; refuse two root calls at once.
+# Words that run the command after them, and their flags that take a value.
+_RUNS_NEXT = {*_ELEVATORS, "env", "exec", "nohup", "time", "!"}
+_RUNS_NEXT |= {"if", "elif", "then", "else", "do", "while", "until"}
+_VALUE_FLAGS = {"-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U", "-T", "-R"}
+_VALUE_FLAGS |= {"--user", "--group", "--chdir", "--unset"}
+_SHELLS = {"sh", "bash", "zsh", "dash", "ksh", "fish"}
+_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
-    In order: a sudo in front of a root server's command goes, identical root
+
+def _starts_jarvis(argv: list) -> bool:
+    """Whether a command's words start JARVIS's own CLI, past sudo, env and the like."""
+    i = 0
+    while i < len(argv) and (
+        os.path.basename(argv[i]) in _RUNS_NEXT
+        or _ASSIGNMENT.match(argv[i])
+        or (i > 0 and argv[i].startswith("-"))
+    ):
+        i += 2 if argv[i] in _VALUE_FLAGS else 1
+    if i >= len(argv):
+        return False
+    name, rest = os.path.basename(argv[i]), argv[i + 1 :]
+    if name == "jarvis":
+        return True
+    if re.fullmatch(r"python[0-9.]*", name):
+        for j, word in enumerate(rest):
+            if not word.startswith("-"):
+                return False
+            if word.startswith("-m"):
+                module = word[2:] or (rest[j + 1] if j + 1 < len(rest) else "")
+                return module == "jarvis" or module.startswith("jarvis.")
+    if name in _SHELLS:
+        for j, word in enumerate(rest):
+            if not word.startswith("-"):
+                return False
+            if not word.startswith("--") and word.endswith("c"):
+                return _line_starts_jarvis(" ".join(rest[j + 1 :]))
+    return False
+
+
+def _line_starts_jarvis(line: str) -> bool:
+    """Whether any command in a shell command line or script is JARVIS's own CLI."""
+    for part in re.split(r"\$\(|[\n;&|(){}`]", line):
+        try:
+            words = shlex.split(part, comments=True)
+        except ValueError:
+            words = part.split()
+        if words and _starts_jarvis(words):
+            return True
+    return False
+
+
+def _runs_jarvis_cli(task: dict) -> bool:
+    params = task.get("params")
+    if task.get("tool") not in _SHELL_TOOLS or not isinstance(params, dict):
+        return False
+    if task.get("tool") == "execute_command":
+        args = params.get("args") or []
+        args = [args] if isinstance(args, str) else list(args)
+        # Joined and re-split: `sudo` given the one argument "jarvis providers"
+        # still runs jarvis.
+        line = " ".join(str(w) for w in [params.get("command") or "", *args])
+    else:
+        line = params.get(
+            "script" if task.get("tool") == "execute_script" else "command"
+        )
+    return isinstance(line, str) and _line_starts_jarvis(line)
+
+
+async def _guard_shell_tasks(app: Any, logger: Logger, tasks: list, seen: dict) -> str:
+    """Make a batch's shell calls runnable; refuse JARVIS's own CLI, two root calls.
+
+    First, a batch that runs the jarvis CLI on any shell server is refused
+    whole: the model ran `jarvis providers add` through the root shell, as told
+    by VISION_ERROR, and the CLI as root rewrote the user's providers.json as
+    root:root 0600, which the daemon could no longer read (2026-11-15).
+
+    Then, in order: a sudo in front of a root server's command goes, identical root
     calls merge (`pacman -Syu` and `sudo pacman -Syu` were sent together),
     package transactions become jobs (after the merge, since a job gets a
     fresh name), and then more than one root call is refused. Each call to a
@@ -934,6 +1006,20 @@ async def _guard_shell_tasks(app: Any, logger: Logger, tasks: list, seen: dict) 
     second while one is open ("Not authorized … This incident has been
     reported" within 0.4 s). Returns the refusal, or "".
     """
+    own = [t for t in tasks if _runs_jarvis_cli(t)]
+    if own:
+        emit_activity(app, "Refused: JARVIS's own CLI through a shell", kind="dispatch")
+        listing = "; ".join(f"{t.get('tool')}: {_root_label(t)}" for t in own)
+        return (
+            f"Dispatch refused: this batch runs JARVIS's own jarvis command through "
+            f"a shell server ({listing}). JARVIS's own settings and providers are "
+            "changed by the user, in Settings (F2 in the TUI, or jarvis-app) or "
+            "with the jarvis command in their own terminal, never through a shell: "
+            "run there, as root, it rewrote the user's config files as root and "
+            "JARVIS could no longer read them. Nothing in this batch was sent. Do "
+            "not retry it or look for another way to run jarvis. Tell the user "
+            "what to change and where, then carry on without it."
+        )
     root = [t for t in tasks if await _runs_as_root(app, logger, t.get("server"), seen)]
     for task in root:
         if task.get("tool") in _SHELL_TOOLS:
@@ -956,6 +1042,7 @@ async def _guard_shell_tasks(app: Any, logger: Logger, tasks: list, seen: dict) 
     root = [t for t in tasks if any(t is r for r in root)]
     if len(root) < 2:
         return ""
+    emit_activity(app, "Sent back: two root commands at once", kind="dispatch")
     listing = "; ".join(f"{t.get('tool')}: {_root_label(t)}" for t in root)
     return (
         f"Dispatch refused: this batch held {len(root)} calls to servers that run "
