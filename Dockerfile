@@ -44,7 +44,10 @@ COPY tests/ ./tests/
 COPY models/ ./models/
 COPY pytest.ini ./
 
-RUN pip install --no-cache-dir -e ".[voice]"
+# .dockerignore drops .git, so setuptools-scm cannot read the version itself.
+ARG JARVIS_VERSION=0.0.0
+RUN SETUPTOOLS_SCM_PRETEND_VERSION_FOR_PROJECT_JARVIS="$JARVIS_VERSION" \
+    pip install --no-cache-dir -e ".[voice]"
 
 RUN cp jarvis/.env.example jarvis/.env || true
 
