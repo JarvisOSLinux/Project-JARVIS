@@ -375,6 +375,9 @@ def edit_provider(name: str, **fields) -> List[str]:
             "No recognized fields. Use model, url, key, temperature, type, or vision."
         )
 
+    if target.get("type") in ("api", "lmstudio") and not effective_url(target):
+        raise ValueError("API/LM Studio providers require a url.")
+
     if target.get("type") in TYPES and target.get("model"):
         target.pop("inactive", None)
 

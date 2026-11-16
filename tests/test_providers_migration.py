@@ -284,3 +284,16 @@ def test_giving_an_inactive_entry_a_type_and_a_model_revives_it(file):
     assert "inactive" not in providers_mod.list_providers()[0]
     pool = ComponentFactory._build_provider_pool()
     assert [e.name for e in pool.entries] == ["broken"]
+
+
+def test_an_edit_that_leaves_an_api_entry_with_no_url_is_refused(file):
+    """It would lose its inactive note, list as a normal provider and still
+    fail to load: add_provider's url rule holds for an edit too."""
+    _write(file, [{"name": "broken", "type": "ollama"}])
+    with pytest.raises(ValueError, match="require a url"):
+        providers_mod.edit_provider("broken", type="api", model="qwen3")
+    assert "inactive" in providers_mod.list_providers()[0], "nothing was saved"
+    providers_mod.edit_provider(
+        "broken", type="api", model="qwen3", url="http://127.0.0.1:8080/v1"
+    )
+    assert "inactive" not in providers_mod.list_providers()[0]
