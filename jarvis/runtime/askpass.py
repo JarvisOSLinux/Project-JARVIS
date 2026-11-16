@@ -13,11 +13,13 @@ Who may ask: anything running as this user can connect to the socket, an MCP
 server or a shell command JARVIS started included, and can run the real dmcp
 for a command of its own choosing. So a request is shown only when it comes
 from the helper this daemon wrote, run by a real sudo (effective uid 0) whose
-parent is the dmcp binary JARVIS uses, below this daemon in the process tree,
-and that dmcp is running something JARVIS itself started: a task it
-dispatched (`expect_tasks`) or a dmcp command it ran (`expect_command`). The
-first dmcp that asks uses that up, so another process running the same
-command gets no popup, and a task's expectation goes when the task ends. The
+parent is the dmcp binary JARVIS uses, and that dmcp is running something
+JARVIS itself started and was started by who runs it: a task it dispatched
+(`expect_tasks`), as a child of this daemon's dispatch, or a dmcp command it
+ran (`expect_command`), as a child of this daemon. Anything else below the
+daemon can read those command lines from ``/proc`` and run them too; it is
+not that child, so it gets no popup. The first dmcp that asks uses the
+expectation up, and a task's expectation goes when the task ends. The
 popup shows sudo's own command line and prompt, read from ``/proc``, not
 anything the asker says. What it cannot stop is code that already runs as
 this user and reads a process's memory; that is the residual risk #310 named
@@ -61,7 +63,6 @@ ENV_HELPER = "DMCP_SUDO_ASKPASS"
 ENV_SOCKET = "JARVIS_ASKPASS_SOCKET"
 # sudo reads one line; anything longer than this is not a password.
 MAX_PASSWORD = 4096
-_MAX_DEPTH = 64
 # How long an elevation JARVIS started stays expected. A popup is shown when
 # sudo asks, right as the call starts; retries come within minutes.
 EXPECT_TTL_S = 30 * 60
@@ -214,14 +215,20 @@ def _call_key(args: list[str]) -> Optional[tuple]:
     return ("call", *positional, _canonical(params))
 
 
-def started_by_jarvis(caller: ProcInfo) -> bool:
+def started_by_jarvis(caller: ProcInfo, spawner: str) -> bool:
     """Whether `caller`, the dmcp that ran sudo, runs something JARVIS started.
 
-    Matching uses the expectation up: from then on only that same dmcp
-    process matches it, so another one running the same command gets no popup.
+    `spawner` is who started that dmcp (`vet`): "dispatch" runs JARVIS's
+    tasks, "daemon" its dmcp commands. Matching uses the expectation up: from
+    then on only that same dmcp process matches it.
     """
     args = [a for a in caller.cmdline[1:] if not a.startswith("--dmcp-internal-")]
-    key = _call_key(args[1:]) if args[:1] == ["call"] else ("argv", *args)
+    if spawner == "dispatch":
+        key = _call_key(args[1:]) if args[:1] == ["call"] else None
+    elif spawner == "daemon":
+        key = ("argv", *args)
+    else:
+        key = None
     if key is None:
         return False
     now = time.monotonic()
@@ -303,6 +310,7 @@ class Vetted:
     prompt: str  # what sudo asks, the helper's argument
     sudo: ProcInfo
     caller: ProcInfo  # the dmcp that ran sudo
+    spawner: str  # who started that dmcp: "dispatch" or "daemon"
 
 
 def vet(
@@ -311,6 +319,7 @@ def vet(
     daemon_pid: int,
     helper: str,
     dmcp: Optional[str],
+    dispatch: Optional[str],
     proc: Callable[[int], Optional[ProcInfo]] = read_proc,
 ) -> tuple[Optional[Vetted], str]:
     """The request `pid` makes, when this relay may show it; else (None, why)."""
@@ -325,21 +334,30 @@ def vet(
         return None, "cannot tell who ran sudo"
     if os.path.realpath(caller.exe) != os.path.realpath(dmcp):
         return None, f"sudo was run by {caller.exe}, not dmcp"
-    step, depth = caller, 0
-    while step is not None and step.pid != daemon_pid and depth < _MAX_DEPTH:
-        if step.ppid <= 1:
-            step = None
-            break
-        step, depth = proc(step.ppid), depth + 1
-    if step is None or step.pid != daemon_pid:
-        return None, "dmcp was not started by this JARVIS"
+    # Only the daemon's own child, or its dispatch's, runs what JARVIS
+    # started; a sibling below the daemon may copy that command line.
+    if caller.ppid == daemon_pid:
+        spawner = "daemon"
+    else:
+        parent = proc(caller.ppid)
+        if (
+            dispatch is None
+            or parent is None
+            or parent.exe is None
+            or parent.ppid != daemon_pid
+            or os.path.realpath(parent.exe) != os.path.realpath(dispatch)
+        ):
+            return None, "dmcp was not started by this JARVIS or its dispatch"
+        spawner = "dispatch"
     command = sudo_command(sudo.cmdline)
     if not command:
         return None, "sudo names no command"
     at = asker.cmdline.index(helper)
     prompt = " ".join(asker.cmdline[at + 1 :]).strip()
     return (
-        Vetted(" ".join(shlex.quote(a) for a in command), prompt, sudo, caller),
+        Vetted(
+            " ".join(shlex.quote(a) for a in command), prompt, sudo, caller, spawner
+        ),
         "",
     )
 
@@ -401,15 +419,17 @@ class AskpassRelay:
         self,
         broadcast: Callable[[dict], None],
         dmcp: Optional[str] = None,
+        dispatch: Optional[str] = None,
         daemon_pid: Optional[int] = None,
         proc: Callable[[int], Optional[ProcInfo]] = read_proc,
         peer: Callable[[asyncio.StreamWriter], Optional[int]] = peer_pid,
-        started: Callable[[ProcInfo], bool] = started_by_jarvis,
+        started: Callable[[ProcInfo, str], bool] = started_by_jarvis,
         kill: Callable[[ProcInfo, Callable], None] = _kill,
         watch_s: float = 1.0,
     ):
         self._broadcast = broadcast
         self._dmcp = dmcp
+        self._dispatch = dispatch
         self._daemon_pid = daemon_pid if daemon_pid is not None else os.getpid()
         self._proc = proc
         self._peer = peer
@@ -435,6 +455,8 @@ class AskpassRelay:
         self._server = await platform.create_ipc_server(path, self.handle)
         if self._dmcp is None:
             self._dmcp = shutil.which(Config.DMCP_BINARY)
+        if self._dispatch is None:
+            self._dispatch = shutil.which(Config.DISPATCH_BINARY)
         os.environ[ENV_HELPER] = install_helper()
         os.environ[ENV_SOCKET] = path
         logger.info(f"JARVIS: sudo askpass relay at {path}")
@@ -519,12 +541,13 @@ class AskpassRelay:
                 daemon_pid=self._daemon_pid,
                 helper=helper_path(),
                 dmcp=self._dmcp,
+                dispatch=self._dispatch,
                 proc=self._proc,
             )
             if pid is not None
             else (None, "unknown peer")
         )
-        if vetted is not None and not self._started(vetted.caller):
+        if vetted is not None and not self._started(vetted.caller, vetted.spawner):
             why = f"JARVIS did not start {' '.join(vetted.caller.cmdline[1:])[:200]}"
             vetted = None
         if vetted is None:
