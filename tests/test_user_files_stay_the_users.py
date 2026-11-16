@@ -233,3 +233,44 @@ class TestStartUpReport:
         with caplog.at_level(logging.ERROR):
             ownership.report_foreign_files(logging.getLogger("t"), ["/etc"])
         assert caplog.records == []
+
+
+class TestTheCliAsRoot:
+    """However the command line spells it (timeout, xargs, eval, a symlink,
+    send_input), the jarvis CLI as root stops before it touches the user's
+    files; the shell guard only catches the usual spellings."""
+
+    def _run(self, monkeypatch, argv):
+        import jarvis.cli as cli
+
+        ran = []
+        monkeypatch.setattr(sys, "argv", ["jarvis", *argv])
+        monkeypatch.setattr(cli, "_cmd_providers", lambda: ran.append("providers"))
+        monkeypatch.setattr(cli, "get_sudo_status", lambda: ran.append("sudo"))
+        try:
+            cli.main()
+        except SystemExit as e:
+            return e.code, ran
+        return 0, ran
+
+    def test_refused_on_the_user_s_dirs(self, dirs, as_root, monkeypatch, capsys):
+        monkeypatch.setattr(Config, "_DEFAULT_CONFIG_DIR", str(dirs[1]))
+        code, ran = self._run(monkeypatch, ["providers", "add", "--type", "x"])
+        assert (code, ran) == (1, [])
+        assert str(dirs[0]) in capsys.readouterr().err
+        assert not os.path.exists(dirs[1]), "nothing was made"
+
+    def test_runs_on_dirs_root_owns(self, as_root, monkeypatch):
+        for name in ("_DEFAULT_CONFIG_DIR", "JARVIS_DATA_DIR"):
+            monkeypatch.setattr(Config, name, "/nonexistent-jarvis-test/jarvis")
+        monkeypatch.setattr(Config, "PROVIDERS_FILE", "/etc/jarvis/providers.json")
+        assert self._run(monkeypatch, ["providers", "list"]) == (0, ["providers"])
+
+    def test_jarvis_sudo_is_meant_for_root(self, dirs, as_root, monkeypatch):
+        monkeypatch.setattr(Config, "_DEFAULT_CONFIG_DIR", str(dirs[1]))
+        assert self._run(monkeypatch, ["sudo"]) == (0, ["sudo"])
+
+    def test_not_root_runs(self, dirs, monkeypatch):
+        monkeypatch.setattr(Config, "_DEFAULT_CONFIG_DIR", str(dirs[1]))
+        monkeypatch.setattr(os, "geteuid", lambda: os.stat(dirs[0]).st_uid)
+        assert self._run(monkeypatch, ["providers", "list"]) == (0, ["providers"])

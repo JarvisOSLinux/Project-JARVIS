@@ -76,7 +76,7 @@ Not hypothetically. Empirically.
 ```
 User (Voice / Text)
        |
-  AI Daemon (local LLM via Ollama)
+  AI Daemon (local LLM via llama.cpp)
        |
   Task Orchestrator (dispatch)
        |

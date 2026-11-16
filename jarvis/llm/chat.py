@@ -85,7 +85,7 @@ def _reason(text: str) -> str:
         return "the provider rejected the API key"
     if "429" in lowered or "rate limit" in lowered:
         return "the provider is rate-limiting requests"
-    if "404" in lowered or "not found" in lowered:
+    if re.search(r"\b404\b", lowered):
         return "the model is not available there (404): check its name, and that the account may use it"
     lines = [
         ln.strip()

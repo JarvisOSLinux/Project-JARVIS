@@ -12,6 +12,8 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, Select, Static, Switch
 
+from ..core.providers import TYPES
+
 
 @dataclass
 class ProviderModalResult:
@@ -28,6 +30,7 @@ class ProviderModalResult:
 _URL_HINT = {
     "llamacpp": "blank = the local runner's default",
     "ollama-cloud": "blank = https://ollama.com",
+    "lmstudio": "blank = http://localhost:1234/v1",
     "api": "e.g. https://integrate.api.nvidia.com or http://localhost:11434 (Ollama)",
 }
 
@@ -139,8 +142,10 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
         self._mode = mode
         self._existing = existing or {}
         # A new provider starts with no type chosen, so a cloud model and key
-        # cannot be saved under a local default by accident (#316).
-        self._ptype = self._existing.get("type", "")
+        # cannot be saved under a local default by accident (#316). So does a
+        # retired type (a migrated "ollama" one): the Select only knows TYPES.
+        ptype = self._existing.get("type", "")
+        self._ptype = ptype if ptype in TYPES else ""
         self._key_revealed = False
 
     def compose(self) -> ComposeResult:
@@ -162,7 +167,8 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
                         [
                             ("Local (llama.cpp)", "llamacpp"),
                             ("Ollama Cloud", "ollama-cloud"),
-                            ("API (cloud, or Ollama/LM Studio server)", "api"),
+                            ("LM Studio", "lmstudio"),
+                            ("API (cloud, or an Ollama server)", "api"),
                         ],
                         value=self._ptype or Select.NULL,
                         prompt="Choose a type",
