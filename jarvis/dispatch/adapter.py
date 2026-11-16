@@ -120,16 +120,18 @@ class DispatchAdapter:
                 f"Dispatch:   task[{i}]: server={task.get('server')}, tool={task.get('tool')}, params={task.get('params')}"
             )
 
-        # The sudo password popup shows only for elevations JARVIS started.
-        from ..runtime.askpass import expect_tasks
+        # The sudo password popup shows only for elevations JARVIS started,
+        # each once, and not after its task ends.
+        from ..runtime import askpass
+        from ..runtime.dispatch_flow import _extract_pids_from_result
 
-        expect_tasks(tasks)
+        expected = askpass.expect_tasks(tasks)
 
         params: Dict[str, Any] = {"tasks": tasks}
         if session_id is not None:
             params["session_id"] = session_id
 
-        return await transport_call_tool(
+        result = await transport_call_tool(
             self,
             logger,
             tool_name="dispatch",
@@ -139,6 +141,8 @@ class DispatchAdapter:
             failure_prefix="Failed to dispatch tasks",
             extractor=self._extract_content,
         )
+        askpass.tasks_started(_extract_pids_from_result(result), expected)
+        return result
 
     async def wait_task(self, pids: List[int]) -> Dict[str, Any]:
         """
