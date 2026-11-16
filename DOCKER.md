@@ -252,6 +252,8 @@ The Docker image runs JARVIS in **conversation-only mode** when the `dispatch` a
 - **User**: Non-root `jarvisuser` (UID 1000)
 - **Working Dir**: `/app`
 - **Install**: `pip install -e ".[voice]"` from pyproject.toml
+- **llama-server**: llama.cpp's CPU build at `/usr/local/bin/llama-server`, so a
+  local `llamacpp` provider runs in the container
 
 ---
 
