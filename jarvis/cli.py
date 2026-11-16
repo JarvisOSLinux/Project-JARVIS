@@ -33,7 +33,7 @@ from .core.providers import (
     parse_flags,
     remove_provider,
 )
-from .platform.ownership import keep_owner, make_dirs
+from .platform.ownership import keep_owner, make_dirs, user_dir_under_root
 
 # Initialise logging from config before any get_logger() call so that the
 # file handler (LOG_FILE) and level (LOG_LEVEL) are applied from the start.
@@ -1409,6 +1409,26 @@ def _run_until_stopped(jarvis) -> None:
 
 def main() -> None:
     """Main CLI entry point."""
+    # Root never runs JARVIS on a user's files (2026-11-15: `jarvis providers
+    # add` through the root shell server left providers.json root's). The shell
+    # guard in dispatch_flow catches the usual spellings; this one every
+    # wrapper reaches. `jarvis sudo` is the command meant to run as root.
+    if sys.argv[1:2] != ["sudo"]:
+        theirs = user_dir_under_root(
+            (
+                Config._DEFAULT_CONFIG_DIR,
+                Config.JARVIS_DATA_DIR,
+                os.path.dirname(os.path.abspath(Config.PROVIDERS_FILE)),
+            )
+        )
+        if theirs:
+            print(
+                f"Error: jarvis does not run as root on another user's files "
+                f"({theirs}). Run it as that user, without sudo.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
     from .main import Jarvis
 
     # No arguments or "run" — dual-input mode (voice + socket + optional stdin)

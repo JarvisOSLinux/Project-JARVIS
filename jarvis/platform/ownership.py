@@ -49,6 +49,20 @@ def make_dirs(path: PathLike, mode: int = 0o777) -> None:
         keep_owner(folder)
 
 
+def user_dir_under_root(paths: Iterable[PathLike]) -> Optional[str]:
+    """Running as root, the first of ``paths`` a non-root user owns (or, when
+    it does not exist yet, the dir it would be made in); else None."""
+    if _euid() != 0:
+        return None
+    for path in paths:
+        folder = os.path.abspath(path)
+        while not os.path.exists(folder):
+            folder = os.path.dirname(folder)
+        if os.stat(folder).st_uid != 0:
+            return folder
+    return None
+
+
 def foreign_files(top: PathLike, uid: int) -> List[str]:
     """``top`` and everything under it that ``uid`` does not own."""
     paths = [os.fspath(top)]

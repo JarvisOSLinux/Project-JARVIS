@@ -1021,7 +1021,10 @@ async def _guard_shell_tasks(app: Any, logger: Logger, tasks: list, seen: dict) 
     First, a batch that runs the jarvis CLI on any shell server is refused
     whole: the model ran `jarvis providers add` through the root shell, as told
     by VISION_ERROR, and the CLI as root rewrote the user's providers.json as
-    root:root 0600, which the daemon could no longer read (2026-11-15).
+    root:root 0600, which the daemon could no longer read (2026-11-15). This
+    reads the usual spellings only (a wrapper such as `timeout`, or text sent
+    with send_input, gets past it); what holds as root is the CLI's own check
+    in `cli.main`.
 
     Then, in order: a sudo in front of a root server's command goes, identical root
     calls merge (`pacman -Syu` and `sudo pacman -Syu` were sent together),
