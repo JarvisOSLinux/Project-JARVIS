@@ -64,15 +64,6 @@ class LlamaEmbeddings:
         """Embed a single text string, returning a float vector."""
         return self._request([text])[0]
 
-    def embed_batch(self, texts: List[str]) -> List[List[float]]:
-        """Embed a batch of texts; a failed batch yields zero vectors."""
-        try:
-            return self._request(texts)
-        except Exception as e:
-            logger.warning(f"Embeddings: Failed to embed batch: {e}")
-            dim = self._dim or 768
-            return [[0.0] * dim for _ in texts]
-
     def use_model(self, spec: str) -> bool:
         """Embed with ``spec`` from now on; its server replaces the old one."""
         if self._server is None:

@@ -6,9 +6,11 @@ a local one keeps using their Ollama through its OpenAI-compatible API, and
 nothing is dropped.
 """
 
+import io
 import json
 import os
 import stat
+import urllib.error
 
 import pytest
 
@@ -73,6 +75,32 @@ def test_cloud_list_unreachable_strips_the_tag(file, monkeypatch):
     monkeypatch.setattr(providers_mod, "_ollama_cloud_names", lambda: [])
     _write(file, [{"name": "c", "type": "ollama", "model": "gemma4:cloud"}])
     assert providers_mod.load_providers()["providers"][0]["model"] == "gemma4"
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [urllib.error.URLError("offline"), b"<html>", b'{"error": "busy"}'],
+)
+def test_cloud_list_failure_is_logged(monkeypatch, caplog, answer):
+    def urlopen(url, timeout):
+        if isinstance(answer, Exception):
+            raise answer
+        return io.BytesIO(answer)
+
+    monkeypatch.setattr(providers_mod.urllib.request, "urlopen", urlopen)
+    with caplog.at_level("WARNING"):
+        assert providers_mod._ollama_cloud_names() == []
+    assert "Could not list ollama.com's models" in caplog.text
+
+
+def test_cloud_list_lists_names(monkeypatch):
+    body = json.dumps({"models": [{"name": "gemma4:31b"}, {"model": "gpt-oss:120b"}]})
+    monkeypatch.setattr(
+        providers_mod.urllib.request,
+        "urlopen",
+        lambda url, timeout: io.BytesIO(body.encode()),
+    )
+    assert providers_mod._ollama_cloud_names() == ["gemma4:31b", "gpt-oss:120b"]
 
 
 def test_local_model_keeps_using_ollama(file):

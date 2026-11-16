@@ -980,7 +980,16 @@ class TestRunDmcp:
     def test_the_popup_waits_as_long_as_dmcp_waits_for_polkit(self, monkeypatch):
         from jarvis.dispatch import dmcp_registry
 
-        monkeypatch.setenv("DMCP_ELEVATION_TIMEOUT_SECS", "240")
-        assert dmcp_registry._elevation_timeout() == 240
-        monkeypatch.setenv("DMCP_ELEVATION_TIMEOUT_SECS", "x")
-        assert dmcp_registry._elevation_timeout() == 180
+        monkeypatch.setattr(Config, "DMCP_ELEVATION_TIMEOUT_SECS", 240)
+        monkeypatch.setattr(Config, "SUDO_PASSWORD_POPUP", True)
+        assert dmcp_registry._dmcp_timeout(30) == 240
+        monkeypatch.setattr(Config, "SUDO_PASSWORD_POPUP", False)
+        assert dmcp_registry._dmcp_timeout(30) == 30
+
+    @pytest.mark.parametrize(
+        "value, seconds", [("240", 240), ("x", 180), ("0", 180), ("", 180)]
+    )
+    def test_elevation_timeout_is_read_as_dmcp_reads_it(self, value, seconds):
+        from jarvis.config import positive_int
+
+        assert positive_int(value, 180) == seconds

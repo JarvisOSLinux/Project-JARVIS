@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import time
 from logging import Logger
 from typing import Any, Optional, Sequence
@@ -917,7 +916,9 @@ def _entries_to_messages(entries: list) -> list:
     return messages
 
 
-def session_history(app: Any, session_id: str, limit: int = SESSION_HISTORY_LIMIT):
+def session_history(
+    app: Any, session_id: str, limit: int = SESSION_HISTORY_LIMIT
+) -> list[dict[str, Any]]:
     """A session's messages and action blocks (role "action"), in the order they came.
 
     A block stands where it started, as it did live. Blocks older than the

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import re
@@ -72,9 +73,18 @@ def _ollama_cloud_names() -> List[str]:
     try:
         with urllib.request.urlopen(_OLLAMA_CLOUD_MODELS, timeout=5) as response:
             listing = json.loads(response.read())
-        return [m.get("name") or m.get("model") for m in listing.get("models", [])]
-    except Exception:
+        models = listing.get("models") if isinstance(listing, dict) else None
+        why = "its answer has no model list"
+    except (OSError, ValueError, http.client.HTTPException) as exc:
+        models, why = None, str(exc)
+    if not isinstance(models, list):
+        logger.warning(
+            f"Could not list ollama.com's models ({why}); a cloud model is "
+            "migrated with only its :cloud tag removed, which may not be the "
+            "name ollama.com serves"
+        )
         return []
+    return [m.get("name") or m.get("model") for m in models if isinstance(m, dict)]
 
 
 def _cloud_model(model: str, cloud_names: Iterable[str]) -> str:
@@ -325,7 +335,7 @@ def url_error(url: Any) -> Optional[str]:
     return None
 
 
-def edit_provider(name: str, **fields) -> List[str]:
+def edit_provider(name: str, **fields: Any) -> List[str]:
     """Update fields on an existing provider. Returns list of updated field names.
 
     A key belongs to the address it was saved for. Moving a provider to

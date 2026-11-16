@@ -22,6 +22,7 @@ import signal
 import socket
 import sys
 import time
+from typing import List, Optional
 
 # How long `--check` may take: dmcp asks before every elevation.
 CHECK_TIMEOUT_S = 5.0
@@ -90,7 +91,7 @@ def _leave(sudo):
         time.sleep(0.2)
 
 
-def main(argv=None):
+def main(argv: Optional[List[str]] = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] == ["--check"]:
         sock = _connect()

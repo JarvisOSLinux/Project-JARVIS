@@ -35,6 +35,16 @@ def web_domains(value: str) -> tuple[str, ...]:
     return tuple(names)
 
 
+def positive_int(value: str, default: int) -> int:
+    """``value`` as a whole number above 0, else ``default``; dmcp reads its
+    own settings this way, so JARVIS agrees with it on a bad value."""
+    try:
+        number = int(value)
+    except ValueError:
+        return default
+    return number if number > 0 else default
+
+
 # Load config: JARVIS_CONFIG_DIR (system install), else the user's
 # jarvis.conf and then jarvis/.env (dev). A setting changed while JARVIS runs
 # (TUI, jarvis-app, a phone) is saved to jarvis.conf in the config dir
@@ -115,6 +125,10 @@ class Config:
     # Ollama cloud, reached through its OpenAI-style /v1 endpoint with a Bearer
     # key from ollama.com/settings/keys.
     OLLAMA_CLOUD_URL = "https://ollama.com"
+    # Key for an ollama-cloud provider at exactly OLLAMA_CLOUD_URL that has none.
+    OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "")
+    # Hugging Face token for gated or private GGUF repositories.
+    HF_TOKEN = os.getenv("HF_TOKEN", "")
     EMBED_PORT = int(os.getenv("JARVIS_EMBED_PORT", "11446"))
     # Layers offloaded to the GPU (-ngl); llama.cpp clamps to the model's count
     # and ignores it on CPU-only builds.
@@ -230,6 +244,11 @@ class Config:
         "DISPATCH_BINARY", "dispatch"
     )  # Path to dispatch binary
     DMCP_BINARY = os.getenv("DMCP_BINARY", "dmcp")  # Path to dmcp binary
+    # dmcp's own wait for an administrator password; with the sudo popup on,
+    # a dmcp command JARVIS runs gets at least as long.
+    DMCP_ELEVATION_TIMEOUT_SECS = positive_int(
+        os.getenv("DMCP_ELEVATION_TIMEOUT_SECS", ""), 180
+    )
     DISPATCH_TIMEOUT = int(os.getenv("DISPATCH_TIMEOUT", "60"))  # seconds
 
     # Dispatch repeat/progress guard (#205). EXIT-driven ROOT turns re-enter at

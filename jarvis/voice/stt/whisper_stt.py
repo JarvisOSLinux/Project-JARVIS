@@ -347,12 +347,9 @@ class WhisperSTT(STTProvider):
             return ""
 
     def _emit(self, text: str, is_final: bool) -> None:
-        try:
-            self._result_q.put_nowait((text, is_final))
-        except Exception:
-            pass
+        self._result_q.put_nowait((text, is_final))  # unbounded: never Full
         if self._on_update:
             try:
                 self._on_update(text, is_final)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"faster-whisper: transcript callback failed: {e}")

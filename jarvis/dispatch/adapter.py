@@ -28,7 +28,6 @@ from .discovery import browse_vectors_batch as discovery_browse_vectors_batch
 from .discovery import embedding_spec as discovery_embedding_spec
 from .discovery import ensure_embedding_model as discovery_ensure_embedding_model
 from .discovery import index_server as discovery_index_server
-from .discovery import normalize_count as discovery_normalize_count
 from .discovery import server_count as discovery_server_count
 from .discovery import sync_index as discovery_sync_index
 from .dmcp_registry import check_updates as registry_check_updates
@@ -78,11 +77,11 @@ class DispatchAdapter:
         """Register where pushed dispatch signals are delivered (#26)."""
         self._signal_sink = sink
 
-    async def connect(self):
+    async def connect(self) -> None:
         """Connect to the dispatch binary via stdio MCP."""
         await transport_connect(self, logger)
 
-    async def disconnect(self):
+    async def disconnect(self) -> None:
         """Disconnect from dispatch."""
         await transport_disconnect(self, logger)
 
@@ -401,10 +400,6 @@ class DispatchAdapter:
 
     async def server_count(self) -> Dict[str, Any]:
         return await discovery_server_count(self, logger)
-
-    @staticmethod
-    def _normalize_count(content: Any) -> Dict[str, int]:
-        return discovery_normalize_count(content)
 
     async def embedding_spec(self) -> Optional[Dict[str, Any]]:
         return await discovery_embedding_spec(self, logger)

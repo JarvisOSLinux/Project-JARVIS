@@ -115,7 +115,7 @@ def local_path(spec: str) -> Optional[Path]:
 
 
 def _headers() -> dict:
-    token = os.environ.get("HF_TOKEN")
+    token = Config.HF_TOKEN
     return {"Authorization": f"Bearer {token}"} if token else {}
 
 

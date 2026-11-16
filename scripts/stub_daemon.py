@@ -21,6 +21,7 @@ import json
 import os
 import sys
 import time
+from typing import Any
 
 SESSION = {"id": "demo", "title": "Demo session", "entry_count": 0}
 pending: list[dict] = []
@@ -167,7 +168,7 @@ async def reply(text: str) -> None:
 running: dict = {}
 
 
-async def action(phase: str, action_id: str, **fields) -> None:
+async def action(phase: str, action_id: str, **fields: Any) -> None:
     await broadcast(
         {"type": "action", "phase": phase, "id": action_id, "at": time.time(), **fields}
     )

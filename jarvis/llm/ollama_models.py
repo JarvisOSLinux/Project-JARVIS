@@ -13,7 +13,6 @@ from typing import Any, Callable, Dict, Iterator, List, Optional
 import httpx
 
 DEFAULT_URL = "http://localhost:11434"
-CLOUD_URL = "https://ollama.com"
 
 
 class _OllamaHttp:
@@ -46,37 +45,28 @@ class _OllamaHttp:
                 yield chunk
 
 
-def _get_shared_client(url: str, api_key: Optional[str]) -> _OllamaHttp:
-    return _OllamaHttp(url, api_key)
-
-
 def is_cloud(url: Optional[str]) -> bool:
     """True for Ollama Cloud's own host (models there are not downloaded)."""
     return bool(url) and (url or "").rstrip("/").lower().endswith("//ollama.com")
 
 
-def _client(url: Optional[str], api_key: Optional[str]) -> Any:
-    return _get_shared_client((url or DEFAULT_URL).rstrip("/"), api_key or None)
-
-
-def _field(obj: Any, name: str) -> Any:
-    return obj.get(name) if isinstance(obj, dict) else getattr(obj, name, None)
+def _client(url: Optional[str], api_key: Optional[str]) -> _OllamaHttp:
+    return _OllamaHttp((url or DEFAULT_URL).rstrip("/"), api_key or None)
 
 
 def list_models(url: Optional[str], api_key: Optional[str]) -> List[Dict[str, Any]]:
     """Models the server at ``url`` offers, as ``{name, size, modified}``."""
     listing = _client(url, api_key).list()
-    models = _field(listing, "models") or []
     out = []
-    for m in models:
-        name = _field(m, "model") or _field(m, "name")
+    for m in listing.get("models") or []:
+        name = m.get("model") or m.get("name")
         if not name:
             continue
-        modified = _field(m, "modified_at")
+        modified = m.get("modified_at")
         out.append(
             {
                 "name": name,
-                "size": _field(m, "size") or 0,
+                "size": m.get("size") or 0,
                 "modified": str(modified) if modified else "",
             }
         )
@@ -104,8 +94,8 @@ def pull_model(
     for chunk in _client(url, api_key).pull(model, stream=True):
         progress(
             {
-                "status": _field(chunk, "status") or "",
-                "completed": _field(chunk, "completed") or 0,
-                "total": _field(chunk, "total") or 0,
+                "status": chunk.get("status") or "",
+                "completed": chunk.get("completed") or 0,
+                "total": chunk.get("total") or 0,
             }
         )

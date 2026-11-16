@@ -1,8 +1,10 @@
 """Model picker backend: list and pull Ollama models (local or Ollama Cloud)."""
 
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
+import httpx
 import pytest
 
 from jarvis.llm import ollama_models
@@ -19,48 +21,78 @@ class TestIsCloud:
         assert not ollama_models.is_cloud(None)
 
 
+def _serve(monkeypatch, handler):
+    """Answer the picker's HTTP requests with ``handler``; nothing leaves the host."""
+    real = httpx.Client
+    monkeypatch.setattr(
+        ollama_models.httpx,
+        "Client",
+        lambda **kw: real(transport=httpx.MockTransport(handler), **kw),
+    )
+
+
 @pytest.mark.unit
 class TestListModels:
-    def test_reads_objects_and_dicts_sorted_and_skips_nameless(self):
-        listing = SimpleNamespace(
-            models=[
-                SimpleNamespace(model="qwen3:8b", size=5, modified_at="t1"),
-                {"name": "llama3:8b", "size": 7},
-                {"size": 1},
-            ]
-        )
-        client = Mock()
-        client.list.return_value = listing
-        with patch.object(
-            ollama_models, "_get_shared_client", return_value=client
-        ) as g:
-            out = ollama_models.list_models("https://ollama.com", "key")
-        g.assert_called_once_with("https://ollama.com", "key")
+    def test_reads_tags_sorted_and_skips_nameless(self, monkeypatch):
+        seen = []
+
+        def handler(request):
+            seen.append(request)
+            return httpx.Response(
+                200,
+                json={
+                    "models": [
+                        {
+                            "name": "qwen3:8b",
+                            "model": "qwen3:8b",
+                            "size": 5,
+                            "modified_at": "t1",
+                        },
+                        {"name": "llama3:8b", "size": 7},
+                        {"size": 1},
+                    ]
+                },
+            )
+
+        _serve(monkeypatch, handler)
+        out = ollama_models.list_models("https://ollama.com", "key")
+        assert [str(r.url) for r in seen] == ["https://ollama.com/api/tags"]
+        assert seen[0].headers["Authorization"] == "Bearer key"
         assert [m["name"] for m in out] == ["llama3:8b", "qwen3:8b"]
         assert out[1] == {"name": "qwen3:8b", "size": 5, "modified": "t1"}
 
-    def test_default_url_and_no_key(self):
-        client = Mock()
-        client.list.return_value = {"models": []}
-        with patch.object(
-            ollama_models, "_get_shared_client", return_value=client
-        ) as g:
-            assert ollama_models.list_models(None, "") == []
-        g.assert_called_once_with("http://localhost:11434", None)
+    def test_default_url_and_no_key(self, monkeypatch):
+        seen = []
+
+        def handler(request):
+            seen.append(request)
+            return httpx.Response(200, json={"models": []})
+
+        _serve(monkeypatch, handler)
+        assert ollama_models.list_models(None, "") == []
+        assert str(seen[0].url) == "http://localhost:11434/api/tags"
+        assert "Authorization" not in seen[0].headers
 
 
 @pytest.mark.unit
 class TestPullModel:
-    def test_streams_progress(self):
-        client = Mock()
-        client.pull.return_value = iter(
-            [{"status": "pulling x", "completed": 1, "total": 4}, {"status": "success"}]
-        )
+    def test_streams_progress(self, monkeypatch):
         seen = []
-        with patch.object(ollama_models, "_get_shared_client", return_value=client):
-            ollama_models.pull_model("m:1", None, None, seen.append)
-        client.pull.assert_called_once_with("m:1", stream=True)
-        assert seen == [
+
+        def handler(request):
+            seen.append(request)
+            return httpx.Response(
+                200,
+                content=b'{"status": "pulling x", "completed": 1, "total": 4}\n\n'
+                b'{"status": "success"}\n',
+            )
+
+        _serve(monkeypatch, handler)
+        progress = []
+        ollama_models.pull_model("m:1", None, None, progress.append)
+        assert str(seen[0].url) == "http://localhost:11434/api/pull"
+        assert json.loads(seen[0].content) == {"model": "m:1", "stream": True}
+        assert progress == [
             {"status": "pulling x", "completed": 1, "total": 4},
             {"status": "success", "completed": 0, "total": 0},
         ]

@@ -1,7 +1,7 @@
 import hashlib
 import json
 import os
-from typing import List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from ..config import Config
 from ..contextor import ContextorAdapter
@@ -115,7 +115,7 @@ class ComponentFactory:
                     and not kwargs["api_key"]
                     and origin(kwargs["api_url"]) == origin(Config.OLLAMA_CLOUD_URL)
                 ):
-                    kwargs["api_key"] = os.environ.get("OLLAMA_API_KEY", "")
+                    kwargs["api_key"] = Config.OLLAMA_API_KEY
                 if spec.get("headers"):
                     kwargs["headers"] = spec["headers"]
 
@@ -224,7 +224,7 @@ class ComponentFactory:
         return EventMerger(poll_interval=3.0)
 
     @staticmethod
-    def create_contextor(embeddings=None) -> ContextorAdapter:
+    def create_contextor(embeddings: Optional[Any] = None) -> ContextorAdapter:
         """
         Create ContextorAdapter — thin stdio client to the Rust binary.
 
@@ -362,8 +362,8 @@ class ComponentFactory:
 
     @staticmethod
     def create_voice_manager_optional(
-        on_command, echo_canceller: Optional[any] = None
-    ) -> Optional[any]:
+        on_command: Callable[[str], Any], echo_canceller: Optional[Any] = None
+    ) -> Optional[Any]:
         """
         Create VoiceManager if voice input is enabled and audio is available.
 
@@ -449,9 +449,9 @@ class ComponentFactory:
     @staticmethod
     def create_all_components(
         text_mode: bool = False,
-        on_voice_command=None,
+        on_voice_command: Optional[Callable[[str], Any]] = None,
         suppress_stdout_output: bool = False,
-    ):
+    ) -> Dict[str, Any]:
         """
         Create all JARVIS components
 

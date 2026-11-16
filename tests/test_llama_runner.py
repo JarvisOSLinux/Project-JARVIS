@@ -310,7 +310,7 @@ class TestOllamaCloud:
             )
         )
         monkeypatch.setattr(Config, "PROVIDERS_FILE", str(path))
-        monkeypatch.setenv("OLLAMA_API_KEY", "envkey")
+        monkeypatch.setattr(Config, "OLLAMA_API_KEY", "envkey")
         pool = ComponentFactory._build_provider_pool()
         provider = pool.entries[0].provider
         assert provider.api_url == "https://ollama.com"
@@ -340,7 +340,7 @@ class TestOllamaCloud:
             )
         )
         monkeypatch.setattr(Config, "PROVIDERS_FILE", str(path))
-        monkeypatch.setenv("OLLAMA_API_KEY", "envkey")
+        monkeypatch.setattr(Config, "OLLAMA_API_KEY", "envkey")
         pool = ComponentFactory._build_provider_pool()
         provider = pool.entries[0].provider
         assert "Authorization" not in provider.headers

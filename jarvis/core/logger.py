@@ -3,7 +3,7 @@ import os
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TextIO
 
 from ..platform.ownership import keep_owner, make_dirs
 from .secret_scrubber import REDACTING_FILTER
@@ -27,10 +27,6 @@ class ColoredFormatter(logging.Formatter):
                 f"{self.COLORS[levelname]}{self.BOLD}{levelname}{self.RESET}"
             )
         return super().format(record)
-
-
-def _is_stdio_stream(stream: object) -> bool:
-    return stream in (sys.stdout, sys.stderr)
 
 
 def _is_console_stream_handler(handler: logging.Handler) -> bool:
@@ -221,7 +217,7 @@ class JarvisLogger:
                     _ensure_no_last_resort(logger)
 
     @classmethod
-    def child_stderr(cls, name: str):
+    def child_stderr(cls, name: str) -> TextIO:
         """Where a helper process (dispatch, contextor) writes its stderr.
 
         dispatch's stderr was the terminal's, so in the TUI its warnings ("WARN
@@ -258,10 +254,6 @@ class JarvisLogger:
                 root.removeHandler(handler)
         if not root.handlers:
             root.addHandler(logging.NullHandler())
-
-    @classmethod
-    def get_log_file(cls) -> Optional[Path]:
-        return cls._log_file
 
 
 def get_logger(name: str) -> logging.Logger:
