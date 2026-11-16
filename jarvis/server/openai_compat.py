@@ -41,6 +41,7 @@ import json
 import os
 import secrets
 import threading
+from email.message import Message
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Optional
 
@@ -51,6 +52,22 @@ from ..llm.base import BaseLLMProvider
 logger = get_logger(__name__)
 
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+# A chat with a few base64 images stays well under this.
+MAX_BODY_BYTES = 32 * 1024 * 1024
+
+
+def _content_length(headers: Message) -> int:
+    """The declared body size, or -1 when it is not a non-negative integer.
+
+    A negative size must never reach ``rfile.read``: ``read(-1)`` reads to EOF,
+    which the client never sends while it waits for the reply.
+    """
+    try:
+        length = int(headers.get("Content-Length", 0) or 0)
+    except ValueError:
+        return -1
+    return max(length, -1)
 
 
 def _load_or_create_token() -> str:
@@ -122,7 +139,13 @@ class _OpenAICompatHandler(BaseHTTPRequestHandler):
         if not self._check_auth():
             return
 
-        length = int(self.headers.get("Content-Length", 0) or 0)
+        length = _content_length(self.headers)
+        if length < 0:
+            self._send_json(400, {"error": {"message": "invalid Content-Length"}})
+            return
+        if length > MAX_BODY_BYTES:
+            self._send_json(413, {"error": {"message": "request body too large"}})
+            return
         raw = self.rfile.read(length) if length else b""
         try:
             payload = json.loads(raw or b"{}")
