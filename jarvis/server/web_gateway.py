@@ -72,7 +72,7 @@ import os
 import time
 from http import HTTPStatus
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 from urllib.parse import urlsplit
 
 from ..config import Config
@@ -81,6 +81,9 @@ from ..core.logger import get_logger
 from ..core.secret_scrubber import redact_secrets
 from ..platform import current as platform
 from ..platform.ownership import keep_owner, make_dirs
+
+if TYPE_CHECKING:  # websockets is the optional `web` extra, imported in serve()
+    from websockets.http11 import Response
 
 logger = get_logger(__name__)
 
@@ -657,7 +660,9 @@ class Gateway:
 
     # -- HTTP -----------------------------------------------------------
 
-    async def process_request(self, connection: Any, request: Any):
+    async def process_request(
+        self, connection: Any, request: Any
+    ) -> Optional[Response]:
         """Serve the page, or vet the WebSocket upgrade. None lets it through."""
         path = request.path.split("?")[0]
         headers = request.headers

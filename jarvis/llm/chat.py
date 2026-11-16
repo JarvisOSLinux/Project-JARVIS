@@ -191,31 +191,7 @@ class LLM:
         """Access the tiered context manager (for external inspection/control)."""
         return self._context_manager
 
-    def set_prompt(self, mode: str, prompt: str) -> bool:
-        """
-        Update the system prompt for a given mode.
-
-        Returns True if the prompt actually changed. When the target mode
-        is the current mode, the history is rebuilt to apply the new
-        prompt on the next turn.
-        """
-        current = self._prompts.get(mode)
-        if current == prompt:
-            return False
-
-        self._prompts[mode] = prompt
-        # Rebuild history for non-root modes so the new prompt takes effect
-        # immediately. Root has its own window/summary machinery; changing
-        # its prompt mid-session isn't a supported operation here.
-        if mode != "root":
-            self._histories[mode] = [
-                {"role": "system", "content": prompt},
-            ]
-            if self._mode == mode:
-                self.chat_history = self._histories[mode]
-        return True
-
-    def switch_mode(self, mode: str):
+    def switch_mode(self, mode: str) -> None:
         """
         Switch to a different prompt mode (root, dispatch).
 
@@ -512,20 +488,12 @@ class LLM:
 
         return None, "none"
 
-    def reset_history(self):
+    def reset_history(self) -> None:
         """Reset current mode's history to system prompt only."""
         if self._mode == "root":
             # Soft reset: clear hot window but keep the rolling summary
             self._context_manager.soft_reset()
 
-        self._histories[self._mode] = [
-            {"role": "system", "content": self._prompts[self._mode]},
-        ]
-        self.chat_history = self._histories[self._mode]
-
-    def full_reset(self):
-        """Hard reset: clear all tiers including rolling summary."""
-        self._context_manager.reset()
         self._histories[self._mode] = [
             {"role": "system", "content": self._prompts[self._mode]},
         ]

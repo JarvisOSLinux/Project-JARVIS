@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from rich.text import Text
 from textual import events
+from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
 from textual.reactive import reactive
@@ -122,7 +123,7 @@ class Block(Vertical):
         self._output.display = False
         self._render_title()
 
-    def compose(self):
+    def compose(self) -> ComposeResult:
         yield self._title
         yield self._body
 

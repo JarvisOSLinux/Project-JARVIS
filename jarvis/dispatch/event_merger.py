@@ -263,7 +263,7 @@ class EventMerger:
         self._tasks = tasks
         logger.info("EventMerger: Started (deduplicating signal queue active)")
 
-    async def stop(self):
+    async def stop(self) -> None:
         """Stop listening and clean up."""
         self._running = False
         for task in self._tasks:
@@ -280,7 +280,7 @@ class EventMerger:
         """Block until the next event arrives from either source."""
         return await self._queue.get()
 
-    async def push_event(self, event: Event):
+    async def push_event(self, event: Event) -> None:
         """Manually push an event (e.g., for shutdown)."""
         await self._queue.put(event)
 

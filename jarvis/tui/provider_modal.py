@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import urlparse
 
+from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -301,7 +302,7 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
             inp.password = not self._key_revealed
             event.button.label = "hide" if self._key_revealed else "show"
 
-    def on_key(self, event) -> None:
+    def on_key(self, event: events.Key) -> None:
         if event.key == "enter":
             self.action_confirm()
 

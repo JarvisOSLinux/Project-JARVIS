@@ -214,7 +214,7 @@ class TestThePoolSurvivesABadEntry:
                 {"name": "ok", "type": "api", "model": "m", "url": "http://h/v1"},
             ],
         }
-        monkeypatch.setenv("OLLAMA_API_KEY", "envkey")
+        monkeypatch.setattr(providers_module.Config, "OLLAMA_API_KEY", "envkey")
         entries = ComponentFactory._pool_entries(data)
         assert "ok" in [e.name for e in entries]
         for e in entries:
@@ -241,7 +241,7 @@ class TestThePoolSurvivesABadEntry:
                 {"name": "c", "type": "ollama-cloud", "model": "m", "url": url}
             ],
         }
-        monkeypatch.setenv("OLLAMA_API_KEY", "envkey")
+        monkeypatch.setattr(providers_module.Config, "OLLAMA_API_KEY", "envkey")
         provider = ComponentFactory._pool_entries(data)[0].provider
         assert (provider.headers.get("Authorization") == "Bearer envkey") is gets_key
 

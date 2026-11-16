@@ -10,7 +10,7 @@ from jarvis.llm import models
 @pytest.fixture(autouse=True)
 def _store(tmp_path, monkeypatch):
     monkeypatch.setattr(Config, "MODELS_DIR", str(tmp_path))
-    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.setattr(Config, "HF_TOKEN", "")
 
 
 def _put(user, repo, name, data=b"GGUF"):
@@ -167,7 +167,7 @@ class TestPull:
             models.pull("a/b")
 
     def test_token_sent_when_set(self, monkeypatch):
-        monkeypatch.setenv("HF_TOKEN", "tok")
+        monkeypatch.setattr(Config, "HF_TOKEN", "tok")
         assert models._headers() == {"Authorization": "Bearer tok"}
 
 

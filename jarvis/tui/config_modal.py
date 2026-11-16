@@ -26,7 +26,6 @@ from ..core.providers import (
     add_provider,
     edit_provider,
     list_providers,
-    move_provider,
     remove_provider,
 )
 from .provider_modal import ProviderModal

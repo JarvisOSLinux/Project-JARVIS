@@ -78,7 +78,7 @@ from .chat_view import ChatView
 from .command_input import CommandDropdown, CommandInput
 from .config_modal import ConfigModal, ConfigModalResult
 from .confirm_modal import ConfirmModal
-from .local_input import export_transcript_to_disk, handle_local_input, show_attached
+from .local_input import handle_local_input, show_attached
 from .session_sidebar import on_session_selected as handle_session_selected
 from .session_sidebar import refresh_sidebar
 from .session_sidebar import schedule_sidebar_refresh as queue_sidebar_refresh
@@ -643,10 +643,6 @@ class JarvisTUI(App):
 
     async def _tui_confirm(self, request_id: str, tools_detail: list) -> bool:
         return await self.push_screen_wait(ConfirmModal(request_id, tools_detail))
-
-    def _export_transcript_to_disk(self, filename: Optional[str]) -> None:
-        """Save plain transcript as Markdown under ``JARVIS_DATA_DIR/transcripts``."""
-        export_transcript_to_disk(self, filename)
 
     # ------------------------------------------------------------------
     # Status bar

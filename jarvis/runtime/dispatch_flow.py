@@ -146,17 +146,6 @@ def _extract_pids_from_result(result: Any) -> list[int]:
     return []
 
 
-async def run_dispatch_subchain(
-    app: Any,
-    logger: Logger,
-    intent: str,
-    max_chain_depth: int,
-    goal_id: Optional[str] = None,
-) -> str:
-    """Kept for compatibility; ROOT now uses search_tools/get_server_docs/dispatch directly."""
-    return f"Direct dispatch unavailable — use search_tools to find tools for: {intent}"
-
-
 # Manifest-derived stateful flags, cached for the daemon's lifetime — the flag
 # is a static property of an installed server and must not cost a manifest read
 # per dispatch. Empty/failed lookups are NOT cached, so a server installed

@@ -180,26 +180,11 @@ class GoalManager:
     def add_goals(self, descriptions: List[str]) -> List["Goal"]:
         return [self.add_goal(d) for d in descriptions]
 
-    def add_subgoal(self, parent_id: str, description: str) -> Goal:
-        """Create a child goal under an existing goal."""
-        goal = Goal(description=description, parent_id=parent_id)
-        self._goals.append(goal)
-        parent = self._find_goal(parent_id)
-        if parent:
-            parent.child_goal_ids.append(goal.id)
-            goal.chat_session = parent.chat_session
-            if parent.status == GoalStatus.PENDING:
-                parent.status = GoalStatus.ACTIVE
-        logger.info(
-            f"GoalManager: Added subgoal [{goal.id}] under [{parent_id}]: {description}"
-        )
-        return goal
-
     # ------------------------------------------------------------------
     # Lifecycle mutations
     # ------------------------------------------------------------------
 
-    def link_tasks(self, goal_id: str, pids: List[int]):
+    def link_tasks(self, goal_id: str, pids: List[int]) -> None:
         """Attach dispatched task PIDs to a goal and mark it active.
 
         Dedupes: _extract_pids_from_result re-parses INIT lines out of
@@ -242,7 +227,7 @@ class GoalManager:
 
     def link_dispatch_fingerprint(
         self, goal_id: str, fingerprint: str, pids: List[int]
-    ):
+    ) -> None:
         """Map dispatched PIDs to the fingerprint that produced them so a later
         EXIT can tell whether that dispatch made progress (#205)."""
         goal = self._find_goal(goal_id)
@@ -253,7 +238,7 @@ class GoalManager:
 
     def link_dispatch_servers(
         self, goal_id: str, pids: List[int], tasks: List[Dict[str, Any]]
-    ):
+    ) -> None:
         """Map each dispatched PID to the server of *its own* task.
 
         The batch fingerprint deliberately covers the whole batch (the repeat
@@ -276,14 +261,7 @@ class GoalManager:
             if isinstance(server, str) and server:
                 goal.dispatch_pid_server[pid] = server
 
-    def update_strategy(self, goal_id: str, strategy: str):
-        """LLM updates its forward-looking plan for this goal."""
-        goal = self._find_goal(goal_id)
-        if goal:
-            goal.strategy = strategy
-            logger.debug(f"GoalManager: Goal [{goal_id}] strategy updated")
-
-    def complete_goal(self, goal_id: str, output: Optional[str] = None):
+    def complete_goal(self, goal_id: str, output: Optional[str] = None) -> None:
         """Mark a goal done and store its final output."""
         goal = self._find_goal(goal_id)
         if goal:
@@ -295,7 +273,7 @@ class GoalManager:
             if goal.parent_id:
                 self._log_parent_progress(goal.parent_id)
 
-    def fail_goal(self, goal_id: str, reason: Optional[str] = None):
+    def fail_goal(self, goal_id: str, reason: Optional[str] = None) -> None:
         """Mark a goal failed and store the reason as its output."""
         goal = self._find_goal(goal_id)
         if goal:
@@ -307,7 +285,7 @@ class GoalManager:
             if goal.parent_id:
                 self._log_parent_progress(goal.parent_id)
 
-    def defer_goal(self, goal_id: str, timer_pid: int):
+    def defer_goal(self, goal_id: str, timer_pid: int) -> None:
         goal = self._find_goal(goal_id)
         if goal:
             goal.status = GoalStatus.DEFERRED
@@ -319,7 +297,7 @@ class GoalManager:
                 f"(timer PID {timer_pid}, defer #{goal.defer_count})"
             )
 
-    def reactivate_goal(self, goal_id: str):
+    def reactivate_goal(self, goal_id: str) -> None:
         goal = self._find_goal(goal_id)
         if goal and goal.status == GoalStatus.DEFERRED:
             goal.status = GoalStatus.PENDING
@@ -375,10 +353,6 @@ class GoalManager:
             if g.status in (GoalStatus.PENDING, GoalStatus.ACTIVE, GoalStatus.DEFERRED)
         ]
 
-    def get_root_goals(self) -> List[Goal]:
-        """Return only top-level goals (no parent)."""
-        return [g for g in self._goals if g.parent_id is None]
-
     def get_all_goals(self) -> List[Goal]:
         return list(self._goals)
 
@@ -402,7 +376,7 @@ class GoalManager:
                 return goal
         return None
 
-    def update_from_signal(self, signal: Dict[str, Any]):
+    def update_from_signal(self, signal: Dict[str, Any]) -> None:
         logger.info(
             f"GoalManager: Processing signal type={signal.get('type')}, "
             f"pid={signal.get('pid')}, data={signal.get('data', '')}"
@@ -497,7 +471,7 @@ class GoalManager:
             self._archive_goals(failed)
         return failed
 
-    def clear(self):
+    def clear(self) -> None:
         self._goals.clear()
 
     def archive_all(self) -> List[Goal]:
@@ -543,24 +517,6 @@ class GoalManager:
             return []
         return entries[-limit:]
 
-    def search_archive(
-        self, keywords: List[str], limit: int = 20
-    ) -> List[Dict[str, Any]]:
-        all_entries = self.load_archive(limit=500)
-        keywords_lower = [k.lower() for k in keywords]
-        matches = []
-        for entry in all_entries:
-            text = (
-                entry.get("description", "")
-                + " "
-                + (entry.get("output") or entry.get("result") or "")
-            ).lower()
-            if any(kw in text for kw in keywords_lower):
-                matches.append(entry)
-                if len(matches) >= limit:
-                    break
-        return matches
-
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
@@ -570,10 +526,6 @@ class GoalManager:
             if goal.id == goal_id:
                 return goal
         return None
-
-    def _find_goal_by_pid(self, pid: int) -> Optional[Goal]:
-        """Legacy alias — use find_goal_by_task_pid from outside."""
-        return self.find_goal_by_task_pid(pid)
 
     def _child_summary(self, goal_id: str) -> Dict[str, Any]:
         """Compact summary of a child goal for parent context."""

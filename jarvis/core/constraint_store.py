@@ -13,7 +13,6 @@ import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 from uuid import uuid4
 
 from ..config import Config
