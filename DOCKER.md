@@ -8,8 +8,7 @@ Complete guide for running Project JARVIS in Docker for cross-platform testing a
 
 ### **Prerequisites**
 1. Docker installed: [Get Docker](https://docs.docker.com/get-docker/)
-2. A model the container can reach. The image has no `llama-server`, so a local
-   `llamacpp` provider does not run in it: use an `api` provider (an Ollama or
+2. A model the container can reach: an `api` provider (an Ollama or
    `llama-server` on the host, or a cloud API), `lmstudio` or `ollama-cloud`.
 
 ### **Configure an LLM provider (first run)**
@@ -267,7 +266,7 @@ The Docker image runs JARVIS in **conversation-only mode** when the `dispatch` a
 
 ## Changelog — corrected claims
 
-*2026-11-15:* Ollama is no longer built in (#291): there is no `ollama` provider type, and the image has no `llama-server`, so a container uses an `api` (a host Ollama included), `lmstudio` or `ollama-cloud` provider. The run scripts no longer check for Ollama or pass the unread `OLLAMA_HOST`; they and docker-compose mount the `jarvis-config` volume that holds `providers.json`.
+*2026-11-15:* Ollama is no longer built in (#291): there is no `ollama` provider type, so a container reaches an Ollama on the host as an `api` provider (or uses `lmstudio` or `ollama-cloud`). The run scripts no longer check for Ollama or pass the unread `OLLAMA_HOST`; they and docker-compose mount the `jarvis-config` volume that holds `providers.json`.
 
 *2026-07-24:* env table extended with the variables the merged tree actually reads — `JARVIS_MODELS_DIR` (plus the legacy `MODELS_DIR` alias; base dir is the platform data dir, not a cwd-relative `models/`) and the five `JARVIS_OPENAI_SERVER_*` settings for the opt-in OpenAI-compatible listener, with its non-loopback double opt-in and mandatory bearer token called out. Names/defaults verified against `jarvis/config.py`.
 

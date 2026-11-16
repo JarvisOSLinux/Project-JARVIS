@@ -198,8 +198,8 @@ Run JARVIS in Docker for easy cross-platform deployment and testing!
 ./docker-build.sh        # Linux/Mac
 docker-build.bat         # Windows
 
-# 2. Add a provider once (the image has no llama-server: use api, lmstudio or
-#    ollama-cloud; see DOCKER.md)
+# 2. Add a provider once, e.g. an Ollama on the host as an api provider
+#    (see DOCKER.md)
 
 # 3. Run JARVIS
 ./docker-run.sh chat     # Text chat mode (recommended first test)
