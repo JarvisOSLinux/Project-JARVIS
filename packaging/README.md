@@ -2,6 +2,13 @@
 
 This directory contains all the necessary files and scripts to integrate JARVIS as a core component of your custom Linux distribution.
 
+> **Outdated.** `install.sh` installs none of JARVIS's three helpers (dispatch,
+> dmcp, contextor), so its service would run conversation-only, and run from
+> anywhere but the repository root it installs `jarvis-ai`, the project's old
+> name. The Makefile still builds packages called `jarvis-ai`, and its RPM target
+> copies a `jarvis.spec` that is not in this folder. For a working install,
+> follow [the Installation steps in the main README](../README.md#installation).
+
 ## 🎯 **Project Status: READY FOR LINUX DISTRIBUTION INTEGRATION**
 
 ✅ **Complete packaging system**  
