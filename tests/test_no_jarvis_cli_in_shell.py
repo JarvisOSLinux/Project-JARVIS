@@ -9,12 +9,14 @@ PermissionError on every provider read after it.
 
 import asyncio
 import logging
+from unittest.mock import Mock, patch
 
 import pytest
 
 import jarvis.core.confirmation_manager as cm
 from jarvis.core.confirmation_manager import ConfirmationManager
-from jarvis.runtime import dispatch_flow
+from jarvis.dispatch.goal_manager import GoalManager
+from jarvis.runtime import dispatch_flow, root_handlers
 
 _LOG = logging.getLogger("test")
 ROOT = "com.github.yakupatahanov.jarvis-shell-system-mcp"
@@ -25,8 +27,9 @@ _SHELL = ["execute_command", "execute_script", "run_job", "send_input", "read_ou
 class _Adapter:
     is_connected = True
 
-    def __init__(self):
+    def __init__(self, forbid=()):
         self.sent = None
+        self.forbid = forbid
 
     async def list_server_tools(self, server_id):
         return {
@@ -38,7 +41,13 @@ class _Adapter:
         return {
             "scope": "system" if server_id == ROOT else "user",
             "trustStatus": "community",
-            "tools": [{"name": t, "threat_level": "dangerous"} for t in _SHELL],
+            "tools": [
+                {
+                    "name": t,
+                    "threat_level": "forbidden" if t in self.forbid else "dangerous",
+                }
+                for t in _SHELL
+            ],
         }
 
     async def send_tasks(self, tasks, session_id=None):
@@ -197,3 +206,94 @@ class TestCommandsAboutJarvisStillRun:
             },
         )
         assert "error" not in result and len(app.dispatch.sent) == 1
+
+
+class _RestartedApp:
+    def __init__(self, confirmation, tmp_path, forbid=()):
+        self.confirmation = confirmation
+        self.dispatch = _Adapter(forbid)
+        self.goals = GoalManager(archive_dir=str(tmp_path))
+        self.llm = object()
+        self._gui_clients = None
+        self.told = None
+
+    async def _act_on_root_response(self, response):
+        pass
+
+
+def _approve_after_restart(monkeypatch, tmp_path, task, forbid=()):
+    """Hold `task` in confirmations.json as a daemon without the guard did,
+    then approve it in a restarted daemon (the offline queue resolves the same)."""
+    for cache in ("_THREAT_DECL_BY_SERVER", "_STATEFUL_BY_SERVER", "_ROOT_BY_SERVER"):
+        monkeypatch.setattr(dispatch_flow, cache, {})
+    for module in (dispatch_flow, root_handlers):
+        monkeypatch.setattr(module, "emit_activity", lambda *a, **k: None)
+    monkeypatch.setattr(root_handlers, "build_root_context", lambda a, l, **k: "")
+    store = tmp_path / "confirmations.json"
+    before = ConfirmationManager(store_path=str(store))
+    before.set_event_injector(Mock())
+    tty = patch.object(ConfirmationManager, "_has_tty", return_value=False)
+    desktop = patch.object(
+        ConfirmationManager, "_has_desktop_notifications", return_value=False
+    )
+    with tty, desktop:
+        asyncio.run(
+            before.request_confirmation(
+                request_id="r1",
+                tasks=[task],
+                tools_needing_confirmation=[
+                    {"tool_name": f"{task['server']}.{task['tool']}", "task": task}
+                ],
+                approved_tasks=[],
+                denied_tools=[],
+                timeout=0,
+                session_id="goal-gone",
+            )
+        )
+    app = _RestartedApp(ConfirmationManager(store_path=str(store)), tmp_path, forbid)
+
+    async def _ask(a, l, context, **k):
+        app.told = context
+        return {"action": "respond", "output": "ok"}
+
+    monkeypatch.setattr(root_handlers, "ask_llm", _ask)
+    asyncio.run(
+        root_handlers.on_confirmation_response(
+            app, _LOG, {"id": "r1", "approved": True}
+        )
+    )
+    return app
+
+
+@pytest.mark.unit
+class TestApprovedBeforeTheGuard:
+    def test_the_incident_held_over_a_restart_is_refused(self, monkeypatch, tmp_path):
+        incident = _cmd(
+            ROOT,
+            "jarvis",
+            "providers",
+            "add",
+            "--type",
+            "llamacpp",
+            "--model",
+            "ggml-org/gemma-3-4b-it-GGUF",
+            "--vision",
+        )
+        app = _approve_after_restart(monkeypatch, tmp_path, incident)
+        assert app.dispatch.sent is None, "nothing in the batch is sent"
+        assert "DISPATCH_ERROR" in app.told
+        assert "JARVIS's own jarvis command" in app.told
+
+    def test_a_tool_now_forbidden_is_refused(self, monkeypatch, tmp_path):
+        task = _cmd(USER, "uname", "-r")
+        app = _approve_after_restart(
+            monkeypatch, tmp_path, task, forbid=("execute_command",)
+        )
+        assert app.dispatch.sent is None, "nothing in the batch is sent"
+        assert "classed FORBIDDEN" in app.told
+
+    def test_an_ordinary_one_still_runs(self, monkeypatch, tmp_path):
+        task = _cmd(USER, "uname", "-r")
+        app = _approve_after_restart(monkeypatch, tmp_path, task)
+        assert app.dispatch.sent == [task]
+        assert app.told is None

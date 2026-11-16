@@ -376,28 +376,10 @@ async def dispatch_send(
     tools_needing_confirmation: list[dict[str, Any]] = []
 
     # FORBIDDEN means the tool never runs (mcp-registry#88): refused here, ahead
-    # of should_confirm, because that is the layer allow_all skips. Every task is
-    # classified before any is sent, so the whole batch is refused, not part of it.
-    metas: list[dict[str, Any]] = []
-    for task in tasks:
-        tool_meta = await get_tool_metadata(app, logger, task)
-        metas.append(tool_meta)
-        if (
-            classify(task.get("tool"), tool_meta, task.get("params"))
-            >= ThreatLevel.FORBIDDEN
-        ):
-            blocked = f"{task.get('server', '?')}.{task.get('tool', '?')}"
-            logger.warning(f"JARVIS: Dispatch blocked, FORBIDDEN tool: {blocked}")
-            emit_activity(app, f"Blocked, forbidden: {blocked}", kind="dispatch")
-            return {
-                "error": (
-                    f"Dispatch refused: {blocked} is classed FORBIDDEN and never "
-                    "runs, whatever the user confirms or the confirmation mode. "
-                    "Nothing in this batch was sent. Do not retry it or look for "
-                    "another route to the same effect. Tell the user what was "
-                    "blocked and why, then ask what they want to do instead."
-                )
-            }
+    # of should_confirm, because that is the layer allow_all skips.
+    forbidden, metas = await _refuse_forbidden(app, logger, tasks)
+    if forbidden:
+        return {"error": forbidden}
 
     for task, tool_meta in zip(tasks, metas):
         tool_name = f"{task.get('server', '?')}.{task.get('tool', '?')}"
@@ -469,6 +451,49 @@ async def dispatch_send(
         "confirmation_id": request_id,
         "tools_pending": tool_names,
     }
+
+
+async def _refuse_forbidden(
+    app: Any, logger: Logger, tasks: list[dict[str, Any]]
+) -> tuple[str, list[dict[str, Any]]]:
+    """The refusal for a batch holding a FORBIDDEN tool, or "", and each task's metadata.
+
+    Every task is classified before any is sent, so the whole batch is refused,
+    not part of it.
+    """
+    metas: list[dict[str, Any]] = []
+    for task in tasks:
+        tool_meta = await get_tool_metadata(app, logger, task)
+        metas.append(tool_meta)
+        if (
+            classify(task.get("tool"), tool_meta, task.get("params"))
+            >= ThreatLevel.FORBIDDEN
+        ):
+            blocked = f"{task.get('server', '?')}.{task.get('tool', '?')}"
+            logger.warning(f"JARVIS: Dispatch blocked, FORBIDDEN tool: {blocked}")
+            emit_activity(app, f"Blocked, forbidden: {blocked}", kind="dispatch")
+            return (
+                f"Dispatch refused: {blocked} is classed FORBIDDEN and never "
+                "runs, whatever the user confirms or the confirmation mode. "
+                "Nothing in this batch was sent. Do not retry it or look for "
+                "another route to the same effect. Tell the user what was "
+                "blocked and why, then ask what they want to do instead."
+            ), metas
+    return "", metas
+
+
+async def refuse_approved(app: Any, logger: Logger, tasks: list[dict[str, Any]]) -> str:
+    """The shell guard's or FORBIDDEN refusal for an approved confirmation's tasks.
+
+    A confirmation restored from confirmations.json, or one approved through
+    the offline queue, can predate a guard: approving it would otherwise send
+    the root-shell `jarvis providers add` it was held with. Returns "" to send.
+    """
+    refused = await _guard_shell_tasks(app, logger, tasks, {})
+    if refused:
+        logger.warning(f"JARVIS: {refused}")
+        return refused
+    return (await _refuse_forbidden(app, logger, tasks))[0]
 
 
 # Manifest-derived per-tool threat declarations, cached for the daemon's
