@@ -8,8 +8,8 @@ Complete guide for running Project JARVIS in Docker for cross-platform testing a
 
 ### **Prerequisites**
 1. Docker installed: [Get Docker](https://docs.docker.com/get-docker/)
-2. Ollama running: `ollama serve`
-3. LLM model: `ollama pull qwen3:4b` (or your preferred model)
+2. A model the container can reach: an `api` provider (an Ollama or
+   `llama-server` on the host, or a cloud API), `lmstudio` or `ollama-cloud`.
 
 ### **Configure an LLM provider (first run)**
 
@@ -18,9 +18,11 @@ A fresh container has no provider configured — the model/endpoint come from
 volume and add a provider once:
 
 ```bash
+# e.g. an Ollama server on the host, reached as localhost with --network host (Linux)
 docker run -it --rm -v jarvis-config:/home/jarvisuser/.config/jarvis \
-  jarvis-ai:latest jarvis providers add --type ollama --model qwen3:4b
+  jarvis-ai:latest jarvis providers add --type api --model qwen3:4b --url http://localhost:11434
 # then reuse the same volume for every run: -v jarvis-config:/home/jarvisuser/.config/jarvis
+# (docker-run.sh, docker-run.bat and docker-compose.yml mount it)
 ```
 
 ### **Build & Run**
@@ -60,7 +62,7 @@ docker-compose up --build
 
 **`docker-run.sh` / `docker-run.bat`**
 - Auto-detects your OS (Linux/Mac/Windows)
-- Checks if Ollama is running
+- Mounts the `jarvis-config` volume, where `providers.json` lives
 - Detects audio devices (Linux)
 - Supports mode: `chat` (text) or default (voice + socket)
 
@@ -109,8 +111,8 @@ docker run -it --rm \
 **Text Chat Mode:**
 ```bash
 docker run -it --rm -v jarvis-config:/home/jarvisuser/.config/jarvis \
-  jarvis-ai:latest jarvis providers add --type ollama --model qwen3:4b \
-    --url http://host.docker.internal:11434   # once
+  jarvis-ai:latest jarvis providers add --type api --model qwen3:4b \
+    --url http://host.docker.internal:11434   # once; Ollama on the host
 docker run -it --rm -v jarvis-config:/home/jarvisuser/.config/jarvis \
   jarvis-ai:latest python -m jarvis.main chat
 ```
@@ -202,8 +204,8 @@ docker run -it --rm \
 > `jarvis/server/openai_compat.py` and `docs/SECURITY-ARCHITECTURE.md` first.
 
 Model and endpoint selection are **not** env vars: they come from the provider
-pool (`jarvis providers add --type ollama --model <m> [--url <u>]`, stored in
-`providers.json`). `OLLAMA_HOST`/`LLM_MODEL` are not read by the daemon.
+pool (`jarvis providers add --type <api|lmstudio|ollama-cloud> --model <m> [--url <u>]`,
+stored in `providers.json`). `OLLAMA_HOST`/`LLM_MODEL` are not read by the daemon.
 
 ---
 
@@ -215,14 +217,14 @@ The Docker image runs JARVIS in **conversation-only mode** when the `dispatch` a
 
 ## 🐛 Troubleshooting
 
-### **Cannot connect to Ollama**
+### **Cannot reach the model server on the host**
 
 **Symptom**: `ConnectionError: Connection refused`
 
 **Solutions:**
-- **Linux**: Use `--network host` or ensure Ollama listens on `0.0.0.0:11434`
-- **Mac/Windows**: point the provider at the host: `jarvis providers add --type ollama --model qwen3:4b --url http://host.docker.internal:11434`
-- **Test**: `curl http://localhost:11434/api/version`
+- **Linux**: Use `--network host` or ensure the server (e.g. Ollama) listens on `0.0.0.0`
+- **Mac/Windows**: point the provider at the host: `jarvis providers add --type api --model qwen3:4b --url http://host.docker.internal:11434`
+- **Test** (Ollama): `curl http://localhost:11434/api/version`
 
 ### **No audio devices**
 
@@ -263,6 +265,8 @@ The Docker image runs JARVIS in **conversation-only mode** when the `dispatch` a
 ---
 
 ## Changelog — corrected claims
+
+*2026-11-15:* Ollama is no longer built in (#291): there is no `ollama` provider type, so a container reaches an Ollama on the host as an `api` provider (or uses `lmstudio` or `ollama-cloud`). The run scripts no longer check for Ollama or pass the unread `OLLAMA_HOST`; they and docker-compose mount the `jarvis-config` volume that holds `providers.json`.
 
 *2026-07-24:* env table extended with the variables the merged tree actually reads — `JARVIS_MODELS_DIR` (plus the legacy `MODELS_DIR` alias; base dir is the platform data dir, not a cwd-relative `models/`) and the five `JARVIS_OPENAI_SERVER_*` settings for the opt-in OpenAI-compatible listener, with its non-loopback double opt-in and mandatory bearer token called out. Names/defaults verified against `jarvis/config.py`.
 

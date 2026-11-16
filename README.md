@@ -6,7 +6,8 @@
 
 Project JARVIS is a modular AI assistant that combines voice and text interfaces
 with dynamic tool discovery through MCP (Model Context Protocol) orchestration.
-It runs fully locally by default via Ollama — no cloud dependency required.
+Local models run on llama.cpp's `llama-server`, which JARVIS starts itself — no
+cloud dependency required.
 Optionally, remote OpenAI-compatible API providers (OpenAI, OpenRouter, etc.)
 can be added to the provider failover pool; when a remote provider is used,
 prompts are sent to that provider.
@@ -62,7 +63,7 @@ any Linux, macOS, or Windows machine.
 - **Unified Orchestration**: a single ROOT loop handles dialogue, memory, tool discovery (semantic search over the MCP registry), and concurrent tool dispatch — no separate dispatch sub-chain
 - **AI-Driven Tool Discovery**: Embedding-based semantic search across the MCP registry
 - **Dynamic Capability Extension**: Add new tools without code changes via MCP servers
-- **Local-First Processing**: STT, TTS, memory, and orchestration run locally; LLM inference is local via Ollama by default, with optional remote API providers
+- **Local-First Processing**: STT, TTS, memory, and orchestration run locally; LLM inference runs on a local llama.cpp model JARVIS serves itself, with optional remote API providers
 - **Cross-Platform**: Windows, Linux, macOS
 - **Event-Driven Execution**: One event queue merges voice, CLI, socket, and dispatch signals
 - **Flexible Output**: Text or voice responses
@@ -79,12 +80,11 @@ For text-only mode without voice features:
 # Install core package
 pip install project-jarvis
 
-# Install Ollama and pull an LLM model
-# Install Ollama from https://ollama.com/
-ollama pull qwen3:4b
+# Install llama.cpp's llama-server (Arch: pacman -S llama-cpp), or set
+# LLAMA_SERVER_BIN to a llama-server binary
 
-# Add an LLM provider and run
-jarvis providers add --type ollama --model qwen3:4b
+# Add a local model (downloaded from Hugging Face on first start) and run
+jarvis providers add --type llamacpp --model Qwen/Qwen3-4B-GGUF:Q4_K_M
 # (or run `jarvis tui` and type /providers add for a guided interactive form)
 jarvis
 ```
@@ -144,18 +144,22 @@ jarvis
    pip install "project-jarvis[voice-output]"  # Text-to-speech only
    ```
 
-6. **Install Ollama and pull an LLM model**:
-   ```bash
-   # Install Ollama from https://ollama.com/
-   ollama pull qwen3:4b
-   ```
+6. **Install llama.cpp** for local models: JARVIS starts its `llama-server`
+   itself (Arch: `pacman -S llama-cpp`; elsewhere set `LLAMA_SERVER_BIN` to a
+   `llama-server` binary). Not needed if you only use remote providers.
 
 7. **Configure LLM provider**:
    ```bash
-   jarvis providers add --type ollama --model qwen3:4b
+   # A local GGUF model from Hugging Face (user/repo[:quant]), downloaded on first
+   # start or ahead of time with `jarvis model pull`
+   jarvis providers add --type llamacpp --model Qwen/Qwen3-4B-GGUF:Q4_K_M
+   # Or an OpenAI-compatible API (an Ollama server you run is one: --url http://localhost:11434)
+   jarvis providers add --type api --model <m> --url <u> --key <k>
+   jarvis providers add --type lmstudio --model <m>
+   jarvis providers add --type ollama-cloud --model gpt-oss:120b --key <k>
    ```
    (Or run `jarvis tui` and type `/providers add` for a guided interactive form.)
-   Providers (Ollama, OpenAI-compatible APIs) are stored in `~/.config/jarvis/providers.json`.
+   Providers (`llamacpp`, `api`, `lmstudio`, `ollama-cloud`) are stored in `~/.config/jarvis/providers.json`.
    Voice, logging, and other settings can be customized in `~/.config/jarvis/jarvis.conf`
    (see `jarvis/.env.example` for all available options).
 
@@ -190,12 +194,12 @@ Run JARVIS in Docker for easy cross-platform deployment and testing!
 ### **Quick Docker Setup**
 
 ```bash
-# 1. Make sure Ollama is running on your host
-ollama serve
-
-# 2. Build the Docker image
+# 1. Build the Docker image
 ./docker-build.sh        # Linux/Mac
 docker-build.bat         # Windows
+
+# 2. Add a provider once, e.g. an Ollama on the host as an api provider
+#    (see DOCKER.md)
 
 # 3. Run JARVIS
 ./docker-run.sh chat     # Text chat mode (recommended first test)
@@ -272,7 +276,7 @@ jarvis
 | `jarvis providers ...` | Manage the LLM provider failover pool (list/add/remove/move/edit) |
 | `jarvis confirm [approve <id> [0,2]\|deny <id>\|approve-all]` | List/resolve pending TLA tool confirmations; the optional index list approves only those items of a batch |
 | `jarvis sudo [enable\|disable]` | Manage sudo access for privileged tools |
-| `jarvis auto-pull [on\|off]` | Auto-pull missing Ollama models |
+| `jarvis model pull\|list\|rm <user/repo[:quant]>` | Download, list or delete local GGUF models |
 | `jarvis --help` | Show help message |
 
 ### **Dual Input (Two Terminals)**
@@ -386,7 +390,7 @@ LOG_COLORS=true               # Colored console output
 ### Voice Features Requirements (Optional)
 - **Audio Hardware**: Microphone (for voice input) and speakers/headphones (for voice output)
 - **Memory**: 8GB RAM (16GB recommended for larger models)
-- **GPU**: Optional, for acceleration of Ollama or Piper TTS models
+- **GPU**: Optional, for acceleration of local llama.cpp models or Piper TTS
 - **Additional Packages**: Install with `pip install "project-jarvis[voice]"`
 
 **Note**: JARVIS works perfectly fine without audio hardware - it will automatically use text mode.
@@ -481,6 +485,8 @@ When opening PRs or issues, use the repository templates for faster triage and r
 ---
 
 ## Changelog — corrected claims
+
+*2026-11-15:* Ollama references trued to the code after #291: local models run on llama.cpp's `llama-server`, which JARVIS starts itself; the provider types are `llamacpp`, `api`, `lmstudio` and `ollama-cloud` (an Ollama server you run is an `api` provider); `jarvis auto-pull` is gone, `jarvis model pull|list|rm` replaces it.
 
 *2026-08-15:* threat table and the Bloated Context paragraph trued to the code: the daemon's two-tier context manager runs on every ROOT turn (#213 — the "never runs" wording below was written before the repair and had gone stale), and the persistent constraint register is shipped, not planned (#214) — path-prefix deny rules persisted at `$JARVIS_DATA_DIR/constraints.json`, enforced at the dispatch gate ahead of the confirmation mode, re-injected into every ROOT prompt, managed via `jarvis constrain`/`unconstrain`/`constraints`. The non-persistence face stays open for constraints beyond path rules.
 
