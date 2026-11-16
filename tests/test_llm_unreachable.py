@@ -51,3 +51,16 @@ def test_an_unreachable_model_is_reported_as_such():
     assert "can't reach my language model" in result["output"]
     assert "ollama.com" in result["output"]
     assert "formatting" not in result["output"]
+
+
+@pytest.mark.unit
+def test_only_an_http_404_reads_as_a_missing_model():
+    told = describe_provider_error(
+        RuntimeError(
+            "'llama-server' not found on PATH; install llama-cpp "
+            "(Arch: pacman -S llama-cpp) or set LLAMA_SERVER_BIN"
+        )
+    )
+    assert "404" not in told and "llama-server' not found on PATH" in told
+    told = describe_provider_error(RuntimeError("model 'x' (status code: 404)"))
+    assert "not available there (404)" in told

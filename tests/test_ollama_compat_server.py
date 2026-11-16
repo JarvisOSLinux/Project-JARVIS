@@ -216,6 +216,16 @@ class TestWebPagesRefused:
         )
         assert status == 200
 
+    def test_negative_content_length_refused(self, running_server):
+        host, port = running_server._httpd.server_address[:2]
+        conn = http.client.HTTPConnection(host, port, timeout=5)
+        conn.putrequest("POST", "/api/chat")
+        conn.putheader("Content-Length", "-1")
+        conn.endheaders()
+        status = conn.getresponse().status
+        conn.close()
+        assert status == 400
+
     def test_oversized_body_refused_unread(self, running_server):
         host, port = running_server._httpd.server_address[:2]
         conn = http.client.HTTPConnection(host, port, timeout=5)
