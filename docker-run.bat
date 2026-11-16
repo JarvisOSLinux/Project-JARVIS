@@ -23,22 +23,12 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM Check if Ollama is running
-echo Checking Ollama connection...
-curl -s http://localhost:11434/api/version >nul 2>&1
-if errorlevel 1 (
-    echo Warning: Cannot connect to Ollama at localhost:11434
-    echo Please make sure Ollama is running
-    set /p CONTINUE="Continue anyway? (y/N) "
-    if /i not "%CONTINUE%"=="y" exit /b 1
-)
-
 REM Parse mode argument
 set MODE=%1
 if "%MODE%"=="" set MODE=voice
 
-REM Build Docker command
-set DOCKER_CMD=docker run -it --rm -e OLLAMA_HOST=http://host.docker.internal:11434
+REM Build Docker command; providers.json lives in the jarvis-config volume (see DOCKER.md)
+set DOCKER_CMD=docker run -it --rm -v jarvis-config:/home/jarvisuser/.config/jarvis
 
 set DOCKER_CMD=%DOCKER_CMD% jarvis-ai:latest
 

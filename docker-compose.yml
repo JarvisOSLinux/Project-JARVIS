@@ -12,12 +12,10 @@ services:
     image: jarvis-ai:latest
     container_name: jarvis
 
-    environment:
-      - OLLAMA_HOST=http://host.docker.internal:11434
-      # Optional overrides:
-      # - LLM_MODEL=qwen3:4b
-      # - OUTPUT_MODE=voice
-      # - WAKE_WORDS=jarvis,hey jarvis
+    # Optional overrides:
+    # environment:
+    #   - OUTPUT_MODE=voice
+    #   - WAKE_WORDS=jarvis,hey jarvis
 
     # For voice mode: Give access to audio devices (Linux only)
     devices:
@@ -27,6 +25,8 @@ services:
       # Mount your .env (LLM, API keys, etc.)
       # Ensure jarvis/.env exists first: cp jarvis/.env.example jarvis/.env
       - ./jarvis/.env:/app/jarvis/.env:ro
+      # providers.json (the LLM providers); add one first, see DOCKER.md
+      - jarvis-config:/home/jarvisuser/.config/jarvis
       # Optional: persistent memory
       # - jarvis-data:/home/jarvisuser/.jarvis
 
@@ -36,5 +36,7 @@ services:
     # Default: dual input mode
     # For text chat: command: python -m jarvis.main chat
 
-# volumes:
-#   jarvis-data:
+volumes:
+  jarvis-config:
+    name: jarvis-config
+  # jarvis-data:

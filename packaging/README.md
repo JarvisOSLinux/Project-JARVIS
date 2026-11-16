@@ -113,7 +113,7 @@ JARVIS is designed to work with systemd, which is the standard for most modern L
 
 ### **Dependencies**
 - Python 3.10+
-- Ollama (for LLM models)
+- llama.cpp's `llama-server` (for local LLM models; JARVIS starts it itself)
 - Audio libraries (ALSA/PulseAudio)
 - Systemd
 
@@ -201,8 +201,8 @@ sudo usermod -a -G audio jarvis
 
 **Models not found:**
 ```bash
-# Download required models
-sudo -u jarvis ollama pull codegemma:7b-instruct-q5_K_M
+# A llamacpp provider's GGUF downloads on first start; to fetch it ahead of time:
+sudo -u jarvis env JARVIS_MODELS_DIR=/var/lib/jarvis/models jarvis model pull Qwen/Qwen3-4B-GGUF:Q4_K_M
 # Download TTS models to /var/lib/jarvis/models/piper/
 ```
 

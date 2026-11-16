@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import re
 
-_DEFAULT_TITLE = re.compile(r"^(?:New chat|Chat \d{4}-\d{2}-\d{2})", re.IGNORECASE)
+_DEFAULT_TITLE = re.compile(
+    r"^(?:New chat(?: \(\d+\))?|Chat \d{4}-\d{2}-\d{2}(?: \d{2}:\d{2}(?::\d{2})?)?)$",
+    re.IGNORECASE,
+)
 
 # Greetings, the wake word and a polite opener, each optional, in that order.
 _LEAD_IN = re.compile(
