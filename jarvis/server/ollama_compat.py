@@ -170,8 +170,6 @@ class _OllamaCompatHandler(BaseHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length", 0) or 0)
         except ValueError:
-            length = -1
-        if length < 0:
             self._send_json(400, {"error": "invalid Content-Length"})
             return
         if length > MAX_BODY_BYTES:

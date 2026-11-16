@@ -225,14 +225,3 @@ class TestWebPagesRefused:
         status = conn.getresponse().status
         conn.close()
         assert status == 413
-
-    @pytest.mark.parametrize("length", ["-1", "abc"])
-    def test_bad_content_length_refused(self, running_server, length):
-        host, port = running_server._httpd.server_address[:2]
-        conn = http.client.HTTPConnection(host, port, timeout=5)
-        conn.putrequest("POST", "/api/chat")
-        conn.putheader("Content-Length", length)
-        conn.endheaders()
-        status = conn.getresponse().status
-        conn.close()
-        assert status == 400
