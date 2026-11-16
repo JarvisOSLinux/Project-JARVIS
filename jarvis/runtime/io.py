@@ -747,6 +747,7 @@ def _handle_add_provider(msg: dict) -> dict:
             url=msg.get("url") or None,
             api_key=msg.get("api_key") or None,
             temperature=msg.get("temperature"),
+            vision=msg.get("vision") is True,
         )
     except ValueError as e:
         return _provider_error(str(e))

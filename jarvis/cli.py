@@ -32,6 +32,7 @@ from .core.providers import (
     move_provider,
     parse_flags,
     remove_provider,
+    take_vision_flag,
 )
 from .platform.ownership import keep_owner, make_dirs, user_dir_under_root
 
@@ -996,9 +997,8 @@ def _cmd_providers() -> None:
     subcmd = sys.argv[2]
 
     if subcmd == "add":
-        args = sys.argv[3:]
-        vision = "--vision" in args
-        flags = parse_flags([a for a in args if a != "--vision"])
+        args, vision = take_vision_flag(sys.argv[3:])
+        flags = parse_flags(args)
         ptype = flags.get("type", "")
         model = flags.get("model", "")
         if not ptype or not model:
@@ -1027,7 +1027,7 @@ def _cmd_providers() -> None:
                 url=flags.get("url"),
                 api_key=flags.get("key"),
                 temperature=temp,
-                vision=vision,
+                vision=bool(vision),
             )
             print(f"Added provider '{name}' ({ptype}/{model}) at position {position}")
         except ValueError as e:
@@ -1067,7 +1067,10 @@ def _cmd_providers() -> None:
             print("Usage: jarvis providers edit <name> --field <value>")
             print("  Fields: --model, --url, --key, --type, --vision <true|false>")
             sys.exit(1)
-        flags = parse_flags(sys.argv[4:])
+        args, vision = take_vision_flag(sys.argv[4:])
+        flags = parse_flags(args)
+        if vision is not None:
+            flags["vision"] = vision
         if not flags:
             print(
                 "Error: No fields to update. Use --model, --url, --key, --type, "

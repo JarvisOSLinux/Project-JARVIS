@@ -16,6 +16,7 @@ from ..core.providers import (
     move_provider,
     parse_flags,
     remove_provider,
+    take_vision_flag,
 )
 from ..platform.ownership import keep_owner, make_dirs
 from .help_screen import HelpScreen
@@ -219,7 +220,8 @@ def _handle_providers(app: Any, text: str) -> None:
     subcmd = tokens[0].lower()
 
     if subcmd == "add":
-        flags = parse_flags(tokens[1:])
+        args, vision = take_vision_flag(tokens[1:])
+        flags = parse_flags(args)
         ptype = flags.get("type", "")
         model = flags.get("model", "")
         if not ptype or not model:
@@ -235,6 +237,7 @@ def _handle_providers(app: Any, text: str) -> None:
                         url=result.url or None,
                         api_key=result.api_key or None,
                         temperature=result.temperature,
+                        vision=result.vision,
                     )
                     app._append_log(
                         f"[green]Added provider '{pname}' ({result.ptype}/{result.model}) "
@@ -252,6 +255,7 @@ def _handle_providers(app: Any, text: str) -> None:
                 name=flags.get("name"),
                 url=flags.get("url"),
                 api_key=flags.get("key"),
+                vision=bool(vision),
             )
             app._append_log(
                 f"[green]Added provider '{name}' ({ptype}/{model}) "
@@ -291,11 +295,14 @@ def _handle_providers(app: Any, text: str) -> None:
         if len(tokens) < 2:
             app._append_log(
                 "[yellow]Usage: /providers edit <name> "
-                "[--model <m>] [--url <u>] [--key <k>][/yellow]"
+                "[--model <m>] [--url <u>] [--key <k>] [--vision <true|false>][/yellow]"
             )
             return
         name = tokens[1]
-        flags = parse_flags(tokens[2:])
+        args, vision = take_vision_flag(tokens[2:])
+        flags = parse_flags(args)
+        if vision is not None:
+            flags["vision"] = vision
         if not flags:
             # No flags — open pre-filled modal
             existing = next(
@@ -319,8 +326,7 @@ def _handle_providers(app: Any, text: str) -> None:
                     fields["type"] = result.ptype
                 if result.temperature is not None:
                     fields["temperature"] = result.temperature
-                if not fields:
-                    return
+                fields["vision"] = result.vision
                 try:
                     updated = edit_provider(name, **fields)
                     app._append_log(

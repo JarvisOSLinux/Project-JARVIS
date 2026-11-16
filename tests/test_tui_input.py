@@ -106,6 +106,45 @@ class TestCatalogSaysWhatHandlersDo:
             "again under the new name.[/red]"
         ]
 
+    def test_providers_add_and_edit_take_vision_like_the_cli(
+        self, tmp_path, monkeypatch
+    ):
+        pytest.importorskip("textual")
+        from jarvis.core import providers
+        from jarvis.tui.local_input import handle_local_input
+        from jarvis.tui.provider_modal import ProviderModalResult
+
+        # providers.Config: a test that reloads jarvis.config leaves a new class there.
+        monkeypatch.setattr(
+            providers.Config, "PROVIDERS_FILE", str(tmp_path / "p.json")
+        )
+        forms = []
+        app = type(
+            "App",
+            (),
+            {
+                "_append_log": lambda self, m: None,
+                "push_screen": lambda self, screen, done: forms.append(done),
+            },
+        )()
+        for line in (
+            "/providers add --type llamacpp --model g --name eyes --vision",
+            "/providers add --type llamacpp --model q --name text --vision false",
+            "/providers edit text --vision true",
+            "/providers add",
+        ):
+            handle_local_input(app, line, ())
+        forms[0](
+            ProviderModalResult(
+                confirmed=True, ptype="llamacpp", model="m", vision=True
+            )
+        )
+        assert [(p["name"], p.get("vision")) for p in providers.list_providers()] == [
+            ("eyes", True),
+            ("text", True),
+            ("llamacpp-m", True),
+        ]
+
 
 @pytest.mark.unit
 class TestIsCommandPrefix:

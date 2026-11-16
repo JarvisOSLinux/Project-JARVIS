@@ -141,6 +141,29 @@ function parseFlags(tokens) {
     return flags;
 }
 
+const VISION_WORDS = new Map([
+    ['true', true], ['on', true], ['yes', true], ['1', true],
+    ['false', false], ['off', false], ['no', false], ['0', false],
+]);
+
+/// `--vision` taken out of `tokens`, as Project-JARVIS's take_vision_flag
+/// reads it: bare is on, a following true/false says which. `vision` is
+/// undefined when the line has none.
+function takeVisionFlag(tokens) {
+    const rest = [];
+    let vision;
+    for (let i = 0; i < tokens.length; i++) {
+        if (tokens[i] !== '--vision') {
+            rest.push(tokens[i]);
+            continue;
+        }
+        const said = VISION_WORDS.get((tokens[i + 1] || '').toLowerCase());
+        vision = said ?? true;
+        if (said !== undefined) i++;
+    }
+    return { rest, vision };
+}
+
 const KEY_FLAG = /(^|\s)--key(\s|$)/;
 
 /// True when a line carries an API key (`--key <value>`).
@@ -173,6 +196,7 @@ if (typeof module !== 'undefined') {
         CommandCompleter,
         parseCommandLine,
         parseFlags,
+        takeVisionFlag,
         hasKeyFlag,
         maskKeys,
         searchCommands,

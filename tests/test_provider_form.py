@@ -11,7 +11,7 @@ import pytest
 textual = pytest.importorskip("textual")
 
 from textual.app import App  # noqa: E402
-from textual.widgets import Input, Select, Static  # noqa: E402
+from textual.widgets import Input, Select, Static, Switch  # noqa: E402
 
 from jarvis.tui.provider_modal import ProviderModal  # noqa: E402
 
@@ -136,3 +136,44 @@ async def test_an_inactive_ollama_provider_opens_with_no_type_chosen():
         await _fill(pilot, type="llamacpp")
         await _confirm(pilot)
         assert pilot.app.results[0].ptype == "llamacpp"
+
+
+def _vision(pilot):
+    return pilot.app.screen.query_one("#input-vision", Switch)
+
+
+@pytest.mark.asyncio
+async def test_the_vision_switch_starts_off_and_is_returned():
+    async with _Host(ProviderModal(mode="add")).run_test() as pilot:
+        await pilot.pause()
+        assert _vision(pilot).value is False
+        await _fill(pilot, type="llamacpp", model="ggml-org/gemma-3-4b-it-GGUF")
+        _vision(pilot).value = True
+        await _confirm(pilot)
+        assert pilot.app.results[0].vision is True
+
+
+@pytest.mark.asyncio
+async def test_settings_adds_and_edits_a_provider_that_can_see(tmp_path, monkeypatch):
+    """F2 → Providers: only `jarvis providers add --vision` could make one."""
+    from jarvis.core import providers
+    from jarvis.core.providers import list_providers
+    from jarvis.tui.config_modal import ConfigModal
+
+    # providers.Config: a test that reloads jarvis.config leaves a new class there.
+    monkeypatch.setattr(providers.Config, "PROVIDERS_FILE", str(tmp_path / "p.json"))
+    async with _Host(ConfigModal(initial_tab="providers")).run_test() as pilot:
+        await pilot.pause()
+        pilot.app.screen._add_provider()
+        await pilot.pause()
+        await _fill(pilot, type="llamacpp", model="g")
+        _vision(pilot).value = True
+        await _confirm(pilot)
+        assert list_providers()[0]["vision"] is True
+
+        pilot.app.screen._edit_provider()
+        await pilot.pause()
+        assert _vision(pilot).value is True, "the edit form shows what is saved"
+        _vision(pilot).value = False
+        await _confirm(pilot)
+        assert list_providers()[0]["vision"] is False

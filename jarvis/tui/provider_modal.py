@@ -10,7 +10,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label, Select, Static
+from textual.widgets import Button, Input, Label, Select, Static, Switch
 
 from ..core.providers import TYPES
 
@@ -24,6 +24,7 @@ class ProviderModalResult:
     url: str = ""
     api_key: str = ""
     temperature: Optional[float] = None
+    vision: bool = False
 
 
 _URL_HINT = {
@@ -96,6 +97,14 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
     #btn-toggle-key {
         width: 8;
         min-width: 8;
+    }
+
+    #vision-row {
+        height: auto;
+    }
+
+    #vision-row Label {
+        width: 1fr;
     }
 
     Select {
@@ -217,6 +226,10 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
                     )
                     yield Button("show", id="btn-toggle-key", variant="default")
 
+                with Horizontal(id="vision-row"):
+                    yield Label("Vision (can look at images)", classes="field-label")
+                    yield Switch(value=bool(ex.get("vision")), id="input-vision")
+
                 yield Static("", id="error-label")
 
                 with Horizontal(id="footer"):
@@ -309,5 +322,6 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
                 url=url,
                 api_key=api_key,
                 temperature=temperature,
+                vision=self.query_one("#input-vision", Switch).value,
             )
         )
