@@ -2,7 +2,6 @@
 
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "install-web-service.sh"
@@ -18,6 +17,11 @@ def test_missing_tailscale_is_installed_then_login_is_required(tmp_path: Path) -
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     calls = tmp_path / "calls.log"
+    # A venv whose python has every module ensure_env asks for, so the test
+    # never pip-installs into, or depends on, the interpreter running pytest.
+    venv = tmp_path / "venv"
+    (venv / "bin").mkdir(parents=True)
+    _stub(venv / "bin", "python", "exit 0")
     (bin_dir / "dirname").symlink_to(shutil.which("dirname") or "/usr/bin/dirname")
     _stub(bin_dir, "sudo", 'exec "$@"')
     _stub(bin_dir, "systemctl", f'echo "systemctl $*" >>{calls}; [ "$1" != is-active ]')
@@ -36,7 +40,7 @@ def test_missing_tailscale_is_installed_then_login_is_required(tmp_path: Path) -
             "PATH": str(bin_dir),
             "HOME": str(tmp_path),
             "XDG_CONFIG_HOME": str(tmp_path / "config"),
-            "VENV": str(Path(sys.executable).parent.parent),
+            "VENV": str(venv),
         },
         capture_output=True,
         text=True,
