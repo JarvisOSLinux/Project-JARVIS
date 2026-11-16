@@ -118,7 +118,9 @@ async def on_user_input(
         about = (
             await asyncio.to_thread(attachments.describe, attached) if attached else ""
         )
-        context = build_root_context(app, logger, new_input=said, attached=about)
+        context = build_root_context(
+            app, logger, new_input=said, attached=about, attached_files=attached
+        )
         emit_activity(app, "Thinking about your request…", kind="llm")
         response = await ask_llm(app, logger, context, tag="root", mode="root")
         await app._act_on_root_response(response)

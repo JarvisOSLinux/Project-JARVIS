@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 from logging import Logger
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from ..config import Config
 from ..core.skill_store import load_skill
+from . import attachments
 
 
 def format_skill_block(server_id: str, content: str) -> str:
@@ -73,9 +74,10 @@ def build_root_context(
     new_input: Optional[str] = None,
     signal: Optional[Dict[str, Any]] = None,
     attached: str = "",
+    attached_files: Sequence[attachments.Attachment] = (),
 ) -> str:
-    """This turn's message to ROOT. `attached` is attachments.describe() of the
-    files sent with `new_input`."""
+    """This turn's message to ROOT. `attached` is attachments.describe() of
+    `attached_files`, the files sent with `new_input`."""
     parts = []
 
     # Standing constraints — injected unconditionally (not gated on new_input) so
@@ -99,6 +101,9 @@ def build_root_context(
     session = getattr(app.sessions, "current", None)
     if session is not None:
         parts.append(f"SESSION_TITLE: {session.title or 'New chat'}")
+    files = attachments.describe_session(app.sessions.current_id, attached_files)
+    if files:
+        parts.append(files)
 
     if signal:
         parts.append(f"SIGNAL: {json.dumps(signal)}")
