@@ -33,6 +33,7 @@ from typing import Any, BinaryIO, Iterable, Optional
 
 from ..config import Config
 from ..core.logger import get_logger
+from ..platform.ownership import keep_owner, make_dirs
 from . import pdf_text
 
 logger = get_logger(__name__)
@@ -116,7 +117,7 @@ def _session_folder(session_id: Optional[str]) -> Optional[str]:
 def _private_dir(name: str) -> Path:
     path = _root() / name
     for d in (_root(), path):
-        d.mkdir(mode=0o700, parents=True, exist_ok=True)
+        make_dirs(d, 0o700)
         os.chmod(d, 0o700)
     return path
 
@@ -149,6 +150,7 @@ def _too_big(name: str, size: int) -> AttachmentError:
 
 def _open_new(path: Path) -> BinaryIO:
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    keep_owner(path)
     return os.fdopen(fd, "wb")
 
 

@@ -29,6 +29,7 @@ from typing import Any, Dict, List, Optional
 
 from ..config import Config
 from ..core.logger import get_logger
+from ..platform.ownership import keep_owner, make_dirs
 from .boundary import verify_boundary
 
 logger = get_logger(__name__)
@@ -163,7 +164,7 @@ class GoalManager:
 
         self._archive_dir = archive_dir or _DEFAULT_ARCHIVE_DIR
         self._archive_path = os.path.join(self._archive_dir, _ARCHIVE_FILENAME)
-        os.makedirs(self._archive_dir, exist_ok=True)
+        make_dirs(self._archive_dir)
 
     # ------------------------------------------------------------------
     # Goal creation
@@ -517,6 +518,7 @@ class GoalManager:
             with open(self._archive_path, "a", encoding="utf-8") as f:
                 for goal in goals:
                     f.write(json.dumps(goal.to_archive()) + "\n")
+            keep_owner(self._archive_path)
             logger.debug(
                 f"GoalManager: Archived {len(goals)} goal(s) to {self._archive_path}"
             )

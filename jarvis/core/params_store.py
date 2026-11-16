@@ -16,12 +16,14 @@ try:
 except ImportError:
     import tomli as tomllib  # type: ignore[no-redef]
 
+from ..platform.ownership import keep_owner, make_dirs
+
 
 def _params_path() -> Path:
     from ..platform import current as platform
 
     path = platform.config_dir() / "jarvis_params.toml"
-    path.parent.mkdir(parents=True, exist_ok=True)
+    make_dirs(path.parent)
     return path
 
 
@@ -66,6 +68,7 @@ def _save(data: Dict[str, Dict[str, str]]) -> None:
     try:
         with os.fdopen(fd, "w") as f:
             f.write(content)
+        keep_owner(tmp)
         os.replace(tmp, path)
     except Exception:
         try:

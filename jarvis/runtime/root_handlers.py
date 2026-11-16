@@ -11,7 +11,7 @@ from typing import Any, Callable, Sequence
 
 from ..core.secret_scrubber import redact_secrets, redaction_notice
 from ..core.voice_state import VoiceState
-from . import action_events, attachments, stop, turns
+from . import action_events, askpass, attachments, stop, turns
 from .io import (
     broadcast_to_gui_clients,
     enrich_pending_with_goals,
@@ -262,6 +262,7 @@ def _note_signal(
     kind = str(signal.get("type") or "").upper()
     if kind in ("EXIT", "KILL") or exit_data is not None:
         finished.add(pid)
+        askpass.task_ended(pid)
         newest.pop(pid, None)
         return lambda: False
     if kind != "REMIND" or pid is None:
@@ -625,13 +626,23 @@ async def _resume_after_confirmation(app: Any, logger: Logger, pending: Any) -> 
         # Without this, tasks that went through a confirmation are detached from
         # their goal and every signal they produce logs "No goal found for PID"
         # and falls back to full root context (#190).
-        result = await app.dispatch.send_tasks(
-            pending.approved_tasks, session_id=pending.session_id
+        from .dispatch_flow import (
+            _extract_pids_from_result,
+            note_dispatched_tools,
+            refuse_approved,
+        )
+
+        refused = await refuse_approved(app, logger, pending.approved_tasks)
+        result = (
+            {"error": refused}
+            if refused
+            else await app.dispatch.send_tasks(
+                pending.approved_tasks, session_id=pending.session_id
+            )
         )
         # A sign-in tool is gated (elevated), so its PID is recorded here, not
         # only on the direct path: its EXIT is when the model is shown the
         # server's full tool list (_tools_after_login).
-        from .dispatch_flow import _extract_pids_from_result, note_dispatched_tools
 
         note_dispatched_tools(
             app, _extract_pids_from_result(result), pending.approved_tasks

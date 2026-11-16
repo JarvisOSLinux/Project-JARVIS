@@ -32,7 +32,9 @@ from .core.providers import (
     move_provider,
     parse_flags,
     remove_provider,
+    take_vision_flag,
 )
+from .platform.ownership import keep_owner, make_dirs, user_dir_under_root
 
 # Initialise logging from config before any get_logger() call so that the
 # file handler (LOG_FILE) and level (LOG_LEVEL) are applied from the start.
@@ -919,8 +921,9 @@ def _update_env_setting(key: str, value: str) -> None:
     if not found:
         lines.append(f"{key}={value}")
 
-    ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
+    make_dirs(ENV_FILE.parent)
     ENV_FILE.write_text("\n".join(lines) + "\n")
+    keep_owner(ENV_FILE)
 
     os.environ[key] = value
     setattr(Config, key, value)
@@ -994,9 +997,8 @@ def _cmd_providers() -> None:
     subcmd = sys.argv[2]
 
     if subcmd == "add":
-        args = sys.argv[3:]
-        vision = "--vision" in args
-        flags = parse_flags([a for a in args if a != "--vision"])
+        args, vision = take_vision_flag(sys.argv[3:])
+        flags = parse_flags(args)
         ptype = flags.get("type", "")
         model = flags.get("model", "")
         if not ptype or not model:
@@ -1025,7 +1027,7 @@ def _cmd_providers() -> None:
                 url=flags.get("url"),
                 api_key=flags.get("key"),
                 temperature=temp,
-                vision=vision,
+                vision=bool(vision),
             )
             print(f"Added provider '{name}' ({ptype}/{model}) at position {position}")
         except ValueError as e:
@@ -1065,7 +1067,10 @@ def _cmd_providers() -> None:
             print("Usage: jarvis providers edit <name> --field <value>")
             print("  Fields: --model, --url, --key, --type, --vision <true|false>")
             sys.exit(1)
-        flags = parse_flags(sys.argv[4:])
+        args, vision = take_vision_flag(sys.argv[4:])
+        flags = parse_flags(args)
+        if vision is not None:
+            flags["vision"] = vision
         if not flags:
             print(
                 "Error: No fields to update. Use --model, --url, --key, --type, "
@@ -1407,6 +1412,26 @@ def _run_until_stopped(jarvis) -> None:
 
 def main() -> None:
     """Main CLI entry point."""
+    # Root never runs JARVIS on a user's files (2026-11-15: `jarvis providers
+    # add` through the root shell server left providers.json root's). The shell
+    # guard in dispatch_flow catches the usual spellings; this one every
+    # wrapper reaches. `jarvis sudo` is the command meant to run as root.
+    if sys.argv[1:2] != ["sudo"]:
+        theirs = user_dir_under_root(
+            (
+                Config._DEFAULT_CONFIG_DIR,
+                Config.JARVIS_DATA_DIR,
+                os.path.dirname(os.path.abspath(Config.PROVIDERS_FILE)),
+            )
+        )
+        if theirs:
+            print(
+                f"Error: jarvis does not run as root on another user's files "
+                f"({theirs}). Run it as that user, without sudo.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
     from .main import Jarvis
 
     # No arguments or "run" — dual-input mode (voice + socket + optional stdin)

@@ -22,6 +22,7 @@ from typing import Any, Optional
 
 from ..config import Config
 from ..core.logger import get_logger
+from ..platform.ownership import keep_owner
 from .base import BaseLLMProvider
 from .context_breakdown import breakdown
 from .context_manager import ContextManager
@@ -84,7 +85,7 @@ def _reason(text: str) -> str:
         return "the provider rejected the API key"
     if "429" in lowered or "rate limit" in lowered:
         return "the provider is rate-limiting requests"
-    if "404" in lowered or "not found" in lowered:
+    if re.search(r"\b404\b", lowered):
         return "the model is not available there (404): check its name, and that the account may use it"
     lines = [
         ln.strip()
@@ -398,6 +399,7 @@ class LLM:
         try:
             with open(Config.LLM_IO_LOG, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry) + "\n")
+            keep_owner(Config.LLM_IO_LOG)
         except Exception as e:
             logger.warning(f"LLM I/O log write failed: {e}")
 

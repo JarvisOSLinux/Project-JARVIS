@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from .base import BasePlatform
+from .ownership import make_dirs
 
 
 class LinuxPlatform(BasePlatform):
@@ -40,7 +41,7 @@ class LinuxPlatform(BasePlatform):
         path: str,
         client_handler: Callable[[asyncio.StreamReader, asyncio.StreamWriter], Any],
     ) -> asyncio.AbstractServer:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        make_dirs(os.path.dirname(path))
         if os.path.exists(path):
             try:
                 os.unlink(path)

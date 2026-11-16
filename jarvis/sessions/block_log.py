@@ -17,6 +17,7 @@ import re
 from typing import Any, Dict, List, Optional
 
 from ..core.logger import get_logger
+from ..platform.ownership import keep_owner, make_dirs
 
 logger = get_logger(__name__)
 
@@ -48,10 +49,11 @@ class BlockLog:
             return
         line = json.dumps(block, ensure_ascii=False) + "\n"
         try:
-            os.makedirs(self.directory, mode=0o700, exist_ok=True)
+            make_dirs(self.directory, 0o700)
             fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
             with os.fdopen(fd, "a", encoding="utf-8") as f:
                 f.write(line)
+            keep_owner(path)
         except OSError as e:
             logger.warning(f"Sessions: could not keep a block for {session_id}: {e}")
 

@@ -14,10 +14,12 @@ import asyncio
 from functools import partial
 from typing import Any, Dict, List, Optional
 
+from .config import Config
 from .core import ComponentFactory
 from .core.logger import JarvisLogger, get_logger
 from .core.setup_queue import SetupQueue
 from .dispatch.event_merger import Event
+from .platform.ownership import report_foreign_files
 from .runtime import events as runtime_events
 from .runtime import io as runtime_io
 from .runtime import root_handlers
@@ -85,6 +87,10 @@ class Jarvis:
         JarvisLogger.set_console_enabled(not self.tui_mode)
         if self.tui_mode:
             JarvisLogger.apply_tui_root_mitigation()
+        # Before anything reads them: a file root took is unreadable from here.
+        report_foreign_files(
+            logger, (Config._DEFAULT_CONFIG_DIR, Config.JARVIS_DATA_DIR)
+        )
 
         self.components = ComponentFactory.create_all_components(
             text_mode=self.text_mode,

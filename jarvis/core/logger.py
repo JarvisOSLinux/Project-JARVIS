@@ -5,6 +5,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
 
+from ..platform.ownership import keep_owner, make_dirs
 from .secret_scrubber import REDACTING_FILTER
 
 
@@ -66,6 +67,7 @@ class _PrivateRotatingFileHandler(RotatingFileHandler):
             os.chmod(self.baseFilename, 0o600)
         except OSError:
             pass
+        keep_owner(self.baseFilename)
         return stream
 
 
@@ -124,7 +126,7 @@ class JarvisLogger:
     @classmethod
     def _attach_file_handler(cls, log_file: str) -> None:
         cls._log_file = Path(log_file).expanduser()
-        cls._log_file.parent.mkdir(parents=True, exist_ok=True)
+        make_dirs(cls._log_file.parent)
         cls._file_handler = _PrivateRotatingFileHandler(
             cls._log_file,
             maxBytes=LOG_FILE_MAX_BYTES,
@@ -233,12 +235,14 @@ class JarvisLogger:
             try:
                 if path.exists() and path.stat().st_size > LOG_FILE_MAX_BYTES:
                     os.replace(path, path.with_name(f"{name}.log.1"))
-                return open(
+                stream = open(
                     path,
                     "a",
                     encoding="utf-8",
                     opener=lambda p, flags: os.open(p, flags, 0o600),
                 )
+                keep_owner(path)
+                return stream
             except OSError:
                 pass
         if cls._screen_owned:
