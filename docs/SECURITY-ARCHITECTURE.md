@@ -206,7 +206,8 @@ review, and maintainer oversight.
 Slack tokens, and months of complete chat histories.
 
 **JARVIS:**
-- Default provider is local Ollama — no API key required.
+- No provider is configured by default; the suggested one is a local model
+  (`llamacpp`) on a `llama-server` JARVIS runs on loopback — no API key required.
 - `.env` is in `.gitignore` and never emitted to logs.
 - Chat history and sessions live in the contextor SQLite store
   (`$JARVIS_DATA_DIR/memory/`, Linux default `~/.local/share/jarvis/memory/`;
@@ -386,6 +387,8 @@ vulnerabilities.
 ---
 
 ## Changelog — corrected claims
+
+*2026-11-15:* "Default provider is local Ollama" corrected: since #291 there is no `ollama` provider type and no default provider; the quick start suggests a local `llamacpp` model, served by a `llama-server` JARVIS binds to `127.0.0.1` (`JARVIS_LLM_HOST`).
 
 *2026-10-18:* FORBIDDEN is now an unconditional block (#250). The earlier statements that `allow_all` bypasses every tier, FORBIDDEN included, no longer hold: `dispatch_send` refuses a FORBIDDEN call before the confirmation gate in every mode. `allow_all` still bypasses ELEVATED and DANGEROUS.
 

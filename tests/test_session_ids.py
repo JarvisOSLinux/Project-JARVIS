@@ -178,3 +178,16 @@ class TestNaming:
             root_handlers.broadcast_to_gui_clients = original
         assert len(sent) == 1 and sent[0]["type"] == "session_list"
         assert "Find my notes" in [s["title"] for s in sent[0]["sessions"]]
+
+    def test_a_title_that_only_starts_like_the_default_is_a_name(self):
+        from jarvis.sessions.naming import is_default_title
+
+        assert is_default_title("New chat") and is_default_title("New chat (3)")
+        assert is_default_title("Chat 2026-05-07 23:55")
+        assert not is_default_title("New chat about backups")
+        assert not is_default_title("Chat 2026-05-07 backup plan")
+        sessions, ctx = _sessions()
+        ctx._add("b4c0ffee-5555", "New chat about backups")
+        sessions.switch("b4c0ffee-5555")
+        assert not sessions.name_after("run the backup now")
+        assert ctx.sessions["b4c0ffee-5555"]["title"] == "New chat about backups"

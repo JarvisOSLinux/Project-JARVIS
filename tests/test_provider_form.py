@@ -112,3 +112,27 @@ async def test_editing_keeps_the_saved_type_and_url():
         assert screen.query_one("#input-type", Select).value == "ollama-cloud"
         await _confirm(pilot)
         assert pilot.app.results[0].ptype == "ollama-cloud"
+
+
+@pytest.mark.asyncio
+async def test_an_lm_studio_provider_opens_for_editing():
+    existing = {"name": "studio", "type": "lmstudio", "model": "qwen3-8b"}
+    async with _Host(ProviderModal(mode="edit", existing=existing)).run_test() as pilot:
+        await pilot.pause()
+        assert pilot.app.screen.query_one("#input-type", Select).value == "lmstudio"
+        await _confirm(pilot)
+        assert pilot.app.results[0].ptype == "lmstudio"
+
+
+@pytest.mark.asyncio
+async def test_an_inactive_ollama_provider_opens_with_no_type_chosen():
+    existing = {"name": "broken", "type": "ollama", "inactive": "no model"}
+    async with _Host(ProviderModal(mode="edit", existing=existing)).run_test() as pilot:
+        await pilot.pause()
+        assert pilot.app.screen.query_one("#input-type", Select).value is Select.NULL
+        await _fill(pilot, model="Qwen/Qwen3-4B-GGUF:Q4_K_M")
+        await _confirm(pilot)
+        assert "Choose a type" in _error(pilot)
+        await _fill(pilot, type="llamacpp")
+        await _confirm(pilot)
+        assert pilot.app.results[0].ptype == "llamacpp"

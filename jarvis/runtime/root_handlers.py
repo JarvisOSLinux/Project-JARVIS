@@ -11,7 +11,7 @@ from typing import Any, Callable, Sequence
 
 from ..core.secret_scrubber import redact_secrets, redaction_notice
 from ..core.voice_state import VoiceState
-from . import action_events, attachments, stop, turns
+from . import action_events, askpass, attachments, stop, turns
 from .io import (
     broadcast_to_gui_clients,
     enrich_pending_with_goals,
@@ -260,6 +260,7 @@ def _note_signal(
     kind = str(signal.get("type") or "").upper()
     if kind in ("EXIT", "KILL") or exit_data is not None:
         finished.add(pid)
+        askpass.task_ended(pid)
         newest.pop(pid, None)
         return lambda: False
     if kind != "REMIND" or pid is None:
