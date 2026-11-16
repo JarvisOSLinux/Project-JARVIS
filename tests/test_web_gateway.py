@@ -786,6 +786,7 @@ class TestRelay:
             "model": "m",
             "url": "https://integrate.api.nvidia.com",
             "api_key": "nvapi-typed-on-the-phone",
+            "vision": True,
         }
         try:
             async with connect(
@@ -798,12 +799,18 @@ class TestRelay:
                 await daemon.push(
                     {
                         "type": "provider_list",
-                        "providers": [{"name": "nvidia", "api_key": add["api_key"]}],
+                        "providers": [
+                            {
+                                "name": "nvidia",
+                                "api_key": add["api_key"],
+                                "vision": True,
+                            }
+                        ],
                     }
                 )
                 seen = await _recv_types(ws, "provider_list")
                 assert seen[-1]["providers"] == [
-                    {"name": "nvidia", "api_key_set": True}
+                    {"name": "nvidia", "vision": True, "api_key_set": True}
                 ]
             assert add["api_key"] not in open(tmp_path / "audit.jsonl").read()
         finally:

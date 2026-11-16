@@ -99,6 +99,7 @@ const providerFormName        = document.getElementById('provider-form-name');
 const providerFormUrl         = document.getElementById('provider-form-url');
 const providerFormTemperature = document.getElementById('provider-form-temperature');
 const providerFormKey         = document.getElementById('provider-form-key');
+const providerFormVision      = document.getElementById('provider-form-vision');
 const providerFormError       = document.getElementById('provider-form-error');
 const providerFormCancelBtn   = document.getElementById('provider-form-cancel-btn');
 const providerFormSaveBtn     = document.getElementById('provider-form-save-btn');
@@ -1150,7 +1151,8 @@ function hasKey(p) {
 
 function providerLabel(p) {
     const temp = p.temperature != null ? `, temp ${p.temperature}` : '';
-    return `${p.type}/${p.model}${temp}${hasKey(p) ? ' \u00b7 key saved' : ''}`;
+    const vision = p.vision ? ' \u00b7 vision' : '';
+    return `${p.type}/${p.model}${temp}${vision}${hasKey(p) ? ' \u00b7 key saved' : ''}`;
 }
 
 // What each type wants, as the TUI's provider form says it (provider_modal.py).
@@ -1274,6 +1276,7 @@ function openProviderForm(existing) {
     providerFormUrl.value = existing?.url || '';
     providerFormTemperature.value = existing?.temperature ?? '';
     providerFormKey.value = '';
+    providerFormVision.checked = !!existing?.vision;
     providerFormSaveBtn.textContent = existing ? 'Save' : 'Add';
     showProviderHints();
     providerForm.classList.remove('hidden');
@@ -1345,9 +1348,10 @@ async function saveProviderForm() {
 
     const url = providerFormUrl.value.trim();
     const name = providerFormName.value.trim();
+    const vision = providerFormVision.checked;
 
     if (editingProviderName) {
-        const fields = { model, type: ptype };
+        const fields = { model, type: ptype, vision };
         if (url) fields.url = url;
         if (apiKey) fields.key = apiKey;
         if (temperature !== null) fields.temperature = temperature;
@@ -1360,6 +1364,7 @@ async function saveProviderForm() {
             url: url || null,
             apiKey: apiKey || null,
             temperature,
+            vision,
         });
     }
 }
@@ -1863,7 +1868,8 @@ function providersCommand(args) {
     const sub = tokens[0].toLowerCase();
     const name = tokens[1];
     if (sub === 'add') {
-        const flags = parseFlags(tokens.slice(1));
+        const { rest, vision } = takeVisionFlag(tokens.slice(1));
+        const flags = parseFlags(rest);
         if (!flags.type || !flags.model) {
             openProvidersTab();
             openProviderForm(null);
@@ -1876,6 +1882,7 @@ function providersCommand(args) {
             url: flags.url || null,
             apiKey: flags.key || null,
             temperature: null,
+            vision: !!vision,
         }, `Added provider ${flags.name ? `'${flags.name}' ` : ''}(${flags.type}/${flags.model})`);
     } else if (sub === 'remove') {
         if (!name) return addCommandReply('Usage: /providers remove <name>');
@@ -1887,8 +1894,12 @@ function providersCommand(args) {
         sendProviderChange('command', 'move_provider', { name, position },
             `Moved provider '${name}' to position ${position}`);
     } else if (sub === 'edit') {
-        if (!name) return addCommandReply('Usage: /providers edit <name> [--model <m>] [--url <u>] [--key <k>]');
-        const fields = parseFlags(tokens.slice(2));
+        if (!name) {
+            return addCommandReply('Usage: /providers edit <name> [--model <m>] [--url <u>] [--key <k>] [--vision <true|false>]');
+        }
+        const { rest, vision } = takeVisionFlag(tokens.slice(2));
+        const fields = parseFlags(rest);
+        if (vision !== undefined) fields.vision = vision;
         if (!Object.keys(fields).length) {
             editAfterList = name; // the form opens pre-filled from the list JARVIS sends
             invoke('list_providers');

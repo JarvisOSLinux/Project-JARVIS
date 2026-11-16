@@ -4,6 +4,7 @@ the lmstudio provider type (#179).
 """
 
 import json
+import sys
 
 import pytest
 
@@ -243,3 +244,49 @@ class TestThePoolSurvivesABadEntry:
         monkeypatch.setenv("OLLAMA_API_KEY", "envkey")
         provider = ComponentFactory._pool_entries(data)[0].provider
         assert (provider.headers.get("Authorization") == "Bearer envkey") is gets_key
+
+
+class TestVisionFlag:
+    """`--vision` as the CLI, the TUI and jarvis-app's /providers read it."""
+
+    @pytest.mark.parametrize(
+        "line, rest, vision",
+        [
+            ("--type api --model m --vision", "--type api --model m", True),
+            ("--vision --model m", "--model m", True),
+            ("--model m --vision false", "--model m", False),
+            ("--vision TRUE --model m", "--model m", True),
+            ("--vision off", "", False),
+            ("--model m", "--model m", None),
+        ],
+    )
+    def test_bare_is_on_and_a_following_word_says_which(self, line, rest, vision):
+        assert providers_module.take_vision_flag(line.split()) == (
+            rest.split(),
+            vision,
+        )
+
+    def test_the_cli_reads_vision_false_as_off(
+        self, isolated_providers_file, monkeypatch
+    ):
+        """`--vision false` saved a vision provider: the CLI saw `--vision`."""
+        from jarvis import cli
+
+        argv = "jarvis providers add --type llamacpp --model m --vision false"
+        monkeypatch.setattr(sys, "argv", argv.split())
+        cli._cmd_providers()
+        assert providers_module.list_providers()[0].get("vision", False) is False
+
+    def test_the_cli_edit_reads_a_bare_vision_as_on(
+        self, isolated_providers_file, monkeypatch
+    ):
+        """`edit x --vision --model y` read `--model` as the vision value."""
+        from jarvis import cli
+
+        name, _ = providers_module.add_provider("llamacpp", "m")
+        monkeypatch.setattr(
+            sys, "argv", f"jarvis providers edit {name} --vision --model y".split()
+        )
+        cli._cmd_providers()
+        (entry,) = providers_module.list_providers()
+        assert (entry["vision"], entry["model"]) == (True, "y")

@@ -140,6 +140,23 @@ class TestProviderCrudHandlers:
         assert result["type"] == "provider_list"
         assert [p["name"] for p in result["providers"]] == ["my-local"]
 
+    def test_the_vision_switch_is_saved_on_add_and_edit(self, tmp_path):
+        """jarvis-app's Vision switch; only JSON true turns it on."""
+        providers_file = str(tmp_path / "providers.json")
+        with patch.object(Config, "PROVIDERS_FILE", providers_file):
+            added = runtime_io._handle_add_provider(
+                {"ptype": "llamacpp", "model": "g", "name": "eyes", "vision": True}
+            )
+            runtime_io._handle_add_provider(
+                {"ptype": "llamacpp", "model": "q", "name": "text", "vision": "false"}
+            )
+            edited, _ = runtime_io._handle_edit_provider(
+                {"name": "eyes", "fields": {"vision": False}}
+            )
+        assert added["providers"][0]["vision"] is True
+        assert "vision" not in edited["providers"][1]
+        assert edited["providers"][0]["vision"] is False
+
     def test_add_provider_failure_returns_provider_error(self, tmp_path):
         providers_file = str(tmp_path / "providers.json")
         with patch.object(Config, "PROVIDERS_FILE", providers_file):

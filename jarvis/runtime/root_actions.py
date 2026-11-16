@@ -777,10 +777,10 @@ async def _handle_analyze_image(
             app,
             logger,
             "VISION_ERROR",
-            "no vision-capable provider configured. Ask the user to add one by "
-            "running 'jarvis providers add --type llamacpp --model "
-            "ggml-org/gemma-3-4b-it-GGUF --vision' in their own terminal; never "
-            "run jarvis yourself through a shell server",
+            "no vision-capable provider configured. Tell the user to add one in "
+            "Settings → Providers with Vision on (F2 in the TUI, or jarvis-app "
+            "and its phone page). Adding it is theirs to do: do not run "
+            "anything for it",
             depth,
         )
         return

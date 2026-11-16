@@ -129,7 +129,7 @@ An unknown id answers `error`.
 | `get_settings` | | `settings` |
 | `set_setting` | `key`, `value` | `config_updated` (to everyone) or `config_error` |
 | `list_providers` | | `provider_list` |
-| `add_provider` | `ptype`, `model`, and optional `name`, `url`, `api_key`, `temperature` | `provider_list` (to everyone) or `provider_error` |
+| `add_provider` | `ptype`, `model`, and optional `name`, `url`, `api_key`, `temperature`, `vision` (`true` marks a provider analyze_image may send images to; anything else is off) | `provider_list` (to everyone) or `provider_error` |
 | `edit_provider` | `name`, `fields` (a dict of the fields to change) | as above. Moving a provider to another address (scheme, host or port) removes its stored key and `headers` unless `fields` has a new `key` (headers go regardless); the editor then also gets a `provider_error` saying so. A `url` must start with `http://` or `https://` and name a host. |
 | `remove_provider` | `name` | as above |
 | `move_provider` | `name`, `position` (1 = tried first) | as above (#267) |

@@ -390,6 +390,35 @@ def edit_provider(name: str, **fields) -> List[str]:
     return updated
 
 
+_VISION_WORDS = {
+    "true": True,
+    "on": True,
+    "yes": True,
+    "1": True,
+    "false": False,
+    "off": False,
+    "no": False,
+    "0": False,
+}
+
+
+def take_vision_flag(args: list) -> Tuple[list, Optional[bool]]:
+    """`--vision` taken out of `args`: bare is on, a following true/false says
+    which. Returns the other args and the value (None when there is none)."""
+    rest: list = []
+    vision: Optional[bool] = None
+    i = 0
+    while i < len(args):
+        if args[i] != "--vision":
+            rest.append(args[i])
+            i += 1
+            continue
+        said = _VISION_WORDS.get(args[i + 1].lower()) if i + 1 < len(args) else None
+        vision = True if said is None else said
+        i += 1 if said is None else 2
+    return rest, vision
+
+
 def parse_flags(args: list) -> dict:
     """Parse --flag value pairs from an argument list."""
     flags: dict = {}
