@@ -13,6 +13,7 @@ textual = pytest.importorskip("textual")
 from textual.app import App  # noqa: E402
 from textual.widgets import Input, Select, Static, Switch  # noqa: E402
 
+from jarvis.config import Config  # noqa: E402
 from jarvis.tui.provider_modal import ProviderModal  # noqa: E402
 
 
@@ -100,6 +101,50 @@ async def test_a_remote_api_provider_still_needs_a_key():
         )
         await _confirm(pilot)
         assert "API key is required" in _error(pilot)
+        assert pilot.app.results == []
+
+
+@pytest.mark.asyncio
+async def test_a_key_on_a_local_llamacpp_provider_is_questioned_once():
+    async with _Host(ProviderModal(mode="add")).run_test() as pilot:
+        await pilot.pause()
+        await _fill(
+            pilot,
+            type="llamacpp",
+            model="nvidia/nemotron-3.5-lightning-30b-a3b",
+            key="nvapi-x",
+        )
+        await _confirm(pilot)
+        assert "sends no API key" in _error(pilot)
+        assert "Press Add again" in _error(pilot)
+        assert pilot.app.results == []
+        await _confirm(pilot)
+        assert pilot.app.results[0].ptype == "llamacpp"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ptype", ["api", "lmstudio"])
+async def test_a_provider_at_jarvis_own_runner_is_questioned_once(ptype):
+    url = f"http://127.0.0.1:{Config.LLM_PORT}"
+    async with _Host(ProviderModal(mode="add")).run_test() as pilot:
+        await pilot.pause()
+        await _fill(pilot, type=ptype, model="qwen3:4b", url=url)
+        await _confirm(pilot)
+        assert "llama-server JARVIS runs itself" in _error(pilot)
+        assert pilot.app.results == []
+        await _confirm(pilot)
+        assert (pilot.app.results[0].ptype, pilot.app.results[0].url) == (ptype, url)
+
+
+@pytest.mark.asyncio
+async def test_a_changed_field_is_questioned_again():
+    async with _Host(ProviderModal(mode="add")).run_test() as pilot:
+        await pilot.pause()
+        await _fill(pilot, type="llamacpp", model="m", key="nvapi-x")
+        await _confirm(pilot)
+        await _fill(pilot, key="nvapi-y")
+        await _confirm(pilot)
+        assert "sends no API key" in _error(pilot)
         assert pilot.app.results == []
 
 
