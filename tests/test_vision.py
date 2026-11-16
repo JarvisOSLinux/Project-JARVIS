@@ -439,6 +439,9 @@ class TestAnalyzeImageHandler:
             "jarvis providers add --type llamacpp --model ggml-org/gemma-3-4b-it-GGUF --vision"
             in summary
         )
+        # The model ran it through the root shell itself (2026-11-15).
+        assert "Ask the user" in summary and "their own terminal" in summary
+        assert "never run jarvis yourself through a shell server" in summary
 
     def test_provider_error_surfaces_message(self, fed, tmp_path):
         img = tmp_path / "photo.png"

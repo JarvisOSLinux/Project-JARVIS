@@ -48,6 +48,7 @@ from typing import Any, Optional
 from ..config import Config
 from ..core.logger import get_logger
 from ..llm.base import BaseLLMProvider
+from ..platform.ownership import keep_owner, make_dirs
 
 logger = get_logger(__name__)
 
@@ -81,9 +82,10 @@ def _load_or_create_token() -> str:
             return token
 
     token = secrets.token_urlsafe(32)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    make_dirs(os.path.dirname(path))
     with open(path, "w") as f:
         f.write(token + "\n")
+    keep_owner(path)
     try:
         os.chmod(path, 0o600)
     except OSError as exc:

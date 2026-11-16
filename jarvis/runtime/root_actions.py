@@ -777,8 +777,10 @@ async def _handle_analyze_image(
             app,
             logger,
             "VISION_ERROR",
-            "no vision-capable provider configured — add one with "
-            "'jarvis providers add --type llamacpp --model ggml-org/gemma-3-4b-it-GGUF --vision'",
+            "no vision-capable provider configured. Ask the user to add one by "
+            "running 'jarvis providers add --type llamacpp --model "
+            "ggml-org/gemma-3-4b-it-GGUF --vision' in their own terminal; never "
+            "run jarvis yourself through a shell server",
             depth,
         )
         return

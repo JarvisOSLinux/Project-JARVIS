@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Optional
 
 from ..config import Config
+from ..platform.ownership import keep_owner, make_dirs
 from .logger import get_logger
 
 logger = get_logger(__name__)
@@ -84,12 +85,13 @@ def load_skill(server_id: str) -> Optional[str]:
 def save_skill(server_id: str, content: str) -> Path:
     """Replace the server's skill file wholesale and return its path."""
     path = skill_path(server_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    make_dirs(path.parent)
 
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".skill_")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(content)
+        keep_owner(tmp)
         os.replace(tmp, path)
     except Exception:
         try:

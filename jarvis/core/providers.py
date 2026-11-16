@@ -12,6 +12,7 @@ from typing import Any, Callable, Iterable, List, Optional, Tuple
 from urllib.parse import urlsplit
 
 from ..config import Config
+from ..platform.ownership import keep_owner, make_dirs
 from .logger import get_logger
 
 logger = get_logger(__name__)
@@ -49,13 +50,14 @@ def save_providers(data: dict) -> None:
 
 def _write_private(path: str, data: dict) -> None:
     folder = os.path.dirname(path) or "."
-    os.makedirs(folder, exist_ok=True)
+    make_dirs(folder)
     fd, tmp = tempfile.mkstemp(dir=folder, prefix=".providers-", suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as f:
             json.dump(data, f, indent=2)
             f.write("\n")
         os.chmod(tmp, 0o600)
+        keep_owner(tmp)
         os.replace(tmp, path)
     except BaseException:
         try:
@@ -163,6 +165,7 @@ def _migrate_file(path: str, data: dict) -> dict:
         if not os.path.exists(backup):
             shutil.copy2(path, backup)
             os.chmod(backup, 0o600)
+            keep_owner(backup)
         _write_private(path, data)
     except OSError as exc:
         logger.warning(

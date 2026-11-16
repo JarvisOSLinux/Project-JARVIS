@@ -17,6 +17,7 @@ from ..core.providers import (
     parse_flags,
     remove_provider,
 )
+from ..platform.ownership import keep_owner, make_dirs
 from .help_screen import HelpScreen
 from .output import escape
 from .provider_modal import ProviderModal
@@ -373,7 +374,7 @@ def export_transcript_to_disk(app: Any, filename: Optional[str]) -> None:
     root = Path(Config.JARVIS_DATA_DIR).expanduser().resolve()
     out_dir = root / "transcripts"
     try:
-        out_dir.mkdir(parents=True, exist_ok=True)
+        make_dirs(out_dir)
     except OSError as e:
         app._append_log(f"[red]Export failed (mkdir): {e}[/red]")
         return
@@ -428,6 +429,7 @@ def export_transcript_to_disk(app: Any, filename: Optional[str]) -> None:
 
     try:
         path.write_text(text_out, encoding="utf-8")
+        keep_owner(path)
     except OSError as e:
         app._append_log(f"[red]Export failed: {e}[/red]")
         return

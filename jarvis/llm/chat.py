@@ -22,6 +22,7 @@ from typing import Any, Optional
 
 from ..config import Config
 from ..core.logger import get_logger
+from ..platform.ownership import keep_owner
 from .base import BaseLLMProvider
 from .context_breakdown import breakdown
 from .context_manager import ContextManager
@@ -398,6 +399,7 @@ class LLM:
         try:
             with open(Config.LLM_IO_LOG, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry) + "\n")
+            keep_owner(Config.LLM_IO_LOG)
         except Exception as e:
             logger.warning(f"LLM I/O log write failed: {e}")
 

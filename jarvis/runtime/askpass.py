@@ -52,6 +52,7 @@ from typing import Any, Callable, Iterable, Optional
 
 from ..config import Config
 from ..core.logger import get_logger
+from ..platform.ownership import keep_owner, make_dirs
 from . import askpass_helper
 
 logger = get_logger(__name__)
@@ -84,7 +85,7 @@ def install_helper() -> str:
     it runs on; ``-I`` keeps the user's environment from changing it.
     """
     path = helper_path()
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    make_dirs(os.path.dirname(path))
     text = f"#!{sys.executable} -I\n" + Path(askpass_helper.__file__).read_text(
         encoding="utf-8"
     )
@@ -93,6 +94,7 @@ def install_helper() -> str:
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(text)
     os.chmod(tmp, 0o700)
+    keep_owner(tmp)
     os.replace(tmp, path)
     return path
 
