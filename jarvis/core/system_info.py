@@ -50,9 +50,13 @@ class SystemInfo:
         """
         me = getpass.getuser()
         own = (me, str(Path.home()))
+        if platform.system() != "Linux":
+            return {"active": own, "others": [], "runs_as": me}
+        users: Dict[str, str] = {}
+        active = None
         try:
-            if platform.system() != "Linux" or not shutil.which("loginctl"):
-                raise OSError("loginctl unavailable")
+            if not shutil.which("loginctl"):
+                raise OSError("loginctl not installed")
             import pwd  # POSIX-only; imported here so Windows still loads this module
 
             def loginctl(*args: str) -> subprocess.CompletedProcess:
@@ -61,23 +65,34 @@ class SystemInfo:
                 )
 
             listed = loginctl("list-sessions", "--json=short")
-            if listed.returncode != 0:
-                raise OSError(listed.stderr.strip())
+            if listed.returncode == 0:
+                sessions = json.loads(listed.stdout or "[]")
+            else:
+                # systemd < 256 (Debian 12, Ubuntu 24.04) has no --json and no
+                # class column; its rows start SESSION UID USER.
+                listed = loginctl("list-sessions", "--no-legend")
+                if listed.returncode != 0:
+                    raise OSError(listed.stderr.strip())
+                sessions = [
+                    {"session": f[0], "uid": int(f[1]), "user": f[2], "class": "user"}
+                    for f in map(str.split, listed.stdout.splitlines())
+                    if len(f) >= 3
+                ]
             # No seat0 on a headless machine: nobody is at the screen.
             seat = loginctl("show-seat", "seat0", "-P", "ActiveSession")
             seat_session = seat.stdout.strip() if seat.returncode == 0 else ""
-            users: Dict[str, str] = {}
-            active = None
-            for s in json.loads(listed.stdout or "[]"):
+            for s in sessions:
                 if s["class"] != "user" or not SystemInfo._is_human(s["uid"]):
                     continue
                 users.setdefault(s["user"], pwd.getpwnam(s["user"]).pw_dir)
                 if s["session"] == seat_session:
                     active = s["user"]
         except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
-            return {"active": own, "others": [], "runs_as": me}
+            users, active = {}, None
 
-        if active is None and SystemInfo._is_human(os.geteuid()):
+        # Only its own account can reach a user-run JARVIS's sockets, so that
+        # account is the one talking, whoever holds the screen.
+        if SystemInfo._is_human(os.geteuid()):
             active, users[me] = me, own[1]
         elif active is None and len(users) == 1:
             active = next(iter(users))

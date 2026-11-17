@@ -57,6 +57,8 @@ def users_section() -> str:
     if users["active"]:
         name, home = users["active"]
         lines.append(f"Active user (the one talking to you): {name}, home {home}")
+    else:
+        lines.append("Active user: unknown; ask whose home a path is in, never guess.")
     if users["others"]:
         label = "Also logged in" if users["active"] else "Logged in"
         lines.append(f"{label}: " + ", ".join(f"{n} ({h})" for n, h in users["others"]))

@@ -27,10 +27,20 @@ def _session(session, uid, user, cls="user", seat=None):
 def host(monkeypatch):
     """A Linux host with loginctl; returns a setter for what it reports."""
 
-    def configure(sessions=(), seat_session=None, me="jarvis", euid=960, home=None):
+    def configure(
+        sessions=(), seat_session=None, me="jarvis", euid=960, home=None, json_ok=True
+    ):
         def run(args, **kwargs):
-            if args[1] == "list-sessions":
+            if args[1:] == ["list-sessions", "--json=short"]:
+                if not json_ok:
+                    return subprocess.CompletedProcess(args, 1, "", "unrecognized")
                 return subprocess.CompletedProcess(args, 0, json.dumps(sessions), "")
+            if args[1:] == ["list-sessions", "--no-legend"]:
+                rows = "".join(
+                    f"{s['session']} {s['uid']} {s['user']} {s['seat'] or ''}\n"
+                    for s in sessions
+                )
+                return subprocess.CompletedProcess(args, 0, rows, "")
             if seat_session is None:
                 return subprocess.CompletedProcess(args, 1, "", "No seat 'seat0'.")
             return subprocess.CompletedProcess(args, 0, seat_session + "\n", "")
@@ -79,6 +89,38 @@ class TestGetUsers:
             "runs_as": "toufic",
         }
 
+    def test_a_user_run_jarvis_is_talked_to_by_its_owner_not_the_seat(self, host):
+        # Its sockets admit its own account only, so alice at the screen is
+        # not who asked "list my Pictures".
+        host(
+            sessions=[_session("3", 1001, "alice", seat="seat0")],
+            seat_session="3",
+            me="toufic",
+            euid=1000,
+            home="/home/toufic",
+        )
+        assert SystemInfo.get_users() == {
+            "active": ("toufic", "/home/toufic"),
+            "others": [("alice", "/home/alice")],
+            "runs_as": "toufic",
+        }
+
+    def test_systemd_without_json_is_read_from_the_table(self, host):
+        host(
+            sessions=[
+                _session("3", 1000, "toufic", seat="seat0"),
+                _session("c1", 120, "gdm", seat="seat0"),
+                _session("5", 1001, "alice"),
+            ],
+            seat_session="3",
+            json_ok=False,
+        )
+        assert SystemInfo.get_users() == {
+            "active": ("toufic", "/home/toufic"),
+            "others": [("alice", "/home/alice")],
+            "runs_as": "jarvis",
+        }
+
     def test_a_system_account_takes_the_one_human_logged_in(self, host):
         host(sessions=[_session("5", 1001, "alice")])
         assert SystemInfo.get_users() == {
@@ -96,7 +138,7 @@ class TestGetUsers:
             {"run": subprocess.TimeoutExpired("loginctl", 2)},
         ],
     )
-    def test_loginctl_failing_falls_back_to_jarvis_own_account(
+    def test_loginctl_failing_names_no_one_rather_than_the_service_account(
         self, host, monkeypatch, broken
     ):
         host()
@@ -111,9 +153,18 @@ class TestGetUsers:
 
             monkeypatch.setattr(system_info.subprocess, "run", run)
         assert SystemInfo.get_users() == {
-            "active": ("jarvis", "/var/lib/jarvis"),
+            "active": None,
             "others": [],
             "runs_as": "jarvis",
+        }
+
+    def test_off_linux_jarvis_own_account_is_the_user(self, host, monkeypatch):
+        host(me="toufic", home="/Users/toufic")
+        monkeypatch.setattr(system_info.platform, "system", lambda: "Darwin")
+        assert SystemInfo.get_users() == {
+            "active": ("toufic", "/Users/toufic"),
+            "others": [],
+            "runs_as": "toufic",
         }
 
 
@@ -138,5 +189,5 @@ def test_every_root_prompt_names_the_users_on_the_machine_now(monkeypatch):
 
     users = {"active": None, "others": [("alice", "/home/alice")], "runs_as": "jarvis"}
     system = cm.build_messages([])[0]["content"]
-    assert "Active user" not in system
+    assert "Active user: unknown; ask whose home" in system
     assert "Logged in: alice (/home/alice)" in system
