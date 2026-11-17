@@ -15,13 +15,13 @@ import pytest
 from jarvis.config import Config
 from jarvis.core.system_info import SystemInfo
 from jarvis.llm.chat import LLM
-from jarvis.llm.context_manager import users_section
 from jarvis.llm.context_breakdown import (
     SUMMARY_MARKER,
     breakdown,
     message_parts,
     token_rows,
 )
+from jarvis.llm.context_manager import users_section
 from jarvis.runtime.session_commands import context_report
 
 TURN = "\n".join(
