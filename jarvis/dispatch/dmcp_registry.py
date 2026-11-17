@@ -15,19 +15,11 @@ from typing import Any, Dict, List, Optional
 from ..config import Config
 
 
-def _elevation_timeout() -> int:
-    """dmcp's own wait for an administrator password (DMCP_ELEVATION_TIMEOUT_SECS)."""
-    try:
-        return int(os.environ.get("DMCP_ELEVATION_TIMEOUT_SECS", "180"))
-    except ValueError:
-        return 180
-
-
 def _dmcp_timeout(base: int) -> int:
     """How long a dmcp command may take; with the sudo popup on, a phone gets
     as long to answer as dmcp gives polkit."""
     if Config.SUDO_PASSWORD_POPUP:
-        return max(base, _elevation_timeout())
+        return max(base, Config.DMCP_ELEVATION_TIMEOUT_SECS)
     return base
 
 
@@ -95,8 +87,6 @@ async def run_dmcp(
 
 async def _local_installed_servers(logger: Logger) -> List[Dict[str, Any]]:
     """Return installed servers (with manifest keywords) via `dmcp list --json`."""
-    import os
-
     raw = await run_dmcp(logger, "list", "--json")
     if not raw:
         return []
@@ -116,10 +106,12 @@ async def _local_installed_servers(logger: Logger) -> List[Dict[str, Any]]:
             try:
                 with open(manifest_path) as f:
                     mf = json.load(f)
+            except (OSError, ValueError) as e:
+                logger.warning(f"Dispatch: cannot read manifest {manifest_path}: {e}")
+                mf = None
+            if isinstance(mf, dict):
                 keywords = mf.get("keywords", [])
                 description = mf.get("description", "")
-            except Exception:
-                pass
         result.append(
             {
                 "id": entry.get("id", ""),
@@ -317,15 +309,10 @@ def _extract_mcp_docstrings(source_file: Path) -> Dict[str, str]:
         explicit_name: Optional[str] = None
         for dec in node.decorator_list:
             # @tool, @mcp.tool, @server.tool, @app.tool
-            bare = None
-            call_func = None
-            call_kwargs: Dict[str, Any] = {}
             if isinstance(dec, ast.Attribute) and dec.attr == "tool":
                 is_tool = True
-                bare = dec.attr
             elif isinstance(dec, ast.Name) and dec.id == "tool":
                 is_tool = True
-                bare = dec.id
             elif isinstance(dec, ast.Call):
                 f = dec.func
                 if (isinstance(f, ast.Attribute) and f.attr == "tool") or (

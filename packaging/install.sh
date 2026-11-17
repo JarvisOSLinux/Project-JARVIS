@@ -167,17 +167,21 @@ install_python_dependencies() {
     log_info "      For voice features: pip install jarvis-ai[voice]"
 }
 
-setup_ollama() {
-    log_info "Setting up Ollama..."
-    
-    # Check if Ollama is installed
-    if ! command -v ollama >/dev/null 2>&1; then
-        log_warn "Ollama not found. Please install Ollama manually:"
-        log_warn "curl -fsSL https://ollama.com/install.sh | sh"
-        log_warn "Then run: ollama pull codegemma:7b-instruct-q5_K_M"
-    else
-        log_info "Ollama found. Please ensure the model is available:"
-        log_info "ollama pull codegemma:7b-instruct-q5_K_M"
+setup_llama_server() {
+    # Local models (the llamacpp provider type) run on llama.cpp's llama-server,
+    # which JARVIS starts itself (jarvis/llm/runner.py).
+    if command -v llama-server >/dev/null 2>&1; then
+        return
+    fi
+    log_info "Installing llama.cpp (llama-server)..."
+    if command -v pacman >/dev/null 2>&1; then
+        pacman -S --needed --noconfirm llama-cpp
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y llama-cpp
+    elif command -v apt-get >/dev/null 2>&1; then
+        # In Debian testing/unstable (forky, sid); stable has no llama.cpp package.
+        apt-get install -y llama.cpp-tools ||
+            log_warn "No llama.cpp package on this release: set LLAMA_SERVER_BIN to a llama-server binary for local models; api, lmstudio and ollama-cloud providers work without it."
     fi
 }
 
@@ -217,7 +221,7 @@ main() {
     install_files
     install_dependencies
     install_python_dependencies
-    setup_ollama
+    setup_llama_server
     setup_models
     configure_service
     
@@ -225,7 +229,7 @@ main() {
     log_info ""
     log_info "Next steps:"
     log_info "1. Download TTS models if not already present"
-    log_info "2. Install Ollama and pull the required model"
+    log_info "2. Add an LLM provider to $CONFIG_DIR/providers.json (llamacpp, api, lmstudio or ollama-cloud; see 'jarvis --help')"
     log_info "3. Configure JARVIS in $CONFIG_DIR/jarvis.conf"
     log_info "4. Start the service: systemctl start jarvis"
     log_info "5. Check status: systemctl status jarvis"

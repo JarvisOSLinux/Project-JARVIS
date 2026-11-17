@@ -72,7 +72,11 @@ a path. Send a file in `upload_chunk`s, then name it in a `message`.
   on the host, to look at with `analyze_image` (when `VISION_ENABLED`); a PDF
   by its text (the first 12,000 characters of its first 50 pages, read in a
   process of its own that is stopped after 20 s), fenced as data from a file
-  the user attached, not instructions. File names reach it quoted, as data. The session keeps the message's text with
+  the user attached, not instructions. File names reach it quoted, as data.
+  Every later prompt of the session lists its files again, newest first and
+  at most 20 (with how many were left out): each name, its kind, and an
+  image's place on the host; a PDF's text is not repeated. This list is
+  model context only and reaches no client. The session keeps the message's text with
   an "Attached: a.png, report.pdf" line, so a reopened chat shows it. A slash
   command sent with files runs, and the files are dropped.
 
@@ -129,7 +133,7 @@ An unknown id answers `error`.
 | `get_settings` | | `settings` |
 | `set_setting` | `key`, `value` | `config_updated` (to everyone) or `config_error` |
 | `list_providers` | | `provider_list` |
-| `add_provider` | `ptype`, `model`, and optional `name`, `url`, `api_key`, `temperature` | `provider_list` (to everyone) or `provider_error` |
+| `add_provider` | `ptype`, `model`, and optional `name`, `url`, `api_key`, `temperature`, `vision` (`true` marks a provider analyze_image may send images to; anything else is off) | `provider_list` (to everyone) or `provider_error` |
 | `edit_provider` | `name`, `fields` (a dict of the fields to change) | as above. Moving a provider to another address (scheme, host or port) removes its stored key and `headers` unless `fields` has a new `key` (headers go regardless); the editor then also gets a `provider_error` saying so. A `url` must start with `http://` or `https://` and name a host. |
 | `remove_provider` | `name` | as above |
 | `move_provider` | `name`, `position` (1 = tried first) | as above (#267) |

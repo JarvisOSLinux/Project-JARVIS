@@ -26,7 +26,6 @@ from ..core.providers import (
     add_provider,
     edit_provider,
     list_providers,
-    move_provider,
     remove_provider,
 )
 from .provider_modal import ProviderModal
@@ -326,6 +325,7 @@ class ConfigModal(ModalScreen[ConfigModalResult]):
                     url=result.url or None,
                     api_key=result.api_key or None,
                     temperature=result.temperature,
+                    vision=result.vision,
                 )
                 self._providers_changed = True
                 self._refresh_provider_table()
@@ -357,8 +357,7 @@ class ConfigModal(ModalScreen[ConfigModalResult]):
                 fields["type"] = result.ptype
             if result.temperature is not None:
                 fields["temperature"] = result.temperature
-            if not fields:
-                return
+            fields["vision"] = result.vision
             try:
                 edit_provider(name, **fields)
                 self._providers_changed = True

@@ -425,7 +425,7 @@ class TestAnalyzeImageHandler:
             {"role": "user", "content": "what color?", "images": [str(img)]}
         ]
 
-    def test_no_vision_provider_mentions_cli_fix(self, fed, tmp_path):
+    def test_no_vision_provider_points_the_user_at_settings(self, fed, tmp_path):
         img = tmp_path / "photo.png"
         img.write_bytes(PNG_BYTES)
         pool = _StubPool(error=NoVisionProviderError("none"))
@@ -435,10 +435,9 @@ class TestAnalyzeImageHandler:
         label, summary = fed[0]
         assert label == "VISION_ERROR"
         assert "no vision-capable provider configured" in summary
-        assert (
-            "jarvis providers add --type llamacpp --model ggml-org/gemma-3-4b-it-GGUF --vision"
-            in summary
-        )
+        assert "Settings → Providers" in summary and "Vision on" in summary
+        # Given a command, the model ran it through the root shell (2026-11-15).
+        assert "jarvis providers" not in summary and "--vision" not in summary
 
     def test_provider_error_surfaces_message(self, fed, tmp_path):
         img = tmp_path / "photo.png"

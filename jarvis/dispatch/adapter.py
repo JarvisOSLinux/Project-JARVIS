@@ -28,7 +28,6 @@ from .discovery import browse_vectors_batch as discovery_browse_vectors_batch
 from .discovery import embedding_spec as discovery_embedding_spec
 from .discovery import ensure_embedding_model as discovery_ensure_embedding_model
 from .discovery import index_server as discovery_index_server
-from .discovery import normalize_count as discovery_normalize_count
 from .discovery import server_count as discovery_server_count
 from .discovery import sync_index as discovery_sync_index
 from .dmcp_registry import check_updates as registry_check_updates
@@ -78,11 +77,11 @@ class DispatchAdapter:
         """Register where pushed dispatch signals are delivered (#26)."""
         self._signal_sink = sink
 
-    async def connect(self):
+    async def connect(self) -> None:
         """Connect to the dispatch binary via stdio MCP."""
         await transport_connect(self, logger)
 
-    async def disconnect(self):
+    async def disconnect(self) -> None:
         """Disconnect from dispatch."""
         await transport_disconnect(self, logger)
 
@@ -120,16 +119,18 @@ class DispatchAdapter:
                 f"Dispatch:   task[{i}]: server={task.get('server')}, tool={task.get('tool')}, params={task.get('params')}"
             )
 
-        # The sudo password popup shows only for elevations JARVIS started.
-        from ..runtime.askpass import expect_tasks
+        # The sudo password popup shows only for elevations JARVIS started,
+        # each once, and not after its task ends.
+        from ..runtime import askpass
+        from ..runtime.dispatch_flow import _extract_pids_from_result
 
-        expect_tasks(tasks)
+        expected = askpass.expect_tasks(tasks)
 
         params: Dict[str, Any] = {"tasks": tasks}
         if session_id is not None:
             params["session_id"] = session_id
 
-        return await transport_call_tool(
+        result = await transport_call_tool(
             self,
             logger,
             tool_name="dispatch",
@@ -139,6 +140,8 @@ class DispatchAdapter:
             failure_prefix="Failed to dispatch tasks",
             extractor=self._extract_content,
         )
+        askpass.tasks_started(_extract_pids_from_result(result), expected)
+        return result
 
     async def wait_task(self, pids: List[int]) -> Dict[str, Any]:
         """
@@ -397,10 +400,6 @@ class DispatchAdapter:
 
     async def server_count(self) -> Dict[str, Any]:
         return await discovery_server_count(self, logger)
-
-    @staticmethod
-    def _normalize_count(content: Any) -> Dict[str, int]:
-        return discovery_normalize_count(content)
 
     async def embedding_spec(self) -> Optional[Dict[str, Any]]:
         return await discovery_embedding_spec(self, logger)

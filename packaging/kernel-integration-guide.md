@@ -205,7 +205,7 @@ git submodule update --init --recursive
 cat > distribution/configs/package-lists/jarvis.list << 'EOF'
 # JARVIS AI Voice Assistant
 jarvis-ai
-ollama
+llama.cpp-tools
 python3
 python3-pip
 systemd
@@ -225,11 +225,9 @@ cat > distribution/configs/jarvis-custom.conf << 'EOF'
 TTS_MODEL_ONNX=en_US-libritts_r-medium.onnx
 TTS_MODEL_JSON=en_US-libritts_r-medium.onnx.json
 STT_MODEL=base
-LLM_MODEL=codegemma:7b-instruct-q5_K_M
 
-# Optimized for your hardware
-OLLAMA_NUM_THREADS=4
-OLLAMA_NO_GPU=1
+# Optimized for your hardware (0 = no layers offloaded to the GPU)
+LLM_GPU_LAYERS=0
 
 # Distribution-specific paths
 JARVIS_CONFIG_DIR=/etc/jarvis

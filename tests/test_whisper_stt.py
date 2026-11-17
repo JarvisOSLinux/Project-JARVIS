@@ -352,6 +352,18 @@ class TestTranscriptionPath:
         assert stt.read(timeout=0.1) == ("hello jarvis", True)
         assert stt.read(timeout=0.01) is None
 
+    def test_a_failing_transcript_callback_is_logged(
+        self, whisper_modules, tmp_path, caplog
+    ):
+        from jarvis.voice.stt.whisper_stt import WhisperSTT
+
+        stt = WhisperSTT(model_size="small", model_dir=str(tmp_path))
+        stt.on_update(Mock(side_effect=RuntimeError("panel gone")))
+        with caplog.at_level("WARNING"):
+            stt._emit("hello jarvis", is_final=True)
+        assert stt.read(timeout=0.1) == ("hello jarvis", True)
+        assert "panel gone" in caplog.text
+
 
 @pytest.mark.unit
 class TestWakeWordStaysOnVosk:

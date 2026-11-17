@@ -6,11 +6,15 @@ from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import urlparse
 
+from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label, Select, Static
+from textual.widgets import Button, Input, Label, Select, Static, Switch
+
+from ..config import Config
+from ..core.providers import TYPES
 
 
 @dataclass
@@ -22,17 +26,47 @@ class ProviderModalResult:
     url: str = ""
     api_key: str = ""
     temperature: Optional[float] = None
+    vision: bool = False
 
 
 _URL_HINT = {
     "llamacpp": "blank = the local runner's default",
     "ollama-cloud": "blank = https://ollama.com",
+    "lmstudio": "blank = http://localhost:1234/v1",
     "api": "e.g. https://integrate.api.nvidia.com or http://localhost:11434 (Ollama)",
 }
 
 
 def _is_loopback(url: str) -> bool:
     return urlparse(url).hostname in ("localhost", "127.0.0.1", "::1")
+
+
+def _is_runner(url: str) -> bool:
+    """Whether ``url`` is the llama-server JARVIS starts for llamacpp providers."""
+    parts = urlparse(url)
+    try:
+        port = parts.port
+    except ValueError:
+        return False
+    hosts = ("localhost", "127.0.0.1", "::1", Config.LLM_HOST)
+    return port == Config.LLM_PORT and parts.hostname in hosts
+
+
+def _mix_up(ptype: str, url: str, api_key: str) -> str:
+    """A likely wrong combination, questioned once before it is saved (#316)."""
+    if ptype == "llamacpp" and api_key:
+        return (
+            "A Local (llama.cpp) provider sends no API key, so this one would go "
+            "unused. For a cloud service (NVIDIA, OpenRouter, …) choose API and "
+            "give its URL."
+        )
+    if ptype in ("api", "lmstudio") and _is_runner(url):
+        return (
+            f"That is the llama-server JARVIS runs itself (port {Config.LLM_PORT}), "
+            "which serves whichever local model it started last. For a model "
+            "JARVIS runs, choose Local (llama.cpp) and leave the URL blank."
+        )
+    return ""
 
 
 class ProviderModal(ModalScreen[ProviderModalResult]):
@@ -95,6 +129,14 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
         min-width: 8;
     }
 
+    #vision-row {
+        height: auto;
+    }
+
+    #vision-row Label {
+        width: 1fr;
+    }
+
     Select {
         width: 1fr;
     }
@@ -130,9 +172,12 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
         self._mode = mode
         self._existing = existing or {}
         # A new provider starts with no type chosen, so a cloud model and key
-        # cannot be saved under a local default by accident (#316).
-        self._ptype = self._existing.get("type", "")
+        # cannot be saved under a local default by accident (#316). So does a
+        # retired type (a migrated "ollama" one): the Select only knows TYPES.
+        ptype = self._existing.get("type", "")
+        self._ptype = ptype if ptype in TYPES else ""
         self._key_revealed = False
+        self._warned = False
 
     def compose(self) -> ComposeResult:
         ex = self._existing
@@ -153,7 +198,8 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
                         [
                             ("Local (llama.cpp)", "llamacpp"),
                             ("Ollama Cloud", "ollama-cloud"),
-                            ("API (cloud, or Ollama/LM Studio server)", "api"),
+                            ("LM Studio", "lmstudio"),
+                            ("API (cloud, or an Ollama server)", "api"),
                         ],
                         value=self._ptype or Select.NULL,
                         prompt="Choose a type",
@@ -211,6 +257,10 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
                     )
                     yield Button("show", id="btn-toggle-key", variant="default")
 
+                with Horizontal(id="vision-row"):
+                    yield Label("Vision (can look at images)", classes="field-label")
+                    yield Switch(value=bool(ex.get("vision")), id="input-vision")
+
                 yield Static("", id="error-label")
 
                 with Horizontal(id="footer"):
@@ -227,10 +277,14 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id != "input-type":
             return
+        self._warned = False
         self._ptype = "" if event.value is Select.NULL else str(event.value)
         self.query_one("#input-url", Input).placeholder = _URL_HINT.get(
             self._ptype, "choose a type first"
         )
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        self._warned = False
 
     def _show_error(self, text: str) -> None:
         err = self.query_one("#error-label", Static)
@@ -248,7 +302,7 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
             inp.password = not self._key_revealed
             event.button.label = "hide" if self._key_revealed else "show"
 
-    def on_key(self, event) -> None:
+    def on_key(self, event: events.Key) -> None:
         if event.key == "enter":
             self.action_confirm()
 
@@ -277,6 +331,13 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
         if ptype == "api" and not api_key and not _is_loopback(url):
             self._show_error("API key is required for cloud providers.")
             return
+        warning = _mix_up(ptype, url, api_key)
+        if warning and not self._warned:
+            self._warned = True
+            self._show_error(
+                f"{warning} Press {self._confirm_label()} again to keep it."
+            )
+            return
 
         temperature: Optional[float] = None
         temp_str = self.query_one("#input-temperature", Input).value.strip()
@@ -303,5 +364,6 @@ class ProviderModal(ModalScreen[ProviderModalResult]):
                 url=url,
                 api_key=api_key,
                 temperature=temperature,
+                vision=self.query_one("#input-vision", Switch).value,
             )
         )

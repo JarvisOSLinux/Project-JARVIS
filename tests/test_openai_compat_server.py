@@ -163,3 +163,21 @@ class TestRequestRoundTrip:
         token = running_server._httpd.token
         status, _ = _request(running_server, "GET", "/v1/unknown", token=token)
         assert status == 404
+
+    def _post_declaring(self, server, length):
+        host, port = server._httpd.server_address[:2]
+        conn = http.client.HTTPConnection(host, port, timeout=5)
+        conn.putrequest("POST", "/v1/chat/completions")
+        conn.putheader("Authorization", f"Bearer {server._httpd.token}")
+        conn.putheader("Content-Length", length)
+        conn.endheaders()
+        status = conn.getresponse().status
+        conn.close()
+        return status
+
+    @pytest.mark.parametrize("length", ["-1", "abc"])
+    def test_bad_content_length_refused(self, running_server, length):
+        assert self._post_declaring(running_server, length) == 400
+
+    def test_oversized_body_refused_unread(self, running_server):
+        assert self._post_declaring(running_server, str(64 * 1024 * 1024)) == 413

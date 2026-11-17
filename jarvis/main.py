@@ -14,10 +14,12 @@ import asyncio
 from functools import partial
 from typing import Any, Dict, List, Optional
 
+from .config import Config
 from .core import ComponentFactory
 from .core.logger import JarvisLogger, get_logger
 from .core.setup_queue import SetupQueue
 from .dispatch.event_merger import Event
+from .platform.ownership import report_foreign_files
 from .runtime import events as runtime_events
 from .runtime import io as runtime_io
 from .runtime import root_handlers
@@ -26,9 +28,6 @@ from .runtime.dispatch_flow import (
 )
 from .runtime.dispatch_flow import dispatch_send as runtime_dispatch_send
 from .runtime.dispatch_flow import do_defer as runtime_do_defer
-from .runtime.dispatch_flow import do_kill as runtime_do_kill
-from .runtime.dispatch_flow import get_tool_metadata as runtime_get_tool_metadata
-from .runtime.goal_updates import apply_goal_updates as runtime_apply_goal_updates
 from .runtime.lifecycle import (
     bootstrap_tool_index_nonfatal,
     broadcast_shutdown_notice,
@@ -41,34 +40,12 @@ from .runtime.lifecycle import (
     shutdown,
     start_askpass_relay,
     start_runtime_services,
-    stdin_is_tty,
     stop_http_server_if_running,
 )
-from .runtime.llm_bridge import ask_llm as runtime_ask_llm
-from .runtime.llm_bridge import ask_llm_sync as runtime_ask_llm_sync
-from .runtime.output_hooks import emit_activity as runtime_emit_activity
-from .runtime.output_hooks import get_embeddings as runtime_get_embeddings
-from .runtime.output_hooks import (
-    persist_assistant_turn as runtime_persist_assistant_turn,
-)
 from .runtime.root_actions import act_on_root_response as runtime_act_on_root_response
-from .runtime.root_actions import feed_root_summary as runtime_feed_root_summary
 from .runtime.root_context import build_root_context as runtime_build_root_context
-from .runtime.root_context import (
-    compact_payload_for_llm as runtime_compact_payload_for_llm,
-)
-from .runtime.session_commands import (
-    handle_slash_command as runtime_handle_slash_command,
-)
-from .runtime.session_commands import session_reply as runtime_session_reply
 from .runtime.sync_ask import handle_voice_command as runtime_handle_voice_command
 from .runtime.sync_ask import sync_ask as runtime_sync_ask
-from .runtime.voice_activation_thread import (
-    process_voice_command_inject as runtime_process_voice_command_inject,
-)
-from .runtime.voice_activation_thread import (
-    run_voice_activation as runtime_run_voice_activation,
-)
 from .sessions import BlockLog, SessionManager
 
 logger = get_logger(__name__)
@@ -85,6 +62,10 @@ class Jarvis:
         JarvisLogger.set_console_enabled(not self.tui_mode)
         if self.tui_mode:
             JarvisLogger.apply_tui_root_mitigation()
+        # Before anything reads them: a file root took is unreadable from here.
+        report_foreign_files(
+            logger, (Config._DEFAULT_CONFIG_DIR, Config.JARVIS_DATA_DIR)
+        )
 
         self.components = ComponentFactory.create_all_components(
             text_mode=self.text_mode,
@@ -131,7 +112,7 @@ class Jarvis:
     # Event-driven main loop
     # ------------------------------------------------------------------
 
-    async def run(self):
+    async def run(self) -> None:
         self._running = True
 
         loop = asyncio.get_running_loop()
@@ -214,9 +195,6 @@ class Jarvis:
             max_chain_depth=MAX_CHAIN_DEPTH,
         )
 
-    async def _feed_root_summary(self, label: str, summary: str, depth: int):
-        await runtime_feed_root_summary(self, logger, label, summary, depth)
-
     # ------------------------------------------------------------------
     # DISPATCH helpers
     # ------------------------------------------------------------------
@@ -235,9 +213,6 @@ class Jarvis:
             session_id=session_id,
         )
 
-    async def _get_tool_metadata(self, task: Dict[str, Any]) -> Dict[str, Any]:
-        return await runtime_get_tool_metadata(self, logger, task)
-
     async def _dispatch_execute_tasks(self, tasks, depth: int):
         await runtime_dispatch_execute_tasks(
             app=self,
@@ -247,41 +222,8 @@ class Jarvis:
         )
 
     # ------------------------------------------------------------------
-    # Session slash-commands
-    # ------------------------------------------------------------------
-
-    def _handle_slash_command(self, text: str) -> bool:
-        return runtime_handle_slash_command(self, text)
-
-    def _session_reply(self, message: str) -> None:
-        runtime_session_reply(self, message)
-
-    # ------------------------------------------------------------------
     # Shared helpers
     # ------------------------------------------------------------------
-
-    def _get_embeddings(self):
-        return runtime_get_embeddings(self)
-
-    def _activity(self, text: str, kind: str = "activity") -> None:
-        runtime_emit_activity(self, text, kind)
-
-    def _persist_assistant_turn(self, text: str) -> None:
-        runtime_persist_assistant_turn(self, text)
-
-    def _ask_llm_sync(self, context: str, tag: str = "") -> Dict[str, Any]:
-        return runtime_ask_llm_sync(self, logger, context, tag)
-
-    async def _ask_llm(self, context: str, tag: str = "") -> Dict[str, Any]:
-        return await runtime_ask_llm(self, logger, context, tag)
-
-    def _compact_payload_for_llm(
-        self,
-        payload: Any,
-        *,
-        max_chars: int = 3000,
-    ) -> str:
-        return runtime_compact_payload_for_llm(payload, max_chars=max_chars)
 
     def _build_root_context(
         self,
@@ -292,54 +234,21 @@ class Jarvis:
             self, logger, new_input=new_input, signal=signal
         )
 
-    def _apply_goal_updates(self, updates):
-        runtime_apply_goal_updates(self, updates)
-
-    async def _do_kill(self, pids):
-        await runtime_do_kill(self, logger, pids)
-
-    async def _do_defer(self, goal_id: str, duration: int, reason: str = ""):
+    async def _do_defer(self, goal_id: str, duration: int, reason: str = "") -> None:
         await runtime_do_defer(self, logger, goal_id, duration, reason)
 
     # ------------------------------------------------------------------
     # Input sources (fed to EventMerger)
     # ------------------------------------------------------------------
 
-    def _has_stdin(self) -> bool:
-        """True if stdin is a TTY (interactive chat mode)."""
-        return stdin_is_tty()
-
-    def _run_voice_activation(self) -> None:
-        runtime_run_voice_activation(self, logger)
-
-    def _process_voice_command_inject(self) -> None:
-        runtime_process_voice_command_inject(self, logger)
-
     async def _run_socket_listener(self) -> None:
         await runtime_io.run_socket_listener(self, logger)
-
-    async def _handle_socket_connection(
-        self,
-        reader: asyncio.StreamReader,
-        writer: asyncio.StreamWriter,
-    ) -> None:
-        await runtime_io.handle_socket_connection(self, logger, reader, writer)
 
     def _on_output_for_broadcast(self, response: Dict[str, Any]) -> None:
         runtime_io.on_output_for_broadcast(self, response)
 
-    async def _broadcast_to_output_clients(self, response: Dict[str, Any]) -> None:
-        await runtime_io.broadcast_to_output_clients(self, response)
-
     async def _run_output_socket_listener(self) -> None:
         await runtime_io.run_output_socket_listener(self, logger)
-
-    async def _handle_output_connection(
-        self,
-        reader: asyncio.StreamReader,
-        writer: asyncio.StreamWriter,
-    ) -> None:
-        await runtime_io.handle_output_connection(self, logger, reader, writer)
 
     async def _run_gui_socket_listener(self) -> None:
         await runtime_io.run_gui_socket_listener(self, logger)
@@ -368,23 +277,20 @@ class Jarvis:
     def stop(self) -> None:
         request_stop(self)
 
-    async def _shutdown(self):
-        await shutdown(self, logger)
-
-    def listen_with_activation(self):
+    def listen_with_activation(self) -> None:
         if not self.voice_manager:
             logger.error("Voice manager not available in text mode")
             return
         self.voice_manager.start_voice_activation_mode()
 
-    def listen(self):
+    def listen(self) -> None:
         if not self.voice_manager:
             logger.error("Voice manager not available in text mode")
             return
         self.voice_manager.start_continuous_listening_mode()
 
 
-def main():
+def main() -> None:
     """Main entry point for JARVIS - delegates to CLI handler"""
     from .cli import main as cli_main
 

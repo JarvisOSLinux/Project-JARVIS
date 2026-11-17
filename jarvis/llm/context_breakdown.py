@@ -58,6 +58,7 @@ _PART_OF_LABEL = {
 # of swelling the block before it.
 for _label in (
     "SESSION_TITLE",
+    "SESSION_FILES",
     "STANDING CONSTRAINTS",
     "INSTALL_RESULT",
     "INSTALL_ERROR",

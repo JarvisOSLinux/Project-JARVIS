@@ -3,8 +3,9 @@ import os
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TextIO
 
+from ..platform.ownership import keep_owner, make_dirs
 from .secret_scrubber import REDACTING_FILTER
 
 
@@ -26,10 +27,6 @@ class ColoredFormatter(logging.Formatter):
                 f"{self.COLORS[levelname]}{self.BOLD}{levelname}{self.RESET}"
             )
         return super().format(record)
-
-
-def _is_stdio_stream(stream: object) -> bool:
-    return stream in (sys.stdout, sys.stderr)
 
 
 def _is_console_stream_handler(handler: logging.Handler) -> bool:
@@ -66,6 +63,7 @@ class _PrivateRotatingFileHandler(RotatingFileHandler):
             os.chmod(self.baseFilename, 0o600)
         except OSError:
             pass
+        keep_owner(self.baseFilename)
         return stream
 
 
@@ -124,7 +122,7 @@ class JarvisLogger:
     @classmethod
     def _attach_file_handler(cls, log_file: str) -> None:
         cls._log_file = Path(log_file).expanduser()
-        cls._log_file.parent.mkdir(parents=True, exist_ok=True)
+        make_dirs(cls._log_file.parent)
         cls._file_handler = _PrivateRotatingFileHandler(
             cls._log_file,
             maxBytes=LOG_FILE_MAX_BYTES,
@@ -219,7 +217,7 @@ class JarvisLogger:
                     _ensure_no_last_resort(logger)
 
     @classmethod
-    def child_stderr(cls, name: str):
+    def child_stderr(cls, name: str) -> TextIO:
         """Where a helper process (dispatch, contextor) writes its stderr.
 
         dispatch's stderr was the terminal's, so in the TUI its warnings ("WARN
@@ -233,12 +231,14 @@ class JarvisLogger:
             try:
                 if path.exists() and path.stat().st_size > LOG_FILE_MAX_BYTES:
                     os.replace(path, path.with_name(f"{name}.log.1"))
-                return open(
+                stream = open(
                     path,
                     "a",
                     encoding="utf-8",
                     opener=lambda p, flags: os.open(p, flags, 0o600),
                 )
+                keep_owner(path)
+                return stream
             except OSError:
                 pass
         if cls._screen_owned:
@@ -254,10 +254,6 @@ class JarvisLogger:
                 root.removeHandler(handler)
         if not root.handlers:
             root.addHandler(logging.NullHandler())
-
-    @classmethod
-    def get_log_file(cls) -> Optional[Path]:
-        return cls._log_file
 
 
 def get_logger(name: str) -> logging.Logger:

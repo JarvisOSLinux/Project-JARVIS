@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import re
@@ -12,6 +13,7 @@ from typing import Any, Callable, Iterable, List, Optional, Tuple
 from urllib.parse import urlsplit
 
 from ..config import Config
+from ..platform.ownership import keep_owner, make_dirs
 from .logger import get_logger
 
 logger = get_logger(__name__)
@@ -49,13 +51,14 @@ def save_providers(data: dict) -> None:
 
 def _write_private(path: str, data: dict) -> None:
     folder = os.path.dirname(path) or "."
-    os.makedirs(folder, exist_ok=True)
+    make_dirs(folder)
     fd, tmp = tempfile.mkstemp(dir=folder, prefix=".providers-", suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as f:
             json.dump(data, f, indent=2)
             f.write("\n")
         os.chmod(tmp, 0o600)
+        keep_owner(tmp)
         os.replace(tmp, path)
     except BaseException:
         try:
@@ -70,9 +73,18 @@ def _ollama_cloud_names() -> List[str]:
     try:
         with urllib.request.urlopen(_OLLAMA_CLOUD_MODELS, timeout=5) as response:
             listing = json.loads(response.read())
-        return [m.get("name") or m.get("model") for m in listing.get("models", [])]
-    except Exception:
+        models = listing.get("models") if isinstance(listing, dict) else None
+        why = "its answer has no model list"
+    except (OSError, ValueError, http.client.HTTPException) as exc:
+        models, why = None, str(exc)
+    if not isinstance(models, list):
+        logger.warning(
+            f"Could not list ollama.com's models ({why}); a cloud model is "
+            "migrated with only its :cloud tag removed, which may not be the "
+            "name ollama.com serves"
+        )
         return []
+    return [m.get("name") or m.get("model") for m in models if isinstance(m, dict)]
 
 
 def _cloud_model(model: str, cloud_names: Iterable[str]) -> str:
@@ -116,7 +128,7 @@ def migrate(
         spec["type"] = "ollama"
         if not model:
             spec["inactive"] = (
-                "an Ollama provider with no model; set its model or remove it"
+                "an Ollama provider with no model; set its type and model, or remove it"
             )
             notes.append(
                 f"'{name}' is inactive: it is an Ollama provider with no model."
@@ -163,6 +175,7 @@ def _migrate_file(path: str, data: dict) -> dict:
         if not os.path.exists(backup):
             shutil.copy2(path, backup)
             os.chmod(backup, 0o600)
+            keep_owner(backup)
         _write_private(path, data)
     except OSError as exc:
         logger.warning(
@@ -322,7 +335,7 @@ def url_error(url: Any) -> Optional[str]:
     return None
 
 
-def edit_provider(name: str, **fields) -> List[str]:
+def edit_provider(name: str, **fields: Any) -> List[str]:
     """Update fields on an existing provider. Returns list of updated field names.
 
     A key belongs to the address it was saved for. Moving a provider to
@@ -375,6 +388,12 @@ def edit_provider(name: str, **fields) -> List[str]:
             "No recognized fields. Use model, url, key, temperature, type, or vision."
         )
 
+    if target.get("type") in ("api", "lmstudio") and not effective_url(target):
+        raise ValueError("API/LM Studio providers require a url.")
+
+    if target.get("type") in TYPES and target.get("model"):
+        target.pop("inactive", None)
+
     if origin(effective_url(target)) != was:
         # Hand-written headers go even with a new key: they may hold one too.
         dropped = target.pop("headers", None) is not None
@@ -385,6 +404,35 @@ def edit_provider(name: str, **fields) -> List[str]:
 
     save_providers(data)
     return updated
+
+
+_VISION_WORDS = {
+    "true": True,
+    "on": True,
+    "yes": True,
+    "1": True,
+    "false": False,
+    "off": False,
+    "no": False,
+    "0": False,
+}
+
+
+def take_vision_flag(args: list) -> Tuple[list, Optional[bool]]:
+    """`--vision` taken out of `args`: bare is on, a following true/false says
+    which. Returns the other args and the value (None when there is none)."""
+    rest: list = []
+    vision: Optional[bool] = None
+    i = 0
+    while i < len(args):
+        if args[i] != "--vision":
+            rest.append(args[i])
+            i += 1
+            continue
+        said = _VISION_WORDS.get(args[i + 1].lower()) if i + 1 < len(args) else None
+        vision = True if said is None else said
+        i += 1 if said is None else 2
+    return rest, vision
 
 
 def parse_flags(args: list) -> dict:

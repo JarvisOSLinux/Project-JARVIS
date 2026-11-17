@@ -14,6 +14,7 @@ from typing import Callable, List, Optional, Tuple
 
 from ..config import Config
 from ..core.logger import get_logger
+from ..platform.ownership import keep_owner, make_dirs
 
 logger = get_logger(__name__)
 
@@ -114,7 +115,7 @@ def local_path(spec: str) -> Optional[Path]:
 
 
 def _headers() -> dict:
-    token = os.environ.get("HF_TOKEN")
+    token = Config.HF_TOKEN
     return {"Authorization": f"Bearer {token}"} if token else {}
 
 
@@ -158,6 +159,7 @@ def _download(
             have = 0
         total = have + int(response.headers.get("content-length", 0))
         with open(part, "ab" if resumed else "wb") as out:
+            keep_owner(part)
             done = have
             for chunk in response.iter_bytes(CHUNK):
                 out.write(chunk)
@@ -188,7 +190,7 @@ def pull(spec: str, progress: Optional[Progress] = None) -> Path:
         siblings = [s["rfilename"] for s in info.json().get("siblings", [])]
         names = _choose_files(siblings, quant)
         directory = _repo_dir(user, repo)
-        directory.mkdir(parents=True, exist_ok=True)
+        make_dirs(directory)
         for name in names:
             dest = directory / Path(name).name
             if dest.exists():

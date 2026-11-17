@@ -356,6 +356,9 @@ class TestServerAttribution:
             )
         )
         assert app.dispatch.sent == [brave_task]
+        # The approval's re-check reads only the approved server's manifest.
+        assert _SQLITE not in app.dispatch.asked_for
+        app.dispatch.asked_for.clear()
         # The full batch fingerprint is still what the repeat guard sees (#205).
         assert goal.dispatch_pid_fps[7] == _batch_fingerprint([brave_task, sqlite_task])
 

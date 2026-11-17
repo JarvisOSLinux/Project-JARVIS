@@ -37,15 +37,17 @@ from typing import Any, Iterator, Optional
 from ..config import Config
 from ..core.logger import get_logger
 from ..llm.base import BaseLLMProvider
-from .openai_compat import _LOOPBACK_HOSTS, _load_or_create_token
+from .openai_compat import (
+    _LOOPBACK_HOSTS,
+    MAX_BODY_BYTES,
+    _content_length,
+    _load_or_create_token,
+)
 
 logger = get_logger(__name__)
 
 # Reported by /api/version. Clients only compare it against a minimum.
 OLLAMA_API_VERSION = "0.6.0"
-
-# A chat with a few base64 images stays well under this.
-MAX_BODY_BYTES = 32 * 1024 * 1024
 
 
 def _loopback_name(authority: str) -> bool:
@@ -167,15 +169,14 @@ class _OllamaCompatHandler(BaseHTTPRequestHandler):
         if not self._check_auth():
             return
 
-        try:
-            length = int(self.headers.get("Content-Length", 0) or 0)
-        except ValueError:
+        length = _content_length(self.headers)
+        if length < 0:
             self._send_json(400, {"error": "invalid Content-Length"})
             return
         if length > MAX_BODY_BYTES:
             self._send_json(413, {"error": "request body too large"})
             return
-        raw = self.rfile.read(length) if length > 0 else b""
+        raw = self.rfile.read(length) if length else b""
         try:
             payload = json.loads(raw or b"{}")
         except json.JSONDecodeError:

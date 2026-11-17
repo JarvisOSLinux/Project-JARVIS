@@ -1,12 +1,12 @@
 """faster-whisper speech-to-text provider (Project-JARVIS#138)."""
 
-import os
 import threading
 from datetime import datetime, timedelta
 from queue import Empty, Queue
 from typing import Any, Callable, Generator, List, Optional, Tuple
 
 from ...core.logger import get_logger
+from ...platform.ownership import make_dirs
 from ..audio import (
     AudioUnavailableError,
     check_audio_input_available,
@@ -129,7 +129,7 @@ class WhisperSTT(STTProvider):
 
         try:
             if self.model_dir:
-                os.makedirs(self.model_dir, exist_ok=True)
+                make_dirs(self.model_dir)
             logger.info(
                 f"Loading faster-whisper model '{self.model_size}' "
                 f"(download root: {self.model_dir or 'default cache'})"
@@ -347,12 +347,9 @@ class WhisperSTT(STTProvider):
             return ""
 
     def _emit(self, text: str, is_final: bool) -> None:
-        try:
-            self._result_q.put_nowait((text, is_final))
-        except Exception:
-            pass
+        self._result_q.put_nowait((text, is_final))  # unbounded: never Full
         if self._on_update:
             try:
                 self._on_update(text, is_final)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"faster-whisper: transcript callback failed: {e}")

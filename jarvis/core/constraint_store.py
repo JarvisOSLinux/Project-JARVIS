@@ -13,10 +13,10 @@ import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 from uuid import uuid4
 
 from ..config import Config
+from ..platform.ownership import keep_owner, make_dirs
 
 
 def _store_path() -> Path:
@@ -39,12 +39,13 @@ def load_constraints() -> list[dict]:
 
 def _save_constraints(records: list[dict]) -> None:
     path = _store_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
+    make_dirs(path.parent)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".constraints_")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(records, f, indent=2, ensure_ascii=False)
             f.write("\n")
+        keep_owner(tmp)
         os.replace(tmp, path)
     except Exception:
         try:

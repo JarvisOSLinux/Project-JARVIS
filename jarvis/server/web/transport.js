@@ -69,7 +69,7 @@
         list_providers:             ()  => ({ type: 'list_providers' }),
         add_provider:               (a) => ({
             type: 'add_provider', ptype: a.ptype, model: a.model, name: a.name,
-            url: a.url, api_key: a.apiKey, temperature: a.temperature,
+            url: a.url, api_key: a.apiKey, temperature: a.temperature, vision: a.vision,
         }),
         edit_provider:              (a) => ({ type: 'edit_provider', name: a.name, fields: a.fields }),
         remove_provider:            (a) => ({ type: 'remove_provider', name: a.name }),

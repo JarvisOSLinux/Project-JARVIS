@@ -4,9 +4,11 @@ vets who asks and hands the answer back, and the GUI socket's side."""
 import asyncio
 import json
 import os
+import signal
 import socket
 import stat
 import subprocess
+import sys
 import threading
 from types import SimpleNamespace
 
@@ -18,6 +20,7 @@ from jarvis.runtime.password_wait import WAITING_NOTE, WAITING_NOTE_POPUP, waiti
 
 HELPER = "/data/jarvis/askpass-helper"
 DMCP = "/usr/bin/dmcp"
+DISPATCH = "/usr/bin/dispatch"
 CALL = [
     "dmcp",
     "call",
@@ -27,6 +30,23 @@ CALL = [
     '{"command": "pacman -Syu"}',
 ]
 PROMPT = "[sudo] password for t: "
+TASK = {
+    "server": "shell",
+    "tool": "execute_command",
+    "params": {"command": "pacman -Syu"},
+}
+
+
+def _caller(cmdline, pid=300, start=3):
+    """The dmcp that ran sudo, as /proc shows it."""
+    return askpass.ProcInfo(pid, 200, "dmcp", 1000, cmdline, DMCP, start)
+
+
+def _started(caller):
+    """`started_by_jarvis` for a dmcp started where JARVIS starts that kind:
+    `dmcp call` by dispatch, any other dmcp command by the daemon."""
+    spawner = "dispatch" if caller.cmdline[1:2] == ["call"] else "daemon"
+    return askpass.started_by_jarvis(caller, spawner)
 
 
 def _proc_table(**over):
@@ -36,7 +56,7 @@ def _proc_table(**over):
             100, 1, "python", 1000, ["python", "-m", "jarvis"], None, 1
         ),
         200: askpass.ProcInfo(
-            200, 100, "dispatch", 1000, ["dispatch", "serve"], None, 2
+            200, 100, "dispatch", 1000, ["dispatch", "serve"], DISPATCH, 2
         ),
         300: askpass.ProcInfo(300, 200, "dmcp", 1000, CALL, DMCP, 3),
         400: askpass.ProcInfo(
@@ -63,7 +83,9 @@ def _proc_table(**over):
 
 
 def _vet(proc):
-    return askpass.vet(500, daemon_pid=100, helper=HELPER, dmcp=DMCP, proc=proc)
+    return askpass.vet(
+        500, daemon_pid=100, helper=HELPER, dmcp=DMCP, dispatch=DISPATCH, proc=proc
+    )
 
 
 def _with(pid, info):
@@ -77,6 +99,7 @@ class TestVet:
         vetted, why = _vet(_proc_table())
         assert why == ""
         assert vetted.sudo.pid == 400 and vetted.caller.pid == 300
+        assert vetted.spawner == "dispatch"
         assert vetted.prompt == PROMPT.strip()
         assert vetted.command == (
             "/usr/bin/dmcp call shell execute_command --args "
@@ -103,12 +126,40 @@ class TestVet:
 
     def test_dmcp_must_be_below_this_daemon(self):
         stray = askpass.ProcInfo(200, 1, "bash", 1000, ["bash"], None)
-        assert _vet(_with(200, stray))[1] == "dmcp was not started by this JARVIS"
+        assert _vet(_with(200, stray))[1] == (
+            "dmcp was not started by this JARVIS or its dispatch"
+        )
+
+    def test_a_dmcp_a_sibling_started_is_refused(self):
+        """A user-scope MCP server below the daemon can read dispatch's
+        `dmcp call` from /proc and run it; it is not dispatch's child."""
+        for parent in (
+            # an MCP server dmcp started, itself below the daemon
+            askpass.ProcInfo(200, 150, "python", 1000, ["python"], "/usr/bin/python3"),
+            # a second dispatch, started by something other than the daemon
+            askpass.ProcInfo(200, 150, "dispatch", 1000, ["dispatch"], DISPATCH),
+        ):
+            table = _with(200, parent)
+            under = askpass.ProcInfo(150, 100, "dmcp", 1000, ["dmcp"], DMCP)
+            proc = lambda p: under if p == 150 else table(p)  # noqa: E731
+            assert (
+                _vet(proc)[1] == "dmcp was not started by this JARVIS or its dispatch"
+            )
+
+    def test_a_dmcp_the_daemon_ran_itself(self):
+        mine = askpass.ProcInfo(300, 100, "dmcp", 1000, ["dmcp", "list"], DMCP, 3)
+        vetted, why = _vet(_with(300, mine))
+        assert why == "" and vetted.spawner == "daemon"
 
     def test_unknown_dmcp_refuses(self):
         assert (
             askpass.vet(
-                500, daemon_pid=100, helper=HELPER, dmcp=None, proc=_proc_table()
+                500,
+                daemon_pid=100,
+                helper=HELPER,
+                dmcp=None,
+                dispatch=DISPATCH,
+                proc=_proc_table(),
             )[0]
             is None
         )
@@ -155,8 +206,10 @@ class TestVet:
 @pytest.fixture
 def clean_expected():
     askpass._expected.clear()
+    askpass._tasks.clear()
     yield
     askpass._expected.clear()
+    askpass._tasks.clear()
 
 
 @pytest.mark.unit
@@ -165,30 +218,24 @@ class TestOnlyWhatJarvisStarted:
     JARVIS started itself may show the popup."""
 
     def test_a_dispatched_task(self, clean_expected):
-        assert not askpass.started_by_jarvis(CALL)
-        askpass.expect_tasks(
-            [
-                {
-                    "server": "shell",
-                    "tool": "execute_command",
-                    "params": {"command": "pacman -Syu"},
-                }
-            ]
-        )
-        assert askpass.started_by_jarvis(CALL)
+        assert not _started(_caller(CALL))
+        askpass.expect_tasks([TASK])
+        assert _started(_caller(CALL))
         # dispatch writes the JSON its own way; the parsed value decides.
-        assert askpass.started_by_jarvis(
-            [
-                "dmcp",
-                "call",
-                "shell",
-                "execute_command",
-                "--args",
-                '{"command":"pacman -Syu"}',
-            ]
+        assert _started(
+            _caller(
+                [
+                    "dmcp",
+                    "call",
+                    "shell",
+                    "execute_command",
+                    "--args",
+                    '{"command":"pacman -Syu"}',
+                ]
+            )
         )
-        assert askpass.started_by_jarvis(
-            [*CALL, "--session", "g1", "--dmcp-internal-sudo-reexec"]
+        assert _started(
+            _caller([*CALL, "--session", "g1", "--dmcp-internal-sudo-reexec"])
         )
 
     def test_another_command_on_the_same_tool_is_not(self, clean_expected):
@@ -201,28 +248,89 @@ class TestOnlyWhatJarvisStarted:
                 }
             ]
         )
-        assert not askpass.started_by_jarvis(CALL)
-        assert not askpass.started_by_jarvis(
-            ["dmcp", "call", "shell", "execute_command"]
-        )
-        assert not askpass.started_by_jarvis(
-            ["dmcp", "call", "shell", "x", "--args", "{bad"]
-        )
+        assert not _started(_caller(CALL))
+        assert not _started(_caller(["dmcp", "call", "shell", "execute_command"]))
+        assert not _started(_caller(["dmcp", "call", "shell", "x", "--args", "{bad"]))
+
+    def test_who_started_the_dmcp_decides_what_it_may_match(self, clean_expected):
+        askpass.expect_tasks([TASK])
+        args = ["sources", "remove", "--system", "https://x"]
+        askpass.expect_command(args)
+        assert not askpass.started_by_jarvis(_caller(CALL), "daemon")
+        assert not askpass.started_by_jarvis(_caller(["dmcp", *args]), "dispatch")
+        assert not askpass.started_by_jarvis(_caller(CALL), "elsewhere")
+        assert askpass.started_by_jarvis(_caller(CALL), "dispatch")
+        assert askpass.started_by_jarvis(_caller(["dmcp", *args]), "daemon")
 
     def test_a_task_with_no_params(self, clean_expected):
         askpass.expect_tasks([{"server": "s", "tool": "t", "params": {}}])
-        assert askpass.started_by_jarvis(["dmcp", "call", "s", "t"])
+        assert _started(_caller(["dmcp", "call", "s", "t"]))
+
+    def test_the_first_dmcp_to_ask_uses_it_up(self, clean_expected):
+        """Anything below the daemon can run the same `dmcp call` again; only
+        the dmcp that asked first (and asks again after a wrong password) may."""
+        askpass.expect_tasks([TASK])
+        assert _started(_caller(CALL))
+        assert _started(_caller(CALL)), "its sudo asking again"
+        assert not _started(_caller(CALL, pid=301, start=9))
+        assert not _started(_caller(CALL, start=10)), "a reused pid"
+
+    def test_each_task_sent_shows_one_popup(self, clean_expected):
+        askpass.expect_tasks([TASK, TASK])
+        assert _started(_caller(CALL, pid=301))
+        assert _started(_caller(CALL, pid=302))
+        assert not _started(_caller(CALL, pid=303))
+
+    def test_a_task_that_ended_shows_no_popup(self, clean_expected):
+        expected = askpass.expect_tasks([TASK])
+        askpass.tasks_started([6, 7], expected)  # this batch's INIT is the newest
+        askpass.task_ended(6)
+        assert askpass._expected
+        askpass.task_ended(7)
+        assert not _started(_caller(CALL))
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["call", "s", "t", "--args", '{"a": 1}'],
+            ["call", "s", "t", '--args={"a":1}'],
+            ["call", "--args", '{"a":1}', "s", "t"],
+            ["call", "-d", "s", "t", "--session=g", '--args={"a":1}', "--interactive"],
+            ["call", "--args", '{"a":1}', "--", "s", "t"],
+        ],
+    )
+    def test_args_in_every_form_clap_reads(self, clean_expected, argv):
+        askpass.expect_tasks([{"server": "s", "tool": "t", "params": {"a": 1}}])
+        assert _started(_caller(["dmcp", *argv]))
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["call", "s", "t", '--args={"command":"rm -rf /"}'],
+            ["call", "s", "t", "--args"],
+            ["call", "s", "t", "--args", "{}", "--args", "{}"],
+            ["call", "s", "t", "--argz", "{}"],
+            ["call", "s", "t", "x"],
+            ["call", "s", "t", "--args=null"],
+            ["call", "s", "t", "--args=[]"],
+            ["call", "s", "t", "--args={bad"],
+            ["call", "s", "-x", "t"],
+        ],
+    )
+    def test_anything_else_is_not_a_task_with_no_params(self, clean_expected, argv):
+        askpass.expect_tasks([{"server": "s", "tool": "t"}])
+        assert not _started(_caller(["dmcp", *argv]))
 
     def test_a_dmcp_command_while_it_runs(self, clean_expected):
         args = ["sources", "remove", "--system", "https://x"]
-        assert not askpass.started_by_jarvis(["dmcp", *args])
+        assert not _started(_caller(["dmcp", *args]))
         key = askpass.expect_command(args)
-        assert askpass.started_by_jarvis(["/usr/bin/dmcp", *args])
-        assert not askpass.started_by_jarvis(
-            ["dmcp", "sources", "add", "--system", "https://x"]
+        assert _started(_caller(["/usr/bin/dmcp", *args]))
+        assert not _started(
+            _caller(["dmcp", "sources", "add", "--system", "https://x"])
         )
         askpass.forget(key)
-        assert not askpass.started_by_jarvis(["dmcp", *args])
+        assert not _started(_caller(["dmcp", *args]))
 
     def test_expectations_expire_and_are_bounded(self, clean_expected, monkeypatch):
         askpass.expect_tasks([{"server": "s", "tool": "t"}])
@@ -230,22 +338,26 @@ class TestOnlyWhatJarvisStarted:
         monkeypatch.setattr(
             askpass.time, "monotonic", lambda: now + askpass.EXPECT_TTL_S + 1
         )
-        assert not askpass.started_by_jarvis(["dmcp", "call", "s", "t"])
+        assert not _started(_caller(["dmcp", "call", "s", "t"]))
         for i in range(askpass._MAX_EXPECTED + 10):
             askpass.expect_command([str(i)])
         assert len(askpass._expected) <= askpass._MAX_EXPECTED
 
 
+_real_started = askpass.started_by_jarvis
+
+
 class _Daemon:
     """A relay on a real unix socket, with a stand-in for /proc and the peer."""
 
-    def __init__(self, tmp_path, proc=None, started=lambda cmdline: True):
+    def __init__(self, tmp_path, proc=None, started=lambda caller, spawner: True):
         self.sent = []
         self.killed = []
         self.table = proc or _proc_table()
         self.relay = askpass.AskpassRelay(
             self.sent.append,
             dmcp=DMCP,
+            dispatch=DISPATCH,
             daemon_pid=100,
             proc=lambda p: self.table(p),
             peer=lambda writer: 500,
@@ -439,10 +551,47 @@ class TestRelay:
             assert d.sent == []
 
     async def test_a_command_jarvis_did_not_start_gets_no_popup(self, tmp_path, popup):
-        async with _Daemon(tmp_path, started=lambda cmdline: False) as d:
+        async with _Daemon(tmp_path, started=lambda caller, spawner: False) as d:
             reader, writer = await d.ask()
             assert "did not start" in json.loads(await reader.readline())["error"]
             assert d.sent == []
+
+    async def test_a_sibling_copying_jarvis_s_call_cannot_take_its_popup(
+        self, tmp_path, popup, clean_expected
+    ):
+        """The race in the #331 review: a process below the daemon runs the
+        same `dmcp call` as a task JARVIS just dispatched and asks first."""
+        askpass.expect_tasks([TASK])
+        table = _proc_table()
+        racer = {
+            150: askpass.ProcInfo(150, 100, "dmcp", 1000, ["dmcp"], DMCP, 1),
+            250: askpass.ProcInfo(250, 150, "python", 1000, ["py"], "/usr/bin/python3"),
+            310: askpass.ProcInfo(310, 250, "dmcp", 1000, CALL, DMCP, 6),
+            410: askpass.ProcInfo(
+                410, 310, "sudo", 0, ["sudo", "-A", "--", DMCP, *CALL[1:]], None, 7
+            ),
+            510: askpass.ProcInfo(
+                510, 410, "askpass-helper", 1000, ["python3", HELPER, PROMPT], None
+            ),
+        }
+        async with _Daemon(
+            tmp_path, proc=lambda p: racer.get(p) or table(p), started=_real_started
+        ) as d:
+            d.relay._peer = lambda writer: 510
+            reader, writer = await d.ask()
+            assert (
+                "not started by this JARVIS"
+                in json.loads(await reader.readline())["error"]
+            )
+            writer.close()
+            assert d.sent == []
+            d.relay._peer = lambda writer: 500
+            reader, writer = await d.ask()
+            request = await d.request()
+            assert "pacman -Syu" in request["command"]
+            d.relay.cancel(request["id"])
+            await d.done()
+            writer.close()
 
     async def test_stopping_ends_what_waits(self, tmp_path, popup):
         d = _Daemon(tmp_path)
@@ -458,6 +607,20 @@ class TestRelay:
         except OSError:
             pass
         assert writer2 is None, "the socket is gone"
+
+
+@pytest.mark.unit
+def test_a_sudo_that_cannot_be_killed_is_logged(monkeypatch):
+    errors = []
+
+    def refuse(pid, sig):
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr(askpass.logger, "error", errors.append)
+    monkeypatch.setattr(askpass.os, "kill", refuse)
+    table = _proc_table()
+    askpass._kill(table(400), table)
+    assert len(errors) == 1 and "400" in errors[0]
 
 
 def _fake_daemon(path, reply):
@@ -514,6 +677,43 @@ class TestHelper:
         assert askpass_helper.main(["p"]) == 1
         t.join(2)
         assert capsys.readouterr().out == ""
+
+    def test_no_password_kills_sudo_instead_of_answering_it(self, tmp_path):
+        """An empty answer is a failed try for pam_faillock; SIGKILL is not."""
+        path = str(tmp_path / "n.sock")
+        t, _ = _fake_daemon(path, {"error": "no"})
+        out = tmp_path / "out"
+        sudo = tmp_path / "sudo"  # what /proc calls the helper's parent
+        sudo.write_text(f'#!/bin/sh\n"$@" > {out}\necho "answered $?" >> {out}\n')
+        sudo.chmod(0o700)
+        env = {"PATH": os.environ.get("PATH", ""), "JARVIS_ASKPASS_SOCKET": path}
+        helper = [sys.executable, "-I", askpass_helper.__file__, "p"]
+        done = subprocess.run([str(sudo), *helper], env=env, timeout=10)
+        t.join(2)
+        assert done.returncode == -signal.SIGKILL
+        assert out.read_text() == ""
+
+    def test_a_sudo_it_cannot_kill_is_waited_for(self, monkeypatch, tmp_path, capsys):
+        path = str(tmp_path / "w.sock")
+        t, _ = _fake_daemon(path, {"error": "no"})
+        monkeypatch.setenv("JARVIS_ASKPASS_SOCKET", path)
+        naps = []
+
+        def refuse(pid, sig):
+            raise PermissionError(1, "Operation not permitted")
+
+        # sudo stays this helper's parent for three naps, then goes.
+        monkeypatch.setattr(
+            askpass_helper.os, "getppid", lambda: 4242 if len(naps) < 3 else 1
+        )
+        monkeypatch.setattr(askpass_helper, "_is_sudo", lambda pid: pid == 4242)
+        monkeypatch.setattr(askpass_helper.os, "kill", refuse)
+        monkeypatch.setattr(askpass_helper.time, "sleep", naps.append)
+        assert askpass_helper.main(["p"]) == 1
+        t.join(2)
+        assert len(naps) == 3
+        out, err = capsys.readouterr()
+        assert out == "" and "cannot stop sudo" in err
 
     def test_installed_helper_runs_on_its_own(self, monkeypatch, tmp_path):
         """The copy sudo runs: owner-only, isolated Python, no JARVIS import."""
@@ -674,25 +874,48 @@ def test_a_client_asks_for_what_waits(monkeypatch):
 
 
 @pytest.mark.unit
-def test_tasks_sent_to_dispatch_are_expected(clean_expected, monkeypatch):
+@pytest.mark.parametrize("end", ["EXIT", "KILL"])
+def test_tasks_sent_to_dispatch_are_expected_until_they_end(
+    clean_expected, monkeypatch, end
+):
     from jarvis.dispatch import adapter as adapter_mod
-
-    seen = {}
+    from jarvis.runtime import root_handlers
 
     async def fake_call(self, logger, **kw):
-        seen.update(kw)
-        return {"ok": True}
+        return {"signals": [{"type": "INIT", "pid": 7}]}
 
     monkeypatch.setattr(adapter_mod, "transport_call_tool", fake_call)
     monkeypatch.setattr(adapter_mod, "require_connection", lambda *a: True)
     a = adapter_mod.DispatchAdapter.__new__(adapter_mod.DispatchAdapter)
-    task = {
-        "server": "shell",
-        "tool": "execute_command",
-        "params": {"command": "pacman -Syu"},
-    }
+    asyncio.run(a.send_tasks([TASK]))
+    assert askpass._expected and askpass._tasks == {7: askpass._expected[0]}
+    root_handlers._note_signal(SimpleNamespace(), {"type": end, "pid": 7})
+    assert not _started(_caller(CALL))
+
+
+@pytest.mark.unit
+def test_a_param_naming_a_pid_is_not_a_task(clean_expected, monkeypatch):
+    """The INIT line carries the task's params; text in them saying "PID 999
+    INIT" must not pair the expectation with a pid that never ends."""
+    from jarvis.dispatch import adapter as adapter_mod
+
+    task = {**TASK, "params": {"command": "echo", "args": ["see PID 999 INIT"]}}
+    window = (
+        "Signal window (last 1):\n[10:00:00] PID 5 INIT     shell/execute_command "
+        + json.dumps(task["params"])
+        + "\n"
+    )
+
+    async def fake_call(self, logger, **kw):
+        return {"output": window}
+
+    monkeypatch.setattr(adapter_mod, "transport_call_tool", fake_call)
+    monkeypatch.setattr(adapter_mod, "require_connection", lambda *a: True)
+    a = adapter_mod.DispatchAdapter.__new__(adapter_mod.DispatchAdapter)
     asyncio.run(a.send_tasks([task]))
-    assert askpass.started_by_jarvis(CALL)
+    assert list(askpass._tasks) == [5]
+    askpass.task_ended(5)
+    assert askpass._expected == []
 
 
 @pytest.mark.unit
@@ -716,14 +939,14 @@ class TestRunDmcp:
             out = await dmcp_registry.run_dmcp(
                 __import__("logging").getLogger("t"), "sources", "list"
             )
-            seen["after"] = real(["dmcp", "sources", "list"])
+            seen["after"] = real(_caller(["dmcp", "sources", "list"]), "daemon")
             return out
 
         orig = askpass.expect_command
 
         def spy(args):
             key = orig(args)
-            seen["during"] = real(["dmcp", *args])
+            seen["during"] = real(_caller(["dmcp", *args]), "daemon")
             return key
 
         monkeypatch.setattr(askpass, "expect_command", spy)
@@ -757,7 +980,16 @@ class TestRunDmcp:
     def test_the_popup_waits_as_long_as_dmcp_waits_for_polkit(self, monkeypatch):
         from jarvis.dispatch import dmcp_registry
 
-        monkeypatch.setenv("DMCP_ELEVATION_TIMEOUT_SECS", "240")
-        assert dmcp_registry._elevation_timeout() == 240
-        monkeypatch.setenv("DMCP_ELEVATION_TIMEOUT_SECS", "x")
-        assert dmcp_registry._elevation_timeout() == 180
+        monkeypatch.setattr(Config, "DMCP_ELEVATION_TIMEOUT_SECS", 240)
+        monkeypatch.setattr(Config, "SUDO_PASSWORD_POPUP", True)
+        assert dmcp_registry._dmcp_timeout(30) == 240
+        monkeypatch.setattr(Config, "SUDO_PASSWORD_POPUP", False)
+        assert dmcp_registry._dmcp_timeout(30) == 30
+
+    @pytest.mark.parametrize(
+        "value, seconds", [("240", 240), ("x", 180), ("0", 180), ("", 180)]
+    )
+    def test_elevation_timeout_is_read_as_dmcp_reads_it(self, value, seconds):
+        from jarvis.config import positive_int
+
+        assert positive_int(value, 180) == seconds

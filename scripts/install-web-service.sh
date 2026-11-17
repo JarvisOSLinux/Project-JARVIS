@@ -61,8 +61,10 @@ fi
 
 ensure_env
 
-if ! command -v tailscale >/dev/null || ! tailscale status >/dev/null 2>&1; then
-    echo "Tailscale is not running here; the page identifies phones through it." >&2
+ensure_tailscale
+if ! tailscale status >/dev/null 2>&1; then
+    echo "Tailscale is installed but not logged in; the page identifies phones through it." >&2
+    echo "Join your tailnet first: sudo tailscale up [--login-server URL]" >&2
     exit 1
 fi
 

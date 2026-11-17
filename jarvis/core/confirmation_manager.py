@@ -59,12 +59,12 @@ import os
 import sys
 import tempfile
 import time
-import uuid
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from ..config import Config
+from ..platform.ownership import keep_owner, make_dirs
 from .logger import get_logger
 from .threat_level import ThreatLevel, classify
 
@@ -204,12 +204,13 @@ def _atomic_write_json(path: Path, payload: Any) -> None:
 
     A crash mid-write leaves the previous file intact rather than a half one.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
+    make_dirs(path.parent)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.stem}_")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2, ensure_ascii=False, default=str)
             f.write("\n")
+        keep_owner(tmp)
         os.replace(tmp, path)
     except Exception:
         try:
