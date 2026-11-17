@@ -100,17 +100,6 @@ for t in dispatch dmcp contextor; do
 done
 ```
 
-> **dispatch's release lags behind.** The latest dispatch release (v0.1.0,
-> August 2026) is four commits older than the version this repository pins in
-> `deps/rust/dispatch`: it lacks the reminder when a long task first prints
-> ([dispatch#42](https://github.com/JarvisOSLinux/dispatch/pull/42)) and the
-> signal window JARVIS polls to catch a missed "task finished"
-> ([dispatch#43](https://github.com/JarvisOSLinux/dispatch/pull/43)), so now and
-> then a finished task's answer never arrives. Until a new release, build
-> dispatch from source, which replaces the downloaded one:
-> `cargo install --git https://github.com/JarvisOSLinux/dispatch --root ~/.local`.
-> The dmcp and contextor releases match the versions pinned here.
-
 ### 2. JARVIS itself
 
 From source, in its own Python environment, with the terminal UI. The last
@@ -459,7 +448,7 @@ LOG_COLORS=true               # Colored console output
 - **Audio Hardware**: Microphone (for voice input) and speakers/headphones (for voice output)
 - **Memory**: 8GB RAM (16GB recommended for larger models)
 - **GPU**: Optional, for acceleration of local llama.cpp models or Piper TTS
-- **Additional Packages**: Install with `pip install "project-jarvis[voice]"`
+- **Additional Packages**: the `voice` extra, from the checkout: `.venv/bin/pip install -e ".[tui,voice]"` (see [Voice](#voice-optional))
 
 **Note**: JARVIS works perfectly fine without audio hardware - it will automatically use text mode.
 
@@ -554,7 +543,7 @@ When opening PRs or issues, use the repository templates for faster triage and r
 
 ## Changelog — corrected claims
 
-*2026-11-15:* Installation rewritten as the four steps checked from a fresh clone in an isolated HOME, the same as the website's download page. Nothing said to install the Rust helpers, and without `dispatch` on `PATH` JARVIS runs conversation-only: step 1 downloads dispatch, dmcp and contextor from their latest releases into `~/.local/bin` (or `cargo install --git`). Step 2 installs from source in a venv: `pip install` outside one fails on PEP 668 distributions such as Arch, and PyPI's `project-jarvis` 2.0.0 (August 2026) predates llama.cpp models, phone access and the root-command guards (new release: #325). Step 3 adds a `llamacpp` provider on llama.cpp's `llama-server` in place of Ollama, which has had no provider type since #291 (types: `llamacpp`, `api`, `lmstudio`, `ollama-cloud`). Step 4 is `jarvis tui`. dispatch's latest release, v0.1.0, is four commits behind `deps/rust/dispatch` and lacks dispatch#42 and #43, so step 1 says to build dispatch from source until a new release; the dmcp and contextor releases match their pins. `packaging/install.sh` and the Makefile's RPM/DEB builds are marked outdated (no helpers, the old `jarvis-ai` name, a missing `jarvis.spec`) rather than fixed; #330 moves `install.sh` off Ollama. The voice steps now say to download the Vosk model, which JARVIS loads from `<models dir>/vosk/vosk-model-small-en-us-0.15` and never fetches.
+*2026-11-15:* Installation rewritten as the four steps checked from a fresh clone in an isolated HOME, the same as the website's download page. Nothing said to install the Rust helpers, and without `dispatch` on `PATH` JARVIS runs conversation-only: step 1 downloads dispatch, dmcp and contextor from their latest releases into `~/.local/bin` (or `cargo install --git`). Step 2 installs from source in a venv: `pip install` outside one fails on PEP 668 distributions such as Arch, and PyPI's `project-jarvis` 2.0.0 (August 2026) predates llama.cpp models, phone access and the root-command guards (new release: #325). Step 3 adds a `llamacpp` provider on llama.cpp's `llama-server` in place of Ollama, which has had no provider type since #291 (types: `llamacpp`, `api`, `lmstudio`, `ollama-cloud`). Step 4 is `jarvis tui`. dispatch's latest release was v0.1.0 (August 2026), four commits behind `deps/rust/dispatch` and without dispatch#42 and #43, so a lost EXIT push was never caught up; v0.1.1 (dispatch#44) is the pinned commit, so step 1 downloads what this repository builds against. contextor's release is its pin; dmcp v0.2.0 is six commits behind its pin, missing only the hidden `--approval` flag JARVIS does not pass yet and clearer errors when a `sudo -A` elevation fails. `packaging/install.sh` and the Makefile's RPM/DEB builds are marked outdated (no helpers, the old `jarvis-ai` name, a missing `jarvis.spec`) rather than fixed; #330 moved `install.sh` off Ollama. The voice steps now say to download the Vosk model, which JARVIS loads from `<models dir>/vosk/vosk-model-small-en-us-0.15` and never fetches.
 
 *2026-11-15:* Ollama references trued to the code after #291: local models run on llama.cpp's `llama-server`, which JARVIS starts itself; the provider types are `llamacpp`, `api`, `lmstudio` and `ollama-cloud` (an Ollama server you run is an `api` provider); `jarvis auto-pull` is gone, `jarvis model pull|list|rm` replaces it.
 
