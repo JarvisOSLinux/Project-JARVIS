@@ -48,7 +48,8 @@ class SystemInfo:
             {"active": (name, home) or None, "others": [(name, home)],
              "runs_as": name}
         """
-        me = getpass.getuser()
+        # $USER is what a shell in this session would answer to `echo $USER`.
+        me = os.environ.get("USER") or getpass.getuser()
         own = (me, str(Path.home()))
         if platform.system() != "Linux":
             return {"active": own, "others": [], "runs_as": me}

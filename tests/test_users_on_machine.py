@@ -51,6 +51,7 @@ def host(monkeypatch):
         monkeypatch.setattr("pwd.getpwnam", lambda n: Mock(pw_dir=HOMES[n]))
         monkeypatch.setattr(system_info.os, "geteuid", lambda: euid)
         monkeypatch.setattr(system_info.getpass, "getuser", lambda: me)
+        monkeypatch.setenv("USER", me)
         monkeypatch.setenv("HOME", home or f"/var/lib/{me}")
 
     return configure
@@ -88,6 +89,11 @@ class TestGetUsers:
             "others": [("alice", "/home/alice")],
             "runs_as": "toufic",
         }
+
+    def test_user_env_names_the_account_like_echo_user(self, host, monkeypatch):
+        host(sessions=[], me="toufic", euid=1000, home="/home/toufic")
+        monkeypatch.setattr(system_info.getpass, "getuser", lambda: "someone-else")
+        assert SystemInfo.get_users()["runs_as"] == "toufic"
 
     def test_a_user_run_jarvis_is_talked_to_by_its_owner_not_the_seat(self, host):
         # Its sockets admit its own account only, so alice at the screen is
