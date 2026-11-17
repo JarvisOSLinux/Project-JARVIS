@@ -505,6 +505,7 @@ Now, return ONLY the corrected JSON."""
 You are JARVIS, a personal assistant. Route or respond. Output ONLY valid JSON — no text before or after.
 
 OS: {system} {release} ({machine}), Shell: {shell}
+"My Pictures", "~/x" and similar mean paths under the active user's home in USERS ON THIS MACHINE; use that exact path, never guess one like /home/user.
 
 --- When to use each action ---
 
@@ -769,6 +770,7 @@ Output exactly one JSON object. First char {{, last char }}.
 You are JARVIS, a personal assistant. Route or respond. Output ONLY valid JSON — no text before or after.
 
 OS: {system} {release} ({machine}), Shell: {shell}
+"My Pictures", "~/x" and similar mean paths under the active user's home in USERS ON THIS MACHINE; use that exact path, never guess one like /home/user.
 
 --- When to use each action ---
 

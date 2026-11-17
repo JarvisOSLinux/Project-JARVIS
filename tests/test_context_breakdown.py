@@ -13,7 +13,9 @@ from unittest.mock import Mock
 import pytest
 
 from jarvis.config import Config
+from jarvis.core.system_info import SystemInfo
 from jarvis.llm.chat import LLM
+from jarvis.llm.context_manager import users_section
 from jarvis.llm.context_breakdown import (
     SUMMARY_MARKER,
     breakdown,
@@ -122,7 +124,9 @@ class TestReport:
 
 
 @pytest.mark.unit
-def test_every_root_call_records_its_breakdown():
+def test_every_root_call_records_its_breakdown(monkeypatch):
+    users = {"active": ("alice", "/home/alice"), "others": [], "runs_as": "alice"}
+    monkeypatch.setattr(SystemInfo, "get_users", lambda: users)
     provider = Mock(model="test")
     provider.chat.side_effect = [
         '{"status": "ready"}',
@@ -130,5 +134,8 @@ def test_every_root_call_records_its_breakdown():
     ]
     llm = LLM(provider=provider, prompts={"root": "RULES"})
     llm.ask("NEW INPUT: hello")
-    assert llm.last_breakdown["chars"]["Instructions"] == len("RULES")
+    # Who is logged in counts with the instructions it sits beside.
+    assert llm.last_breakdown["chars"]["Instructions"] == len(
+        "RULES\n" + users_section()
+    )
     assert llm.last_breakdown["chars"]["Your message"] == len("NEW INPUT: hello")

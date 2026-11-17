@@ -20,6 +20,7 @@ about the contextor subsystem.
 Architecture:
     ┌─────────────────────────────────────────────┐
     │  System Prompt                              │
+    │  + Users on this machine (read per call)    │
     │  + [WARM] Rolling Summary (compressed)      │
     ├─────────────────────────────────────────────┤
     │  [HOT] Last N exchange pairs (full text)    │
@@ -31,6 +32,7 @@ Architecture:
 from typing import Any, Dict, List, Optional
 
 from ..core.logger import get_logger
+from ..core.system_info import SystemInfo
 
 logger = get_logger(__name__)
 
@@ -46,6 +48,20 @@ Exchanges to summarize:
 
 Previous summary (incorporate and update, don't repeat):
 {previous_summary}"""
+
+
+def users_section() -> str:
+    """Who is on this machine now, for the ROOT system prompt."""
+    users = SystemInfo.get_users()
+    lines = ["\n--- USERS ON THIS MACHINE ---"]
+    if users["active"]:
+        name, home = users["active"]
+        lines.append(f"Active user (the one talking to you): {name}, home {home}")
+    if users["others"]:
+        label = "Also logged in" if users["active"] else "Logged in"
+        lines.append(f"{label}: " + ", ".join(f"{n} ({h})" for n, h in users["others"]))
+    lines.append(f"JARVIS runs as: {users['runs_as']}")
+    return "\n".join(lines)
 
 
 class ContextManager:
@@ -106,7 +122,10 @@ class ContextManager:
             Complete messages list ready for provider.chat().
         """
         # --- Build augmented system prompt ---
-        system_parts = [self._system_prompt]
+        # Users are read per call (people log in and out while JARVIS runs),
+        # after the static prompt so its KV cache stays valid, and before the
+        # summary, which changes far more often than who is logged in.
+        system_parts = [self._system_prompt, users_section()]
 
         # Tier 2: Inject rolling summary
         if self._rolling_summary:
