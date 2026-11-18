@@ -1,13 +1,17 @@
-"""Spot a root call parked on polkit's password prompt (#310).
+"""Spot a task parked on a password prompt (#310).
 
 dmcp writes a stderr line before it raises the prompt and another once the
 password is accepted; dispatch streams a task's stderr into its live tail. A
 tail whose last such line is the waiting one means nobody has answered yet.
 The wording is dmcp's (`AUTH_WAITING_NOTICE` / `AUTH_GRANTED_NOTICE` in
-dmcp/src/elevation.rs).
+dmcp/src/elevation.rs). A sudo inside a shell task (a job's yay) prints
+nothing while JARVIS's popup asks, so for those the relay says which tasks
+wait (`popup_waits`).
 """
 
 from __future__ import annotations
+
+from typing import Any, Iterable
 
 WAITING = "waiting for the administrator password"
 GRANTED = "administrator password accepted"
@@ -42,3 +46,19 @@ def waiting_note(tail: str) -> str:
     """What to tell the model about a tail `awaiting_password` holds."""
     last = tail[tail.rfind(WAITING) :]
     return WAITING_NOTE_POPUP if BY_POPUP in last.split("\n", 1)[0] else WAITING_NOTE
+
+
+def popup_waits(app: Any) -> set:
+    """dispatch's pids of the tasks whose sudo waits on JARVIS's popup now."""
+    relay = getattr(app, "askpass", None)
+    return relay.waiting_tasks() if relay is not None else set()
+
+
+def popup_notes(app: Any, pids: Iterable[Any]) -> str:
+    """A WAITING_FOR_PASSWORD line for each of `pids` the popup waits on."""
+    waiting = popup_waits(app)
+    return "".join(
+        f"\nWAITING_FOR_PASSWORD (pid {pid}): {WAITING_NOTE_POPUP}"
+        for pid in dict.fromkeys(pids)
+        if pid in waiting
+    )

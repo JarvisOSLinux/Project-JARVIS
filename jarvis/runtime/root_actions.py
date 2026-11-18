@@ -18,7 +18,7 @@ from . import action_events
 from .goal_updates import apply_goal_updates
 from .llm_bridge import ask_llm
 from .output_hooks import emit_activity, get_embeddings, persist_assistant_turn
-from .password_wait import awaiting_password, waiting_note
+from .password_wait import awaiting_password, popup_notes, waiting_note
 from .root_context import (
     build_root_context,
     compact_payload_for_llm,
@@ -865,6 +865,10 @@ async def _handle_status(
         context += f"\nLIVE_OUTPUT (pid {pid}, newest output so far):\n{tail}"
         if awaiting_password(tail):
             context += f"\nWAITING_FOR_PASSWORD (pid {pid}): {waiting_note(tail)}"
+    noted = {pid for pid, tail in tails if awaiting_password(tail)}
+    context += popup_notes(
+        app, [t.get("pid") for t in tasks if t.get("pid") not in noted]
+    )
     if held_output:
         context += f"\nHELD_OUTPUT:\n{held_output}"
     if not tasks:

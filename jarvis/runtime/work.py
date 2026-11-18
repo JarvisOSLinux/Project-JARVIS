@@ -12,7 +12,7 @@ import time
 from typing import Any, Dict, List
 
 from . import action_events
-from .password_wait import awaiting_password
+from .password_wait import awaiting_password, popup_waits
 
 # Enough of a running task's output to see where it is.
 TAIL_CHARS = 2_000
@@ -44,6 +44,7 @@ async def collect_work(app: Any, *, tail: int = TAIL_CHARS) -> Dict[str, Any]:
             listed = await dispatch.get_task_status(tail=tail)
         except Exception:
             listed = []
+        waiting = popup_waits(app)
         for t in listed:
             if t.get("state") != "running":
                 continue
@@ -74,7 +75,8 @@ async def collect_work(app: Any, *, tail: int = TAIL_CHARS) -> Dict[str, Any]:
                         round(now - record["at"], 1) if record.get("at") else None
                     ),
                     "output": output,
-                    "awaiting_password": awaiting_password(t.get("tail")),
+                    "awaiting_password": awaiting_password(t.get("tail"))
+                    or pid in waiting,
                     "request": owner.get(pid, ""),
                 }
             )

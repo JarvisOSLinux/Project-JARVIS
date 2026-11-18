@@ -21,9 +21,21 @@ daemon can read those command lines from ``/proc`` and run them too; it is
 not that child, so it gets no popup. The first dmcp that asks uses the
 expectation up, and a task's expectation goes when the task ends. The
 popup shows sudo's own command line and prompt, read from ``/proc``, not
-anything the asker says. What it cannot stop is code that already runs as
-this user and reads a process's memory; that is the residual risk #310 named
-for any password typed on a phone, and polkit's own desktop dialog has it too.
+anything the asker says.
+
+A sudo inside a shell task JARVIS dispatched may ask too: yay or a script in
+a ``run_job`` calls sudo itself, and the user shell server gives such a job a
+``sudo`` that runs the real one with ``-A`` when ``SUDO_ASKPASS`` is set, so
+the model never sees the password prompt. Its parent is not dmcp, so ``vet``
+walks up from sudo to the nearest dmcp, which must be dispatch's child running
+one of `TASK_TOOLS` that JARVIS sent; every process between is part of that
+task, which the user approved, and the popup shows the command sudo will run.
+The server keeps a job below the call that started it while that call runs,
+so a sudo in a job whose call has ended has no dmcp above it and is refused.
+
+What none of this can stop is code that already runs as this user and reads a
+process's memory; that is the residual risk #310 named for any password typed
+on a phone, and polkit's own desktop dialog has it too.
 
 Cancelling, or the dmcp that ran sudo going away (a stopped task, a timeout),
 kills that sudo instead of handing it an empty answer, which PAM would count
@@ -62,12 +74,29 @@ SOCKET_NAME = "askpass.sock"
 # Environment the daemon hands to dmcp (directly, and through dispatch).
 ENV_HELPER = "DMCP_SUDO_ASKPASS"
 ENV_SOCKET = "JARVIS_ASKPASS_SOCKET"
+# sudo's own variable: a shell server's job runs `sudo -A` with it.
+ENV_SUDO = "SUDO_ASKPASS"
 # sudo reads one line; anything longer than this is not a password.
 MAX_PASSWORD = 4096
 # How long an elevation JARVIS started stays expected. A popup is shown when
 # sudo asks, right as the call starts; retries come within minutes.
 EXPECT_TTL_S = 30 * 60
+# A shell task may run sudo at its very end (yay installs what it spent an
+# hour building), so its expectation lasts until the task ends; this is only
+# the backstop for an end JARVIS never hears of.
+TASK_TTL_S = 24 * 60 * 60
 _MAX_EXPECTED = 256
+# The tools whose processes may ask (a sudo inside the task): what the shell
+# servers run for the user. dispatch_flow._SHELL_TOOLS names the same three.
+TASK_TOOLS = frozenset({"execute_command", "execute_script", "run_job"})
+# How far above sudo the task's dmcp may be: job holder, its fork, the
+# server, a shell and a helper like yay are about six.
+_MAX_TASK_DEPTH = 32
+# What the helper prints where sudo was run when the popup is off.
+POPUP_OFF = (
+    "the sudo password popup is off; turn on 'Ask for the sudo password in "
+    "jarvis-app and on phones' (Settings, Safety) or run it in a terminal"
+)
 
 
 def helper_path() -> str:
@@ -127,12 +156,12 @@ def _canonical(params: Any) -> str:
     return json.dumps(params or {}, sort_keys=True, separators=(",", ":"))
 
 
-def _remember(key: tuple) -> _Expected:
+def _remember(key: tuple, ttl: float = EXPECT_TTL_S) -> _Expected:
     now = time.monotonic()
     _expected[:] = [e for e in _expected if e.until > now][-(_MAX_EXPECTED - 1) :]
     for pid in [p for p, e in _tasks.items() if e not in _expected]:
         del _tasks[pid]
-    entry = _Expected(key, now + EXPECT_TTL_S)
+    entry = _Expected(key, now + ttl)
     _expected.append(entry)
     return entry
 
@@ -147,7 +176,8 @@ def expect_tasks(tasks: Iterable[Any]) -> list[Optional[_Expected]]:
                     str(task.get("server")),
                     str(task.get("tool")),
                     _canonical(task.get("params")),
-                )
+                ),
+                TASK_TTL_S if task.get("tool") in TASK_TOOLS else EXPECT_TTL_S,
             )
             if isinstance(task, dict)
             else None
@@ -164,6 +194,12 @@ def tasks_started(pids: list[int], expected: list[Optional[_Expected]]) -> None:
     for pid, entry in zip(pids[-len(expected) :], expected):
         if entry is not None:
             _tasks[pid] = entry
+
+
+def task_of(caller: "ProcInfo") -> Optional[int]:
+    """dispatch's pid of the task whose expectation `caller` claimed."""
+    me = (caller.pid, caller.start)
+    return next((pid for pid, e in _tasks.items() if e.caller == me), None)
 
 
 def task_ended(pid: Any) -> None:
@@ -221,12 +257,16 @@ def started_by_jarvis(caller: ProcInfo, spawner: str) -> bool:
     """Whether `caller`, the dmcp that ran sudo, runs something JARVIS started.
 
     `spawner` is who started that dmcp (`vet`): "dispatch" runs JARVIS's
-    tasks, "daemon" its dmcp commands. Matching uses the expectation up: from
-    then on only that same dmcp process matches it.
+    tasks, "daemon" its dmcp commands, and "task" is a dispatched task with
+    the sudo somewhere inside it, which only `TASK_TOOLS` may have. Matching
+    uses the expectation up: from then on only that same dmcp process matches
+    it, however often its task runs sudo.
     """
     args = [a for a in caller.cmdline[1:] if not a.startswith("--dmcp-internal-")]
-    if spawner == "dispatch":
+    if spawner in ("dispatch", "task"):
         key = _call_key(args[1:]) if args[:1] == ["call"] else None
+        if spawner == "task" and key is not None and key[2] not in TASK_TOOLS:
+            key = None
     elif spawner == "daemon":
         key = ("argv", *args)
     else:
@@ -295,6 +335,23 @@ def read_proc(pid: int, root: str = "/proc") -> Optional[ProcInfo]:
     return ProcInfo(pid, ppid, comm, euid, args, exe, start)
 
 
+def task_sudo_command(sudo_args: list[str]) -> list[str]:
+    """What a sudo inside a task will run, as the user should read it.
+
+    Only the shell server's leading ``-A`` (and a ``--`` after it) is dropped;
+    any other option is shown with ``sudo`` itself, since ``-u alice`` or
+    ``-v`` changes what the password is for.
+    """
+    args = sudo_args[1:]
+    if args[:1] == ["-A"]:
+        args = args[1:]
+    if args[:1] == ["--"]:
+        return args[1:]
+    if args and args[0].startswith("-"):
+        return ["sudo", *args]
+    return args
+
+
 def sudo_command(sudo_args: list[str]) -> list[str]:
     """What a ``sudo -A -- <command…>`` will run, without dmcp's own flags."""
     args = sudo_args[1:]
@@ -311,8 +368,8 @@ class Vetted:
     command: str  # what sudo will run, as a shell would quote it
     prompt: str  # what sudo asks, the helper's argument
     sudo: ProcInfo
-    caller: ProcInfo  # the dmcp that ran sudo
-    spawner: str  # who started that dmcp: "dispatch" or "daemon"
+    caller: ProcInfo  # the dmcp that ran sudo, or the task's dmcp above it
+    spawner: str  # "dispatch" or "daemon" (who started dmcp), or "task"
 
 
 def vet(
@@ -335,7 +392,13 @@ def vet(
     if dmcp is None or caller is None or caller.exe is None:
         return None, "cannot tell who ran sudo"
     if os.path.realpath(caller.exe) != os.path.realpath(dmcp):
-        return None, f"sudo was run by {caller.exe}, not dmcp"
+        task = _task_above(sudo, daemon_pid, dmcp, dispatch, proc)
+        if task is None:
+            return None, f"sudo was run by {caller.exe}, not dmcp"
+        command = task_sudo_command(sudo.cmdline)
+        if not command:
+            return None, "sudo names no command"
+        return _vetted(asker, helper, command, sudo, task, "task"), ""
     # Only the daemon's own child, or its dispatch's, runs what JARVIS
     # started; a sibling below the daemon may copy that command line.
     if caller.ppid == daemon_pid:
@@ -354,14 +417,59 @@ def vet(
     command = sudo_command(sudo.cmdline)
     if not command:
         return None, "sudo names no command"
+    return _vetted(asker, helper, command, sudo, caller, spawner), ""
+
+
+def _vetted(
+    asker: ProcInfo,
+    helper: str,
+    command: list[str],
+    sudo: ProcInfo,
+    caller: ProcInfo,
+    spawner: str,
+) -> Vetted:
     at = asker.cmdline.index(helper)
     prompt = " ".join(asker.cmdline[at + 1 :]).strip()
-    return (
-        Vetted(
-            " ".join(shlex.quote(a) for a in command), prompt, sudo, caller, spawner
-        ),
-        "",
+    return Vetted(
+        " ".join(shlex.quote(a) for a in command), prompt, sudo, caller, spawner
     )
+
+
+def _task_above(
+    sudo: ProcInfo,
+    daemon_pid: int,
+    dmcp: str,
+    dispatch: Optional[str],
+    proc: Callable[[int], Optional[ProcInfo]],
+) -> Optional[ProcInfo]:
+    """The dmcp of the dispatched task `sudo` runs inside, if any.
+
+    The nearest dmcp above sudo decides: it must be a child of this daemon's
+    dispatch. A dmcp the daemon ran itself, or one further down a server's
+    own tree, does not stand for a task the user approved.
+    """
+    pid = sudo.ppid
+    for _ in range(_MAX_TASK_DEPTH):
+        if pid <= 1 or pid == daemon_pid:
+            return None
+        info = proc(pid)
+        if info is None:
+            return None
+        if info.exe is not None and os.path.realpath(info.exe) == os.path.realpath(
+            dmcp
+        ):
+            parent = proc(info.ppid)
+            if (
+                dispatch is None
+                or parent is None
+                or parent.exe is None
+                or parent.ppid != daemon_pid
+                or os.path.realpath(parent.exe) != os.path.realpath(dispatch)
+            ):
+                return None
+            return info
+        pid = info.ppid
+    return None
 
 
 def peer_pid(writer: asyncio.StreamWriter) -> Optional[int]:
@@ -412,6 +520,7 @@ def _kill(info: ProcInfo, proc: Callable[[int], Optional[ProcInfo]]) -> None:
 class _Pending:
     request: dict
     answer: asyncio.Future = field(repr=False)
+    task: Optional[int] = None  # dispatch's pid of the task that asked
 
 
 class AskpassRelay:
@@ -460,6 +569,7 @@ class AskpassRelay:
         if self._dispatch is None:
             self._dispatch = shutil.which(Config.DISPATCH_BINARY)
         os.environ[ENV_HELPER] = install_helper()
+        os.environ[ENV_SUDO] = os.environ[ENV_HELPER]
         os.environ[ENV_SOCKET] = path
         logger.info(f"JARVIS: sudo askpass relay at {path}")
 
@@ -482,10 +592,15 @@ class AskpassRelay:
 
             platform.ipc_cleanup(socket_path())
         os.environ.pop(ENV_HELPER, None)
+        os.environ.pop(ENV_SUDO, None)
         os.environ.pop(ENV_SOCKET, None)
 
     def pending(self) -> list[dict]:
         return [p.request for p in self._pending.values()]
+
+    def waiting_tasks(self) -> set[int]:
+        """dispatch's pids of the tasks whose sudo waits on the popup."""
+        return {p.task for p in self._pending.values() if p.task is not None}
 
     def answer(self, request_id: Any, password: Any) -> Optional[str]:
         """Hand `password` to the request; the reason when it cannot."""
@@ -534,7 +649,7 @@ class AskpassRelay:
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
         if self._closing or not self.enabled():
-            await self._write(writer, {"error": "the password popup is off"})
+            await self._write(writer, {"error": POPUP_OFF})
             return
         pid = self._peer(writer)
         vetted, why = (
@@ -574,7 +689,7 @@ class AskpassRelay:
             "at": now,
         }
         answer = asyncio.get_running_loop().create_future()
-        self._pending[request["id"]] = _Pending(request, answer)
+        self._pending[request["id"]] = _Pending(request, answer, task_of(vetted.caller))
         gone = asyncio.ensure_future(reader.read())
         outcome = "gone"
         try:
