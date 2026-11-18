@@ -50,8 +50,8 @@ used independently or composed together:
 [**JARVIS OS**](https://github.com/JarvisOSLinux/jarvisos) is one
 *implementation* — a complete Linux distribution that instantiates the system at
 the OS level, with kernel-integrated policy enforcement and hardware monitoring.
-But the system runs standalone on any platform: `pip install project-jarvis` on
-any Linux, macOS, or Windows machine.
+But the system also runs standalone on the Linux you already have: see
+[Installation](#installation).
 
 ---
 
@@ -72,118 +72,175 @@ any Linux, macOS, or Windows machine.
 
 ## Installation
 
-### Quick Start (Minimal Install - CLI/Text Only)
+Four steps on the Linux you already have. You need Python 3.10 or newer, git
+and curl.
 
-For text-only mode without voice features:
+### 1. The three helpers
+
+JARVIS hands its work to three Rust programs: **dispatch** runs tools side by
+side, **dmcp** installs and starts MCP servers, and **contextor** keeps
+long-term memory. They must be on your `PATH`: without `dispatch`, JARVIS
+starts in conversation-only mode, with no tools. This puts the prebuilt
+binaries in `~/.local/bin`:
 
 ```bash
-# Install core package
-pip install project-jarvis
-
-# Install llama.cpp's llama-server (Arch: pacman -S llama-cpp), or set
-# LLAMA_SERVER_BIN to a llama-server binary
-
-# Add a local model (downloaded from Hugging Face on first start) and run
-jarvis providers add --type llamacpp --model Qwen/Qwen3-4B-GGUF:Q4_K_M
-# (or run `jarvis tui` and type /providers add for a guided interactive form)
-jarvis
+mkdir -p ~/.local/bin
+for t in dispatch dmcp contextor; do
+  curl -fL -o ~/.local/bin/$t \
+    https://github.com/JarvisOSLinux/$t/releases/latest/download/$t-linux-x86_64
+  chmod +x ~/.local/bin/$t
+done
 ```
 
-### Full Installation with Voice Features
+Not on an x86-64 PC? Build them with Rust instead, into the same folder:
 
-1. **Clone the repository with the Rust submodules (dispatch, dmcp, contextor)**:
-   ```bash
-   git clone --recursive https://github.com/JarvisOSLinux/Project-JARVIS.git
-   cd Project-JARVIS
-   ```
+```bash
+for t in dispatch dmcp contextor; do
+  cargo install --git https://github.com/JarvisOSLinux/$t --root ~/.local
+done
+```
 
-2. **Create required folders**:
+### 2. JARVIS itself
+
+From source, in its own Python environment, with the terminal UI. The last
+line lets you type `jarvis` from anywhere.
+
+```bash
+git clone https://github.com/JarvisOSLinux/Project-JARVIS.git
+cd Project-JARVIS
+python -m venv .venv
+.venv/bin/pip install -e ".[tui]"
+ln -sf "$PWD/.venv/bin/jarvis" ~/.local/bin/jarvis
+```
+
+- **Why a venv:** Arch, Debian 12+, Ubuntu 23.04+ and other distributions that
+  follow PEP 668 refuse `pip install` outside one ("externally-managed-environment").
+- **Debian or Ubuntu:** install `python3-venv` first and write `python3 -m venv
+  .venv`, since there is no `python` command by default.
+- **Why not `pip install project-jarvis`:** PyPI has 2.0.0 from August 2026,
+  from before local llama.cpp models, phone access and the root-command guards.
+  A new release is tracked in
+  [#325](https://github.com/JarvisOSLinux/Project-JARVIS/issues/325).
+- **`jarvis: command not found`?** Add `export PATH="$HOME/.local/bin:$PATH"` to
+  `~/.bashrc` and open a new terminal.
+- Keep the checkout: JARVIS runs from it (an editable install), so `git pull`
+  updates it.
+
+### 3. A model
+
+Free and private: a model that runs on your computer through llama.cpp's
+`llama-server`, which JARVIS starts itself.
+
+```bash
+sudo pacman -S llama-cpp   # Arch; elsewhere, llama.cpp's own builds
+jarvis providers add --type llamacpp --model Qwen/Qwen3-4B-GGUF:Q4_K_M
+```
+
+JARVIS downloads the model from Hugging Face (about 2.5 GB, into
+`~/.local/share/jarvis/models/llm`) the first time it starts; `jarvis model pull
+Qwen/Qwen3-4B-GGUF:Q4_K_M` fetches it ahead of time. Not on Arch? Take
+`llama-server` from [llama.cpp's releases](https://github.com/ggml-org/llama.cpp/releases)
+and put it on `PATH`, or set `LLAMA_SERVER_BIN=/path/to/llama-server` in
+`~/.config/jarvis/jarvis.conf`.
+
+Or use a hosted model with your own key:
+
+```bash
+jarvis providers add --type api --model <model> --url <api url> --key <key>
+```
+
+The provider types are `llamacpp` (a GGUF file or Hugging Face
+`user/repo[:quant]`), `api` (any OpenAI-compatible endpoint, an Ollama server
+you run included), `lmstudio` and `ollama-cloud` (ollama.com, with `--key` or
+`OLLAMA_API_KEY`). `jarvis providers` lists them; `jarvis tui` then
+`/providers add` gives a form instead. Several providers form a failover pool,
+tried in order.
+
+**Keep llama.cpp even with a hosted model.** JARVIS runs a small embedding
+model on it to find tools and search its memory; without it, tools are found by
+keyword and memory search is off.
+
+### 4. Ask
+
+```bash
+jarvis tui
+```
+
+Type what you want. When JARVIS needs a tool it doesn't have yet, it finds one
+in the [MCP registry](https://github.com/JarvisOSLinux/mcp-registry) and
+installs it; anything risky waits for your OK. `jarvis tui` runs the engine in
+the same process. To keep JARVIS running for other front ends, start `jarvis`
+(the daemon) instead and connect with `jarvis send`, the
+[desktop app](https://github.com/JarvisOSLinux/jarvis-app) or your phone
+through `jarvis web` ([docs/web-gateway.md](docs/web-gateway.md)).
+
+Providers are stored in `~/.config/jarvis/providers.json`. Voice, logging and
+other settings go in `~/.config/jarvis/jarvis.conf` (see `jarvis/.env.example`
+for every option).
+
+### Updating
+
+```bash
+cd Project-JARVIS && git pull && .venv/bin/pip install -e ".[tui]"
+```
+
+For newer helpers, repeat step 1 the way you did it.
+
+### Voice (optional)
+
+Voice needs a microphone and speakers; without them JARVIS stays in text mode.
+
+1. **Install the voice extra** from the checkout:
    ```bash
-   mkdir -p ~/.local/share/jarvis/models/piper
+   .venv/bin/pip install -e ".[tui,voice]"
    ```
+2. **Download the speech models.** Listening (and the wake word) needs the
+   Vosk model, which JARVIS does not download itself:
+   ```bash
+   mkdir -p ~/.local/share/jarvis/models/vosk ~/.local/share/jarvis/models/piper
+   cd ~/.local/share/jarvis/models/vosk
+   curl -fLO https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
+   unzip vosk-model-small-en-us-0.15.zip && rm vosk-model-small-en-us-0.15.zip
+   ```
+   Speaking needs a Piper voice: both the `.onnx` and the `.onnx.json` file
+   from [Piper samples](https://rhasspy.github.io/piper-samples/), for example
+   [en_US-libritts_r-medium](https://rhasspy.github.io/piper-samples/#en_US-libritts_r-medium),
+   in `~/.local/share/jarvis/models/piper`.
+
    Models live under the platform data dir, **not** a `models/` folder in the
    checkout: `~/.local/share/jarvis/models` on Linux,
    `~/Library/Application Support/jarvis/models` on macOS,
    `%LOCALAPPDATA%\jarvis\models` on Windows. Override with `MODELS_DIR` or
    `JARVIS_MODELS_DIR`.
-
-3. **Download a Piper TTS model** (for voice output):
-   - Get both `.onnx` and `.onnx.json` files from [Piper samples](https://rhasspy.github.io/piper-samples/).  
-   - Place them in `<models dir>/piper` (e.g. `~/.local/share/jarvis/models/piper`).  
-   - Example: [en_US-libritts_r-medium](https://rhasspy.github.io/piper-samples/#en_US-libritts_r-medium).  
-
-4. **Create and activate a virtual environment**:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate   # Linux/MacOS
-   venv\Scripts\activate      # Windows
-   ```
-
-5. **Install dependencies**:
-   
-   **Option A: Install with voice support (recommended)**:
-   ```bash
-   pip install "project-jarvis[voice]"
-   ```
-   
-   **Option B: Install from source with voice support**:
-   ```bash
-   pip install -e ".[voice]"
-   ```
-   
-   **Option C: Install minimal (CLI/Text only)**:
-   ```bash
-   pip install project-jarvis
-   # or from source:
-   pip install -e .
-   ```
-   
-   **Option D: Install specific voice features**:
-   ```bash
-   pip install "project-jarvis[voice-input]"   # Speech-to-text only
-   pip install "project-jarvis[voice-output]"  # Text-to-speech only
-   ```
-
-6. **Install llama.cpp** for local models: JARVIS starts its `llama-server`
-   itself (Arch: `pacman -S llama-cpp`; elsewhere set `LLAMA_SERVER_BIN` to a
-   `llama-server` binary). Not needed if you only use remote providers.
-
-7. **Configure LLM provider**:
-   ```bash
-   # A local GGUF model from Hugging Face (user/repo[:quant]), downloaded on first
-   # start or ahead of time with `jarvis model pull`
-   jarvis providers add --type llamacpp --model Qwen/Qwen3-4B-GGUF:Q4_K_M
-   # Or an OpenAI-compatible API (an Ollama server you run is one: --url http://localhost:11434)
-   jarvis providers add --type api --model <m> --url <u> --key <k>
-   jarvis providers add --type lmstudio --model <m>
-   jarvis providers add --type ollama-cloud --model gpt-oss:120b --key <k>
-   ```
-   (Or run `jarvis tui` and type `/providers add` for a guided interactive form.)
-   Providers (`llamacpp`, `api`, `lmstudio`, `ollama-cloud`) are stored in `~/.config/jarvis/providers.json`.
-   Voice, logging, and other settings can be customized in `~/.config/jarvis/jarvis.conf`
-   (see `jarvis/.env.example` for all available options).
-
-8. **Run JARVIS**:
-   ```bash
-   jarvis
-   ```
+3. **Run** `jarvis` (voice and socket input). See
+   [Voice Activation Configuration](#voice-activation-configuration) for wake
+   words and the speech-to-text engine.
 
 ### Optional Dependency Groups
 
-JARVIS supports optional dependencies for flexible installation:
+Install any of these from the checkout with
+`.venv/bin/pip install -e ".[<group>,<group>]"`:
 
-- **`project-jarvis`** - Core package (CLI/Text mode only)
-- **`project-jarvis[voice-input]`** - Add speech-to-text support (Vosk)
-- **`project-jarvis[voice-output]`** - Add text-to-speech support
-- **`project-jarvis[voice]`** - Full voice support (input + output)
-- **`project-jarvis[voice-whisper]`** - faster-whisper speech-to-text (opt-in; includes voice-input, more accurate than Vosk but needs more RAM). Not part of `voice` or `all`.
-- **`project-jarvis[tui]`** - Interactive terminal UI (`jarvis tui`)
-- **`project-jarvis[voice-aec]`** - Acoustic echo cancellation for barge-in (includes voice; needs a C++ toolchain)
-- **`project-jarvis[dev]`** - Development tools (pytest, black, etc.)
-- **`project-jarvis[docs]`** - Documentation tools (sphinx, etc.)
-- **`project-jarvis[all]`** - Everything (tui + voice-aec/voice + dev + docs)
+- **`tui`** - Interactive terminal UI (`jarvis tui`)
+- **`voice-input`** - Speech-to-text (Vosk)
+- **`voice-output`** - Text-to-speech (Piper)
+- **`voice`** - Full voice support (input + output)
+- **`voice-whisper`** - faster-whisper speech-to-text (opt-in; includes voice-input, more accurate than Vosk but needs more RAM). Not part of `voice` or `all`.
+- **`voice-aec`** - Acoustic echo cancellation for barge-in (includes voice; needs a C++ toolchain)
+- **`dev`** - Development tools (pytest, black, etc.)
+- **`docs`** - Documentation tools (sphinx, etc.)
+- **`all`** - Everything (tui + voice-aec/voice + dev + docs)
 
-**Note**: Voice features require audio devices. The system will gracefully degrade to text mode if audio is unavailable.
+With no group, JARVIS has the CLI and text mode only.
+
+### System-wide install (`packaging/`): outdated
+
+`packaging/install.sh` and the RPM/DEB builds in `packaging/Makefile` have not
+kept up with the steps above. `install.sh` installs none of the three helpers,
+so its service would run conversation-only, and run from anywhere but the
+repository root it installs `jarvis-ai`, the project's old name. The Makefile
+still builds a package called `jarvis-ai`, and its RPM target copies a
+`jarvis.spec` that is not in the repository. Use the four steps above.
 
 ---
 
@@ -391,7 +448,7 @@ LOG_COLORS=true               # Colored console output
 - **Audio Hardware**: Microphone (for voice input) and speakers/headphones (for voice output)
 - **Memory**: 8GB RAM (16GB recommended for larger models)
 - **GPU**: Optional, for acceleration of local llama.cpp models or Piper TTS
-- **Additional Packages**: Install with `pip install "project-jarvis[voice]"`
+- **Additional Packages**: the `voice` extra, from the checkout: `.venv/bin/pip install -e ".[tui,voice]"` (see [Voice](#voice-optional))
 
 **Note**: JARVIS works perfectly fine without audio hardware - it will automatically use text mode.
 
@@ -485,6 +542,8 @@ When opening PRs or issues, use the repository templates for faster triage and r
 ---
 
 ## Changelog — corrected claims
+
+*2026-11-15:* Installation rewritten as the four steps checked from a fresh clone in an isolated HOME, the same as the website's download page. Nothing said to install the Rust helpers, and without `dispatch` on `PATH` JARVIS runs conversation-only: step 1 downloads dispatch, dmcp and contextor from their latest releases into `~/.local/bin` (or `cargo install --git`). Step 2 installs from source in a venv: `pip install` outside one fails on PEP 668 distributions such as Arch, and PyPI's `project-jarvis` 2.0.0 (August 2026) predates llama.cpp models, phone access and the root-command guards (new release: #325). Step 3 adds a `llamacpp` provider on llama.cpp's `llama-server` in place of Ollama, which has had no provider type since #291 (types: `llamacpp`, `api`, `lmstudio`, `ollama-cloud`). Step 4 is `jarvis tui`. dispatch's latest release was v0.1.0 (August 2026), four commits behind `deps/rust/dispatch` and without dispatch#42 and #43, so a lost EXIT push was never caught up; v0.1.1 (dispatch#44) is the pinned commit, so step 1 downloads what this repository builds against. contextor's release is its pin; dmcp v0.2.0 is six commits behind its pin, missing only the hidden `--approval` flag JARVIS does not pass yet and clearer errors when a `sudo -A` elevation fails. `packaging/install.sh` and the Makefile's RPM/DEB builds are marked outdated (no helpers, the old `jarvis-ai` name, a missing `jarvis.spec`) rather than fixed; #330 moved `install.sh` off Ollama. The voice steps now say to download the Vosk model, which JARVIS loads from `<models dir>/vosk/vosk-model-small-en-us-0.15` and never fetches.
 
 *2026-11-15:* Ollama references trued to the code after #291: local models run on llama.cpp's `llama-server`, which JARVIS starts itself; the provider types are `llamacpp`, `api`, `lmstudio` and `ollama-cloud` (an Ollama server you run is an `api` provider); `jarvis auto-pull` is gone, `jarvis model pull|list|rm` replaces it.
 
