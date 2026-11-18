@@ -993,3 +993,277 @@ class TestRunDmcp:
         from jarvis.config import positive_int
 
         assert positive_int(value, 180) == seconds
+
+
+# -- a sudo inside a shell task (a job's yay) ---------------------------------
+
+JOB_PARAMS = {"command": "yay -S spotify", "job": "aur-spotify"}
+JOB_CALL = [
+    "dmcp",
+    "call",
+    "shell",
+    "run_job",
+    "--args",
+    json.dumps(JOB_PARAMS),
+]
+JOB_TASK = {"server": "shell", "tool": "run_job", "params": JOB_PARAMS}
+PYTHON = "/usr/bin/python3"
+
+
+def _job_table(sudo_args=("-A", "pacman", "-U", "/tmp/spotify.pkg.tar.zst"), **over):
+    """daemon (100) > dispatch (200) > dmcp call run_job (300) > server (310)
+    > the holder's first fork (320) > holder (330) > sh -c (340) > yay (350)
+    > sudo (400) > helper (500), as the user shell server leaves a job."""
+    table = {
+        100: askpass.ProcInfo(
+            100, 1, "python", 1000, ["python", "-m", "jarvis"], None, 1
+        ),
+        200: askpass.ProcInfo(
+            200, 100, "dispatch", 1000, ["dispatch", "serve"], DISPATCH, 2
+        ),
+        300: askpass.ProcInfo(300, 200, "dmcp", 1000, JOB_CALL, DMCP, 3),
+        310: askpass.ProcInfo(
+            310, 300, "python3", 1000, ["python3", "server.py"], PYTHON, 4
+        ),
+        320: askpass.ProcInfo(
+            320, 310, "python3", 1000, ["python3", "server.py"], PYTHON, 5
+        ),
+        330: askpass.ProcInfo(
+            330, 320, "python3", 1000, ["python3", "server.py"], PYTHON, 6
+        ),
+        340: askpass.ProcInfo(
+            340,
+            330,
+            "sh",
+            1000,
+            ["/bin/sh", "-c", "yay -S spotify"],
+            "/usr/bin/bash",
+            7,
+        ),
+        350: askpass.ProcInfo(
+            350, 340, "yay", 1000, ["yay", "-S", "spotify"], "/usr/bin/yay", 8
+        ),
+        400: askpass.ProcInfo(
+            400, 350, "sudo", 0, ["/usr/bin/sudo", *sudo_args], None, 9
+        ),
+        500: askpass.ProcInfo(
+            500,
+            400,
+            "askpass-helper",
+            1000,
+            ["/usr/bin/python3", "-I", HELPER, PROMPT],
+            None,
+            10,
+        ),
+    }
+    table.update({int(k): v for k, v in over.items()})
+    return table.get
+
+
+@pytest.mark.unit
+class TestASudoInsideATask:
+    def test_it_is_vetted_against_the_tasks_own_dmcp(self):
+        vetted, why = _vet(_job_table())
+        assert why == ""
+        assert vetted.spawner == "task"
+        assert vetted.caller.pid == 300, "the run_job's dmcp, not yay"
+        assert vetted.sudo.pid == 400
+        assert vetted.command == "pacman -U /tmp/spotify.pkg.tar.zst"
+        assert vetted.prompt == PROMPT.strip()
+
+    @pytest.mark.parametrize(
+        "sudo_args, shown",
+        [
+            (["-A", "--", "pacman", "-U", "x"], "pacman -U x"),
+            (["-A", "-u", "alice", "id"], "sudo -u alice id"),
+            (["-A", "-v"], "sudo -v"),
+            (["-k", "-A", "true"], "sudo -k -A true"),
+        ],
+    )
+    def test_options_that_change_what_it_is_for_are_shown(self, sudo_args, shown):
+        vetted, why = _vet(_job_table(sudo_args))
+        assert why == "" and vetted.command == shown
+
+    def test_a_sudo_naming_nothing_is_refused(self):
+        assert _vet(_job_table(["-A"]))[1] == "sudo names no command"
+
+    def test_a_job_whose_call_ended_is_refused(self):
+        """The holder's first fork is reparented once run_job's call ends:
+        nothing above it is JARVIS's, so nothing asks for it."""
+        orphaned = askpass.ProcInfo(320, 1, "python3", 1000, ["python3"], PYTHON, 5)
+        vetted, why = _vet(_job_table(**{"320": orphaned}))
+        assert vetted is None and why == "sudo was run by /usr/bin/yay, not dmcp"
+
+    def test_the_nearest_dmcp_must_be_dispatchs_child(self):
+        for parent in (100, 310):  # the daemon's own dmcp; one a server ran
+            dmcp = askpass.ProcInfo(300, parent, "dmcp", 1000, JOB_CALL, DMCP, 3)
+            assert _vet(_job_table(**{"300": dmcp}))[0] is None
+
+    def test_a_dmcp_inside_the_task_is_the_one_that_counts(self):
+        """A server that runs dmcp itself: the nearest dmcp is not dispatch's
+        child, and the task further up does not stand in for it."""
+        inner = askpass.ProcInfo(
+            340, 330, "dmcp", 1000, ["dmcp", "call", "x", "y"], DMCP, 7
+        )
+        assert _vet(_job_table(**{"340": inner}))[0] is None
+
+    def test_a_task_below_a_stray_dispatch_is_refused(self):
+        stray = askpass.ProcInfo(200, 150, "dispatch", 1000, ["dispatch"], DISPATCH, 2)
+        assert _vet(_job_table(**{"200": stray}))[0] is None
+
+    def test_no_dmcp_within_reach_is_refused(self, monkeypatch):
+        monkeypatch.setattr(askpass, "_MAX_TASK_DEPTH", 3)
+        assert _vet(_job_table())[0] is None
+
+
+@pytest.mark.unit
+class TestTasksThatMayAsk:
+    def test_a_shell_task_jarvis_sent(self, clean_expected):
+        caller = _caller(JOB_CALL)
+        assert not askpass.started_by_jarvis(caller, "task")
+        askpass.expect_tasks([JOB_TASK])
+        assert askpass.started_by_jarvis(caller, "task")
+        assert askpass.started_by_jarvis(caller, "task"), "yay's next sudo"
+        assert not askpass.started_by_jarvis(
+            _caller(JOB_CALL, pid=301, start=9), "task"
+        )
+
+    def test_only_the_shell_tools(self, clean_expected):
+        params = {"city": "Paris"}
+        askpass.expect_tasks(
+            [{"server": "weather", "tool": "forecast", "params": params}]
+        )
+        caller = _caller(
+            ["dmcp", "call", "weather", "forecast", "--args", json.dumps(params)]
+        )
+        assert not askpass.started_by_jarvis(caller, "task")
+        assert askpass.started_by_jarvis(
+            caller, "dispatch"
+        ), "its own elevation still may"
+
+    @pytest.mark.parametrize("tool", sorted(askpass.TASK_TOOLS))
+    def test_each_shell_tool(self, clean_expected, tool):
+        askpass.expect_tasks([{"server": "shell", "tool": tool, "params": {"a": 1}}])
+        caller = _caller(["dmcp", "call", "shell", tool, "--args", '{"a": 1}'])
+        assert askpass.started_by_jarvis(caller, "task")
+
+    def test_a_shell_task_is_expected_while_it_runs(self, clean_expected, monkeypatch):
+        """yay may spend an hour building before its sudo pacman -U."""
+        askpass.expect_tasks([JOB_TASK, {"server": "weather", "tool": "forecast"}])
+        now = askpass.time.monotonic()
+        monkeypatch.setattr(
+            askpass.time, "monotonic", lambda: now + askpass.EXPECT_TTL_S + 1
+        )
+        assert askpass.started_by_jarvis(_caller(JOB_CALL), "task")
+        assert not askpass.started_by_jarvis(
+            _caller(["dmcp", "call", "weather", "forecast"]), "dispatch"
+        )
+
+    def test_the_task_that_asked_is_known(self, clean_expected):
+        expected = askpass.expect_tasks([JOB_TASK])
+        askpass.tasks_started([7], expected)
+        caller = _caller(JOB_CALL)
+        assert askpass.task_of(caller) is None
+        assert askpass.started_by_jarvis(caller, "task")
+        assert askpass.task_of(caller) == 7
+        askpass.task_ended(7)
+        assert not askpass.started_by_jarvis(caller, "task")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_the_relay_says_which_task_waits(tmp_path, popup, clean_expected):
+    expected = askpass.expect_tasks([JOB_TASK])
+    askpass.tasks_started([7], expected)
+    async with _Daemon(tmp_path, proc=_job_table(), started=_real_started) as d:
+        assert d.relay.waiting_tasks() == set()
+        reader, writer = await d.ask()
+        request = await d.request()
+        assert request["command"] == "pacman -U /tmp/spotify.pkg.tar.zst"
+        assert d.relay.waiting_tasks() == {7}
+        d.relay.answer(request["id"], "hunter2")
+        assert json.loads(await reader.readline()) == {"password": "hunter2"}
+        writer.close()
+        await d.done()
+        assert d.relay.waiting_tasks() == set()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_job_whose_call_was_stopped_has_its_sudo_killed(
+    tmp_path, popup, clean_expected
+):
+    askpass.tasks_started([7], askpass.expect_tasks([JOB_TASK]))
+    table = _job_table()
+    async with _Daemon(tmp_path, proc=table, started=_real_started) as d:
+        reader, writer = await d.ask()
+        request = await d.request()
+        d.table = lambda p: None if p == 300 else table(p)
+        assert (await d.done()) == {
+            "type": "password_request_done",
+            "id": request["id"],
+            "outcome": "gone",
+        }
+        assert d.killed == [400]
+        writer.close()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_the_relay_hands_sudo_its_askpass(monkeypatch, tmp_path):
+    monkeypatch.setattr(Config, "JARVIS_DATA_DIR", str(tmp_path))
+    for name in (askpass.ENV_HELPER, askpass.ENV_SUDO, askpass.ENV_SOCKET):
+        monkeypatch.delenv(name, raising=False)
+    relay = askpass.AskpassRelay(lambda m: None, dmcp=DMCP, dispatch=DISPATCH)
+    await relay.start()
+    try:
+        assert os.environ[askpass.ENV_SUDO] == askpass.helper_path()
+        assert os.environ[askpass.ENV_HELPER] == askpass.helper_path()
+    finally:
+        await relay.stop()
+    assert askpass.ENV_SUDO not in os.environ
+
+
+@pytest.mark.unit
+def test_dispatch_hands_sudo_its_askpass(monkeypatch):
+    from jarvis.dispatch import transport
+
+    monkeypatch.setenv("SUDO_ASKPASS", "/d/askpass-helper")
+    assert transport._dmcp_env()["SUDO_ASKPASS"] == "/d/askpass-helper"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "reply, said",
+    [
+        ({"error": askpass.POPUP_OFF}, f"jarvis askpass: {askpass.POPUP_OFF}\n"),
+        ({"cancel": True}, ""),
+        (None, ""),
+    ],
+)
+def test_the_helper_says_why_there_is_no_password(
+    monkeypatch, tmp_path, capsys, reply, said
+):
+    """sudo's terminal is a job's output or dmcp's stderr: the model and the
+    user read why sudo failed there."""
+    path = str(tmp_path / "e.sock")
+    t, _ = _fake_daemon(path, reply)
+    monkeypatch.setenv("JARVIS_ASKPASS_SOCKET", path)
+    monkeypatch.setattr(askpass_helper, "_leave", lambda sudo: None)
+    assert askpass_helper.main(["p"]) == 1
+    t.join(2)
+    out = capsys.readouterr()
+    assert out.out == "" and out.err == said
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_with_the_popup_off_the_asker_is_told_how_to_turn_it_on(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(Config, "SUDO_PASSWORD_POPUP", False)
+    async with _Daemon(tmp_path) as d:
+        reader, writer = await d.ask()
+        assert json.loads(await reader.readline()) == {"error": askpass.POPUP_OFF}
+        writer.close()
+    assert "Settings" in askpass.POPUP_OFF

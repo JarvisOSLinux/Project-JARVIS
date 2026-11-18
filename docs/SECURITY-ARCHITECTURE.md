@@ -237,7 +237,15 @@ request only when it comes from its own helper under a real sudo started by
 dmcp below the daemon, running a task JARVIS dispatched or a dmcp command
 JARVIS ran, with the command read from `/proc`: an MCP server or a
 prompt-injected shell command cannot raise a genuine popup for a command of
-its own and phish the password. Cancelling kills that sudo instead of
+its own and phish the password. One kind of task may ask from inside: a
+shell task JARVIS dispatched (`execute_command`, `execute_script`, `run_job`),
+whose job's `sudo` the user shell server runs with `-A` when `SUDO_ASKPASS` is
+set, so yay's `sudo pacman -U …` asks in the popup and never on a terminal
+only the model can type into. The daemon walks `/proc` from sudo up to the
+nearest dmcp, which must be dispatch's child running that task; the popup
+shows the command sudo will run. Whatever runs inside an approved shell task
+can therefore ask for a command of its own, in the popup, under its real
+command line, which is what the user reads before typing. Cancelling kills that sudo instead of
 failing its password, so it never counts toward `pam_faillock`. It cannot stop
 code that already runs as the user from reading a process's memory, the same
 exposure polkit's desktop dialog has. Anyone allowed to answer can make the

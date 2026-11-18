@@ -11,7 +11,7 @@ from typing import Any, Callable, Sequence
 
 from ..core.secret_scrubber import redact_secrets, redaction_notice
 from ..core.voice_state import VoiceState
-from . import action_events, askpass, attachments, stop, turns
+from . import action_events, askpass, attachments, password_wait, stop, turns
 from .io import (
     broadcast_to_gui_clients,
     enrich_pending_with_goals,
@@ -457,6 +457,14 @@ async def _answer_signals(
     from .dispatch_flow import job_note
 
     context += job_note(app, [i.signal for i in live])
+    context += password_wait.popup_notes(
+        app,
+        [
+            i.signal.get("pid")
+            for i in live
+            if str(i.signal.get("type") or "").upper() == "REMIND"
+        ],
+    )
 
     response = await ask_llm(
         app,

@@ -99,7 +99,8 @@ that one sudo (`runtime/askpass.py`); it is not logged, stored or audited (the
 audit file gets the request's id). JARVIS shows a request only when it comes
 from its own askpass helper under a real sudo started by dmcp below the
 daemon, with sudo's command line as read from `/proc`. Only a task JARVIS
-dispatched or a dmcp command it ran gets a popup. The owner's phone may turn
+dispatched or a dmcp command it ran gets a popup, or a sudo inside a shell
+task JARVIS dispatched (a job's yay installing what it built). The owner's phone may turn
 the popup on or off; it changes where sudo asks, not whether a password is
 needed. Anyone allowed to answer can make the host
 run that one command as root, so allow `trusted` only to people you would

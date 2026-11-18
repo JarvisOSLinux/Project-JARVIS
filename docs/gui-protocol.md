@@ -250,6 +250,10 @@ clients that subscribed to them:
 {"type": "password_request_done", "id": "9f2c1a07b3d4e5f6", "outcome": "answered"}
 ```
 
+A sudo inside a shell task (yay in a `run_job`) asks the same way; its
+`command` is what that sudo will run, prefixed with `sudo` when it carries an
+option such as `-u alice` or `-v`: `"command": "pacman -U /home/t/.cache/yay/spotify/spotify-1.2-x86_64.pkg.tar.zst"`.
+
 `command` is sudo's own command line and `prompt` what it asks, both read from
 `/proc`. A wrong password makes sudo ask again: a new request with `attempt` 2
 and `retry: true`; a different prompt (a code, a new password) has `retry:

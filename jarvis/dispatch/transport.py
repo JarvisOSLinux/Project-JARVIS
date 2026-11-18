@@ -112,7 +112,10 @@ _DMCP_VARS = (
     "DMCP_SESSION_TTL_SECS",
     "DMCP_ELICIT_MAX_PROMPTS",
     # The sudo password popup (runtime/askpass.py sets them in the daemon).
+    # SUDO_ASKPASS is for a sudo inside a shell task: the shell servers run
+    # it with -A when it is set.
     "DMCP_SUDO_ASKPASS",
+    "SUDO_ASKPASS",
     "JARVIS_ASKPASS_SOCKET",
 )
 

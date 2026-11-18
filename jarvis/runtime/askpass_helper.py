@@ -9,7 +9,8 @@ goes nowhere but to sudo.
 
 Without a password it never just exits: sudo would hand PAM an empty answer,
 which pam_faillock counts as a failed try. It kills its sudo instead, and if
-that is refused it waits for sudo to go.
+that is refused it waits for sudo to go. Why there is none (the popup is off,
+JARVIS did not start that sudo) goes to its standard error first.
 
 Standard library only: the daemon copies this file into its data directory
 and sudo runs it with ``python -I``, so it imports nothing from JARVIS, reads
@@ -117,6 +118,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                 reply = _reply(sock, lambda: os.getppid() == sudo)
     password = reply.get("password") if reply else None
     if not isinstance(password, str):
+        why = reply.get("error") if reply else None
+        if isinstance(why, str) and why:
+            # On the terminal sudo was run from: a job's output, or dmcp's
+            # stderr, which is where the model and the user look.
+            sys.stderr.write(f"jarvis askpass: {why}\n")
+            sys.stderr.flush()
         _leave(sudo)
         return 1
     sys.stdout.write(password + "\n")
