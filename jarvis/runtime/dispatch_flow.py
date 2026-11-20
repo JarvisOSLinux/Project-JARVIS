@@ -72,27 +72,70 @@ def _tool_labels(tasks: list[dict[str, Any]]) -> list[str]:
     return labels
 
 
+# A JSON "message" field, as Microsoft Graph and most HTTP APIs report errors.
+_MESSAGE_FIELD = re.compile(r'"message"\s*:\s*"((?:[^"\\]|\\.)*)"')
+_FAILED_CALL = "Error: dmcp invocation failed: "
+_GIST_CHARS = 600
+
+
+def _answer_gist(text: str) -> str:
+    """A tool's answer as a person reads it: a shell result as printed, an API
+    error as its messages. Graph nests its error JSON inside a JSON string, so
+    "The recurrence start date is too early." sat three escapes deep."""
+    shown = action_events.readable(text)[0].strip()
+    if shown.startswith(_FAILED_CALL):
+        shown = shown[len(_FAILED_CALL) :].strip()
+    flat = shown
+    for _ in range(3):
+        flat = flat.replace('\\"', '"')
+    messages: list[str] = []
+    for found in _MESSAGE_FIELD.finditer(flat):
+        message = found.group(1).replace("\\n", " ").strip()
+        if message and message not in messages:
+            messages.append(message)
+    gist = " ".join(messages) if messages else shown
+    return gist if len(gist) <= _GIST_CHARS else gist[:_GIST_CHARS].rstrip() + " …"
+
+
 def _short_circuit_repeat(
-    app: Any, logger: Logger, goal_id: str, tasks: list[dict[str, Any]]
+    app: Any,
+    logger: Logger,
+    goal_id: str,
+    tasks: list[dict[str, Any]],
+    fingerprint: str,
 ) -> None:
     """Bail out of a no-progress dispatch loop with an informative respond (#205).
 
     Mirrors the ROOT respond path (root_actions.py) so the user sees a real
-    answer, then fails and dismisses the goal so it stops re-driving.
+    answer, then fails and dismisses the goal so it stops re-driving. The
+    answer names what the tool last returned (the goal records each EXIT's
+    output per batch), since "no progress" is usually the same error again.
+    That text is the tool's, so it is shown, never stored: contextor hands
+    stored replies back to the model as memories, past the provenance
+    boundary (#165).
     """
     labels = _tool_labels(tasks)
     label = ", ".join(labels)
     logger.warning(
         f"JARVIS: Dispatch repeat guard tripped for goal [{goal_id}] on {label}"
     )
-    message = (
-        f"I attempted to run {label} several times without making progress — "
-        "the tool appears to be returning no usable content (e.g. an empty page "
-        "snapshot). I've stopped retrying. You may want to try a different "
-        "approach or tool."
-    )
-    app.output_manager.handle_response({"output": message})
-    persist_assistant_turn(app, message)
+    goal = app.goals.get_goal(goal_id)
+    last = goal.dispatch_last_output.get(fingerprint) if goal else None
+    advice = "You may want to try a different approach or tool."
+    if last is None:
+        why = "I asked for it several times and no answer came back."
+    elif not last:
+        why = "it kept coming back empty."
+    else:
+        why = "it kept answering the same way."
+    stopped = f"I stopped retrying {label}: {why}"
+    if last:
+        shown = f"{stopped} Its last answer:\n{_answer_gist(last)}\n{advice}"
+        stored = f"{stopped} Its last answer is in the failed step above. {advice}"
+    else:
+        shown = stored = f"{stopped} {advice}"
+    app.output_manager.handle_response({"output": shown})
+    persist_assistant_turn(app, stored)
     if hasattr(app, "mcp_dispatch_docs"):
         app.mcp_dispatch_docs.clear()
     app.goals.fail_goal(
@@ -660,7 +703,7 @@ async def dispatch_execute_tasks(
             goal_id, fingerprint, delivers_input=_delivers_live_input(tasks)
         )
         if count >= Config.DISPATCH_REPEAT_LIMIT:
-            _short_circuit_repeat(app, logger, goal_id, tasks)
+            _short_circuit_repeat(app, logger, goal_id, tasks, fingerprint)
             return
 
     result = await dispatch_send(
