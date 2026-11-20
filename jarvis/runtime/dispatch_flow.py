@@ -11,6 +11,7 @@ from logging import Logger
 from typing import Any, Optional
 
 from ..config import Config
+from ..core.command_parser import VALID_ACTIONS
 from ..core.threat_level import ThreatLevel, classify
 from . import action_events
 from .llm_bridge import ask_llm
@@ -444,18 +445,50 @@ async def dispatch_send(
     }
 
 
+def _unknown_tool(task: dict[str, Any], listed: Optional[list[str]]) -> str:
+    """The refusal for a tool the server does not list, or "".
+
+    Without it a made-up name went to the confirmation gate as an undeclared
+    tool, and on a root server dmcp asked for the password before the server
+    could answer "Unknown tool" (session 43940ebc: `status` on the root shell,
+    five password prompts). Only a listing that worked can say a name is not
+    there.
+    """
+    tool = task.get("tool")
+    if not listed or tool in listed:
+        return ""
+    server = task.get("server", "?")
+    action = (
+        f" '{tool}' is one of your own actions, not a tool: send "
+        f'{{"action": "{tool}"}} instead.'
+        if tool in VALID_ACTIONS
+        else ""
+    )
+    return (
+        f"Dispatch refused: {server} has no tool named '{tool}'. Its tools are: "
+        f"{', '.join(listed)}. Nothing in this batch was sent.{action} Use one "
+        "of these names, or tell the user if none of them does what they asked."
+    )
+
+
 async def _refuse_forbidden(
     app: Any, logger: Logger, tasks: list[dict[str, Any]]
 ) -> tuple[str, list[dict[str, Any]]]:
-    """The refusal for a batch holding a FORBIDDEN tool, or "", and each task's metadata.
+    """The refusal for a batch with an unknown or FORBIDDEN tool, or "", and the metadata.
 
-    Every task is classified before any is sent, so the whole batch is refused,
+    Every task is checked before any is sent, so the whole batch is refused,
     not part of it.
     """
     metas: list[dict[str, Any]] = []
     for task in tasks:
         tool_meta = await get_tool_metadata(app, logger, task)
+        unknown = _unknown_tool(task, tool_meta.pop("server_tools", None))
         metas.append(tool_meta)
+        if unknown:
+            named = f"{task.get('server', '?')}.{task.get('tool', '?')}"
+            logger.warning(f"JARVIS: Dispatch refused, no such tool: {named}")
+            emit_activity(app, f"Refused: no tool {named}", kind="dispatch")
+            return unknown, metas
         if (
             classify(task.get("tool"), tool_meta, task.get("params"))
             >= ThreatLevel.FORBIDDEN
@@ -572,7 +605,9 @@ async def get_tool_metadata(
     install-time trust tier) and ``registry_declared`` (this tool has a
     manifest declaration) unconditionally — server-scope provenance the
     server's own output can never supply — which feed classify()'s tier floor
-    (#223): an unreviewed tool floors at ELEVATED.
+    (#223): an unreviewed tool floors at ELEVATED. When the server's listing
+    worked, ``server_tools`` holds every name it lists, for the unknown-tool
+    refusal, which takes it off before anything classifies the metadata.
     """
     server_id = task.get("server")
     tool_name = task.get("tool")
@@ -580,15 +615,23 @@ async def get_tool_metadata(
         return {}
 
     meta: dict[str, Any] = {}
+    listed: list[str] = []
     try:
         tools = await app.dispatch.list_server_tools(server_id)
         if isinstance(tools, dict) and "tools" in tools:
             for tool in tools["tools"]:
-                if isinstance(tool, dict) and tool.get("name") == tool_name:
+                if not isinstance(tool, dict):
+                    continue
+                if isinstance(tool.get("name"), str):
+                    listed.append(tool["name"])
+                if tool.get("name") == tool_name and not meta:
                     meta = dict(tool)
-                    break
+            if tools.get("error"):
+                listed = []
     except Exception as e:
         logger.debug(f"Could not fetch metadata for {server_id}.{tool_name}: {e}")
+    if listed:
+        meta["server_tools"] = listed
 
     # Merge the manifest's declared threat level onto the runtime metadata.
     # Both fallbacks are logged, not swallowed (contrast the constraint-store
