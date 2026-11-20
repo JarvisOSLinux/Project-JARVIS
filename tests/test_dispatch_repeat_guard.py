@@ -730,3 +730,108 @@ def _boom(msg):
         raise AssertionError(msg)
 
     return _fail
+
+
+# ---------------------------------------------------------------------------
+# Giving up says what went wrong (session 43940ebc, 2026-11-20)
+# ---------------------------------------------------------------------------
+#
+# Twelve calls to add three weekly classes failed with Graph's "The recurrence
+# start date is too early.", and the guard told Yakup the tool "appears to be
+# returning no usable content (e.g. an empty page snapshot)".
+
+# The failed call exactly as it came back, Graph's JSON nested in dmcp's.
+_GRAPH_ERROR = (
+    'Error: dmcp invocation failed: {"error":"Microsoft Graph API error: 400  - '
+    '{\\"error\\":{\\"code\\":\\"ErrorInvalidOperation\\",\\"message\\":\\"The '
+    'recurrence start date is too early.\\",\\"innererror\\":{\\"message\\":'
+    "\\\"StartDate is 01/01/0001 16:00:00 which can't be less than 04/02/1601 "
+    '00:00:00.\\",\\"type\\":\\"Microsoft.Exchange.Data.Storage.'
+    'RecurrenceStartDateTooSmallException\\"}}}"}'
+)
+
+
+def _event():
+    return [
+        {
+            "server": "microsoft-365",
+            "tool": "create-specific-calendar-event",
+            "params": {"calendarId": "c", "body": {"subject": "CPT_S 484"}},
+        }
+    ]
+
+
+def _give_up(tmp_path, monkeypatch, output):
+    """Drive the same batch until the guard trips, each EXIT carrying `output`
+    (None: no EXIT ever comes). Returns (what was shown, what was stored)."""
+    state = {"pid": 1, "sends": 0}
+    _patch(monkeypatch, state, limit=3)
+    stored = []
+    monkeypatch.setattr(
+        dispatch_flow, "persist_assistant_turn", lambda app, text: stored.append(text)
+    )
+    gm = GoalManager(archive_dir=str(tmp_path))
+    gm.add_goal("add my classes")
+    app = _App(gm)
+    for _ in range(5):
+        if app.output_manager.responses:
+            break
+        asyncio.run(dispatch_flow.dispatch_execute_tasks(app, _LOG, _event(), depth=0))
+        if output is not None:
+            gm.update_from_signal(_exit(state["pid"], output=output))
+    (shown,) = app.output_manager.responses
+    return shown["output"], stored
+
+
+@pytest.mark.unit
+def test_giving_up_quotes_the_last_answer(tmp_path, monkeypatch):
+    shown, _ = _give_up(tmp_path, monkeypatch, _GRAPH_ERROR)
+    assert "create-specific-calendar-event" in shown
+    assert "it kept answering the same way" in shown
+    assert (
+        "The recurrence start date is too early. StartDate is 01/01/0001 16:00:00 "
+        "which can't be less than 04/02/1601 00:00:00." in shown
+    )
+    assert "empty page snapshot" not in shown and "dmcp invocation" not in shown
+
+
+@pytest.mark.unit
+def test_the_stored_reply_holds_none_of_the_tools_words(tmp_path, monkeypatch):
+    """contextor hands stored replies back to the model as memories, past the
+    provenance boundary, so a tool's text is shown and never stored."""
+    _, stored = _give_up(tmp_path, monkeypatch, _GRAPH_ERROR)
+    (text,) = stored
+    assert "recurrence" not in text and "StartDate" not in text
+    assert "in the failed step above" in text
+
+
+@pytest.mark.unit
+def test_empty_answers_are_named(tmp_path, monkeypatch):
+    shown, stored = _give_up(tmp_path, monkeypatch, "")
+    assert "it kept coming back empty" in shown and stored == [shown]
+
+
+@pytest.mark.unit
+def test_no_answer_at_all_is_named(tmp_path, monkeypatch):
+    # Every attempt denied or still unanswered: no EXIT ever came.
+    shown, _ = _give_up(tmp_path, monkeypatch, None)
+    assert "no answer came back" in shown
+
+
+@pytest.mark.unit
+class TestAnswerGist:
+    def test_a_shell_result_reads_as_printed(self):
+        text = (
+            'Error: dmcp invocation failed: {"stdout": "", "stderr": '
+            '"error: target not found: foo", "exit_code": 1}'
+        )
+        gist = dispatch_flow._answer_gist(text)
+        assert "error: target not found: foo" in gist and "(exit code 1)" in gist
+
+    def test_plain_text_stays_as_it_is(self):
+        text = "Error: dmcp invocation failed: Could not reach the server"
+        assert dispatch_flow._answer_gist(text) == "Could not reach the server"
+
+    def test_a_long_answer_is_cut(self):
+        gist = dispatch_flow._answer_gist("x" * 5000)
+        assert len(gist) < 700 and gist.endswith("…")
