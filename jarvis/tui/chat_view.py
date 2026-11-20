@@ -36,6 +36,7 @@ _MARKS = {
     "waiting": "[cyan]… waiting for you[/cyan]",
     "approved": "[green]✓ approved[/green]",
     "denied": "[red]✗ denied[/red]",
+    "unanswered": "[yellow]■ no answer[/yellow]",
     "unverified": "[yellow]! unverified output[/yellow]",
 }
 

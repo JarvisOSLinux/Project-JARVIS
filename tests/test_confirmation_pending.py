@@ -91,7 +91,12 @@ class TestTimeoutDisabledByDefault:
         # the real event loop's CONFIRMATION_RESPONSE handling -- not
         # exercised by this isolated unit test.
         injector.assert_called_once_with(
-            {"type": "confirmation_response", "id": "abc", "approved": False}
+            {
+                "type": "confirmation_response",
+                "id": "abc",
+                "approved": False,
+                "unanswered_after": 0.05,
+            }
         )
 
 
