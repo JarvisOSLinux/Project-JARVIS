@@ -1,5 +1,6 @@
 # import multiprocessing
 import os
+from typing import Optional
 from urllib.parse import urlsplit
 
 from dotenv import dotenv_values, load_dotenv
@@ -15,6 +16,26 @@ TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), ".env.example")
 
 def template_values() -> dict:
     return dotenv_values(TEMPLATE_PATH) if os.path.isfile(TEMPLATE_PATH) else {}
+
+
+# Defaults .env.example had before, for settings JARVIS saves. A jarvis.conf
+# seeded from an older template carries them though nobody chose them: one
+# from before #224 held CONFIRMATION_TIMEOUT=30 and denied every approval
+# request left for 30 seconds.
+EARLIER_TEMPLATE_DEFAULTS = {
+    "CONFIRMATION_TIMEOUT": {"30"},
+    "RESET_HISTORY_AFTER_RESPONSE": {"true"},
+}
+
+
+def chosen_before_header(key: str, value: Optional[str], template: dict) -> bool:
+    """Whether a value in a jarvis.conf without SAVED_SETTINGS_HEADER was
+    someone's choice: not the template's value for it, now or before."""
+    return (
+        value is not None
+        and template.get(key) != value
+        and value not in EARLIER_TEMPLATE_DEFAULTS.get(key, ())
+    )
 
 
 def web_domains(value: str) -> tuple[str, ...]:
@@ -66,12 +87,15 @@ else:
             _saved = _f.readline().rstrip("\n") == SAVED_SETTINGS_HEADER
         # Until 2026-11-11 the first saved setting copied .env.example into
         # this file whole, with no header. In such a file a value equal to
-        # the template's was chosen by nobody and must not override
-        # jarvis/.env (an `ask_all` there would drop back to smart); the next
-        # save rewrites it with the header and only what differs.
+        # the template's, today's or an earlier one's, was chosen by nobody
+        # and must not override jarvis/.env (an `ask_all` there would drop
+        # back to smart); the next save rewrites it with the header and only
+        # what was chosen.
         _template = {} if _saved else template_values()
         for _key, _value in dotenv_values(_user_conf).items():
-            if _value is not None and _template.get(_key) != _value:
+            if _value is not None and (
+                _saved or chosen_before_header(_key, _value, _template)
+            ):
                 os.environ.setdefault(_key, _value)
     load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 

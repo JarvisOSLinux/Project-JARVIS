@@ -168,6 +168,9 @@ class PendingConfirmation:
     # Human-readable "tool: command" lines shown in every channel (#186).
     tool_lines: List[str] = field(default_factory=list)
     created_at: float = field(default_factory=time.time)
+    # Set by resolve() when CONFIRMATION_TIMEOUT denied it: the seconds it
+    # waited. Nobody refused it, and the block and the model must not say so.
+    unanswered_after: Optional[float] = None
 
 
 # ----------------------------------------------------------------------
@@ -634,6 +637,8 @@ class ConfirmationManager:
             return pending
 
         approved = response.get("approved", False)
+        if not approved and isinstance(response.get("unanswered_after"), (int, float)):
+            pending.unanswered_after = float(response["unanswered_after"])
         if approved:
             # Move all tools_needing_confirmation into approved.
             # (The tasks that needed confirmation are everything in
@@ -949,5 +954,6 @@ class ConfirmationManager:
                         "type": "confirmation_response",
                         "id": request_id,
                         "approved": False,
+                        "unanswered_after": timeout,
                     }
                 )
