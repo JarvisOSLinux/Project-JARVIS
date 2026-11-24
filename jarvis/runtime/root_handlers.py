@@ -162,8 +162,10 @@ def _contains_auth_error(text: str) -> bool:
     return _AUTH_ERROR_PHRASES.search(text) is not None
 
 
-def _server_ids_for_signals(app: Any, signals: list[dict[str, Any]], owning_goal: Any):
-    """Server ids behind the PIDs in these signals.
+def _servers_by_signal(
+    signals: list[dict[str, Any]], owning_goal: Any
+) -> dict[int, str]:
+    """Index into ``signals`` -> the server behind that signal's PID, where known.
 
     The goal's pid -> server map attributes each PID to its own task, so one
     failing task names one server. The pid -> batch-fingerprint map (#205) is
@@ -175,21 +177,35 @@ def _server_ids_for_signals(app: Any, signals: list[dict[str, Any]], owning_goal
     """
     from .dispatch_flow import _FP_FIELD_SEP, _FP_TASK_SEP
 
-    server_ids: set[str] = set()
+    found: dict[int, str] = {}
     pid_servers = getattr(owning_goal, "dispatch_pid_server", {}) or {}
     pid_fps = getattr(owning_goal, "dispatch_pid_fps", {}) or {}
-    for sig in signals:
+    for index, sig in enumerate(signals):
         pid = sig.get("pid")
         server = pid_servers.get(pid)
+        if not server:
+            fingerprint = pid_fps.get(pid)
+            if fingerprint and _FP_TASK_SEP not in fingerprint:
+                server = fingerprint.split(_FP_FIELD_SEP)[0]
         if server:
-            server_ids.add(server)
-            continue
-        fingerprint = pid_fps.get(pid)
-        if fingerprint and _FP_TASK_SEP not in fingerprint:
-            server = fingerprint.split(_FP_FIELD_SEP)[0]
-            if server:
-                server_ids.add(server)
-    return server_ids
+            found[index] = server
+    return found
+
+
+# A setting's name as a server spells it in an error ("put it in this server's
+# STEAM_API_KEY setting"). Only names with an underscore count: a bare word
+# like URL or TOKEN is too likely to be ordinary text.
+_SETTING_NAME = re.compile(
+    r"(?<![A-Za-z0-9_])[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+(?![A-Za-z0-9_])"
+)
+
+
+def _settings_named(text: str, props: Any) -> list[str]:
+    """Declared settings whose names appear in a failure's text, in manifest order."""
+    named = set(_SETTING_NAME.findall(text))
+    return [
+        p["key"] for p in props or [] if isinstance(p, dict) and p.get("key") in named
+    ]
 
 
 async def _config_hint_for_signals(
@@ -199,7 +215,8 @@ async def _config_hint_for_signals(
     owning_goal: Any,
     signal_text: str,
 ) -> str:
-    """CONFIG_HINT block naming the exact config keys an auth-failing server needs.
+    """CONFIG_HINT block naming the exact config keys a failing server needs:
+    its required keys after an auth failure, and any setting its failed call names.
 
     Re-homed into the EXIT-signal path: the dispatch result no longer flows back
     through dispatch_flow (#195 made the confirmed/dispatched path go silent and
@@ -211,25 +228,52 @@ async def _config_hint_for_signals(
     failures = [s for s in signals if s.get("type") in _FAILURE_SIGNAL_TYPES]
     if not failures:
         return ""
-    if not _contains_auth_error(signal_text):
+    auth = _contains_auth_error(signal_text)
+    servers = _servers_by_signal(failures, owning_goal)
+    # What each server's failed calls said, to find the settings it names. An
+    # optional setting (a key that unlocks more tools) is never in the
+    # required list, so a failure saying "put it in this server's STEAM_API_KEY
+    # setting" got no hint, and the model told the user the task was blocked.
+    said: dict[str, str] = {}
+    for index, server in servers.items():
+        status, text = action_events.outcome(failures[index])
+        if status == "failed":
+            said[server] = said.get(server, "") + "\n" + text
+    if not auth and not any(_SETTING_NAME.search(text) for text in said.values()):
         return ""
 
     hint = ""
-    for sid in sorted(_server_ids_for_signals(app, failures, owning_goal)):
+    for sid in sorted(set(servers.values()) if auth else said):
         try:
             manifest = await app.dispatch.get_server_manifest(sid)
         except Exception as e:  # a hint is best-effort; never break the turn
             logger.debug(f"Could not fetch manifest for {sid}: {e}")
             continue
         props = (manifest or {}).get("configurableProperties")
-        required_keys = required_config_keys(props)
-        if not required_keys:
+        required_keys = required_config_keys(props) if auth else []
+        named = [
+            k
+            for k in _settings_named(said.get(sid, ""), props)
+            if k not in required_keys
+        ]
+        if not required_keys and not named:
             continue
-        hint += (
-            f"\nCONFIG_HINT: {sid} requires configuration."
-            f"\n  Required key(s): {', '.join(required_keys)}\n"
-            + "\n".join(configure_call_hint(sid, props))
-        )
+        current = (manifest or {}).get("config") or {}
+        lines = [f"CONFIG_HINT: {sid} requires configuration."]
+        if required_keys:
+            lines.append(f"  Required key(s): {', '.join(required_keys)}")
+        if named:
+            states = ", ".join(
+                f"{k} ({'set' if str(current.get(k) or '').strip() else 'not set'})"
+                for k in named
+            )
+            lines.append(f"  Its error names the setting(s): {states}")
+            lines.append(
+                "  Ask for them with configure_server rather than ending the request: "
+                "JARVIS opens a form for the user, and their answer resumes this request."
+            )
+        lines.extend(configure_call_hint(sid, props, required_keys + named))
+        hint += "\n" + "\n".join(lines)
     return hint
 
 

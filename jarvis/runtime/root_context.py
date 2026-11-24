@@ -222,16 +222,20 @@ _CONFIG_ERROR_HINTS = (
 )
 
 
-def configure_call_hint(server_id: str, props: Any) -> List[str]:
+def configure_call_hint(
+    server_id: str, props: Any, keys: Optional[List[str]] = None
+) -> List[str]:
     """How the model should call configure_server, with secrets left empty.
 
     Shared by SERVER_DOCS and CONFIG_HINT for the same reason as
     ``required_config_keys``. A sensitive key is shown empty because the model
     must never supply it -- naming it is what opens the secure form. Showing
     "<value>" there, as both surfaces used to, invited the model to ask for the
-    secret in chat (#242).
+    secret in chat (#242). ``keys`` are the settings to name; without it, the
+    server's required ones.
     """
-    keys = required_config_keys(props)
+    if keys is None:
+        keys = required_config_keys(props)
     secret = {
         p["key"]
         for p in props or []
