@@ -478,3 +478,108 @@ class TestRequiredFlagFiltering:
         ctx = seen["context"]
         assert "BRAVE_API_KEY" in ctx
         assert "BRAVE_ENDPOINT" in ctx
+
+
+_STEAM = "com.github.jarvisoslinux.mcp.steam"
+_STEAM_MANIFEST = {
+    "configurableProperties": [
+        {"key": "STEAM_API_KEY", "sensitive": True, "required": False},
+        {"key": "STEAM_ID", "required": False},
+        {"key": "STEAM_COUNTRY", "required": False},
+    ],
+    "config": {"STEAM_ID": "76561198000000000"},
+}
+# What the Steam server answered in Yakup's first test (2026-11-23), as
+# dispatch delivers a failed call.
+_NO_KEY = (
+    "[hash=ab12] 500 <ab12>Error: dmcp invocation failed: This needs a Steam Web "
+    "API key. Get one free at https://steamcommunity.com/dev/apikey, then put it "
+    "in this server's STEAM_API_KEY setting.</ab12>"
+)
+
+
+class TestSettingsTheErrorNames:
+    """A failed call that names one of its server's settings gets a hint for it,
+    optional or not: the Steam key is optional (the store works without it), so
+    it was never in the required list, and the model gave up instead of asking."""
+
+    def _run(self, tmp_path, monkeypatch, message, manifest=None):
+        goals, _goal = _goal_with_dispatch(tmp_path, server=_STEAM)
+        app = _FakeApp(goals, manifest=manifest or _STEAM_MANIFEST)
+        seen = _wire(monkeypatch)
+        asyncio.run(
+            root_handlers.on_dispatch_signal(
+                app, _LOG, _wire_signal(7, "EXIT", message)
+            )
+        )
+        return app, seen["context"]
+
+    def test_an_optional_key_the_error_names_is_asked_for(self, tmp_path, monkeypatch):
+        app, ctx = self._run(tmp_path, monkeypatch, _NO_KEY)
+
+        assert f"CONFIG_HINT: {_STEAM}" in ctx
+        assert "STEAM_API_KEY (not set)" in ctx
+        assert '"config": {"STEAM_API_KEY": ""}' in ctx
+        assert "rather than ending the request" in ctx
+        # Settings the error did not name are not offered as values to invent.
+        assert "STEAM_COUNTRY" not in ctx
+        assert app.dispatch.asked_for == [_STEAM]
+
+    def test_a_set_setting_the_error_names_is_offered_again(
+        self, tmp_path, monkeypatch
+    ):
+        _, ctx = self._run(
+            tmp_path,
+            monkeypatch,
+            "[hash=ab12] 500 <ab12>Error: dmcp invocation failed: STEAM_ID is not a "
+            "Steam profile.</ab12>",
+        )
+
+        assert "STEAM_ID (set)" in ctx
+        assert '"STEAM_ID": "<value>"' in ctx
+        assert "76561198000000000" not in ctx
+
+    def test_a_name_the_server_does_not_declare_adds_nothing(
+        self, tmp_path, monkeypatch
+    ):
+        _, ctx = self._run(
+            tmp_path,
+            monkeypatch,
+            "[hash=ab12] 500 <ab12>Error: dmcp invocation failed: set NODE_OPTIONS "
+            "to --max-old-space-size</ab12>",
+        )
+
+        assert "CONFIG_HINT" not in ctx
+
+    def test_a_successful_call_naming_a_setting_adds_nothing(
+        self, tmp_path, monkeypatch
+    ):
+        app, ctx = self._run(
+            tmp_path,
+            monkeypatch,
+            '[hash=ab12] 200 <ab12>{"games": 3, "note": "Add STEAM_API_KEY for '
+            'your whole library."}</ab12>',
+        )
+
+        assert "CONFIG_HINT" not in ctx
+        assert app.dispatch.asked_for == []
+
+    def test_an_auth_failure_still_lists_required_keys_beside_named_ones(
+        self, tmp_path, monkeypatch
+    ):
+        manifest = {
+            "configurableProperties": [
+                {"key": "BRAVE_API_KEY", "sensitive": True},
+                {"key": "BRAVE_REGION", "required": False},
+            ]
+        }
+        _, ctx = self._run(
+            tmp_path,
+            monkeypatch,
+            "[hash=ab12] 500 <ab12>Error: invalid_api_key; check BRAVE_REGION</ab12>",
+            manifest=manifest,
+        )
+
+        assert "Required key(s): BRAVE_API_KEY" in ctx
+        assert "BRAVE_REGION (not set)" in ctx
+        assert '"config": {"BRAVE_API_KEY": "", "BRAVE_REGION": "<value>"}' in ctx
