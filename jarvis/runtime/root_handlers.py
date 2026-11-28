@@ -573,17 +573,42 @@ async def on_confirmation_response(
         await _resume_after_confirmation(app, logger, pending)
 
 
-async def _resume_after_confirmation(app: Any, logger: Logger, pending: Any) -> None:
-    action_events.end(
-        app,
-        f"confirm:{pending.request_id}",
-        "approved" if pending.approved_tasks else "denied",
-        (
-            f"Denied: {', '.join(pending.denied_tools)}"
-            if pending.approved_tasks and pending.denied_tools
-            else ""
-        ),
+def _confirm_outcome(pending: Any) -> tuple[str, str]:
+    """The confirmation block's status and detail.
+
+    ``approved_tasks`` also holds the batch's tools that needed no approval,
+    so it says nothing about what was asked: a request denied beside one of
+    those read "approved". A request CONFIRMATION_TIMEOUT denied is
+    "unanswered", since nobody refused it.
+    """
+    denied = ", ".join(pending.denied_tools)
+    asked_approved = any(
+        detail.get("task") in pending.approved_tasks
+        for detail in pending.confirm_details
     )
+    if pending.unanswered_after is not None:
+        waited = f"{pending.unanswered_after:g}"
+        return "unanswered", f"No answer within {waited} s: {denied}"
+    if pending.denied_tools and not asked_approved:
+        return "denied", ""
+    return "approved", f"Denied: {denied}" if pending.denied_tools else ""
+
+
+def _denial_note(pending: Any) -> str:
+    """What the model is told about the tools that did not run."""
+    denied = ", ".join(pending.denied_tools)
+    if pending.unanswered_after is not None:
+        return (
+            f"\nNO_ANSWER: nobody answered the request to run {denied} within "
+            f"{pending.unanswered_after:g} s (CONFIRMATION_TIMEOUT), so it did "
+            "not run. The user did not refuse it: tell them the request timed "
+            "out and ask whether to try again."
+        )
+    return f"\nUSER_DENIAL: Action {denied} was denied by the user"
+
+
+async def _resume_after_confirmation(app: Any, logger: Logger, pending: Any) -> None:
+    action_events.end(app, f"confirm:{pending.request_id}", *_confirm_outcome(pending))
 
     logger.info(
         f"JARVIS: Confirmation resolved: id={pending.request_id}, "
@@ -611,9 +636,7 @@ async def _resume_after_confirmation(app: Any, logger: Logger, pending: Any) -> 
         return
 
     if pending.denied_tools and not pending.approved_tasks:
-        denied_list = ", ".join(pending.denied_tools)
-        context = build_root_context(app, logger)
-        context += f"\nUSER_DENIAL: Action {denied_list} was denied by the user"
+        context = build_root_context(app, logger) + _denial_note(pending)
         response = await ask_llm(
             app, logger, context, tag="root-confirmation-denied", mode="root"
         )
@@ -699,8 +722,7 @@ async def _resume_after_confirmation(app: Any, logger: Logger, pending: Any) -> 
             context += f"\nDISPATCH_RESULT: {compact_payload_for_llm(result)}"
 
         if pending.denied_tools:
-            denied_list = ", ".join(pending.denied_tools)
-            context += f"\nUSER_DENIAL: Action {denied_list} was denied by the user"
+            context += _denial_note(pending)
 
         response = await ask_llm(
             app, logger, context, tag="root-confirmation-result", mode="root"

@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
+from jarvis.core.confirmation_manager import PendingConfirmation
 from jarvis.runtime import io as runtime_io
 from jarvis.runtime import lifecycle, root_handlers
 
@@ -132,8 +133,8 @@ class TestOnConfirmationResponseBroadcast:
     @pytest.mark.asyncio
     async def test_broadcasts_refreshed_list_when_gui_clients_connected(self):
         app = _make_app(confirmations=[], gui_clients={Mock()})
-        app.confirmation.resolve.return_value = Mock(
-            request_id="abc", approved_tasks=[], denied_tools=[]
+        app.confirmation.resolve.return_value = PendingConfirmation(
+            request_id="abc", tasks=[]
         )
         app.llm = None  # short-circuits right after the broadcast is scheduled
 
@@ -152,8 +153,8 @@ class TestOnConfirmationResponseBroadcast:
     @pytest.mark.asyncio
     async def test_no_broadcast_when_no_gui_clients(self):
         app = _make_app(confirmations=[], gui_clients=set())
-        app.confirmation.resolve.return_value = Mock(
-            request_id="abc", approved_tasks=[], denied_tools=[]
+        app.confirmation.resolve.return_value = PendingConfirmation(
+            request_id="abc", tasks=[]
         )
         app.llm = None
 

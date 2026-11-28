@@ -75,6 +75,7 @@ for _label in (
     "CONFIGURE_ERROR",
     "CONFIG_HINT",
     "USER_DENIAL",
+    "NO_ANSWER",
     "NOTE",
 ):
     _PART_OF_LABEL[_label] = "Other"

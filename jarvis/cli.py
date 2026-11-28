@@ -23,7 +23,12 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 
-from .config import SAVED_SETTINGS_HEADER, Config, template_values
+from .config import (
+    SAVED_SETTINGS_HEADER,
+    Config,
+    chosen_before_header,
+    template_values,
+)
 from .core.logger import JarvisLogger, get_logger
 from .core.providers import (
     add_provider,
@@ -896,8 +901,9 @@ def _update_env_setting(key: str, value: str) -> None:
     holds only what was saved, so `config.py` honours every value in it. One
     from before the header (seeded from .env.example, which would pin every
     default there over jarvis/.env) is rewritten with only the values that
-    differ from the template. A system install's file (JARVIS_CONFIG_DIR) is
-    the admin's and is only edited in place.
+    differ from the template's, today's or an earlier one's. A system
+    install's file (JARVIS_CONFIG_DIR) is the admin's and is only edited in
+    place.
     """
     lines = ENV_FILE.read_text().splitlines() if ENV_FILE.exists() else []
     if not _jarvis_config_dir and lines[:1] != [SAVED_SETTINGS_HEADER]:
@@ -907,7 +913,7 @@ def _update_env_setting(key: str, value: str) -> None:
             parsed = dotenv_values(stream=io.StringIO(line))
             if len(parsed) == 1:
                 name, val = next(iter(parsed.items()))
-                if val is not None and template.get(name) != val:
+                if chosen_before_header(name, val, template):
                     chosen.append(line)
         lines = [SAVED_SETTINGS_HEADER, *chosen]
 
