@@ -101,6 +101,7 @@ class TestTheBlock:
         )
 
     def test_the_tui_draws_it(self):
+        pytest.importorskip("textual")
         from jarvis.tui.chat_view import _MARKS
 
         assert "no answer" in _MARKS["unanswered"]
